@@ -60,7 +60,7 @@ The model catalog, Providers, reasoning effort, credentials, and every non-visua
 - A fresh global install exposes bare `deepseek`, which provisions and boots the `tui` Profile.
 - macOS and Linux only; Windows is unsupported.
 
-A successful external model response still requires a valid credential in the calling environment. The isolated environment used here had an upstream-rejected OpenAI credential and no DeepSeek credential, so a successful live-provider response is not part of the current acceptance claim.
+A real live-provider response was verified with a valid DeepSeek credential injected only into the test process: `v4-flash` returned exactly `DSH_PLUGIN_DEEPSEEK_OK`. The credential was not written to a Profile, settings file, log, or the repository.
 
 Reusable stock-dsh contract check:
 

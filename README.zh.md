@@ -60,7 +60,7 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/deepseek-tui
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
 - macOS 和 Linux；不支持 Windows。
 
-成功的外部在线模型回复仍需要调用环境提供有效凭据。本次隔离环境中的 OpenAI 凭据被上游判定无效，且没有 DeepSeek 凭据，因此在线成功响应不在当前验收结论内。
+已使用仅注入测试进程环境的有效 DeepSeek 凭据完成真实在线响应验收：`v4-flash` 精确返回 `DSH_PLUGIN_DEEPSEEK_OK`。凭据未写入 Profile、设置文件、日志或仓库。
 
 可复用的 stock-dsh 插拔检查：
 
