@@ -9,6 +9,7 @@ DeepSeek TUI 是独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deep
 仓库目前是私有的，安装者需要拥有 GitHub 访问权限。
 
 ```sh
+gh auth setup-git  # 只需一次；Git 已能克隆私有仓库时可跳过
 pnpm add --global github:Hilbert-beinghappy/deepseek-tui
 deepseek
 ```

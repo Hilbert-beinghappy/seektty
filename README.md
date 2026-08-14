@@ -9,6 +9,7 @@ DeepSeek TUI is an independent [DeepSeek Harness](https://github.com/deepseek-ai
 The repository is currently private, so the installing account needs GitHub access.
 
 ```sh
+gh auth setup-git  # once; skip when Git can already clone private repositories
 pnpm add --global github:Hilbert-beinghappy/deepseek-tui
 deepseek
 ```
