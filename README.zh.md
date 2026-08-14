@@ -69,11 +69,14 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 
 模型目录、Provider、推理强度、凭据和全部非外观设置都来自 Harness。请通过 TUI 的 `/model`、`/settings` 或 Harness 原生设置配置；密钥不属于本插件，也不能提交到仓库。
 
+SeekTTY 默认使用 DeepSeek 暗色主题。输入 `/theme` 可在暗色和亮色之间选择，也可直接使用 `/theme dark` 或 `/theme light`。切换立即生效，并通过 Harness Settings 持久化；插件不建立第二套外观配置存储。
+
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.6` 隔离安装、配置装配和 PTY 启动。
 - `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
+- 暗色与亮色真实 PTY 渲染、`/theme` 即时切换，以及同一 Profile 重启后的主题恢复。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
 - macOS 和 Linux；不支持 Windows。

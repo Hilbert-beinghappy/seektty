@@ -33,7 +33,7 @@ import type {
   WorkflowRunMemberData,
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
-import { color, escapeTerminalText, markdownTheme } from './theme.ts'
+import { color, escapeTerminalText, markdownTheme, surfaceRow } from './theme.ts'
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
 export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
@@ -860,10 +860,14 @@ export class Transcript implements Component, Focusable {
       if (this.rows[index]?.userTurn === true) {
         anchors.push(lines.length)
       }
+      const row = this.rows[index]
       const rendered = component.render(contentWidth)
-      lines.push(...(this.rows[index]?.format === 'image'
+      const escaped = row?.format === 'image'
         ? rendered
-        : rendered.map(escapeTerminalText)))
+        : rendered.map(escapeTerminalText)
+      lines.push(...(row?.userTurn === true
+        ? escaped.map(line => surfaceRow(line, contentWidth))
+        : escaped))
     }
     if (this.emptyState) {
       for (const [index, line] of lines.entries()) {

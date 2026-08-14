@@ -1,6 +1,7 @@
 /** Interactive pi-tui lifecycle over the authoritative Harness Client Runtime. */
 
 import {
+  Box,
   Key,
   matchesKey,
   ProcessTerminal,
@@ -14,8 +15,9 @@ import { capabilityError, type TuiActiveSession } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import { ContextBar, PromptEditor, StatusBar, transcriptViewportRows } from './chrome.ts'
+import { appearanceSettings, themeFromAppearance } from './appearance.ts'
 import { OverlayQueue } from './overlays.ts'
-import { color, escapeTerminalText } from './theme.ts'
+import { background, color, escapeTerminalText, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
@@ -89,6 +91,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   const client = await internals.startClient(options)
   let stopConstructedTui = (): void => undefined
   try {
+    setTheme(themeFromAppearance(appearanceSettings(
+      await options.management.settings.describe(),
+    )))
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => { tui.stop() }
     const capabilities = client.capabilities
@@ -101,12 +106,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       () => { if (stopping === undefined) tui.requestRender() },
     )
     const status = new StatusBar()
+    const canvas = new Box(0, 0, background.canvas)
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
-    tui.addChild(contextBar)
-    tui.addChild(new Spacer(1))
-    tui.addChild(transcript)
-    tui.addChild(editor)
-    tui.addChild(status)
+    canvas.addChild(contextBar)
+    canvas.addChild(new Spacer(1))
+    canvas.addChild(transcript)
+    canvas.addChild(editor)
+    canvas.addChild(status)
+    tui.addChild(canvas)
     tui.setFocus(editor)
 
     const overlays = new OverlayQueue(tui)
@@ -263,6 +270,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       notice: setNotice,
       refresh,
       refreshHeader: () => { refreshHeader(false) },
+      applyTheme: (theme) => {
+        setTheme(theme)
+        tui.invalidate()
+        tui.requestRender(true)
+      },
       setEditor: (text) => {
         editor.setText(escapeTerminalText(text))
         focusEditor()

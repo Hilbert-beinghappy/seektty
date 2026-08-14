@@ -10,6 +10,15 @@ export interface TuiSettingsSecret {
   readonly set: boolean
 }
 
+/** Harness Settings namespace that persists SeekTTY-only visual preferences. */
+export const TUI_APPEARANCE_SETTINGS_NAMESPACE = 'seektty-appearance'
+
+/** Terminal color scheme selected by the user. */
+export type TuiTheme = 'dark' | 'light'
+
+/** First-run color scheme when no user override has been stored. */
+export const DEFAULT_TUI_THEME: TuiTheme = 'dark'
+
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {
   readonly namespace: string

@@ -69,11 +69,14 @@ The package declares the standard `dsh.bundle.patch`. It owns no second plugin d
 
 The model catalog, Providers, reasoning effort, credentials, and every non-visual setting come from Harness. Configure them through `/model`, `/settings`, or the native Harness settings. Secrets do not belong to this plugin and must never enter the repository.
 
+SeekTTY starts in its DeepSeek dark theme. Run `/theme` to choose the dark or light theme, or switch directly with `/theme dark` and `/theme light`. The change is immediate and persists through Harness Settings, so the plugin does not create a separate appearance store.
+
 ## Verified scope
 
 - Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.6`.
 - `/doctor`: 95 Harness plugins running, 0 errors, 0 warnings.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
+- Real PTY rendering for both themes, live `/theme` switching, and persistence after restarting the same Profile.
 - Native removal clears the dependency, Bundle, and config entries; re-add boots again.
 - A fresh global install exposes bare `deepseek`, which provisions and boots the `tui` Profile.
 - macOS and Linux only; Windows is unsupported.

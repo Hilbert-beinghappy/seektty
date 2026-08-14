@@ -6,6 +6,7 @@ import {
   rehydrateSchema,
   type SchemaNode,
 } from '@deepseek-ai/dsh-client-schema-form'
+import { TUI_APPEARANCE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiSettingsDocument } from './management.ts'
 
 /** Terminal control selected for one schema-addressed Settings field. */
@@ -178,6 +179,7 @@ export function settingsSectionLabel(namespace: string): string {
   if (namespace === 'permission') return '默认权限'
   if (namespace === 'agent-presets') return '默认 Agent Preset'
   if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return '模型与 Provider'
+  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return 'SeekTTY 主题'
   if (namespace === 'tui-plugin-marketplace') return '插件市场来源'
   return '通用设置'
 }

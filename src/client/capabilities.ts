@@ -215,6 +215,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'profile', description: '管理 Profile', argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
   { name: 'mode', description: '切换模式', source: 'TUI', behavior: 'local' },
   { name: 'model', description: '切换模型和推理强度', source: 'TUI', behavior: 'local' },
+  { name: 'theme', description: '切换亮色或暗色主题', source: 'TUI', behavior: 'local' },
   { name: 'queue', description: '管理排队消息', source: 'TUI', behavior: 'local' },
   { name: 'steer', description: '发送引导消息', argumentHint: '<消息>', source: 'TUI', behavior: 'local' },
   { name: 'attach', description: '添加图片', argumentHint: '<图片路径>', source: 'TUI', behavior: 'local' },

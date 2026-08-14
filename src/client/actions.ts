@@ -8,7 +8,11 @@ import type {
   PendingInteraction,
   PendingWait,
 } from '@deepseek-ai/dsh-client-runtime/node-client'
-import { TuiSettingsConflictError } from '@deepseek-ai/dsh-tui-protocol'
+import {
+  TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  TuiSettingsConflictError,
+  type TuiTheme,
+} from '@deepseek-ai/dsh-tui-protocol'
 import {
   capabilityError,
   HarnessTuiCapabilities,
@@ -36,6 +40,7 @@ import {
   type TuiSettingsField,
 } from './settings.ts'
 import type { Transcript } from './transcript.ts'
+import { appearanceSettings, saveTheme, themeFromAppearance } from './appearance.ts'
 
 /** Surface callbacks kept separate from Harness business actions. */
 export interface TuiActionHost {
@@ -44,6 +49,7 @@ export interface TuiActionHost {
   notice(message: string, tone?: 'info' | 'success' | 'warning' | 'error'): void
   refresh(): void
   refreshHeader(): void
+  applyTheme(theme: TuiTheme): void
   setEditor(text: string): void
   copy(text: string): void
   close(code: number): void
@@ -219,6 +225,7 @@ export class TuiActions {
         case 'profile': await this.profile(args); break
         case 'mode': await this.mode(); break
         case 'model': await this.model(); break
+        case 'theme': await this.theme(args); break
         case 'permission': await this.permission(args); break
         case 'queue': await this.queue(); break
         case 'steer': await this.steer(args); break
@@ -792,6 +799,44 @@ export class TuiActions {
     }
   }
 
+  private async theme(args: string): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const current = themeFromAppearance(document)
+    const themes: readonly { readonly id: TuiTheme; readonly label: string; readonly description: string }[] = [
+      { id: 'dark', label: '暗色', description: '深灰蓝画布' },
+      { id: 'light', label: '亮色', description: '柔和冷白画布' },
+    ]
+    let target: TuiTheme | undefined
+    if (args !== '') {
+      target = themes.find(theme => theme.id === args)?.id
+      if (target === undefined) throw new Error('用法：/theme [dark|light]')
+    } else {
+      const selected = await this.host.overlays.select({
+        title: '主题',
+        detail: '立即切换并保存终端外观',
+        choices: [...themes]
+          .sort((left, right) => Number(right.id === current) - Number(left.id === current))
+          .map(theme => ({
+            id: theme.id,
+            label: `${currentMark(theme.id === current)}${theme.label}`,
+            description: theme.description,
+          })),
+        searchable: false,
+        footer: '↑↓ 选择 · Enter 确认 · Esc 关闭',
+        options: { width: 58, maxHeight: 12, anchor: 'center', margin: 1 },
+      })
+      target = selected?.id === 'dark' || selected?.id === 'light' ? selected.id : undefined
+    }
+    if (target === undefined) return
+    if (target === current) {
+      this.host.notice(`${target === 'dark' ? '暗色' : '亮色'}主题已启用`, 'info')
+      return
+    }
+    const updated = await saveTheme(bridge, document, target)
+    await this.settingsChanged(updated, `${target === 'dark' ? '暗色' : '亮色'}主题`)
+  }
+
   private async permission(args: string): Promise<void> {
     const options = this.capabilities.listPermissions()
     if (args !== '') {
@@ -1250,6 +1295,9 @@ export class TuiActions {
 
   private async settingsChanged(document: TuiSettingsDocument, label: string): Promise<void> {
     if (document.applies === 'live') {
+      if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) {
+        this.host.applyTheme(themeFromAppearance(document))
+      }
       this.host.notice(`${label} 已更新并立即生效`, 'success')
       return
     }

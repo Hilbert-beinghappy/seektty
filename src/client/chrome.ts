@@ -9,7 +9,7 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
-import { color, editorTheme } from './theme.ts'
+import { color, editorTheme, surfaceRow } from './theme.ts'
 
 function fit(text: string, width: number): string {
   return truncateToWidth(text, Math.max(1, width), '…')
@@ -229,7 +229,7 @@ export class PromptEditor extends Editor {
   }
 
   override render(width: number): string[] {
-    this.borderColor = this.focused ? color.brand : color.muted
+    this.borderColor = this.focused ? color.brand : color.border
     if (width < 8) return super.render(width)
     const { prefix, innerWidth: frameWidth } = gutter(width)
     const innerWidth = frameWidth - 2
@@ -253,9 +253,9 @@ export class PromptEditor extends Editor {
     const body = [...editorRows, ...autocompleteRows].map(row => `${vertical}${padded(row, innerWidth)}${vertical}`)
     const compactedFacts = compactFacts(this.facts, Math.max(0, frameWidth - 7))
     return [
-      `${prefix}${framedRule('╭', '╮', '', frameWidth, this.borderColor)}`,
+      framedRule('╭', '╮', '', frameWidth, this.borderColor),
       ...body,
-      `${prefix}${framedRule('╰', '╯', compactedFacts, frameWidth, this.borderColor, 'right')}`,
-    ].map((line, index) => index === 0 || index === body.length + 1 ? line : `${prefix}${line}`)
+      framedRule('╰', '╯', compactedFacts, frameWidth, this.borderColor, 'right'),
+    ].map(line => `${prefix}${surfaceRow(line, frameWidth)}`)
   }
 }

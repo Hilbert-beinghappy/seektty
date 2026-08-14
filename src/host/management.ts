@@ -12,11 +12,16 @@ import type {
   TuiProfileSummary,
   TuiSettingsDocument,
 } from '@deepseek-ai/dsh-tui-protocol'
-import { TuiSettingsConflictError } from '@deepseek-ai/dsh-tui-protocol'
+import {
+  DEFAULT_TUI_THEME,
+  TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  TuiSettingsConflictError,
+} from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
+const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
 const TUI_BUNDLE = 'seektty'
 const NON_TUI_SURFACE_BUNDLES = ['@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'] as const
 const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
@@ -38,6 +43,11 @@ const CatalogSourceSchema = z.object({
 
 const MarketplaceSettingsSchema = z.object({
   sources: z.array(CatalogSourceSchema).default([]),
+})
+
+const AppearanceSettingsSchema = z.object({
+  theme: z.union(['dark', 'light']).default(DEFAULT_TUI_THEME)
+    .description('SeekTTY 终端使用的暗色或亮色主题。'),
 })
 
 interface StoredCatalogSource {
@@ -140,6 +150,7 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     throw new Error('tui-runner: Settings、Credentials 或 Profile Plugin Manager 未装配')
   }
   settings.register(MARKETPLACE_NAMESPACE, MarketplaceSettingsSchema, { applies: 'live' })
+  settings.register(APPEARANCE_NAMESPACE, AppearanceSettingsSchema, { applies: 'live' })
   const marketplace = new PluginMarketplace({
     cwd,
     resolveCredential: async ref => (await credentials.resolve(credentialRef(ref)))?.value,

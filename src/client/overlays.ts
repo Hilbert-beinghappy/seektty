@@ -16,7 +16,7 @@ import {
   type SelectItem,
   type TUI,
 } from '@mariozechner/pi-tui'
-import { color, editorTheme, escapeTerminalText } from './theme.ts'
+import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
 
 /** One row in a searchable terminal selector. */
 export interface OverlayChoice {
@@ -96,19 +96,20 @@ function modalRule(title: string | undefined, width: number, top: boolean): stri
   const start = top ? '╭' : '╰'
   const end = top ? '╮' : '╯'
   if (!top || title === undefined || width < 8) {
-    return color.brand(`${start}${'─'.repeat(Math.max(0, width - 2))}${end}`)
+    return color.border(`${start}${'─'.repeat(Math.max(0, width - 2))}${end}`)
   }
   const label = truncateToWidth(escapeTerminalText(title), Math.max(1, width - 7), '…')
   const lead = `─ ${label} `
-  return color.brand(`${start}${lead}${'─'.repeat(Math.max(0, width - 2 - visibleWidth(lead)))}${end}`)
+  return color.border(`${start}${lead}${'─'.repeat(Math.max(0, width - 2 - visibleWidth(lead)))}${end}`)
 }
 
 function modalFrame(title: string, lines: readonly string[], width: number): string[] {
   const contentWidth = frameContentWidth(width)
-  const vertical = color.brand('│')
+  const vertical = color.border('│')
   const content = escapeFrame(lines.map(line => truncateToWidth(line, contentWidth, '…')))
     .map(line => `${vertical} ${line}${' '.repeat(Math.max(0, contentWidth - visibleWidth(line)))} ${vertical}`)
   return [modalRule(title, width, true), ...content, modalRule(undefined, width, false)]
+    .map(line => surfaceRow(line, width))
 }
 
 function modalOptions(options: OverlayOptions | undefined): OverlayOptions {
