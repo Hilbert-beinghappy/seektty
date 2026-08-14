@@ -1,0 +1,121 @@
+{
+  "name": "deepseek-tui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "tui"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hilbert-beinghappy/deepseek-tui.git"
+  },
+  "homepage": "https://github.com/Hilbert-beinghappy/deepseek-tui#readme",
+  "bugs": "https://github.com/Hilbert-beinghappy/deepseek-tui/issues",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./startup": "./lib/startup.js",
+    "./marketplace-provider": "./lib/marketplace-provider.js",
+    "./in-process": "./lib/in-process.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "deepseek": "./lib/bin.js"
+  },
+  "files": [
+    "lib/*.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "minimum": "0.1.0-rc.6",
+      "tested": "0.1.0-rc.6"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:stock": "node scripts/stock-dsh-cycle.mjs",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm pack --dry-run"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis-plugin-include": "1.0.6",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.2",
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-api-gateway": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-api-remotes": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-schema-form": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-deliverables": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-goal": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-trajectory": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-workflow-run": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-cmdline": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-code-runtime-worker-thread": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-commands": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-cordis-host-runner": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-credentials": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-goal": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-apiproxy": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-message-feedback": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-projection-cache": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-stats": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-storage": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-storage-json": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-workspace": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "commander": "15.0.0",
+    "cross-spawn": "7.0.6",
+    "immer": "10.1.1",
+    "js-yaml": "4.3.1",
+    "zod": "4.4.3",
+    "zustand": "4.4.7"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@mariozechner/pi-tui": "0.73.1",
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "24.10.1",
+    "@types/cross-spawn": "6.0.6",
+    "tsdown": "0.15.11",
+    "typescript": "5.9.3",
+    "vitest": "4.0.15"
+  }
+}

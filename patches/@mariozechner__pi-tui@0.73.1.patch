@@ -1,0 +1,24 @@
+diff --git a/dist/components/editor.js b/dist/components/editor.js
+--- a/dist/components/editor.js
++++ b/dist/components/editor.js
+@@ -1204,6 +1204,7 @@ export class Editor {
+         this.setCursorCol(currentLine.length);
+     }
+     deleteToStartOfLine() {
++        this.cancelAutocomplete();
+         this.historyIndex = -1; // Exit history browsing mode
+         const currentLine = this.state.lines[this.state.cursorLine] || "";
+         if (this.state.cursorCol > 0) {
+diff --git a/dist/terminal.js b/dist/terminal.js
+index 6bf1397..ec9f8bd 100644
+--- a/dist/terminal.js
++++ b/dist/terminal.js
+@@ -130,7 +130,7 @@ export class ProcessTerminal {
+         process.stdin.on("data", this.stdinDataHandler);
+         process.stdout.write("\x1b[?u");
+         setTimeout(() => {
+-            if (!this._kittyProtocolActive && !this._modifyOtherKeysActive) {
++            if (this.inputHandler && !this._kittyProtocolActive && !this._modifyOtherKeysActive) {
+                 process.stdout.write("\x1b[>4;2m");
+                 this._modifyOtherKeysActive = true;
+             }

@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/dsh-tui-protocol": ["src/protocol.ts"],
+      "@deepseek-ai/dsh-client-connection/in-process": ["src/host/in-process.ts"],
+      "@deepseek-ai/dsh-client-connection": ["vendor/client-connection/index.d.ts"],
+      "@deepseek-ai/dsh-client-connection/node-client": ["vendor/client-connection/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-connection/client": ["vendor/client-connection/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-gateway/node-client": ["vendor/api-gateway/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-gateway/client": ["vendor/api-gateway/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-remotes/node-client": ["vendor/api-remotes/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-remotes/client": ["vendor/api-remotes/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/node-client": ["vendor/client-runtime/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/projection": ["vendor/client-runtime/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["vendor/client-runtime/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client/*": ["vendor/client-runtime/client/*"],
+      "@deepseek-ai/dsh-client-ui-conversation/client": ["vendor/ui-conversation/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-conversation/projection": ["vendor/ui-conversation/client/conversation-nodes/register.d.ts"],
+      "@deepseek-ai/dsh-client-ui-deliverables/projection": ["vendor/ui-deliverables/client/projection.d.ts"],
+      "@deepseek-ai/dsh-client-ui-goal/projection": ["vendor/ui-goal/client/projection.d.ts"],
+      "@deepseek-ai/dsh-client-ui-trajectory/projection": ["vendor/ui-trajectory/client/projection.d.ts"],
+      "@deepseek-ai/dsh-client-ui-workflow-run/projection": ["vendor/ui-workflow-run/client/projection.d.ts"],
+      "@deepseek-ai/dsh-typert-registry/node-client": ["vendor/typert-registry/client/index.d.ts"],
+      "@deepseek-ai/dsh-typert-registry/client": ["vendor/typert-registry/client/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "vendor/**/*.d.ts", "tests/**/*.ts", "tsdown.config.ts", "vitest.config.ts"]
+}

@@ -1,0 +1,207 @@
+/**
+ * Structural contracts shared by the TUI Host bridge and terminal Surface.
+ * This package owns no Harness state and performs no I/O.
+ * @module @deepseek-ai/dsh-tui-protocol
+ */
+
+/** One secret slot from a redacted Settings descriptor. */
+export interface TuiSettingsSecret {
+  readonly path: readonly string[]
+  readonly set: boolean
+}
+
+/** One complete, redacted registered Settings namespace. */
+export interface TuiSettingsDocument {
+  readonly namespace: string
+  readonly schema: unknown
+  readonly value: unknown
+  readonly revision: number
+  readonly applies: 'live' | 'restart'
+  readonly base?: unknown
+  readonly user?: unknown
+  readonly secrets: readonly TuiSettingsSecret[]
+}
+
+/** Path edit applied by the native Settings service with revision protection. */
+export type TuiSettingsPathOp =
+  | { readonly op: 'set'; readonly path: readonly string[]; readonly value: unknown }
+  | { readonly op: 'unset'; readonly path: readonly string[] }
+
+/** A stale TUI Settings writer was rejected before changing durable state. */
+export class TuiSettingsConflictError extends Error {
+  /** Stable machine-readable conflict discriminator. */
+  readonly code = 'TUI_SETTINGS_CONFLICT'
+
+  /**
+   * @param namespace - registered Settings namespace that changed.
+   * @param expected - revision held by the terminal editor.
+   * @param actual - current Host revision.
+   */
+  constructor(
+    readonly namespace: string,
+    readonly expected: number,
+    readonly actual: number,
+  ) {
+    super(`设置 ${JSON.stringify(namespace)} 已在其他界面更新（期望 revision ${String(expected)}，当前 ${String(actual)}）`)
+    this.name = 'TuiSettingsConflictError'
+  }
+}
+
+/** Safe Credential metadata; the secret value never crosses this contract. */
+export interface TuiCredentialInfo {
+  readonly configured: boolean
+  readonly source?: string
+  readonly writable: boolean
+}
+
+/** Installed Profile dependency as understood by the native Bundle manager. */
+export interface TuiPluginEntry {
+  readonly name: string
+  readonly spec: string
+  readonly version?: string
+  readonly description?: string
+  readonly source: 'npm' | 'git' | 'tarball' | 'local' | 'unknown'
+  readonly bundle: boolean
+  readonly active: boolean
+  readonly patch?: string
+  readonly patchValid: boolean
+  readonly scripts: readonly string[]
+  readonly diagnostics: readonly string[]
+}
+
+/** Native Profile dependency and ordered Bundle snapshot. */
+export interface TuiPluginSnapshot {
+  readonly profile: string
+  readonly dir: string
+  readonly dependencies: Readonly<Record<string, string>>
+  readonly bundles: readonly string[]
+  readonly plugins: readonly TuiPluginEntry[]
+}
+
+/** One Profile visible to the launcher-owned Profile manager. */
+export interface TuiProfileSummary {
+  readonly name: string
+  readonly dir: string
+  readonly initialized: boolean
+  readonly bundles: readonly string[]
+  readonly dependencyCount: number
+  readonly compatible: boolean
+  readonly diagnostic?: string
+}
+
+/** Result of an install/remove/update operation over the active Profile. */
+export interface TuiPluginOperation {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly warnings: readonly string[]
+  readonly changed: boolean
+  readonly restartRequired: boolean
+  readonly snapshot: TuiPluginSnapshot
+}
+
+/** One structured native Profile diagnostic. */
+export interface TuiPluginDiagnostic {
+  readonly level: 'info' | 'warning' | 'error'
+  readonly message: string
+}
+
+/** Result of Profile, pnpm, and Bundle compatibility diagnosis. */
+export interface TuiPluginDoctor {
+  readonly profile: string
+  readonly pnpm?: string
+  readonly diagnostics: readonly TuiPluginDiagnostic[]
+  readonly snapshot: TuiPluginSnapshot
+}
+
+/** One configured marketplace discovery source. */
+export interface TuiMarketplaceSource {
+  readonly id: string
+  /** Provider-owned discriminator; new Providers do not require a protocol enum change. */
+  readonly kind: string
+  readonly label: string
+  readonly url: string
+  readonly enabled: boolean
+  readonly credentialRef?: string
+  readonly builtIn: boolean
+}
+
+/** Marketplace source list with the native Settings revision that produced it. */
+export interface TuiMarketplaceSources {
+  readonly revision: number
+  readonly sources: readonly TuiMarketplaceSource[]
+}
+
+/** Validated marketplace candidate; compatibility never implies trust. */
+export interface TuiMarketplaceCandidate {
+  readonly id: string
+  readonly name: string
+  readonly version?: string
+  readonly description?: string
+  readonly publisher?: string
+  readonly sourceId: string
+  readonly source: TuiPluginEntry['source']
+  readonly spec: string
+  readonly bundle: boolean
+  readonly patchValid: boolean
+  readonly scripts: readonly string[]
+  readonly immutable: boolean
+  readonly diagnostics: readonly string[]
+}
+
+/** Operation progress emitted from native pnpm without becoming durable state. */
+export interface TuiPluginRunOptions {
+  readonly signal?: AbortSignal
+  readonly onOutput?: (stream: 'stdout' | 'stderr', chunk: string) => void
+}
+
+/** One native Harness Session-log export stream handed to the terminal saver. */
+export interface TuiSessionExport {
+  readonly suggestedFilename: string
+  readonly mediaType: string
+  readonly contentLength?: number
+  readonly stream: ReadableStream<Uint8Array>
+}
+
+/** Host-owned services intentionally exposed to the terminal management UI. */
+export interface TuiManagementBridge {
+  readonly sessionExport: {
+    download(sessionId: string, includeDescendants: boolean, signal?: AbortSignal): Promise<TuiSessionExport>
+  }
+  readonly settings: {
+    describe(): Promise<readonly TuiSettingsDocument[]>
+    mutate(namespace: string, ops: readonly TuiSettingsPathOp[], expectedRevision: number): Promise<TuiSettingsDocument>
+    credentialInfo(ref: string): Promise<TuiCredentialInfo>
+    setCredential(ref: string, value: string): Promise<TuiCredentialInfo>
+    unsetCredential(ref: string): Promise<TuiCredentialInfo>
+  }
+  readonly profiles: {
+    list(): Promise<readonly TuiProfileSummary[]>
+    create(name: string, copyFrom?: string): Promise<TuiProfileSummary>
+  }
+  readonly plugins: {
+    snapshot(): Promise<TuiPluginSnapshot>
+    run(args: readonly string[], options?: TuiPluginRunOptions): Promise<TuiPluginOperation>
+    reorder(bundles: readonly string[]): Promise<TuiPluginSnapshot>
+    doctor(): Promise<TuiPluginDoctor>
+    sources(): Promise<TuiMarketplaceSources>
+    saveSources(sources: readonly TuiMarketplaceSource[], expectedRevision: number): Promise<TuiMarketplaceSources>
+    search(query: string, signal?: AbortSignal): Promise<readonly TuiMarketplaceCandidate[]>
+    inspect(spec: string, signal?: AbortSignal): Promise<TuiMarketplaceCandidate>
+  }
+}
+
+/** Context references handed to a controlled child-process restart. */
+export interface TuiRestartRequest {
+  readonly profile: string
+  readonly cwd: string
+  readonly resume?: string
+  readonly draft?: string
+  readonly attachmentPaths: readonly string[]
+  readonly notice?: string
+}
+
+/** Terminal Surface completion: ordinary exit or launcher-owned restart. */
+export type TuiSurfaceOutcome =
+  | { readonly kind: 'exit'; readonly code: number }
+  | { readonly kind: 'restart'; readonly request: TuiRestartRequest }

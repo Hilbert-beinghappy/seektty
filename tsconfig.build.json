@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@deepseek-ai/dsh-tui-protocol": ["src/protocol.ts"],
+      "@deepseek-ai/dsh-client-connection/in-process": ["src/host/in-process.ts"],
+      "@deepseek-ai/dsh-client-connection": ["vendor/client-connection/index.js"],
+      "@deepseek-ai/dsh-client-connection/node-client": ["vendor/client-connection/client/index.js"],
+      "@deepseek-ai/dsh-client-connection/client": ["vendor/client-connection/client/index.js"],
+      "@deepseek-ai/dsh-api-gateway/node-client": ["vendor/api-gateway/client/index.js"],
+      "@deepseek-ai/dsh-api-gateway/client": ["vendor/api-gateway/client/index.js"],
+      "@deepseek-ai/dsh-api-remotes/node-client": ["vendor/api-remotes/client/index.js"],
+      "@deepseek-ai/dsh-api-remotes/client": ["vendor/api-remotes/client/index.js"],
+      "@deepseek-ai/dsh-client-runtime/node-client": ["vendor/client-runtime/client/index.js"],
+      "@deepseek-ai/dsh-client-runtime/projection": ["vendor/client-runtime/client/index.js"],
+      "@deepseek-ai/dsh-client-runtime/client": ["vendor/client-runtime/client/index.js"],
+      "@deepseek-ai/dsh-client-runtime/client/*": ["vendor/client-runtime/client/*"],
+      "@deepseek-ai/dsh-client-ui-conversation/client": ["vendor/ui-conversation/client/index.js"],
+      "@deepseek-ai/dsh-client-ui-conversation/projection": ["vendor/ui-conversation/client/conversation-nodes/register.js"],
+      "@deepseek-ai/dsh-client-ui-deliverables/projection": ["vendor/ui-deliverables/client/projection.js"],
+      "@deepseek-ai/dsh-client-ui-goal/projection": ["vendor/ui-goal/client/projection.js"],
+      "@deepseek-ai/dsh-client-ui-trajectory/projection": ["vendor/ui-trajectory/client/projection.js"],
+      "@deepseek-ai/dsh-client-ui-workflow-run/projection": ["vendor/ui-workflow-run/client/projection.js"],
+      "@deepseek-ai/dsh-typert-registry/node-client": ["vendor/typert-registry/client/index.js"],
+      "@deepseek-ai/dsh-typert-registry/client": ["vendor/typert-registry/client/index.js"]
+    }
+  }
+}

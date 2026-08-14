@@ -1,0 +1,159 @@
+# DeepSeek Harness TUI profile layer. It adds the Host capabilities shared
+# with Web, a network-free Connection carrier, and the terminal startup bridge.
+# No Web server, browser loader, or React package is mounted.
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+- id: hmr
+  disabled: true
+
+- id: tools
+  config:
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+# The terminal is a Surface over the same multi-session Agent plane as Web.
+# Model-facing rows therefore live in each Agent Preset, while process-wide
+# registries, projections, commands, and API services remain in the Host.
+- id: tool-bash
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-jobs
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: skill-filesystem
+  disabled: true
+
+- id: tool-skill
+  disabled: true
+
+- id: tool-goal
+  disabled: true
+
+- id: plan-mode
+  disabled: true
+
+- id: compaction-basic
+  disabled: true
+
+- id: command-compact
+  disabled: true
+
+- id: tool-result-pruner
+  disabled: true
+
+- id: tool-subagent-control
+  disabled: true
+
+- id: tool-subagent-list-agents
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: workflow-worker-thread
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: tool-ralph
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: tool-todo
+  disabled: true
+
+- id: tool-web
+  disabled: true
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard
+
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    - id: message-feedback
+      name: '@deepseek-ai/dsh-message-feedback'
+      config:
+        maxNoteBytes: 8192
+
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    - id: session-projection-cache
+      name: '@deepseek-ai/dsh-session-projection-cache'
+      config:
+        writeEveryEvents: 200
+        writeIntervalMs: 5000
+
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
+    # ApiProxy requires the shared directory-picker seam. The TUI composes the
+    # platform-neutral browse backend so future `/workspace` overlays can list
+    # paths without opening a GUI dialog or mounting Web transport.
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+
+    - id: plugin-inventory
+      name: '@deepseek-ai/dsh-host-plugin-inventory'
+
+    # Extension registry for discovery Providers contributed by Harness
+    # Bundles. Provider sources stay read-only in the TUI; install state still
+    # belongs exclusively to the native Profile/pnpm manager.
+    - id: tui-marketplace-providers
+      name: 'deepseek-tui/marketplace-provider'
+
+    - id: api-gateway
+      name: '@deepseek-ai/dsh-host-apiproxy'
+
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    - id: connection
+      name: 'deepseek-tui/in-process'
+
+    - id: api-remotes
+      name: '@deepseek-ai/dsh-api-remotes'
+
+    - id: tui-startup
+      name: 'deepseek-tui/startup'
+
+    - id: tui-runner
+      name: 'deepseek-tui'
