@@ -24,7 +24,7 @@ export function createConnectionHandle(options: ConnectionHandleOptions): Connec
       try {
         listener()
       } catch (error) {
-        console.error('[deepseek-tui] host-description listener threw:', error)
+        console.error('[seektty] host-description listener threw:', error)
       }
     }
   }

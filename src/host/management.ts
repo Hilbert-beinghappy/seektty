@@ -17,7 +17,7 @@ import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
-const TUI_BUNDLE = 'deepseek-tui'
+const TUI_BUNDLE = 'seektty'
 const NON_TUI_SURFACE_BUNDLES = ['@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'] as const
 const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
   id: 'npm',

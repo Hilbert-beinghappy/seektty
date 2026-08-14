@@ -1,15 +1,17 @@
-# DeepSeek TUI
+# SeekTTY
 
 English | [中文](README.zh.md)
 
-DeepSeek TUI is an independent [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Profile Bundle. Harness remains the owner of Agent, Session, model, settings, permissions, Profile, plugin, and persistence state. This repository supplies only the DeepSeek-colored terminal Surface and its compatibility adapters; it is not a Harness fork.
+SeekTTY is an independent [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Profile Bundle. Harness remains the owner of Agent, Session, model, settings, permissions, Profile, plugin, and persistence state. This repository supplies only the DeepSeek-colored terminal Surface and its compatibility adapters; it is not a Harness fork.
+
+![Real SeekTTY TUI conversation](assets/seektty-tui.png)
 
 ## Install the bare command
 
 The repository is public and can be installed directly from GitHub without private-repository authentication.
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/deepseek-tui
+pnpm add --global github:Hilbert-beinghappy/seektty
 deepseek
 ```
 
@@ -26,8 +28,25 @@ deepseek --profile team-tui
 The native dsh entry remains available:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/deepseek-tui
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 dsh --profile tui
+```
+
+## Migrate from deepseek-tui
+
+Replace the former global package once. The new `deepseek` launcher then uses native `dsh plugin` commands to replace the legacy Bundle identity in the target Profile with `seektty`:
+
+```sh
+pnpm remove --global deepseek-tui
+pnpm add --global github:Hilbert-beinghappy/seektty
+deepseek
+```
+
+Custom Profiles migrate independently on first launch, for example `deepseek --profile team-tui`. Native dsh-only installations can migrate explicitly:
+
+```sh
+dsh plugin --profile tui remove deepseek-tui
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 ```
 
 ## Plug and unplug
@@ -35,13 +54,13 @@ dsh --profile tui
 Removal changes only the target Profile, never the dsh installation:
 
 ```sh
-dsh plugin --profile tui remove deepseek-tui
+dsh plugin --profile tui remove seektty
 ```
 
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/deepseek-tui
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 ```
 
 The package declares the standard `dsh.bundle.patch`. It owns no second plugin database, Profile format, Session store, model adapter, settings store, or permission system.
@@ -65,7 +84,7 @@ Reusable stock-dsh contract check:
 
 ```sh
 DSH_BIN=/path/to/dsh \
-DEEPSEEK_TUI_SPEC=/path/to/deepseek-tui.tgz \
+SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
 ```
 

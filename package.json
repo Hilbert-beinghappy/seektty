@@ -1,23 +1,24 @@
 {
-  "name": "deepseek-tui",
+  "name": "seektty",
   "version": "0.1.0",
   "private": true,
-  "description": "A pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
+  "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [
     "deepseek",
     "deepseek-harness",
     "dsh",
     "dsh-plugin",
+    "seektty",
     "tui"
   ],
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Hilbert-beinghappy/deepseek-tui.git"
+    "url": "git+https://github.com/Hilbert-beinghappy/seektty.git"
   },
-  "homepage": "https://github.com/Hilbert-beinghappy/deepseek-tui#readme",
-  "bugs": "https://github.com/Hilbert-beinghappy/deepseek-tui/issues",
+  "homepage": "https://github.com/Hilbert-beinghappy/seektty#readme",
+  "bugs": "https://github.com/Hilbert-beinghappy/seektty/issues",
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": "^22.19.0 || >=24"
@@ -39,6 +40,7 @@
   },
   "files": [
     "lib/*.js",
+    "assets/seektty-tui.png",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",

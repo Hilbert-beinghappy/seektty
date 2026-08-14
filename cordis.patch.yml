@@ -138,7 +138,7 @@
     # Bundles. Provider sources stay read-only in the TUI; install state still
     # belongs exclusively to the native Profile/pnpm manager.
     - id: tui-marketplace-providers
-      name: 'deepseek-tui/marketplace-provider'
+      name: 'seektty/marketplace-provider'
 
     - id: api-gateway
       name: '@deepseek-ai/dsh-host-apiproxy'
@@ -147,13 +147,13 @@
       name: '@deepseek-ai/dsh-cordis-host-runner'
 
     - id: connection
-      name: 'deepseek-tui/in-process'
+      name: 'seektty/in-process'
 
     - id: api-remotes
       name: '@deepseek-ai/dsh-api-remotes'
 
     - id: tui-startup
-      name: 'deepseek-tui/startup'
+      name: 'seektty/startup'
 
     - id: tui-runner
-      name: 'deepseek-tui'
+      name: 'seektty'

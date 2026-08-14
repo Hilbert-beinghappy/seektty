@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const dsh = process.env.DSH_BIN?.trim()
-const pluginSpec = process.env.DEEPSEEK_TUI_SPEC?.trim()
+const pluginSpec = process.env.SEEKTTY_SPEC?.trim()
 
 if (!dsh || !pluginSpec) {
-  process.stderr.write('用法：DSH_BIN=/path/to/dsh DEEPSEEK_TUI_SPEC=/path/to/deepseek-tui.tgz pnpm test:stock\n')
+  process.stderr.write('用法：DSH_BIN=/path/to/dsh SEEKTTY_SPEC=/path/to/seektty.tgz pnpm test:stock\n')
   process.exit(2)
 }
 
-const home = mkdtempSync(join(tmpdir(), 'deepseek-tui-stock-cycle-'))
+const home = mkdtempSync(join(tmpdir(), 'seektty-stock-cycle-'))
 const environment = { ...process.env, DSH_HOME: home }
 
 function run(args) {
@@ -40,19 +40,19 @@ function assert(condition, message) {
 try {
   run(['plugin', '--profile', 'tui', 'add', pluginSpec])
   let manifest = profileManifest()
-  assert(manifest.dependencies?.['deepseek-tui'] !== undefined, 'add 后 Profile 缺少 deepseek-tui 依赖')
-  assert(manifest.dsh?.profile?.bundles?.includes('deepseek-tui'), 'add 后 Bundle 未进入 Profile')
+  assert(manifest.dependencies?.seektty !== undefined, 'add 后 Profile 缺少 seektty 依赖')
+  assert(manifest.dsh?.profile?.bundles?.includes('seektty'), 'add 后 Bundle 未进入 Profile')
 
   let dump = run(['--profile', 'tui', '--dump-config'])
-  assert(dump.includes('id: tui-runner') && dump.includes('name: deepseek-tui'), 'add 后 dump-config 未挂载 TUI entry')
+  assert(dump.includes('id: tui-runner') && dump.includes('name: seektty'), 'add 后 dump-config 未挂载 TUI entry')
   assert(run(['--profile', 'tui', '--help']).includes('Usage: deepseek'), 'TUI Bundle 无法由 stock dsh 加载')
 
-  run(['plugin', '--profile', 'tui', 'remove', 'deepseek-tui'])
+  run(['plugin', '--profile', 'tui', 'remove', 'seektty'])
   manifest = profileManifest()
-  assert(manifest.dependencies?.['deepseek-tui'] === undefined, 'remove 后仍存在 deepseek-tui 依赖')
-  assert(!manifest.dsh?.profile?.bundles?.includes('deepseek-tui'), 'remove 后 Bundle 仍在 Profile')
+  assert(manifest.dependencies?.seektty === undefined, 'remove 后仍存在 seektty 依赖')
+  assert(!manifest.dsh?.profile?.bundles?.includes('seektty'), 'remove 后 Bundle 仍在 Profile')
   dump = run(['--profile', 'tui', '--dump-config'])
-  assert(!dump.includes('deepseek-tui'), 'remove 后 dump-config 仍包含 TUI entry')
+  assert(!dump.includes('seektty'), 'remove 后 dump-config 仍包含 TUI entry')
 
   run(['plugin', '--profile', 'tui', 'add', pluginSpec])
   assert(run(['--profile', 'tui', '--help']).includes('Usage: deepseek'), 're-add 后 TUI Bundle 无法加载')

@@ -8,8 +8,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 
-const PACKAGE_NAME = 'deepseek-tui'
-const DEFAULT_SPEC = 'github:Hilbert-beinghappy/deepseek-tui'
+const PACKAGE_NAME = 'seektty'
+const LEGACY_PACKAGE_NAME = 'deepseek-tui'
+const DEFAULT_SPEC = 'github:Hilbert-beinghappy/seektty'
 
 interface ProfileManifest {
   readonly dependencies?: Readonly<Record<string, string>>
@@ -38,11 +39,15 @@ export function launcherArgs(args: readonly string[]): { profile: string; inner:
   return { profile, inner }
 }
 
-export function installed(profile: string): boolean {
+function hasDependency(profile: string, name: string): boolean {
   const manifestPath = join(resolveProfileDir(profile), 'package.json')
   if (!existsSync(manifestPath)) return false
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ProfileManifest
-  return manifest.dependencies?.[PACKAGE_NAME] !== undefined
+  return manifest.dependencies?.[name] !== undefined
+}
+
+export function installed(profile: string): boolean {
+  return hasDependency(profile, PACKAGE_NAME)
 }
 
 export function run(command: string, args: readonly string[]): number {
@@ -59,8 +64,12 @@ export function launch(
 ): number {
   const { profile, inner } = launcherArgs(args)
   const dsh = environment.DSH_BIN?.trim() || 'dsh'
+  if (hasDependency(profile, LEGACY_PACKAGE_NAME)) {
+    const status = execute(dsh, ['plugin', '--profile', profile, 'remove', LEGACY_PACKAGE_NAME])
+    if (status !== 0) return status
+  }
   if (!installed(profile)) {
-    const spec = environment.DEEPSEEK_TUI_SPEC?.trim() || DEFAULT_SPEC
+    const spec = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || DEFAULT_SPEC
     const status = execute(dsh, ['plugin', '--profile', profile, 'add', spec])
     if (status !== 0) return status
   }

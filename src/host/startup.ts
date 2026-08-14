@@ -174,7 +174,7 @@ export function apply(ctx: Context): void {
     invokingCwd: process.cwd(),
   }))
   ctx.provide('appRestart', restartProvider(ctx))
-  const handoff = restartHandoff(consumeAppHandoff('deepseek-tui-v1'))
+  const handoff = restartHandoff(consumeAppHandoff('seektty-v1'))
   const program = tuiCommand()
   program.action(() => {
     const options = program.opts<TuiOptions>()

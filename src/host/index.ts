@@ -80,7 +80,7 @@ async function run(ctx: Context): Promise<void> {
         '--cwd', outcome.request.cwd,
         ...(outcome.request.resume === undefined ? [] : ['--resume', outcome.request.resume]),
       ],
-      handoff: { channel: 'deepseek-tui-v1', payload: outcome.request },
+      handoff: { channel: 'seektty-v1', payload: outcome.request },
     })
   } catch (error) {
     internals.stderr.write(`deepseek: 重启失败：${error instanceof Error ? error.message : String(error)}\n`)

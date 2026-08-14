@@ -1,15 +1,17 @@
-# DeepSeek TUI
+# SeekTTY
 
 [English](README.md) | 中文
 
-DeepSeek TUI 是独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Profile Bundle。Harness 继续负责 Agent、Session、模型、设置、权限、Profile、插件和持久化；本仓库只提供 DeepSeek 配色的终端 Surface 和必要的兼容适配层，不再维护 Harness fork。
+SeekTTY 是独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Profile Bundle。Harness 继续负责 Agent、Session、模型、设置、权限、Profile、插件和持久化；本仓库只提供 DeepSeek 配色的终端 Surface 和必要的兼容适配层，不再维护 Harness fork。
+
+![SeekTTY 真实 TUI 对话截图](assets/seektty-tui.png)
 
 ## 安装并使用裸命令
 
 仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/deepseek-tui
+pnpm add --global github:Hilbert-beinghappy/seektty
 deepseek
 ```
 
@@ -26,8 +28,25 @@ deepseek --profile team-tui
 也可以只使用 dsh 的原生入口：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/deepseek-tui
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 dsh --profile tui
+```
+
+## 从 deepseek-tui 迁移
+
+旧版全局包只需替换一次；新的 `deepseek` 启动器会通过原生 `dsh plugin` 命令把目标 Profile 中的旧 Bundle 标识替换为 `seektty`：
+
+```sh
+pnpm remove --global deepseek-tui
+pnpm add --global github:Hilbert-beinghappy/seektty
+deepseek
+```
+
+自定义 Profile 在首次启动时分别迁移，例如 `deepseek --profile team-tui`。只使用 dsh 原生入口时，可显式执行：
+
+```sh
+dsh plugin --profile tui remove deepseek-tui
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 ```
 
 ## 直接插拔
@@ -35,13 +54,13 @@ dsh --profile tui
 移除不会修改 dsh 本体，只会让 Bundle 离开目标 Profile：
 
 ```sh
-dsh plugin --profile tui remove deepseek-tui
+dsh plugin --profile tui remove seektty
 ```
 
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/deepseek-tui
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 ```
 
 本包声明标准 `dsh.bundle.patch`，不建立第二套插件数据库、Profile 格式、Session Store、模型适配器、设置 Store 或权限系统。
@@ -65,7 +84,7 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/deepseek-tui
 
 ```sh
 DSH_BIN=/path/to/dsh \
-DEEPSEEK_TUI_SPEC=/path/to/deepseek-tui.tgz \
+SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
 ```
 

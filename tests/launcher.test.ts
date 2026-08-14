@@ -7,7 +7,7 @@ import { installed, launch, launcherArgs } from '../src/bin.ts'
 const temporaryHomes: string[] = []
 
 function temporaryHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'deepseek-tui-launcher-'))
+  const home = mkdtempSync(join(tmpdir(), 'seektty-launcher-'))
   temporaryHomes.push(home)
   vi.stubEnv('DSH_HOME', home)
   return home
@@ -54,12 +54,14 @@ describe('launcher arguments', () => {
 })
 
 describe('launcher provisioning', () => {
-  it('recognizes only a Profile that already contains deepseek-tui', () => {
+  it('recognizes only a Profile that already contains seektty', () => {
     const home = temporaryHome()
     expect(installed('tui')).toBe(false)
     writeProfile(home, 'tui', { other: '1.0.0' })
     expect(installed('tui')).toBe(false)
     writeProfile(home, 'tui', { 'deepseek-tui': '0.1.0' })
+    expect(installed('tui')).toBe(false)
+    writeProfile(home, 'tui', { seektty: '0.1.0' })
     expect(installed('tui')).toBe(true)
   })
 
@@ -68,13 +70,13 @@ describe('launcher provisioning', () => {
     const calls: Array<{ command: string; args: readonly string[] }> = []
     const execute = (command: string, args: readonly string[]): number => {
       calls.push({ command, args })
-      if (args[0] === 'plugin') writeProfile(home, 'team', { 'deepseek-tui': 'file:/plugin.tgz' })
+      if (args[0] === 'plugin') writeProfile(home, 'team', { seektty: 'file:/plugin.tgz' })
       return 0
     }
 
     expect(launch(
       ['--profile', 'team', '--cwd', '/workspace'],
-      { DSH_BIN: '/stock/dsh', DEEPSEEK_TUI_SPEC: '/plugin.tgz' },
+      { DSH_BIN: '/stock/dsh', SEEKTTY_SPEC: '/plugin.tgz' },
       execute,
     )).toBe(0)
     expect(calls).toEqual([
@@ -89,6 +91,25 @@ describe('launcher provisioning', () => {
     ])
   })
 
+  it('replaces the legacy Bundle before booting', () => {
+    const home = temporaryHome()
+    writeProfile(home, 'tui', { 'deepseek-tui': '0.1.0' })
+    const calls: Array<{ command: string; args: readonly string[] }> = []
+    const execute = (command: string, args: readonly string[]): number => {
+      calls.push({ command, args })
+      if (args[0] === 'plugin' && args[3] === 'remove') writeProfile(home, 'tui', {})
+      if (args[0] === 'plugin' && args[3] === 'add') writeProfile(home, 'tui', { seektty: '0.1.0' })
+      return 0
+    }
+
+    expect(launch([], { DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
+    expect(calls.map(call => call.args)).toEqual([
+      ['plugin', '--profile', 'tui', 'remove', 'deepseek-tui'],
+      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty'],
+      ['--profile', 'tui'],
+    ])
+  })
+
   it('does not boot when native plugin installation fails', () => {
     temporaryHome()
     const calls: readonly string[][] = []
@@ -98,8 +119,9 @@ describe('launcher provisioning', () => {
       return 17
     }
 
-    expect(launch([], { DSH_BIN: '/stock/dsh' }, execute)).toBe(17)
+    expect(launch([], { DSH_BIN: '/stock/dsh', DEEPSEEK_TUI_SPEC: '/legacy-plugin.tgz' }, execute)).toBe(17)
     expect(calls).toHaveLength(1)
     expect(calls[0]?.slice(0, 4)).toEqual(['plugin', '--profile', 'tui', 'add'])
+    expect(calls[0]?.[4]).toBe('/legacy-plugin.tgz')
   })
 })

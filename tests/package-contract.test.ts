@@ -33,15 +33,15 @@ describe('out-of-tree Bundle contract', () => {
     const patchText = readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8')
     const patch = load(patchText, { schema: entryListSchema })
     expect(Array.isArray(patch)).toBe(true)
-    expect(patchText).toContain("name: 'deepseek-tui/marketplace-provider'")
-    expect(patchText).toContain("name: 'deepseek-tui/in-process'")
-    expect(patchText).toContain("name: 'deepseek-tui/startup'")
-    expect(patchText).toContain("name: 'deepseek-tui'")
+    expect(patchText).toContain("name: 'seektty/marketplace-provider'")
+    expect(patchText).toContain("name: 'seektty/in-process'")
+    expect(patchText).toContain("name: 'seektty/startup'")
+    expect(patchText).toContain("name: 'seektty'")
   })
 
   it('does not retain the in-tree TUI Bundle identity', () => {
     const management = readFileSync(resolve(root, 'src/host/management.ts'), 'utf8')
-    expect(management).toContain("const TUI_BUNDLE = 'deepseek-tui'")
+    expect(management).toContain("const TUI_BUNDLE = 'seektty'")
     expect(management).not.toContain('@deepseek-ai/dsh-tui-app')
   })
 
@@ -51,7 +51,7 @@ describe('out-of-tree Bundle contract', () => {
       resolveCredential: () => Promise.resolve(undefined),
     })
     const candidate = await marketplace.inspect(root, [])
-    expect(candidate.name).toBe('deepseek-tui')
+    expect(candidate.name).toBe('seektty')
     expect(candidate.bundle).toBe(true)
     expect(candidate.patchValid).toBe(true)
     expect(candidate.diagnostics).toEqual([
