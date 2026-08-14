@@ -6,10 +6,9 @@ DeepSeek TUI 是独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deep
 
 ## 安装并使用裸命令
 
-仓库目前是私有的，安装者需要拥有 GitHub 访问权限。
+仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。
 
 ```sh
-gh auth setup-git  # 只需一次；Git 已能克隆私有仓库时可跳过
 pnpm add --global github:Hilbert-beinghappy/deepseek-tui
 deepseek
 ```
@@ -74,4 +73,4 @@ pnpm test:stock
 
 当前只承诺官方 `0.1.0-rc.6`。dsh 更新时不需要把本仓库重新合并成 fork；需要更新这里的精确依赖和兼容快照，再跑 add／boot／remove／re-add 契约。通过后才能扩大兼容范围。
 
-仓库保持私有；未经明确授权，不发布 npm 包或公开 Release。
+源码仓库公开；当前未发布 npm 包或 GitHub Release，请使用上方 GitHub 地址安装。

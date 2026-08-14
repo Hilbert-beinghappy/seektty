@@ -6,10 +6,9 @@ DeepSeek TUI is an independent [DeepSeek Harness](https://github.com/deepseek-ai
 
 ## Install the bare command
 
-The repository is currently private, so the installing account needs GitHub access.
+The repository is public and can be installed directly from GitHub without private-repository authentication.
 
 ```sh
-gh auth setup-git  # once; skip when Git can already clone private repositories
 pnpm add --global github:Hilbert-beinghappy/deepseek-tui
 deepseek
 ```
@@ -74,4 +73,4 @@ pnpm test:stock
 
 Only official `0.1.0-rc.6` is currently supported. A dsh update does not require merging this repository back into a fork. Update the exact dependencies and compatibility snapshots here, then pass add/boot/remove/re-add before widening the compatibility range.
 
-Keep the repository private. Do not publish an npm package or public Release without explicit authorization.
+The source repository is public. No npm package or GitHub Release is currently published; install from the GitHub source above.
