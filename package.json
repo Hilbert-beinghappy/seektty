@@ -41,6 +41,7 @@
   "files": [
     "lib/*.js",
     "assets/seektty-tui.png",
+    "assets/seektty-tui-dark.png",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
