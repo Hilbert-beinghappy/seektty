@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@mariozechner/pi-tui@0.73.1': 9db834928e0bcc7c2257ed2462eb306a4f5e55ae5904d69e8c34e721f03306f2
+  '@mariozechner/pi-tui@0.73.1': 7d95e956b3ba0dca9460ba312b126b864bf4b49bf880b095158948f20f74e7de
 
 importers:
 
@@ -119,6 +119,15 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: 3.18.1
         version: 3.18.1
+      '@shikijs/core':
+        specifier: 4.4.3
+        version: 4.4.3
+      '@shikijs/engine-javascript':
+        specifier: 4.4.3
+        version: 4.4.3
+      '@shikijs/langs':
+        specifier: 4.4.3
+        version: 4.4.3
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -131,6 +140,9 @@ importers:
       js-yaml:
         specifier: 4.3.1
         version: 4.3.1
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -143,7 +155,7 @@ importers:
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
       '@mariozechner/pi-tui':
         specifier: 0.73.1
-        version: 0.73.1(patch_hash=9db834928e0bcc7c2257ed2462eb306a4f5e55ae5904d69e8c34e721f03306f2)
+        version: 0.73.1(patch_hash=7d95e956b3ba0dca9460ba312b126b864bf4b49bf880b095158948f20f74e7de)
       '@types/cross-spawn':
         specifier: 6.0.6
         version: 6.0.6
@@ -1742,6 +1754,9 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
+
   katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
     hasBin: true
@@ -3198,7 +3213,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@mariozechner/pi-tui@0.73.1(patch_hash=9db834928e0bcc7c2257ed2462eb306a4f5e55ae5904d69e8c34e721f03306f2)':
+  '@mariozechner/pi-tui@0.73.1(patch_hash=7d95e956b3ba0dca9460ba312b126b864bf4b49bf880b095158948f20f74e7de)':
     dependencies:
       '@types/mime-types': 2.1.4
       chalk: 5.6.2
@@ -3696,6 +3711,8 @@ snapshots:
       argparse: 2.0.1
 
   jsesc@3.1.0: {}
+
+  jsonc-parser@3.3.1: {}
 
   katex@0.16.47:
     dependencies:

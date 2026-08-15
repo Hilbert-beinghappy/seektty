@@ -7,6 +7,7 @@ import {
   matchesKey,
   Text,
   visibleWidth,
+  wrapTextWithAnsi,
   type Component,
   type Focusable,
 } from '@mariozechner/pi-tui'
@@ -31,7 +32,15 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
-import { color, escapeTerminalText, markdownTheme, terminalColorLevel } from './theme.ts'
+import {
+  background,
+  color,
+  escapeTerminalText,
+  highlightCodeLines,
+  markdownTheme,
+  terminalColorLevel,
+} from './theme.ts'
+import { syntaxLanguageForPath } from './syntax-highlighter.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -63,6 +72,13 @@ type TranscriptRow = ({
   readonly format: 'plain'
   readonly text: string
 } | {
+  readonly format: 'code'
+  readonly text: string
+  readonly language?: string
+  readonly caption?: string
+  readonly lineNumbers?: readonly number[]
+  readonly prefix?: string
+} | {
   readonly format: 'image'
   readonly key: string
   readonly attachment: TranscriptImageAttachment
@@ -73,6 +89,8 @@ type TranscriptRow = ({
   readonly userTurn?: boolean
   /** Animate one active marker without changing row geometry or surrounding text. */
   readonly pulse?: 'thinking' | 'marker'
+  /** Unix epoch ms used to render an in-flight duration beside this row. */
+  readonly liveDurationSince?: number
 }
 
 function thinkingRow(): TranscriptRow {
@@ -84,15 +102,63 @@ class PulsingRow implements Component {
     private readonly text: string,
     private readonly mode: 'thinking' | 'marker',
     private readonly frame: () => number,
+    private readonly liveDurationSince?: number,
   ) {}
 
   render(width: number): string[] {
     const marker = color.pulse('◆', this.frame())
-    const safeText = escapeTerminalText(this.text)
+    const liveDuration = this.liveDurationSince === undefined
+      ? ''
+      : ` · ${durationText(Math.max(0, Date.now() - this.liveDurationSince))}`
+    const safeText = escapeTerminalText(`${this.text}${liveDuration}`)
     const text = this.mode === 'thinking'
       ? `${marker} ${color.muted(safeText)}`
       : safeText.replace('◆', marker)
     return new Text(text, 0, 0).render(width)
+  }
+
+  invalidate(): void {}
+}
+
+class CodeRow implements Component {
+  constructor(private readonly row: Extract<TranscriptRow, { readonly format: 'code' }>) {}
+
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, width)
+    const requestedPrefix = escapeTerminalText(this.row.prefix ?? '')
+    const prefix = visibleWidth(requestedPrefix) < safeWidth ? requestedPrefix : ''
+    const prefixWidth = visibleWidth(prefix)
+    const numbers = this.row.lineNumbers
+    const highest = numbers?.reduce((value, number) => Math.max(value, number), 0) ?? 0
+    const numberWidth = numbers !== undefined && safeWidth - prefixWidth >= 8
+      ? String(highest).length + 2
+      : 0
+    const codeWidth = Math.max(1, safeWidth - prefixWidth - numberWidth)
+    const highlighted = highlightCodeLines(this.row.text, this.row.language)
+    const rows: string[] = []
+    if (this.row.caption !== undefined) {
+      rows.push(...new Text(`${color.muted(prefix)}${color.muted(escapeTerminalText(this.row.caption))}`, 0, 0).render(safeWidth))
+    }
+    for (const [index, sourceLine] of highlighted.entries()) {
+      const wrapped = wrapTextWithAnsi(sourceLine, codeWidth)
+      const parts = wrapped.length === 0 ? [''] : wrapped
+      for (const [partIndex, part] of parts.entries()) {
+        const number = numbers?.[index]
+        const gutter = numberWidth === 0
+          ? ''
+          : color.muted(partIndex === 0 && number !== undefined
+            ? `${String(number).padStart(numberWidth - 1)} `
+            : ' '.repeat(numberWidth))
+        const padded = `${part}${' '.repeat(Math.max(0, codeWidth - visibleWidth(part)))}`
+        const connector = prefix === ''
+          ? ''
+          : this.row.caption === undefined && index === 0 && partIndex === 0
+            ? color.muted(prefix)
+            : ' '.repeat(prefixWidth)
+        rows.push(`${connector}${gutter}${background.code(padded)}`)
+      }
+    }
+    return rows
   }
 
   invalidate(): void {}
@@ -268,8 +334,10 @@ function assistantBlockRows(block: AssistantBlock, preferences: TranscriptPrefer
       if (preferences.tools === 'hidden') return []
       return [{
         format: 'plain',
-        text: color.accent(`◆ ${block.name}${preferences.tools === 'expanded' ? `\n${prettyArgs(block.argsRaw)}` : ''}`),
-      }]
+        text: color.accent(`◆ ${block.name}`),
+      }, ...(preferences.tools === 'expanded'
+        ? [{ format: 'code' as const, text: prettyArgs(block.argsRaw), language: 'json' }]
+        : [])]
     case 'other': return [{ format: 'plain', text: color.muted('模型扩展内容 · /trajectory 查看详情') }]
   }
 }
@@ -296,22 +364,24 @@ function diffText(value: unknown): string {
       return jsonText(value)
     }
     paths.add(path)
-    rows.push(color.accent(path))
+    rows.push(`diff -- ${path}`)
+    rows.push(oldText === null ? '--- /dev/null' : `--- a/${path}`)
+    rows.push(`+++ b/${path}`)
     if (oldText !== null) {
       for (const line of contentLines(oldText)) {
-        rows.push(color.danger(`- ${line}`))
+        rows.push(`-${line}`)
         removed += 1
       }
     }
     for (const line of contentLines(newText)) {
-      rows.push(color.success(`+ ${line}`))
+      rows.push(`+${line}`)
       added += 1
     }
   }
   const visible = rows.length <= 80
     ? rows
-    : [...rows.slice(0, 40), color.muted(`… 省略 ${rows.length - 80} 行 …`), ...rows.slice(-40)]
-  visible.push(color.muted(`└ +${added} -${removed} · ${paths.size} 个文件`))
+    : [...rows.slice(0, 40), `@@ … 省略 ${rows.length - 80} 行 … @@`, ...rows.slice(-40)]
+  visible.push(`# +${added} -${removed} · ${paths.size} 个文件`)
   return visible.join('\n')
 }
 
@@ -333,6 +403,11 @@ function toolTitle(node: ToolResultNode | RunningToolCall): string {
   const name = 'kind' in node ? node.call?.name : node.name
   const productTitle = name === undefined ? undefined : PRODUCT_TOOL_TITLES[name]
   if (productTitle !== undefined) return productTitle
+  const callView = node.callView
+  if (callView?.card === 'terminal') {
+    const description = callView.description?.trim()
+    return description === undefined || description === '' ? '执行 Shell 指令' : description
+  }
   if ('kind' in node) {
     return node.resultView?.title ?? node.callView?.title ?? node.call?.name ?? node.callId
   }
@@ -346,60 +421,228 @@ function settledToolFailed(node: ToolResultNode): boolean {
     && ((result.exitCode !== undefined && result.exitCode !== 0) || result.signal !== undefined)
 }
 
-function viewDetails(node: ToolResultNode): string[] {
-  const details: string[] = []
-  const call = node.callView
-  if (call === null && node.call?.argsRaw !== undefined) details.push(prettyArgs(node.call.argsRaw))
-  if (call?.card === 'generic' && call.rawInput !== undefined) details.push(jsonText(call.rawInput))
-  if (call?.card === 'terminal') {
-    if (call.description !== undefined) details.push(call.description)
-    details.push(`${call.cwd ?? '(当前工作区)'}\n$ ${call.title}`)
-  }
-  if (call?.card === 'diff') details.push(diffText(call.diffs))
-  const result = node.resultView
-  if (result?.card === 'terminal') {
-    if (result.output !== undefined) details.push(result.output)
-    if (result.exitCode !== undefined) details.push(`退出码 ${result.exitCode}`)
-    if (result.signal !== undefined) details.push(`信号 ${result.signal}`)
-  } else if (result?.card === 'diff') {
-    details.push(diffText(result.diffs))
-  } else if (result?.card === 'generic' && result.content !== undefined) {
-    details.push(contentText(result.content))
-  } else if (result !== null) {
-    details.push(jsonText(result))
-  } else {
-    const raw = contentText(node.content)
-    if (raw !== '') details.push(raw)
-  }
-  if (node.meta !== undefined) details.push(`元数据\n${jsonText(node.meta)}`)
-  return details.filter(value => value !== '')
+type ToolDetail = {
+  readonly kind: 'plain'
+  readonly text: string
+} | {
+  readonly kind: 'markdown'
+  readonly text: string
+} | {
+  readonly kind: 'code'
+  readonly text: string
+  readonly language?: string
+  readonly caption?: string
+  readonly lineNumbers?: readonly number[]
 }
 
-function runningViewDetails(node: RunningToolCall): string[] {
+interface ReadLineView {
+  readonly number: number
+  readonly text: string
+}
+
+interface SearchMatchView {
+  readonly lineNumber: number
+  readonly line: string
+}
+
+interface SearchFileView {
+  readonly path: string
+  readonly matches: readonly SearchMatchView[]
+}
+
+interface WebSourceView {
+  readonly url: string
+  readonly title?: string
+  readonly snippet?: string
+}
+
+function contentDetails(content: readonly unknown[]): ToolDetail[] {
+  return content.flatMap((block): ToolDetail[] => {
+    if (typeof block !== 'object' || block === null) return [{ kind: 'plain', text: String(block) }]
+    const value = block as Record<string, unknown>
+    if ((value.type === 'text' || value.type === 'reasoning') && typeof value.text === 'string') {
+      return value.text === '' ? [] : [{ kind: 'markdown', text: value.text }]
+    }
+    return [{ kind: 'plain', text: contentBlockText(block) }]
+  })
+}
+
+function invocationCode(name: string, value: unknown): ToolDetail {
+  const argumentsText = typeof value === 'object' && value !== null
+    && !Array.isArray(value) && Object.keys(value).length === 0
+    ? ''
+    : jsonText(value)
+  return { kind: 'code', text: `${name}(${argumentsText})`, language: 'typescript' }
+}
+
+function toolInvocationDetail(name: string, argsRaw: string): ToolDetail {
+  try {
+    return invocationCode(name, JSON.parse(argsRaw))
+  } catch {
+    return { kind: 'code', text: `${name}(${argsRaw})`, language: 'typescript' }
+  }
+}
+
+function fallbackInvocationDetail(value: unknown): ToolDetail {
+  return invocationCode('tool', value)
+}
+
+function terminalCommandDetail(value: unknown): ToolDetail | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const view = value as Readonly<Record<string, unknown>>
+  if (view.card !== 'terminal' || typeof view.title !== 'string' || view.title === '') return undefined
+  return { kind: 'code', text: `$ ${view.title}`, language: 'bash' }
+}
+
+function readInvocationFallback(node: ToolResultNode): ToolDetail | undefined {
+  const result = node.resultView
+  if (result?.card === 'read') return invocationCode('read', { file_path: String(result.path) })
+  const call = node.callView
+  if (call?.card !== 'generic' || call.kind !== 'read') return undefined
+  const locations = Array.isArray(call.locations) ? call.locations as readonly unknown[] : []
+  const location = locations.find((candidate): candidate is { readonly path: string } =>
+    typeof candidate === 'object' && candidate !== null
+    && 'path' in candidate && typeof candidate.path === 'string' && candidate.path !== '')
+  return location === undefined ? undefined : invocationCode('read', { file_path: location.path })
+}
+
+function settledInvocationDetails(node: ToolResultNode): ToolDetail[] {
+  const call = node.callView
+  const details: ToolDetail[] = []
+  if (call?.card === 'terminal') {
+    const command = terminalCommandDetail(call)
+    if (command !== undefined) details.push(command)
+  } else if (call?.card === 'diff') {
+    details.push({ kind: 'code', text: diffText(call.diffs), language: 'diff' })
+  } else if (node.call !== null) {
+    details.push(toolInvocationDetail(node.call.name, node.call.argsRaw))
+  } else if (call?.card === 'generic' && call.rawInput !== undefined) {
+    details.push(fallbackInvocationDetail(call.rawInput))
+  }
+  const readFallback = details.length === 0 ? readInvocationFallback(node) : undefined
+  if (readFallback !== undefined) details.push(readFallback)
+  return details
+}
+
+function viewDetails(node: ToolResultNode): ToolDetail[] {
+  const result = node.resultView
+  const details = settledInvocationDetails(node)
+  if (result?.card === 'terminal') {
+    if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
+    if (result.exitCode !== undefined) details.push({ kind: 'plain', text: `退出码 ${result.exitCode}` })
+    if (result.signal !== undefined) details.push({ kind: 'plain', text: `信号 ${result.signal}` })
+  } else if (result?.card === 'diff') {
+    details.push({ kind: 'code', text: diffText(result.diffs), language: 'diff' })
+  } else if (result?.card === 'generic' && result.content !== undefined) {
+    details.push(...contentDetails(result.content))
+  } else if (result?.card === 'read') {
+    const lines = result.lines as readonly ReadLineView[]
+    const path = String(result.path)
+    const language = syntaxLanguageForPath(path, typeof result.lang === 'string' ? result.lang : undefined)
+    const first = lines[0]?.number ?? Number(result.offset)
+    const last = lines.at(-1)?.number ?? first
+    details.push({
+      kind: 'code',
+      text: lines.map(line => line.text).join('\n'),
+      ...(language === undefined ? {} : { language }),
+      caption: `${path} · ${String(first)}–${String(last)} / ${String(result.totalLines)}`,
+      lineNumbers: lines.map(line => line.number),
+    })
+  } else if (result?.card === 'search' && result.shape === 'matches') {
+    const files = result.files as readonly SearchFileView[]
+    for (const file of files) {
+      const language = syntaxLanguageForPath(file.path)
+      details.push({
+        kind: 'code',
+        text: file.matches.map(match => match.line).join('\n'),
+        ...(language === undefined ? {} : { language }),
+        caption: file.path,
+        lineNumbers: file.matches.map(match => match.lineNumber),
+      })
+    }
+    if (result.truncated) details.push({ kind: 'plain', text: `只显示部分结果 · 共 ${String(result.total)} 项` })
+  } else if (result?.card === 'search') {
+    details.push({ kind: 'plain', text: result.paths.join('\n') })
+    if (result.truncated) details.push({ kind: 'plain', text: `只显示部分结果 · 共 ${String(result.total)} 项` })
+  } else if (result?.card === 'web' && result.kind === 'search') {
+    if (result.answer !== undefined) details.push({ kind: 'markdown', text: result.answer })
+    const sources = result.sources as readonly WebSourceView[]
+    details.push(...sources.map(source => ({
+      kind: 'plain' as const,
+      text: `${source.title ?? source.url}\n${source.url}${source.snippet === undefined ? '' : `\n${source.snippet}`}`,
+    })))
+    if (result.truncated) details.push({ kind: 'plain', text: '来源列表已截断' })
+  } else if (result?.card === 'web') {
+    details.push({
+      kind: 'plain',
+      text: `${result.statusCode} · ${result.url}${result.truncated ? ' · 内容已截断' : ''}`,
+    })
+    details.push(...contentDetails(node.content))
+  } else if (result?.card === 'generic') {
+    details.push(...contentDetails(node.content))
+  } else {
+    details.push(...contentDetails(node.content))
+  }
+  if (node.meta !== undefined) {
+    details.push({ kind: 'code', text: jsonText(node.meta), language: 'json', caption: '元数据' })
+  }
+  return details.filter(value => value.text !== '')
+}
+
+function runningViewDetails(node: RunningToolCall): ToolDetail[] {
   const view = node.callView
   if (view?.card === 'terminal') {
+    const command = terminalCommandDetail(view)
+    return command === undefined ? [] : [command]
+  }
+  if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs), language: 'diff' }]
+  return [toolInvocationDetail(node.name, node.argsRaw)]
+}
+
+function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
+  if (detail.kind === 'plain') return { format: 'plain', text: detail.text }
+  if (detail.kind === 'markdown') return { format: 'markdown', text: detail.text }
+  return {
+    format: 'code',
+    text: detail.text,
+    ...(detail.language === undefined ? {} : { language: detail.language }),
+    ...(detail.caption === undefined ? {} : { caption: detail.caption }),
+    ...(detail.lineNumbers === undefined ? {} : { lineNumbers: detail.lineNumbers }),
+    prefix: `${'  '.repeat(depth + 1)}⎿  `,
+  }
+}
+
+function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): TranscriptRow[] {
+  const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
+  if ('kind' in block) {
+    const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
+    const failed = settledToolFailed(block)
+    const details = preferences.tools === 'expanded'
+      ? viewDetails(block)
+      : settledInvocationDetails(block)
     return [
-      ...(view.description === undefined ? [] : [view.description]),
-      `${view.cwd ?? '(当前工作区)'}\n$ ${view.title}`,
+      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger('失败')}` : ''}${duration}` },
+      ...details.map(detail => detailRow(detail, depth)),
+      ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
   }
-  if (view?.card === 'diff') return [diffText(view.diffs)]
-  if (view?.card === 'generic' && view.rawInput !== undefined) return [jsonText(view.rawInput)]
-  return [prettyArgs(node.argsRaw)]
+  const details = runningViewDetails(block)
+  return [
+    {
+      format: 'plain',
+      text: `${prefix}${color.accent(toolTitle(block))}`,
+      pulse: 'marker',
+      liveDurationSince: block.time,
+    },
+    ...details.map(detail => detailRow(detail, depth)),
+    ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
+  ]
 }
 
 function toolBlockText(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): string {
-  const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
-  if ('kind' in block) {
-    const duration = block.callTime === null ? '' : ` · ${Math.max(0, block.time - block.callTime)} ms`
-    const state = settledToolFailed(block) ? color.danger('失败') : color.success('完成')
-    const detail = preferences.tools === 'expanded' ? viewDetails(block).join('\n') : ''
-    const children = block.subCalls.map(child => toolBlockText(child, preferences, depth + 1)).filter(Boolean)
-    return `${prefix}${color.accent(toolTitle(block))} · ${state}${duration}${detail === '' ? '' : `\n${detail}`}${children.length === 0 ? '' : `\n${children.join('\n')}`}`
-  }
-  const detail = preferences.tools === 'expanded' ? `\n${runningViewDetails(block).join('\n')}` : ''
-  const children = block.subCalls.map(child => toolBlockText(child, preferences, depth + 1)).filter(Boolean)
-  return `${prefix}${color.accent(toolTitle(block))} · ${color.warning('运行中')}${detail}${children.length === 0 ? '' : `\n${children.join('\n')}`}`
+  return toolBlockRows(block, preferences, depth).map(row => row.format === 'image'
+    ? imageLabel(row.attachment)
+    : row.text).join('\n')
 }
 
 function nodeText(node: ConversationNode, preferences: TranscriptPreferences): string {
@@ -522,6 +765,12 @@ function durationText(milliseconds: number): string {
   if (seconds < 60) return `${String(Math.round(seconds * 10) / 10)}s`
   const whole = Math.round(seconds)
   return `${String(Math.floor(whole / 60))}m${String(whole % 60)}s`
+}
+
+function toolDurationText(milliseconds: number): string {
+  if (milliseconds <= 0) return '<1ms'
+  if (milliseconds < 1_000) return `${String(Math.round(milliseconds))}ms`
+  return durationText(milliseconds)
 }
 
 function tokenText(value: number): string {
@@ -695,11 +944,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   if (node.kind === 'tool-call') {
     if (preferences.tools === 'hidden') return []
     const data = toolChatData(node.data)
-    return data === undefined ? [] : grouped([{
-      format: 'plain',
-      text: toolBlockText(data.root, preferences, 0),
-      ...('kind' in data.root ? {} : { pulse: 'marker' as const }),
-    }])
+    return data === undefined ? [] : grouped(toolBlockRows(data.root, preferences, 0))
   }
   if (node.kind === 'manual-compaction') return manualCompactionRows(node.data, preferences)
   if (node.kind === 'model-retry') return retryRows(node.data, preferences)
@@ -750,6 +995,8 @@ export class Transcript implements Component, Focusable {
   private readonly pendingImages = new Set<string>()
   private imageGeneration = 0
   private imageLoader: TranscriptImageLoader | undefined
+  private snapshot: ConversationSnapshot | undefined
+  private emptyMessage = '在下方输入消息，或用 /help 查看命令。'
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
@@ -803,12 +1050,22 @@ export class Transcript implements Component, Focusable {
   }
 
   /**
+   * Report whether the transcript is showing non-durable empty-session guidance.
+   * @returns true while the conversation has no visible durable content.
+   */
+  isEmptyState(): boolean {
+    return this.emptyState
+  }
+
+  /**
    * Replace the transcript with non-durable empty-selection guidance.
    * @param message - guidance rendered when no Session is active.
    */
   empty(message = '在下方输入消息，或用 /help 查看命令。'): void {
     this.imageGeneration += 1
     this.imageLoader = undefined
+    this.snapshot = undefined
+    this.emptyMessage = message
     this.sessionId = undefined
     this.pendingImages.clear()
     this.imageComponents.clear()
@@ -824,6 +1081,7 @@ export class Transcript implements Component, Focusable {
    * @param imageLoader - authenticated reader for references in this Session.
    */
   update(snapshot: ConversationSnapshot, imageLoader?: TranscriptImageLoader): void {
+    this.snapshot = snapshot
     const sessionId = String(snapshot.sessionId)
     if (sessionId !== this.sessionId) {
       this.imageGeneration += 1
@@ -853,11 +1111,7 @@ export class Transcript implements Component, Focusable {
       ]))
     }
     if (preferences.tools !== 'hidden' && !visibleNodes.some(node => node.kind === 'tool-call')) {
-      rows.push(...snapshot.runningCalls.flatMap(call => grouped([{
-        format: 'plain' as const,
-        text: toolBlockText(call, preferences, 0),
-        pulse: 'marker' as const,
-      }])))
+      rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0))))
     }
     this.emptyState = rows.length === 0
     if (this.emptyState) rows.push({
@@ -865,6 +1119,24 @@ export class Transcript implements Component, Focusable {
       text: `${color.brand('deepseek')}\n${color.muted('探索未至之境')}\n${color.muted('直接描述你想完成的事')}`,
     })
     this.replace(rows)
+  }
+
+  /**
+   * Rebuild colorized rows after a live theme or lazy grammar change.
+   * The current viewport and durable turn cursor remain unchanged.
+   */
+  refreshPresentation(): void {
+    const scrollOffset = this.scrollOffset
+    const turnCursor = this.turnCursor
+    const snapshot = this.snapshot
+    if (snapshot === undefined) {
+      this.replace([{ format: 'plain', text: color.muted(this.emptyMessage) }])
+    } else {
+      this.update(snapshot, this.imageLoader)
+    }
+    this.scrollOffset = scrollOffset
+    this.turnCursor = turnCursor
+    this.requestRender()
   }
 
   invalidate(): void {
@@ -1033,7 +1305,8 @@ export class Transcript implements Component, Focusable {
     this.rows = rows
     this.turnCursor = undefined
     this.components = rows.map(row => this.component(row))
-    this.syncPulseAnimation(rows.some(row => row.pulse !== undefined))
+    this.syncPulseAnimation(rows.some(row => row.liveDurationSince !== undefined
+      || (row.pulse !== undefined && terminalColorLevel() !== 0)))
   }
 
   private component(row: TranscriptRow): Component {
@@ -1041,8 +1314,9 @@ export class Transcript implements Component, Focusable {
     if (row.format === 'plain') {
       return row.pulse === undefined
         ? new Text(escapeTerminalText(row.text), 0, 0)
-        : new PulsingRow(row.text, row.pulse, () => this.pulseFrame)
+        : new PulsingRow(row.text, row.pulse, () => this.pulseFrame, row.liveDurationSince)
     }
+    if (row.format === 'code') return new CodeRow(row)
     const cacheKey = `${this.sessionId ?? 'none'}:${row.key}`
     const cached = this.imageComponents.get(cacheKey)
     if (cached !== undefined) return cached
@@ -1083,7 +1357,7 @@ export class Transcript implements Component, Focusable {
   }
 
   private syncPulseAnimation(active: boolean): void {
-    if (!active || terminalColorLevel() === 0) {
+    if (!active) {
       this.stopPulseAnimation()
       return
     }

@@ -5,7 +5,6 @@ import {
   Key,
   matchesKey,
   ProcessTerminal,
-  Spacer,
   TUI,
   type Terminal,
 } from '@mariozechner/pi-tui'
@@ -14,16 +13,17 @@ import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
-import { ContextBar, PromptEditor, StatusBar, transcriptViewportRows } from './chrome.ts'
-import { appearanceSettings, themeFromAppearance } from './appearance.ts'
 import {
-  DISABLE_MOUSE_TRACKING,
-  ENABLE_MOUSE_TRACKING,
-  isMouseInput,
-  mouseWheelDirection,
-} from './mouse.ts'
+  BottomAnchoredLayout,
+  ContextBar,
+  PromptEditor,
+  StatusBar,
+  transcriptViewportRows,
+} from './chrome.ts'
+import { appearanceSettings, themeFromAppearance } from './appearance.ts'
 import { OverlayQueue } from './overlays.ts'
-import { background, color, escapeTerminalText, setTheme } from './theme.ts'
+import { SyntaxHighlighter } from './syntax-highlighter.ts'
+import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
@@ -95,20 +95,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   }
   const terminal = internals.createTerminal()
   const client = await internals.startClient(options)
-  let mouseTrackingEnabled = false
-  const disableMouseTracking = (): void => {
-    if (!mouseTrackingEnabled) return
-    mouseTrackingEnabled = false
-    terminal.write(DISABLE_MOUSE_TRACKING)
-  }
   let stopConstructedTui = (): void => undefined
+  let disposeConstructedSyntax = (): void => undefined
   try {
-    setTheme(themeFromAppearance(appearanceSettings(
+    const initialTheme = themeFromAppearance(appearanceSettings(
       await options.management.settings.describe(),
-    )))
+    ))
+    setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
-      disableMouseTracking()
       tui.stop()
     }
     const capabilities = client.capabilities
@@ -117,8 +112,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
+    let transcriptFocused = false
     const transcript = new Transcript(
-      () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
+      // The default full transcript becomes normal terminal scrollback, which keeps
+      // native drag selection, Command+C, and wheel scrolling under terminal control.
+      () => transcriptFocused
+        ? transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length)
+        : Number.POSITIVE_INFINITY,
       () => { if (stopping === undefined) tui.requestRender() },
       () => {
         const current = active
@@ -127,15 +127,24 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
       },
     )
+    const syntax = await SyntaxHighlighter.create(initialTheme, () => {
+      transcript.refreshPresentation()
+      tui.invalidate()
+      tui.requestRender(true)
+    })
+    disposeConstructedSyntax = () => { syntax.dispose() }
+    setCodeHighlighter((code, lang) => syntax.highlight(code, lang))
     const status = new StatusBar()
     const canvas = new Box(0, 0, background.canvas)
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
-    canvas.addChild(contextBar)
-    canvas.addChild(new Spacer(1))
-    canvas.addChild(transcript)
-    canvas.addChild(new Spacer(1))
-    canvas.addChild(editor)
-    canvas.addChild(status)
+    canvas.addChild(new BottomAnchoredLayout(
+      () => terminal.rows,
+      contextBar,
+      transcript,
+      editor,
+      status,
+      () => transcript.isEmptyState(),
+    ))
     tui.addChild(canvas)
     tui.setFocus(editor)
 
@@ -147,7 +156,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let notice: { message: string; tone: NoticeTone } | undefined
     let restartRequired: string | undefined
     let headerGeneration = 0
-    let transcriptFocused = false
 
     const focusEditor = (): void => {
       transcriptFocused = false
@@ -259,8 +267,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const failures: unknown[] = []
         overlays.dispose()
         transcript.dispose()
+        setCodeHighlighter(undefined)
+        try { syntax.dispose() } catch (error) { failures.push(error) }
         try { unsubscribeActive() } catch (error) { failures.push(error) }
-        try { disableMouseTracking() } catch (error) { failures.push(error) }
         try {
           await terminal.drainInput(250, 30)
         } catch (error) {
@@ -295,6 +304,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
         setTheme(theme)
+        syntax.setTheme(theme)
+        transcript.refreshPresentation()
         tui.invalidate()
         tui.requestRender(true)
       },
@@ -432,12 +443,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
-      const wheel = mouseWheelDirection(data)
-      if (wheel !== undefined) {
-        if (!overlays.hasActive()) transcript.scrollBy(wheel === 'up' ? 3 : -3)
-        return { consume: true }
-      }
-      if (isMouseInput(data)) return { consume: true }
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
@@ -498,6 +503,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (matchesKey(data, Key.shift(Key.left)) || matchesKey(data, Key.shift(Key.right))) {
+        if (!transcriptFocused) {
+          transcriptFocused = true
+          tui.setFocus(transcript)
+        }
         const offset = matchesKey(data, Key.shift(Key.left)) ? -1 : 1
         const moved = transcript.navigateTurn(offset)
         setNotice(
@@ -542,8 +551,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     terminal.setTitle('DeepSeek Harness')
     tui.start()
-    mouseTrackingEnabled = true
-    terminal.write(ENABLE_MOUSE_TRACKING)
     refreshHeader(true)
     refresh()
     if (options.startupNotice !== undefined) setNotice(options.startupNotice, 'success')
@@ -565,6 +572,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
+    setCodeHighlighter(undefined)
+    try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }
     try { stopConstructedTui() } catch { /* preserve the setup failure */ }
     try {
       await client.ctx.fiber.dispose()

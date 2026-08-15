@@ -45,6 +45,13 @@ describe('out-of-tree Bundle contract', () => {
     expect(management).not.toContain('@deepseek-ai/dsh-tui-app')
   })
 
+  it('leaves text selection, copying, and scrollback under terminal control', () => {
+    const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
+    expect(surface).not.toContain("from './mouse.ts'")
+    expect(surface).not.toMatch(/\\u001B\[\?100[0-6]h/u)
+    expect(surface).toContain('Number.POSITIVE_INFINITY')
+  })
+
   it('is accepted by its own local marketplace preflight', async () => {
     const marketplace = new PluginMarketplace({
       cwd: root,

@@ -13,11 +13,97 @@ export interface TuiSettingsSecret {
 /** Harness Settings namespace that persists SeekTTY-only visual preferences. */
 export const TUI_APPEARANCE_SETTINGS_NAMESPACE = 'seektty-appearance'
 
-/** Terminal color scheme selected by the user. */
-export type TuiTheme = 'dark' | 'light'
+/** Built-in DeepSeek color scheme. */
+export type TuiBuiltInTheme = 'dark' | 'light'
+
+/** Persisted built-in or named custom theme selection. */
+export type TuiThemeId = TuiBuiltInTheme | `custom:${string}`
+
+/** Independent code-theme selection or automatic pairing with the interface theme. */
+export type TuiCodeThemeId = 'auto' | TuiThemeId
+
+/** Dark or light contrast direction used by one resolved theme. */
+export type TuiThemeTone = 'dark' | 'light'
+
+/** How one custom theme was originally created. */
+export type TuiThemeSource = 'manual' | 'palette' | 'vscode'
+
+/** Portable terminal styles imported from one VS Code TextMate rule. */
+export type TuiTokenFontStyle = 'bold' | 'italic' | 'underline' | 'strikethrough'
+
+/** One sanitized TextMate scope rule applied only inside code regions. */
+export interface TuiTextMateRule {
+  readonly scope: readonly string[]
+  readonly foreground?: string
+  readonly background?: string
+  readonly fontStyle?: readonly TuiTokenFontStyle[]
+}
+
+/** Complete terminal chrome palette persisted for one custom theme. */
+export interface TuiThemeUiColors {
+  readonly text: string
+  readonly muted: string
+  readonly border: string
+  readonly brand: string
+  readonly accent: string
+  readonly success: string
+  readonly warning: string
+  readonly danger: string
+  readonly canvas: string
+  readonly surface: string
+  readonly selection: string
+}
+
+/** Editable semantic colors used by code syntax highlighting. */
+export interface TuiSyntaxThemeColors {
+  readonly background: string
+  readonly foreground: string
+  readonly comment: string
+  readonly keyword: string
+  readonly string: string
+  readonly number: string
+  readonly constant: string
+  readonly function: string
+  readonly type: string
+  readonly variable: string
+  readonly property: string
+  readonly parameter: string
+  readonly operator: string
+  readonly punctuation: string
+  readonly tag: string
+  readonly attribute: string
+  readonly regexp: string
+}
+
+/** One named custom theme stored in the Harness Settings namespace. */
+export interface TuiCustomTheme {
+  readonly id: string
+  readonly name: string
+  readonly tone: TuiThemeTone
+  readonly source: TuiThemeSource
+  readonly colors: TuiThemeUiColors
+  readonly syntax: TuiSyntaxThemeColors
+  readonly tokenColors: readonly TuiTextMateRule[]
+}
+
+/** Complete appearance value owned by the SeekTTY Settings namespace. */
+export interface TuiAppearanceSettings {
+  readonly theme: TuiThemeId
+  readonly codeTheme: TuiCodeThemeId
+  readonly customThemes: readonly TuiCustomTheme[]
+}
 
 /** First-run color scheme when no user override has been stored. */
-export const DEFAULT_TUI_THEME: TuiTheme = 'dark'
+export const DEFAULT_TUI_THEME: TuiThemeId = 'dark'
+
+/** Default code pairing follows the active interface theme. */
+export const DEFAULT_TUI_CODE_THEME: TuiCodeThemeId = 'auto'
+
+/** Maximum named themes accepted by one Settings document. */
+export const MAX_CUSTOM_THEMES = 32
+
+/** Maximum imported TextMate rules stored in one custom theme. */
+export const MAX_TEXTMATE_RULES = 4_096
 
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {

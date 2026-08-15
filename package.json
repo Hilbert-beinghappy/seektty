@@ -1,6 +1,6 @@
 {
   "name": "seektty",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [
@@ -42,6 +42,8 @@
     "lib/*.js",
     "assets/seektty-tui.png",
     "assets/seektty-tui-dark.png",
+    "assets/seektty-code-light.png",
+    "assets/seektty-code-dark.png",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
@@ -101,10 +103,14 @@
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
     "@deepseek-ai/dsh-workspace": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "3.18.1",
+    "@shikijs/core": "4.4.3",
+    "@shikijs/engine-javascript": "4.4.3",
+    "@shikijs/langs": "4.4.3",
     "commander": "15.0.0",
     "cross-spawn": "7.0.6",
     "immer": "10.1.1",
     "js-yaml": "4.3.1",
+    "jsonc-parser": "3.3.1",
     "zod": "4.4.3",
     "zustand": "4.4.7"
   },
