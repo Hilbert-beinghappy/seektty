@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleWidth, type TUI } from '@mariozechner/pi-tui'
-import { PromptEditor } from '../src/client/chrome.ts'
+import { PromptEditor, transcriptViewportRows } from '../src/client/chrome.ts'
 
 function editor(): PromptEditor {
   return new PromptEditor({
@@ -12,6 +12,10 @@ function editor(): PromptEditor {
 afterEach(() => { vi.unstubAllEnvs() })
 
 describe('composer chrome', () => {
+  it('reserves one breathing row between conversation and composer', () => {
+    expect(transcriptViewportRows(24, 3)).toBe(17)
+  })
+
   it('uses open horizontal rules without side borders or corner glyphs', () => {
     vi.stubEnv('NO_COLOR', '1')
     const rows = editor().render(40)

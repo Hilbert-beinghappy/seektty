@@ -19,9 +19,6 @@ import type {
   ToolCallBlock,
   ToolResultNode,
 } from '@deepseek-ai/dsh-client-runtime/node-client'
-import {
-  producedForClosing,
-} from '@deepseek-ai/dsh-client-ui-deliverables/projection'
 import type {
   AssistantChatData,
   ManualCompactionChatData,
@@ -33,7 +30,8 @@ import type {
   WorkflowRunMemberData,
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
-import { color, escapeTerminalText, markdownTheme, surfaceRow } from './theme.ts'
+import { producedForClosing } from './compat/deliverables-rc6.ts'
+import { color, escapeTerminalText, markdownTheme } from './theme.ts'
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
 export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
@@ -203,10 +201,12 @@ function contentRows(content: readonly unknown[]): TranscriptRow[] {
 }
 
 function userContentRows(content: readonly unknown[], steering = false): TranscriptRow[] {
-  const rows = contentRows(content)
+  const rows = contentRows(content).map(row => row.format === 'markdown'
+    ? { ...row, format: 'plain' as const }
+    : row)
   const prefix = steering
-    ? `${color.brand('❯')} ${color.muted('引导')} `
-    : `${color.brand('❯')} `
+    ? `${color.brand('>')} ${color.muted('引导')} `
+    : `${color.brand('>')} `
   const first = rows[0]
   if (first === undefined) return [{ format: 'plain', text: prefix.trimEnd(), userTurn: true }]
   if (first.format === 'image') {
@@ -378,9 +378,9 @@ function toolBlockText(block: ToolCallBlock, preferences: TranscriptPreferences,
 function nodeText(node: ConversationNode, preferences: TranscriptPreferences): string {
   switch (node.kind) {
     case 'user':
-      return `${color.brand('❯')} ${contentText(node.content)}`
+      return `${color.brand('>')} ${contentText(node.content)}`
     case 'steering':
-      return `${color.brand('❯')} ${color.muted('引导')} ${contentText(node.content)}`
+      return `${color.brand('>')} ${color.muted('引导')} ${contentText(node.content)}`
     case 'context':
       return `${color.muted(`${node.provenance.role === 'recall' ? '召回' : '上下文'}${node.provenance.label === null ? '' : ` · ${node.provenance.label}`}${node.form === null ? ' · 未知格式' : ` · ${node.form}`}`)}\n${contentText(node.content)}`
     case 'assistant':
@@ -583,10 +583,10 @@ function assistantStepRows(data: unknown, preferences: TranscriptPreferences): T
     && step.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
   if (content.length === 0 && step.status === 'settled' && !hasFoldedReasoning) return []
   const rows: TranscriptRow[] = []
-  if (hasFoldedReasoning) {
+  if (hasFoldedReasoning && step.status === 'running') {
     rows.push({
       format: 'plain',
-      text: color.muted(step.status === 'running' ? '◆ 正在思考…' : '◆ 思考完成'),
+      text: color.muted('◆ 正在思考…'),
     })
   } else if (content.length === 0 && step.status === 'running') {
     rows.push({ format: 'plain', text: color.muted('◆ 正在思考…') })
@@ -639,7 +639,7 @@ function subagentUserRows(node: Extract<ConversationNode, { kind: 'user' }>): Tr
   }
   if (node.source.kind !== 'subagent-report') return undefined
   return grouped([
-    { format: 'plain', text: `${color.brand('❯')} ${color.muted('子 Agent 报告')}`, userTurn: true },
+    { format: 'plain', text: `${color.brand('>')} ${color.muted('子 Agent 报告')}`, userTurn: true },
     ...contentRows(node.content.slice(1)),
   ])
 }
@@ -689,12 +689,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
       return grouped(userContentRows(node.data.content, node.data.kind === 'steering'))
     }
     if (node.data.kind === 'assistant') {
-      const hasFoldedReasoning = !preferences.reasoning
-        && node.data.blocks.some((block: AssistantBlock) => block.kind === 'reasoning' && block.text !== '')
       const rows: TranscriptRow[] = [
-        ...(hasFoldedReasoning
-          ? [{ format: 'plain' as const, text: color.muted('◆ 思考完成') }]
-          : []),
         ...node.data.blocks.flatMap((block: AssistantBlock) => assistantBlockRows(block, preferences)),
       ]
       if (node.data.interrupted === true) rows.push({ format: 'plain', text: color.warning('已停止') })
@@ -707,7 +702,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   }
   const commandInputText = node.kind === 'command-input' ? textProperty(node.data) : undefined
   if (commandInputText !== undefined) {
-    return grouped([{ format: 'plain', text: `${color.brand('❯')} ${commandInputText}`, userTurn: true }])
+    return grouped([{ format: 'plain', text: `${color.brand('>')} ${commandInputText}`, userTurn: true }])
   }
   if (node.kind === 'workflow-run') {
     const rendered = workflowText(node.data)
@@ -735,6 +730,8 @@ export class Transcript implements Component, Focusable {
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
   private emptyState = true
+  private hasMore = false
+  private loadingOlder = false
   private scrollOffset = 0
   private renderedLineCount = 0
   private turnAnchors: readonly number[] = []
@@ -743,10 +740,13 @@ export class Transcript implements Component, Focusable {
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
+   * @param requestRender - schedule a TUI frame after local presentation state changes.
+   * @param requestOlder - ask Harness for the preceding durable history page.
    */
   constructor(
     private readonly viewportRows: () => number = () => Number.POSITIVE_INFINITY,
     private readonly requestRender: () => void = () => undefined,
+    private readonly requestOlder: () => void = () => undefined,
   ) {}
 
   /**
@@ -787,6 +787,8 @@ export class Transcript implements Component, Focusable {
     this.pendingImages.clear()
     this.imageComponents.clear()
     this.emptyState = true
+    this.hasMore = false
+    this.loadingOlder = false
     this.replace([{ format: 'plain', text: color.muted(message) }])
   }
 
@@ -804,6 +806,8 @@ export class Transcript implements Component, Focusable {
       this.sessionId = sessionId
     }
     this.imageLoader = imageLoader
+    this.hasMore = snapshot.hasMore
+    this.loadingOlder = snapshot.loadingOlder
     const preferences: TranscriptPreferences = {
       tools: this.toolVisibility,
       reasoning: this.reasoningVisible,
@@ -853,6 +857,13 @@ export class Transcript implements Component, Focusable {
     const contentWidth = Math.max(1, width - inset * 2)
     const withInset = (values: readonly string[]): string[] => values.map(line =>
       line === '' ? '' : `${' '.repeat(inset)}${line}`)
+    const olderMarker = (count: number): string => {
+      if (this.loadingOlder) return color.muted('↑ 正在加载更早内容…')
+      const hint = this.focused ? 'PgUp/Home' : '滚轮上翻'
+      return color.muted(count === 0
+        ? `↑ 还有更早内容 · ${hint}`
+        : `↑ ${String(count)} 行更早内容 · ${hint}`)
+    }
     const lines: string[] = []
     const anchors: number[] = []
     for (const [index, component] of this.components.entries()) {
@@ -865,9 +876,7 @@ export class Transcript implements Component, Focusable {
       const escaped = row?.format === 'image'
         ? rendered
         : rendered.map(escapeTerminalText)
-      lines.push(...(row?.userTurn === true
-        ? escaped.map(line => surfaceRow(line, contentWidth))
-        : escaped))
+      lines.push(...escaped)
     }
     if (this.emptyState) {
       for (const [index, line] of lines.entries()) {
@@ -886,7 +895,19 @@ export class Transcript implements Component, Focusable {
     if (lines.length <= rows) {
       this.scrollOffset = 0
       const remaining = rows - lines.length
-      const before = this.emptyState ? Math.floor(remaining / 2) : 0
+      if (!this.emptyState && this.hasMore) {
+        if (remaining === 0) {
+          const visible = [...lines]
+          visible[0] = olderMarker(0)
+          return withInset(visible)
+        }
+        return withInset([
+          ...Array.from({ length: remaining - 1 }, () => ''),
+          olderMarker(0),
+          ...lines,
+        ])
+      }
+      const before = this.emptyState ? Math.floor(remaining / 2) : remaining
       return withInset([
         ...Array.from({ length: before }, () => ''),
         ...lines,
@@ -897,10 +918,27 @@ export class Transcript implements Component, Focusable {
     this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
     const end = lines.length - this.scrollOffset
     const start = Math.max(0, end - rows)
+    if (this.scrollOffset === 0 && start > 0) {
+      const alignedStart = this.turnAnchors.find(anchor =>
+        anchor >= start && end - anchor <= rows - 1)
+      if (alignedStart !== undefined) {
+        const latestTurnRows = lines.slice(alignedStart, end)
+        return withInset([
+          ...Array.from({ length: rows - latestTurnRows.length - 1 }, () => ''),
+          olderMarker(alignedStart),
+          ...latestTurnRows,
+        ])
+      }
+    }
     const visible = lines.slice(start, end)
-    if (this.focused && start > 0 && visible.length > 0) visible[0] = color.muted(`↑ 更早内容 · ${String(start)} 行`)
-    if (this.focused && end < lines.length && visible.length > 0) {
-      visible[visible.length - 1] = color.muted(`↓ 更新内容 · ${String(lines.length - end)} 行`)
+    if (start > 0 && visible.length > 0) {
+      visible[0] = olderMarker(start)
+    } else if (this.hasMore && visible.length > 0) {
+      visible[0] = olderMarker(0)
+    }
+    if (end < lines.length && visible.length > 0) {
+      const hint = this.focused ? 'PgDn/End' : '滚轮下翻'
+      visible[visible.length - 1] = color.muted(`↓ ${String(lines.length - end)} 行更新内容 · ${hint}`)
     }
     return withInset(visible)
   }
@@ -909,12 +947,35 @@ export class Transcript implements Component, Focusable {
     this.turnCursor = undefined
     const rows = Math.max(1, Math.floor(this.viewportRows()))
     const maxOffset = Math.max(0, this.renderedLineCount - rows)
-    if (matchesKey(data, Key.up)) this.scrollOffset = Math.min(maxOffset, this.scrollOffset + 1)
-    else if (matchesKey(data, Key.down)) this.scrollOffset = Math.max(0, this.scrollOffset - 1)
-    else if (matchesKey(data, Key.pageUp)) this.scrollOffset = Math.min(maxOffset, this.scrollOffset + Math.max(1, rows - 1))
-    else if (matchesKey(data, Key.pageDown)) this.scrollOffset = Math.max(0, this.scrollOffset - Math.max(1, rows - 1))
-    else if (matchesKey(data, Key.home)) this.scrollOffset = maxOffset
-    else if (matchesKey(data, Key.end)) this.scrollOffset = 0
+    if (matchesKey(data, Key.up)) this.scrollBy(1)
+    else if (matchesKey(data, Key.down)) this.scrollBy(-1)
+    else if (matchesKey(data, Key.pageUp)) this.scrollBy(Math.max(1, rows - 1))
+    else if (matchesKey(data, Key.pageDown)) this.scrollBy(-Math.max(1, rows - 1))
+    else if (matchesKey(data, Key.home)) this.scrollBy(maxOffset)
+    else if (matchesKey(data, Key.end)) this.scrollBy(-this.scrollOffset)
+  }
+
+  /**
+   * Move the conversation viewport while leaving the composer focus unchanged.
+   * @param lines - positive for older content, negative for newer content.
+   * @returns whether the viewport moved.
+   */
+  scrollBy(lines: number): boolean {
+    this.turnCursor = undefined
+    const delta = Math.trunc(lines)
+    if (!Number.isFinite(delta) || delta === 0) return false
+    const rows = Math.max(1, Math.floor(this.viewportRows()))
+    const maxOffset = Math.max(0, this.renderedLineCount - rows)
+    const nextOffset = Math.max(0, Math.min(maxOffset, this.scrollOffset + delta))
+    if (nextOffset === this.scrollOffset) {
+      if (delta > 0 && this.scrollOffset === maxOffset && this.hasMore && !this.loadingOlder) {
+        this.requestOlder()
+      }
+      return false
+    }
+    this.scrollOffset = nextOffset
+    this.requestRender()
+    return true
   }
 
   /**
@@ -936,6 +997,7 @@ export class Transcript implements Component, Focusable {
     if (anchor === undefined) return false
     this.turnCursor = index
     this.scrollOffset = Math.max(0, this.renderedLineCount - (anchor + rows))
+    this.requestRender()
     return true
   }
 

@@ -89,13 +89,15 @@ dsh --profile tui
 
 `/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。
 
-## 常用键位
+## 常用交互
 
-| 键位 | 操作 |
+| 输入 | 操作 |
 | --- | --- |
+| 鼠标滚轮 / 触控板 | 输入框保持激活时直接上翻历史或下翻到最新内容 |
 | `/` | 打开命令与 Skill 候选 |
 | Enter / Shift+Enter | 发送或确认 / 输入换行 |
 | Tab / Escape | 在输入区与 Transcript 间切换 / 返回输入区或关闭当前弹窗 |
+| PgUp / PgDn / Home / End | 浏览 Transcript 时翻页、跳到最早或回到最新内容 |
 | Shift+Tab | 循环当前权限，进入完全访问前确认 |
 | Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |
 | Ctrl+P | 打开完整命令面板 |

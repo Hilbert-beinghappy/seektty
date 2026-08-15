@@ -16,6 +16,12 @@ import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import { ContextBar, PromptEditor, StatusBar, transcriptViewportRows } from './chrome.ts'
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
+import {
+  DISABLE_MOUSE_TRACKING,
+  ENABLE_MOUSE_TRACKING,
+  isMouseInput,
+  mouseWheelDirection,
+} from './mouse.ts'
 import { OverlayQueue } from './overlays.ts'
 import { background, color, escapeTerminalText, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
@@ -89,21 +95,37 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   }
   const terminal = internals.createTerminal()
   const client = await internals.startClient(options)
+  let mouseTrackingEnabled = false
+  const disableMouseTracking = (): void => {
+    if (!mouseTrackingEnabled) return
+    mouseTrackingEnabled = false
+    terminal.write(DISABLE_MOUSE_TRACKING)
+  }
   let stopConstructedTui = (): void => undefined
   try {
     setTheme(themeFromAppearance(appearanceSettings(
       await options.management.settings.describe(),
     )))
     const tui = new TUI(terminal, true)
-    stopConstructedTui = () => { tui.stop() }
+    stopConstructedTui = () => {
+      disableMouseTracking()
+      tui.stop()
+    }
     const capabilities = client.capabilities
     let stopping: Promise<void> | undefined
+    let active: TuiActiveSession | undefined
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
     const transcript = new Transcript(
       () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
+      () => {
+        const current = active
+        if (current === undefined) return
+        const snapshot = current.session.getSnapshot()
+        if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
+      },
     )
     const status = new StatusBar()
     const canvas = new Box(0, 0, background.canvas)
@@ -111,6 +133,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     canvas.addChild(contextBar)
     canvas.addChild(new Spacer(1))
     canvas.addChild(transcript)
+    canvas.addChild(new Spacer(1))
     canvas.addChild(editor)
     canvas.addChild(status)
     tui.addChild(canvas)
@@ -120,7 +143,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let resolveClosed: (outcome: TuiSurfaceOutcome) => void = () => undefined
     const closed = new Promise<TuiSurfaceOutcome>((resolve) => { resolveClosed = resolve })
     let exitArmedUntil = 0
-    let active: TuiActiveSession | undefined
     let latestSessionId = ''
     let notice: { message: string; tone: NoticeTone } | undefined
     let restartRequired: string | undefined
@@ -238,6 +260,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         overlays.dispose()
         transcript.dispose()
         try { unsubscribeActive() } catch (error) { failures.push(error) }
+        try { disableMouseTracking() } catch (error) { failures.push(error) }
         try {
           await terminal.drainInput(250, 30)
         } catch (error) {
@@ -409,6 +432,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
+      const wheel = mouseWheelDirection(data)
+      if (wheel !== undefined) {
+        if (!overlays.hasActive()) transcript.scrollBy(wheel === 'up' ? 3 : -3)
+        return { consume: true }
+      }
+      if (isMouseInput(data)) return { consume: true }
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
@@ -513,6 +542,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     terminal.setTitle('DeepSeek Harness')
     tui.start()
+    mouseTrackingEnabled = true
+    terminal.write(ENABLE_MOUSE_TRACKING)
     refreshHeader(true)
     refresh()
     if (options.startupNotice !== undefined) setNotice(options.startupNotice, 'success')

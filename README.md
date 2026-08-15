@@ -89,13 +89,15 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 `/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts.
 
-## Keyboard shortcuts
+## Common controls
 
-| Key | Action |
+| Input | Action |
 | --- | --- |
+| Mouse wheel / trackpad | Browse older or newer conversation content while the composer remains active |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
 | Tab / Escape | Switch between composer and transcript / return or close the active overlay |
+| PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
 | Shift+Tab | Cycle the current permission, confirming full access first |
 | Shift+Left / Shift+Right | Jump to the previous or next user turn |
 | Ctrl+P | Open the complete command palette |

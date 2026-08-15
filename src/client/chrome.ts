@@ -102,8 +102,8 @@ function isHorizontalRule(line: string): boolean {
  * @returns Rows that remain available for the transcript viewport.
  */
 export function transcriptViewportRows(terminalRows: number, editorRows: number): number {
-  // Context (1) + breathing room (1) + permission status (1) are the non-editor rows.
-  return Math.max(1, terminalRows - 3 - editorRows)
+  // Context (1) + top/bottom breathing room (2) + permission status (1).
+  return Math.max(1, terminalRows - 4 - editorRows)
 }
 
 /** One quiet context row containing only live execution state on the right. */
