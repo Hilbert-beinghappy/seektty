@@ -36,10 +36,10 @@ import type {
   MessageFeedbackRating,
   MessageFeedbackVersion,
 } from '@deepseek-ai/dsh-message-feedback/types'
-import { producedForClosing } from '@deepseek-ai/dsh-client-ui-deliverables/projection'
 import type { TrajectorySnapshot } from '@deepseek-ai/dsh-client-ui-trajectory/projection'
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
+import { producedForClosing } from './compat/deliverables-rc6.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -215,7 +215,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'profile', description: '管理 Profile', argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
   { name: 'mode', description: '切换模式', source: 'TUI', behavior: 'local' },
   { name: 'model', description: '切换模型和推理强度', source: 'TUI', behavior: 'local' },
-  { name: 'theme', description: '切换亮色或暗色主题', source: 'TUI', behavior: 'local' },
+  { name: 'theme', description: '自定义颜色或自动生成主题', argumentHint: '[dark|light|use|edit|palette|delete]', source: 'TUI', behavior: 'local' },
   { name: 'queue', description: '管理排队消息', source: 'TUI', behavior: 'local' },
   { name: 'steer', description: '发送引导消息', argumentHint: '<消息>', source: 'TUI', behavior: 'local' },
   { name: 'attach', description: '添加图片', argumentHint: '<图片路径>', source: 'TUI', behavior: 'local' },

@@ -22,7 +22,7 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 
 | 能力 | 当前可用操作 |
 | --- | --- |
-| 对话与运行 | 流式回复、Markdown/GFM、代码块、链接、表格、推理显示切换、工具卡片折叠/展开/隐藏、模型重试、上下文压缩、最大输出与错误状态、Ctrl+C 停止当前轮次 |
+| 对话与运行 | 流式回复、Markdown/GFM、不显示围栏的主题语法高亮代码色块、链接、表格、推理显示切换、工具卡片折叠/展开/隐藏、模型重试、上下文压缩、最大输出与错误状态、Ctrl+C 停止当前轮次 |
 | 会话 | 新建、恢复、列表、全文搜索、重命名、Fork、归档、复制最后一条回复、导出当前会话或连同子 Agent 会话及附件一起导出 ZIP |
 | 工作区 | 从当前目录启动，添加、选择、重命名、移除注册、调整工作区顺序和工作区内会话顺序；移除注册不会删除目录、文件或会话日志 |
 | Agent 模式 | 支持 Standard、Code/PTC、Minimal、Cordis/Create 四种基线模式，并动态显示插件注册的新 Agent Preset；活跃会话切换模式时在同一工作区创建新会话 |
@@ -32,7 +32,7 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 | 人机交互 | 处理单选、多选、自定义回答、跳过、取消和计划审查；待处理交互失败后可通过 `/pending` 重试 |
 | 图片附件 | 通过路径或粘贴加入 PNG、JPEG、GIF、WebP，按 Harness 限制检查数量和大小；终端支持时内联显示，否则显示文件名、尺寸、类型和大小 |
 | Plan、Goal、Todo 与压缩 | 使用 Harness 原生 `/plan`、`/goal`、`/compact` 命令，显示计划审查、目标状态、Todo 数量和上下文压缩记录 |
-| 工具与产出文件 | 动态工具目录、工具参数与安全边界说明、结构化结果和通用降级卡片；查看本轮生成文件、复制绝对路径，并在确认后交给外部程序打开 |
+| 工具与产出文件 | 动态工具目录、工具参数与安全边界说明、带原文件行号的高亮读取、JSON 与 Diff 高亮、安全保留的终端 ANSI、通用降级卡片；查看本轮生成文件、复制绝对路径，并在确认后交给外部程序打开 |
 | 子 Agent | 查看直接子 Agent、运行状态、树结构、Token 和耗时；打开可继续会话或只读会话，并在运行时停止当前子 Agent 轮次 |
 | 后台任务与工作流 | 查看 Jobs 的类型、状态、开始/结束时间、耗时和详情；在 Transcript 中显示工作流阶段、成员、结果和失败状态 |
 | 统计与轨迹 | 每轮显示步骤数、LLM/工具耗时、首 Token、吞吐率、缓存命中和输入/输出 Token；检查模型请求、运行中工具与结构化 Trajectory |
@@ -42,7 +42,7 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 | Skills 与 MCP | 动态列出当前可调用 Skills 并插入原生命令；查看 MCP 工具、实例、设置、加载状态和独立进程/远端服务风险 |
 | 反馈 | 记录会话反馈；对 Assistant 回复提交好评、差评和可选说明，也可删除已有消息反馈 |
 | 状态与诊断 | 查看 Harness、Node、平台、Profile、工作区、会话、模式、模型、权限、pnpm、插件运行状态及诊断信息 |
-| 主题 | DeepSeek 暗色与亮色主题、True Color/256 色/16 色降级、`NO_COLOR` 支持；`/theme` 切换后立即生效并由 Harness Settings 持久化 |
+| 主题 | DeepSeek 暗色/亮色与命名自定义主题；手动修改背景、文字和代码高亮颜色；输入 3–16 个颜色代码自动生成主题；实时预览、对比度警告、True Color/256 色/16 色降级和 `NO_COLOR` |
 
 模型、Provider、Agent Preset、权限、Host 命令、工具、Settings、Skills、MCP 和插件来源都从当前 Harness 运行时读取。上游或第三方 Bundle 注册新能力后，SeekTTY 会将它加入动态目录；需要专用界面的能力也保留 Schema、结构化详情和错误诊断入口。
 
@@ -156,19 +156,34 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
 
 `/settings` 会列出当前 Profile 注册的全部设置命名空间。默认模型、默认权限、默认 Agent 模式和插件来源使用专用选择器；布尔、枚举、数字、文本、JSON、Secret 和 Credential Ref 等其他字段由 Schema 通用界面处理。界面同时显示继承值、用户覆盖、重置操作以及立即生效或重启生效状态，写入时使用 revision 防止覆盖并发修改。Secret 只显示是否已配置，输入时不会回显。
 
-SeekTTY 默认使用 DeepSeek 暗色主题。输入 `/theme` 可打开亮色/暗色选择器，也可直接使用 `/theme dark` 或 `/theme light`。主题立即更新，并通过 Harness Settings 保留到下次启动。
+SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心，内置主题和命名自定义主题也可以直接管理：
+
+```text
+/theme dark
+/theme light
+/theme use <主题名>
+/theme edit [主题名]
+/theme palette [主题名]
+/theme delete <主题名>
+```
+
+主题自定义只有两条路径。`/theme edit` 修改 TUI 的背景色、文字色和代码语法高亮颜色；`/theme palette` 接收 3–16 个 HEX/RGB 颜色代码，自动生成暗色与亮色候选方案，保存前先进入实时预览。手动设置的低对比度颜色不会被静默修改；预览会标出问题角色并要求再次确认。
+
+自定义主题覆盖终端画布、面板、选中状态、正文、边框、品牌色、状态色、代码背景与正文，以及注释、关键字、字符串、数字、常量、函数、类型、变量、属性、参数、运算符、标点、标签、属性名和正则表达式等语法角色。常用语法随启动加载，其他支持的语法按需加载并原地重绘。切换主题会立即重新着色已有消息，不会改变当前滚动位置、展开状态或未发送草稿。
+
+主题选择与命名定义保存在 `seektty-appearance` Harness Settings 命名空间中，一次 revision 保护写入即可同时保存主题并切换当前选择。因此 `/settings` 也能通过 Schema 通用界面编辑同一份数据。主题名不区分大小写且不可重复；覆盖与删除都必须确认，删除当前主题会原子切回 DeepSeek 暗色。终端字体继续由用户的终端配置决定，SeekTTY 的主题自定义只围绕上面两条路径。
 
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.6` 隔离安装、配置装配和 PTY 启动。
 - `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
-- 暗色与亮色真实 PTY 渲染、`/theme` 即时切换，以及同一 Profile 重启后的主题恢复。
+- 暗色、亮色与配色生成主题的真实 PTY 渲染、`/theme` 即时切换、80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
 - macOS 和 Linux；不支持 Windows。
 
-已使用仅注入测试进程环境的有效 DeepSeek 凭据完成真实在线响应验收：`v4-flash` 精确返回 `DSH_PLUGIN_DEEPSEEK_OK`。凭据未写入 Profile、设置文件、日志或仓库。
+已使用仅注入测试进程环境的有效 DeepSeek 凭据完成真实在线多轮响应验收：`v4-flash` 返回 `DSH_THEME_LIVE_OK` 与 `DSH_MULTI_TURN_OK`，并实际渲染 TypeScript 和 JSON 高亮代码块。凭据未写入 Profile、设置文件、日志或仓库。
 
 可复用的 stock-dsh 插拔检查：
 

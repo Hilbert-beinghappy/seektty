@@ -23,7 +23,8 @@ import {
   mouseWheelDirection,
 } from './mouse.ts'
 import { OverlayQueue } from './overlays.ts'
-import { background, color, escapeTerminalText, setTheme } from './theme.ts'
+import { SyntaxHighlighter } from './syntax-highlighter.ts'
+import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
@@ -102,10 +103,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     terminal.write(DISABLE_MOUSE_TRACKING)
   }
   let stopConstructedTui = (): void => undefined
+  let disposeConstructedSyntax = (): void => undefined
   try {
-    setTheme(themeFromAppearance(appearanceSettings(
+    const initialTheme = themeFromAppearance(appearanceSettings(
       await options.management.settings.describe(),
-    )))
+    ))
+    setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
       disableMouseTracking()
@@ -127,6 +130,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
       },
     )
+    const syntax = await SyntaxHighlighter.create(initialTheme, () => {
+      transcript.refreshPresentation()
+      tui.invalidate()
+      tui.requestRender(true)
+    })
+    disposeConstructedSyntax = () => { syntax.dispose() }
+    setCodeHighlighter((code, lang) => syntax.highlight(code, lang))
     const status = new StatusBar()
     const canvas = new Box(0, 0, background.canvas)
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
@@ -259,6 +269,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const failures: unknown[] = []
         overlays.dispose()
         transcript.dispose()
+        setCodeHighlighter(undefined)
+        try { syntax.dispose() } catch (error) { failures.push(error) }
         try { unsubscribeActive() } catch (error) { failures.push(error) }
         try { disableMouseTracking() } catch (error) { failures.push(error) }
         try {
@@ -295,6 +307,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
         setTheme(theme)
+        syntax.setTheme(theme)
+        transcript.refreshPresentation()
         tui.invalidate()
         tui.requestRender(true)
       },
@@ -565,6 +579,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
+    setCodeHighlighter(undefined)
+    try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }
     try { stopConstructedTui() } catch { /* preserve the setup failure */ }
     try {
       await client.ctx.fiber.dispose()

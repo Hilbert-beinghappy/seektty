@@ -1,5 +1,6 @@
 /** Product command and pending-interaction orchestration for the TUI Surface. */
 
+import { visibleWidth } from '@mariozechner/pi-tui'
 import type {
   QuestionResponsePayload, SessionId, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-remotes/node-client'
@@ -11,7 +12,9 @@ import type {
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
-  type TuiTheme,
+  type TuiAppearanceSettings,
+  type TuiCustomTheme,
+  type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
 import {
   capabilityError,
@@ -40,7 +43,30 @@ import {
   type TuiSettingsField,
 } from './settings.ts'
 import type { Transcript } from './transcript.ts'
-import { appearanceSettings, saveTheme, themeFromAppearance } from './appearance.ts'
+import {
+  appearanceFromSettings,
+  appearanceSettings,
+  deleteCustomTheme,
+  saveCustomTheme,
+  saveTheme,
+  themeFromAppearance,
+} from './appearance.ts'
+import {
+  editableTheme,
+  generateThemeCandidates,
+  normalizeCustomTheme,
+  normalizeThemeColor,
+  resolveTheme,
+  themeContrastWarnings,
+  themeIdFromName,
+  type ResolvedTuiTheme,
+} from './theme-config.ts'
+import {
+  background,
+  color,
+  highlightCodeLines,
+  markdownTheme,
+} from './theme.ts'
 
 /** Surface callbacks kept separate from Harness business actions. */
 export interface TuiActionHost {
@@ -49,7 +75,7 @@ export interface TuiActionHost {
   notice(message: string, tone?: 'info' | 'success' | 'warning' | 'error'): void
   refresh(): void
   refreshHeader(): void
-  applyTheme(theme: TuiTheme): void
+  applyTheme(theme: ResolvedTuiTheme): void
   setEditor(text: string): void
   copy(text: string): void
   close(code: number): void
@@ -109,6 +135,62 @@ function argumentPair(args: string): { first: string; rest: string } {
   return match === null
     ? { first: '', rest: '' }
     : { first: match[1] ?? '', rest: match[2]?.trim() ?? '' }
+}
+
+const THEME_UI_FIELDS: Readonly<Record<keyof TuiCustomTheme['colors'], string>> = {
+  canvas: '画布背景',
+  surface: '面板与输入框背景',
+  selection: '选择背景',
+  text: '正文',
+  muted: '弱化文字',
+  border: '边框',
+  brand: '品牌色',
+  accent: '强调色',
+  success: '成功',
+  warning: '警告',
+  danger: '错误',
+}
+
+const THEME_SYNTAX_FIELDS: Readonly<Record<keyof TuiCustomTheme['syntax'], string>> = {
+  background: '代码背景',
+  foreground: '代码正文',
+  comment: '注释',
+  keyword: '关键字',
+  string: '字符串',
+  number: '数字',
+  constant: '常量',
+  function: '函数',
+  type: '类型与类',
+  variable: '变量',
+  property: '属性',
+  parameter: '参数',
+  operator: '运算符',
+  punctuation: '标点',
+  tag: '标签',
+  attribute: '属性名',
+  regexp: '正则表达式',
+}
+
+function customThemeId(theme: TuiCustomTheme): TuiThemeId {
+  return `custom:${theme.id}`
+}
+
+function resolvedCustomTheme(theme: TuiCustomTheme): ResolvedTuiTheme {
+  return { ...theme, id: customThemeId(theme) }
+}
+
+function themePreviewText(theme: TuiCustomTheme, warnings: readonly string[]): string {
+  const codeBlock = (text: string, language: string): string => highlightCodeLines(text, language)
+    .map(line => background.code(`${line}${' '.repeat(Math.max(0, 42 - visibleWidth(line)))}`))
+    .join('\n')
+  return [
+    `${color.brand('deepseek')} · ${color.accent(theme.name)} · ${theme.tone === 'dark' ? '暗色' : '亮色'}`,
+    `${markdownTheme.heading('Markdown 标题')}  ${markdownTheme.bold('粗体')}  ${markdownTheme.code('inline code')}`,
+    `${color.success('成功')} · ${color.warning('警告')} · ${color.danger('错误')} · ${color.muted('弱化文字')}`,
+    codeBlock('const deepseek = "探索未至之境"', 'typescript'),
+    codeBlock('@@ 主题预览 @@\n+ 新增内容\n- 删除内容', 'diff'),
+    ...warnings.map(warning => color.warning(`⚠ ${warning}`)),
+  ].join('\n')
 }
 
 function detailText(value: unknown): string {
@@ -800,41 +882,339 @@ export class TuiActions {
   }
 
   private async theme(args: string): Promise<void> {
+    const parsed = commandParts(args)
+    switch (parsed.command) {
+      case '': await this.themeCenter(); return
+      case 'dark':
+      case 'light': await this.activateTheme(parsed.command); return
+      case 'use': await this.themeUse(parsed.rest); return
+      case 'edit': await this.themeEdit(parsed.rest); return
+      case 'palette': await this.themePalette(parsed.rest); return
+      case 'delete': await this.themeDelete(parsed.rest); return
+      default: throw new Error('用法：/theme [dark|light|use|edit|palette|delete]')
+    }
+  }
+
+  private async themeCenter(): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe())
-    const current = themeFromAppearance(document)
-    const themes: readonly { readonly id: TuiTheme; readonly label: string; readonly description: string }[] = [
-      { id: 'dark', label: '暗色', description: '深灰蓝画布' },
-      { id: 'light', label: '亮色', description: '柔和冷白画布' },
+    const appearance = appearanceFromSettings(document)
+    const choices: OverlayChoice[] = [
+      { id: 'dark', label: 'DeepSeek 暗色', description: '内置 · 深灰蓝画布' },
+      { id: 'light', label: 'DeepSeek 亮色', description: '内置 · 柔和冷白画布' },
+      ...appearance.customThemes.map(theme => ({
+        id: customThemeId(theme),
+        label: theme.name,
+        description: `${theme.tone === 'dark' ? '暗色' : '亮色'} · ${theme.source === 'palette' ? '颜色组生成' : '手动配色'}`,
+      })),
     ]
-    let target: TuiTheme | undefined
-    if (args !== '') {
-      target = themes.find(theme => theme.id === args)?.id
-      if (target === undefined) throw new Error('用法：/theme [dark|light]')
-    } else {
-      const selected = await this.host.overlays.select({
-        title: '主题',
-        detail: '立即切换并保存终端外观',
-        choices: [...themes]
-          .sort((left, right) => Number(right.id === current) - Number(left.id === current))
-          .map(theme => ({
-            id: theme.id,
-            label: `${currentMark(theme.id === current)}${theme.label}`,
-            description: theme.description,
-          })),
-        searchable: false,
-        footer: '↑↓ 选择 · Enter 确认 · Esc 关闭',
-        options: { width: 58, maxHeight: 12, anchor: 'center', margin: 1 },
-      })
-      target = selected?.id === 'dark' || selected?.id === 'light' ? selected.id : undefined
-    }
-    if (target === undefined) return
-    if (target === current) {
-      this.host.notice(`${target === 'dark' ? '暗色' : '亮色'}主题已启用`, 'info')
+    choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
+    choices.push(
+      { id: '__edit__', label: '自定义颜色与代码高亮', description: '修改背景、文字和语法颜色' },
+      { id: '__palette__', label: '用颜色组合自动配置', description: '输入 3–16 个 HEX/RGB 颜色代码' },
+      { id: '__delete__', label: '删除主题', description: '管理命名自定义主题' },
+    )
+    const selected = await this.host.overlays.select({
+      title: '主题',
+      detail: '手动自定义颜色，或用颜色组合自动生成',
+      choices: choices.map(choice => ({
+        ...choice,
+        label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
+      })),
+      footer: '↑↓ 选择 · Enter 确认 · Esc 关闭',
+      options: { width: 68, maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
+    if (selected === undefined) return
+    if (selected.id === '__palette__') await this.themePalette('')
+    else if (selected.id === '__edit__') await this.themeEdit('')
+    else if (selected.id === '__delete__') await this.themeDelete('')
+    else await this.activateTheme(selected.id as TuiThemeId)
+  }
+
+  private async activateTheme(target: TuiThemeId): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const appearance = appearanceFromSettings(document)
+    const resolved = resolveTheme(appearance, target)
+    if (target === appearance.theme) {
+      this.host.notice(`${resolved.name}已启用`, 'info')
       return
     }
     const updated = await saveTheme(bridge, document, target)
-    await this.settingsChanged(updated, `${target === 'dark' ? '暗色' : '亮色'}主题`)
+    await this.settingsChanged(updated, resolved.name)
+  }
+
+  private async themeUse(value: string): Promise<void> {
+    if (value === '') throw new Error('用法：/theme use <主题名>')
+    if (value === 'dark' || value === 'light') {
+      await this.activateTheme(value)
+      return
+    }
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe())
+    const appearance = appearanceFromSettings(document)
+    const requested = value.startsWith('custom:') ? value.slice('custom:'.length) : value
+    const folded = requested.toLowerCase()
+    const theme = appearance.customThemes.find(candidate =>
+      candidate.id === requested || candidate.name.toLowerCase() === folded)
+    if (theme === undefined) throw new Error(`找不到主题 ${JSON.stringify(value)}`)
+    await this.activateTheme(customThemeId(theme))
+  }
+
+  private async themeIdentity(
+    nameValue: string,
+    appearance: TuiAppearanceSettings,
+  ): Promise<{ readonly id: string; readonly name: string } | undefined> {
+    const name = nameValue.trim()
+    if (name === '' || name.length > 80) throw new Error('主题名称必须为 1–80 个字符')
+    if (/[\u0000-\u001F\u007F-\u009F]/u.test(name)) throw new Error('主题名称不能包含终端控制字符')
+    const existing = appearance.customThemes.find(theme =>
+      theme.name.toLowerCase() === name.toLowerCase())
+    if (existing !== undefined) {
+      const overwrite = await this.host.overlays.confirm(
+        `覆盖主题 ${existing.name}？`,
+        '原主题颜色会被新配置替换，其他命名主题不受影响。',
+        '覆盖',
+      )
+      return overwrite ? { id: existing.id, name: existing.name } : undefined
+    }
+    if (appearance.customThemes.length >= 32) throw new Error('已达到 32 个自定义主题上限')
+    const base = themeIdFromName(name)
+    let id = base
+    for (let index = 2; appearance.customThemes.some(theme => theme.id === id); index += 1) {
+      const suffix = `-${String(index)}`
+      id = `${base.slice(0, 48 - suffix.length).replace(/-+$/u, '')}${suffix}`
+    }
+    return { id, name }
+  }
+
+  private async promptThemeName(initialValue = ''): Promise<string | undefined> {
+    const value = await this.host.overlays.input({
+      title: '主题名称',
+      initialValue,
+      placeholder: '例如 DeepSeek Ocean',
+    })
+    return value === undefined || value.trim() === '' ? undefined : value.trim()
+  }
+
+  private async themePalette(requestedName: string): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const appearance = appearanceFromSettings(document)
+    const enteredName = requestedName === '' ? await this.promptThemeName() : requestedName
+    if (enteredName === undefined) return
+    const identity = await this.themeIdentity(enteredName, appearance)
+    if (identity === undefined) return
+    const palette = await this.host.overlays.input({
+      title: `生成主题 · ${identity.name}`,
+      detail: '粘贴 3–16 个 HEX/RGB 颜色；程序会自动分配背景、正文、状态和代码高亮。',
+      placeholder: '#0B1020 #E8ECF5 #6682FF #42C99A',
+      options: { width: '95%', maxHeight: '80%', anchor: 'center', margin: 1 },
+    })
+    if (palette === undefined) return
+    const candidates = generateThemeCandidates(identity.id, identity.name, palette)
+    const first = candidates[candidates.recommended]
+    const alternate = candidates[candidates.recommended === 'dark' ? 'light' : 'dark']
+    await this.previewAndSaveTheme(document, first, alternate)
+  }
+
+  private async themeEdit(requested: string): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const appearance = appearanceFromSettings(document)
+    let source: ResolvedTuiTheme | undefined
+    if (requested !== '') {
+      if (requested === 'dark' || requested === 'light') source = resolveTheme(appearance, requested)
+      else {
+        const folded = requested.toLowerCase()
+        const custom = appearance.customThemes.find(theme =>
+          theme.id === requested || theme.name.toLowerCase() === folded)
+        if (custom !== undefined) source = resolvedCustomTheme(custom)
+      }
+      if (source === undefined) throw new Error(`找不到主题 ${JSON.stringify(requested)}`)
+    } else {
+      source = resolveTheme(appearance)
+      if (source.source === 'builtin' && appearance.customThemes.length > 0) {
+        const selected = await this.host.overlays.select({
+          title: '编辑主题',
+          detail: '内置主题会先复制为命名主题',
+          choices: [
+            { id: source.id, label: source.name, description: '当前内置主题 · 创建副本' },
+            ...appearance.customThemes.map(theme => ({
+              id: customThemeId(theme), label: theme.name, description: theme.tone === 'dark' ? '暗色' : '亮色',
+            })),
+          ],
+        })
+        if (selected === undefined) return
+        source = resolveTheme(appearance, selected.id as TuiThemeId)
+      }
+    }
+    let editable: TuiCustomTheme
+    if (source.source === 'builtin') {
+      const requestedCopyName = await this.promptThemeName(`${source.name} 自定义`)
+      if (requestedCopyName === undefined) return
+      const identity = await this.themeIdentity(requestedCopyName, appearance)
+      if (identity === undefined) return
+      editable = editableTheme(source, identity.id, identity.name)
+    } else {
+      const overwrite = await this.host.overlays.confirm(
+        `编辑并覆盖主题 ${source.name}？`,
+        '保存后会替换这个命名主题；其他主题不受影响。',
+        '继续编辑',
+      )
+      if (!overwrite) return
+      editable = editableTheme(source, source.id.slice('custom:'.length), source.name)
+    }
+    const edited = await this.editThemeValue(editable)
+    if (edited === undefined) return
+    await this.previewAndSaveTheme(document, edited)
+  }
+
+  private async editThemeValue(initial: TuiCustomTheme): Promise<TuiCustomTheme | undefined> {
+    let theme = initial
+    while (true) {
+      const selected = await this.host.overlays.select({
+        title: `编辑主题 · ${theme.name}`,
+        detail: '只修改界面背景、文字和代码语法高亮颜色',
+        choices: [
+          { id: '__done__', label: '完成并预览', description: '检查实际终端效果后保存' },
+          { id: '__tone__', label: '暗亮方向', description: theme.tone === 'dark' ? '暗色' : '亮色' },
+          ...Object.entries(THEME_UI_FIELDS).map(([key, label]) => ({
+            id: `ui:${key}`, label, description: theme.colors[key as keyof typeof THEME_UI_FIELDS],
+          })),
+          ...Object.entries(THEME_SYNTAX_FIELDS).map(([key, label]) => ({
+            id: `syntax:${key}`, label: `代码 · ${label}`, description: theme.syntax[key as keyof typeof THEME_SYNTAX_FIELDS],
+          })),
+        ],
+        options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+      if (selected === undefined) return undefined
+      if (selected.id === '__done__') return normalizeCustomTheme(theme)
+      if (selected.id === '__tone__') {
+        const tone = await this.host.overlays.select({
+          title: '暗亮方向',
+          choices: [
+            { id: 'dark', label: '暗色', ...(theme.tone === 'dark' ? { description: '当前' } : {}) },
+            { id: 'light', label: '亮色', ...(theme.tone === 'light' ? { description: '当前' } : {}) },
+          ],
+          searchable: false,
+        })
+        if (tone?.id === 'dark' || tone?.id === 'light') theme = { ...theme, tone: tone.id, source: 'manual' }
+        continue
+      }
+      const [section, key] = selected.id.split(':', 2)
+      if ((section !== 'ui' && section !== 'syntax') || key === undefined) continue
+      const current = section === 'ui'
+        ? theme.colors[key as keyof typeof THEME_UI_FIELDS]
+        : theme.syntax[key as keyof typeof THEME_SYNTAX_FIELDS]
+      const value = await this.host.overlays.input({
+        title: selected.label,
+        detail: '输入 HEX 或 rgb(r,g,b)',
+        initialValue: current,
+      })
+      if (value === undefined) continue
+      const normalized = normalizeThemeColor(value)
+      theme = section === 'ui'
+        ? { ...theme, source: 'manual', colors: { ...theme.colors, [key]: normalized } }
+        : { ...theme, source: 'manual', syntax: { ...theme.syntax, [key]: normalized } }
+    }
+  }
+
+  private async previewAndSaveTheme(
+    document: TuiSettingsDocument,
+    initial: TuiCustomTheme,
+    initialAlternate?: TuiCustomTheme,
+  ): Promise<void> {
+    const original = themeFromAppearance(document)
+    let candidate = initial
+    let alternate = initialAlternate
+    while (true) {
+      const warnings = themeContrastWarnings(candidate)
+      this.host.applyTheme(resolvedCustomTheme(candidate))
+      const selected = await this.host.overlays.select({
+        title: `主题预览 · ${candidate.name}`,
+        detail: themePreviewText(candidate, warnings),
+        searchable: false,
+        choices: [
+          { id: 'apply', label: '应用并保存', description: '写入 Harness Settings' },
+          ...(alternate === undefined ? [] : [{ id: 'toggle', label: `切换为${alternate.tone === 'dark' ? '暗色' : '亮色'}方向`, description: '使用同一组颜色重新预览' }]),
+          { id: 'edit', label: '继续调整', description: '修改界面或代码颜色' },
+          { id: 'cancel', label: '取消', description: '恢复原主题' },
+        ],
+        footer: '↑↓ 选择 · Enter 确认 · Esc 取消并恢复',
+        options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+      if (selected === undefined || selected.id === 'cancel') {
+        this.host.applyTheme(original)
+        return
+      }
+      if (selected.id === 'toggle' && alternate !== undefined) {
+        const previous = candidate
+        candidate = alternate
+        alternate = previous
+        continue
+      }
+      if (selected.id === 'edit') {
+        const edited = await this.editThemeValue(candidate)
+        if (edited !== undefined) {
+          candidate = edited
+          alternate = undefined
+        }
+        continue
+      }
+      if (warnings.length > 0) {
+        const confirmed = await this.host.overlays.confirm(
+          '主题存在对比度警告',
+          `${warnings.join('；')}。颜色不会被静默修改。是否仍然保存？`,
+          '仍然保存',
+        )
+        if (!confirmed) continue
+      }
+      try {
+        const updated = await saveCustomTheme(
+          this.capabilities.managementBridge().settings,
+          document,
+          normalizeCustomTheme(candidate),
+        )
+        await this.settingsChanged(updated, candidate.name)
+      } catch (error) {
+        this.host.applyTheme(original)
+        throw error
+      }
+      return
+    }
+  }
+
+  private async themeDelete(requested: string): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const appearance = appearanceFromSettings(document)
+    if (appearance.customThemes.length === 0) throw new Error('没有可删除的自定义主题')
+    let theme = requested === '' ? undefined : appearance.customThemes.find(candidate =>
+      candidate.id === requested || candidate.name.toLowerCase() === requested.toLowerCase())
+    if (requested !== '' && theme === undefined) throw new Error(`找不到主题 ${JSON.stringify(requested)}`)
+    if (theme === undefined) {
+      const selected = await this.host.overlays.select({
+        title: '删除主题',
+        choices: appearance.customThemes.map(candidate => ({
+          id: candidate.id,
+          label: candidate.name,
+          description: appearance.theme === customThemeId(candidate) ? '当前 · 删除后切换到 DeepSeek 暗色' : candidate.tone === 'dark' ? '暗色' : '亮色',
+        })),
+      })
+      if (selected === undefined) return
+      theme = appearance.customThemes.find(candidate => candidate.id === selected.id)
+    }
+    if (theme === undefined) return
+    const confirmed = await this.host.overlays.confirm(
+      `删除主题 ${theme.name}？`,
+      appearance.theme === customThemeId(theme)
+        ? '该主题会从 Harness Settings 删除，并立即切换到 DeepSeek 暗色。'
+        : '该主题会从 Harness Settings 删除；当前主题不变。',
+      '删除',
+    )
+    if (!confirmed) return
+    const updated = await deleteCustomTheme(bridge, document, theme.id)
+    await this.settingsChanged(updated, `主题 ${theme.name}`)
   }
 
   private async permission(args: string): Promise<void> {

@@ -14,6 +14,7 @@ import type {
 } from '@deepseek-ai/dsh-tui-protocol'
 import {
   DEFAULT_TUI_THEME,
+  MAX_CUSTOM_THEMES,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
@@ -45,9 +46,53 @@ const MarketplaceSettingsSchema = z.object({
   sources: z.array(CatalogSourceSchema).default([]),
 })
 
+const ThemeColorSchema = z.string().pattern(/^#[0-9A-Fa-f]{6}$/u)
+const ThemeUiColorsSchema = z.object({
+  text: ThemeColorSchema.required(),
+  muted: ThemeColorSchema.required(),
+  border: ThemeColorSchema.required(),
+  brand: ThemeColorSchema.required(),
+  accent: ThemeColorSchema.required(),
+  success: ThemeColorSchema.required(),
+  warning: ThemeColorSchema.required(),
+  danger: ThemeColorSchema.required(),
+  canvas: ThemeColorSchema.required(),
+  surface: ThemeColorSchema.required(),
+  selection: ThemeColorSchema.required(),
+}).required()
+const SyntaxThemeColorsSchema = z.object({
+  background: ThemeColorSchema.required(),
+  foreground: ThemeColorSchema.required(),
+  comment: ThemeColorSchema.required(),
+  keyword: ThemeColorSchema.required(),
+  string: ThemeColorSchema.required(),
+  number: ThemeColorSchema.required(),
+  constant: ThemeColorSchema.required(),
+  function: ThemeColorSchema.required(),
+  type: ThemeColorSchema.required(),
+  variable: ThemeColorSchema.required(),
+  property: ThemeColorSchema.required(),
+  parameter: ThemeColorSchema.required(),
+  operator: ThemeColorSchema.required(),
+  punctuation: ThemeColorSchema.required(),
+  tag: ThemeColorSchema.required(),
+  attribute: ThemeColorSchema.required(),
+  regexp: ThemeColorSchema.required(),
+}).required()
+const CustomThemeSchema = z.object({
+  id: z.string().pattern(/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u).max(48).required(),
+  name: z.string().min(1).max(80).pattern(/^[^\u0000-\u001F\u007F-\u009F]+$/u).required(),
+  tone: z.union(['dark', 'light']).required(),
+  source: z.union(['manual', 'palette']).required(),
+  colors: ThemeUiColorsSchema,
+  syntax: SyntaxThemeColorsSchema,
+})
 const AppearanceSettingsSchema = z.object({
-  theme: z.union(['dark', 'light']).default(DEFAULT_TUI_THEME)
-    .description('SeekTTY 终端使用的暗色或亮色主题。'),
+  theme: z.string().pattern(/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
+    .default(DEFAULT_TUI_THEME)
+    .description('SeekTTY 当前使用的内置或命名自定义主题。'),
+  customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
+    .description('SeekTTY 命名自定义主题。'),
 })
 
 interface StoredCatalogSource {

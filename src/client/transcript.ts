@@ -7,6 +7,7 @@ import {
   matchesKey,
   Text,
   visibleWidth,
+  wrapTextWithAnsi,
   type Component,
   type Focusable,
 } from '@mariozechner/pi-tui'
@@ -31,7 +32,15 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
-import { color, escapeTerminalText, markdownTheme, terminalColorLevel } from './theme.ts'
+import {
+  background,
+  color,
+  escapeTerminalText,
+  highlightCodeLines,
+  markdownTheme,
+  terminalColorLevel,
+} from './theme.ts'
+import { syntaxLanguageForPath } from './syntax-highlighter.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -63,6 +72,12 @@ type TranscriptRow = ({
   readonly format: 'plain'
   readonly text: string
 } | {
+  readonly format: 'code'
+  readonly text: string
+  readonly language?: string
+  readonly caption?: string
+  readonly lineNumbers?: readonly number[]
+} | {
   readonly format: 'image'
   readonly key: string
   readonly attachment: TranscriptImageAttachment
@@ -93,6 +108,42 @@ class PulsingRow implements Component {
       ? `${marker} ${color.muted(safeText)}`
       : safeText.replace('◆', marker)
     return new Text(text, 0, 0).render(width)
+  }
+
+  invalidate(): void {}
+}
+
+class CodeRow implements Component {
+  constructor(private readonly row: Extract<TranscriptRow, { readonly format: 'code' }>) {}
+
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, width)
+    const numbers = this.row.lineNumbers
+    const highest = numbers?.reduce((value, number) => Math.max(value, number), 0) ?? 0
+    const numberWidth = numbers !== undefined && safeWidth >= 8
+      ? String(highest).length + 2
+      : 0
+    const codeWidth = Math.max(1, safeWidth - numberWidth)
+    const highlighted = highlightCodeLines(this.row.text, this.row.language)
+    const rows: string[] = []
+    if (this.row.caption !== undefined) {
+      rows.push(...new Text(color.muted(escapeTerminalText(this.row.caption)), 0, 0).render(safeWidth))
+    }
+    for (const [index, sourceLine] of highlighted.entries()) {
+      const wrapped = wrapTextWithAnsi(sourceLine, codeWidth)
+      const parts = wrapped.length === 0 ? [''] : wrapped
+      for (const [partIndex, part] of parts.entries()) {
+        const number = numbers?.[index]
+        const gutter = numberWidth === 0
+          ? ''
+          : color.muted(partIndex === 0 && number !== undefined
+            ? `${String(number).padStart(numberWidth - 1)} `
+            : ' '.repeat(numberWidth))
+        const padded = `${part}${' '.repeat(Math.max(0, codeWidth - visibleWidth(part)))}`
+        rows.push(`${gutter}${background.code(padded)}`)
+      }
+    }
+    return rows
   }
 
   invalidate(): void {}
@@ -268,8 +319,10 @@ function assistantBlockRows(block: AssistantBlock, preferences: TranscriptPrefer
       if (preferences.tools === 'hidden') return []
       return [{
         format: 'plain',
-        text: color.accent(`◆ ${block.name}${preferences.tools === 'expanded' ? `\n${prettyArgs(block.argsRaw)}` : ''}`),
-      }]
+        text: color.accent(`◆ ${block.name}`),
+      }, ...(preferences.tools === 'expanded'
+        ? [{ format: 'code' as const, text: prettyArgs(block.argsRaw), language: 'json' }]
+        : [])]
     case 'other': return [{ format: 'plain', text: color.muted('模型扩展内容 · /trajectory 查看详情') }]
   }
 }
@@ -296,22 +349,24 @@ function diffText(value: unknown): string {
       return jsonText(value)
     }
     paths.add(path)
-    rows.push(color.accent(path))
+    rows.push(`diff -- ${path}`)
+    rows.push(oldText === null ? '--- /dev/null' : `--- a/${path}`)
+    rows.push(`+++ b/${path}`)
     if (oldText !== null) {
       for (const line of contentLines(oldText)) {
-        rows.push(color.danger(`- ${line}`))
+        rows.push(`-${line}`)
         removed += 1
       }
     }
     for (const line of contentLines(newText)) {
-      rows.push(color.success(`+ ${line}`))
+      rows.push(`+${line}`)
       added += 1
     }
   }
   const visible = rows.length <= 80
     ? rows
-    : [...rows.slice(0, 40), color.muted(`… 省略 ${rows.length - 80} 行 …`), ...rows.slice(-40)]
-  visible.push(color.muted(`└ +${added} -${removed} · ${paths.size} 个文件`))
+    : [...rows.slice(0, 40), `@@ … 省略 ${rows.length - 80} 行 … @@`, ...rows.slice(-40)]
+  visible.push(`# +${added} -${removed} · ${paths.size} 个文件`)
   return visible.join('\n')
 }
 
@@ -346,60 +401,192 @@ function settledToolFailed(node: ToolResultNode): boolean {
     && ((result.exitCode !== undefined && result.exitCode !== 0) || result.signal !== undefined)
 }
 
-function viewDetails(node: ToolResultNode): string[] {
-  const details: string[] = []
-  const call = node.callView
-  if (call === null && node.call?.argsRaw !== undefined) details.push(prettyArgs(node.call.argsRaw))
-  if (call?.card === 'generic' && call.rawInput !== undefined) details.push(jsonText(call.rawInput))
-  if (call?.card === 'terminal') {
-    if (call.description !== undefined) details.push(call.description)
-    details.push(`${call.cwd ?? '(当前工作区)'}\n$ ${call.title}`)
-  }
-  if (call?.card === 'diff') details.push(diffText(call.diffs))
-  const result = node.resultView
-  if (result?.card === 'terminal') {
-    if (result.output !== undefined) details.push(result.output)
-    if (result.exitCode !== undefined) details.push(`退出码 ${result.exitCode}`)
-    if (result.signal !== undefined) details.push(`信号 ${result.signal}`)
-  } else if (result?.card === 'diff') {
-    details.push(diffText(result.diffs))
-  } else if (result?.card === 'generic' && result.content !== undefined) {
-    details.push(contentText(result.content))
-  } else if (result !== null) {
-    details.push(jsonText(result))
-  } else {
-    const raw = contentText(node.content)
-    if (raw !== '') details.push(raw)
-  }
-  if (node.meta !== undefined) details.push(`元数据\n${jsonText(node.meta)}`)
-  return details.filter(value => value !== '')
+type ToolDetail = {
+  readonly kind: 'plain'
+  readonly text: string
+} | {
+  readonly kind: 'markdown'
+  readonly text: string
+} | {
+  readonly kind: 'code'
+  readonly text: string
+  readonly language?: string
+  readonly caption?: string
+  readonly lineNumbers?: readonly number[]
 }
 
-function runningViewDetails(node: RunningToolCall): string[] {
+interface ReadLineView {
+  readonly number: number
+  readonly text: string
+}
+
+interface SearchMatchView {
+  readonly lineNumber: number
+  readonly line: string
+}
+
+interface SearchFileView {
+  readonly path: string
+  readonly matches: readonly SearchMatchView[]
+}
+
+interface WebSourceView {
+  readonly url: string
+  readonly title?: string
+  readonly snippet?: string
+}
+
+function contentDetails(content: readonly unknown[]): ToolDetail[] {
+  return content.flatMap((block): ToolDetail[] => {
+    if (typeof block !== 'object' || block === null) return [{ kind: 'plain', text: String(block) }]
+    const value = block as Record<string, unknown>
+    if ((value.type === 'text' || value.type === 'reasoning') && typeof value.text === 'string') {
+      return value.text === '' ? [] : [{ kind: 'markdown', text: value.text }]
+    }
+    return [{ kind: 'plain', text: contentBlockText(block) }]
+  })
+}
+
+function rawInputDetail(value: unknown): ToolDetail {
+  return typeof value === 'string'
+    ? { kind: 'plain', text: value }
+    : { kind: 'code', text: jsonText(value), language: 'json' }
+}
+
+function viewDetails(node: ToolResultNode): ToolDetail[] {
+  const details: ToolDetail[] = []
+  const call = node.callView
+  if (call === null && node.call?.argsRaw !== undefined) {
+    details.push({ kind: 'code', text: prettyArgs(node.call.argsRaw), language: 'json' })
+  }
+  if (call?.card === 'generic') {
+    if (call.rawInput !== undefined) details.push(rawInputDetail(call.rawInput))
+    if (call.content !== undefined) details.push(...contentDetails(call.content))
+  }
+  if (call?.card === 'terminal') {
+    if (call.description !== undefined) details.push({ kind: 'plain', text: call.description })
+    details.push({ kind: 'plain', text: `${call.cwd ?? '(当前工作区)'}\n$ ${call.title}` })
+  }
+  if (call?.card === 'diff') details.push({ kind: 'code', text: diffText(call.diffs), language: 'diff' })
+  const result = node.resultView
+  if (result?.card === 'terminal') {
+    if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
+    if (result.exitCode !== undefined) details.push({ kind: 'plain', text: `退出码 ${result.exitCode}` })
+    if (result.signal !== undefined) details.push({ kind: 'plain', text: `信号 ${result.signal}` })
+  } else if (result?.card === 'diff') {
+    details.push({ kind: 'code', text: diffText(result.diffs), language: 'diff' })
+  } else if (result?.card === 'generic' && result.content !== undefined) {
+    details.push(...contentDetails(result.content))
+  } else if (result?.card === 'read') {
+    const lines = result.lines as readonly ReadLineView[]
+    const path = String(result.path)
+    const language = syntaxLanguageForPath(path, typeof result.lang === 'string' ? result.lang : undefined)
+    const first = lines[0]?.number ?? Number(result.offset)
+    const last = lines.at(-1)?.number ?? first
+    details.push({
+      kind: 'code',
+      text: lines.map(line => line.text).join('\n'),
+      ...(language === undefined ? {} : { language }),
+      caption: `${path} · ${String(first)}–${String(last)} / ${String(result.totalLines)}`,
+      lineNumbers: lines.map(line => line.number),
+    })
+  } else if (result?.card === 'search' && result.shape === 'matches') {
+    const files = result.files as readonly SearchFileView[]
+    for (const file of files) {
+      const language = syntaxLanguageForPath(file.path)
+      details.push({
+        kind: 'code',
+        text: file.matches.map(match => match.line).join('\n'),
+        ...(language === undefined ? {} : { language }),
+        caption: file.path,
+        lineNumbers: file.matches.map(match => match.lineNumber),
+      })
+    }
+    if (result.truncated) details.push({ kind: 'plain', text: `只显示部分结果 · 共 ${String(result.total)} 项` })
+  } else if (result?.card === 'search') {
+    details.push({ kind: 'plain', text: result.paths.join('\n') })
+    if (result.truncated) details.push({ kind: 'plain', text: `只显示部分结果 · 共 ${String(result.total)} 项` })
+  } else if (result?.card === 'web' && result.kind === 'search') {
+    if (result.answer !== undefined) details.push({ kind: 'markdown', text: result.answer })
+    const sources = result.sources as readonly WebSourceView[]
+    details.push(...sources.map(source => ({
+      kind: 'plain' as const,
+      text: `${source.title ?? source.url}\n${source.url}${source.snippet === undefined ? '' : `\n${source.snippet}`}`,
+    })))
+    if (result.truncated) details.push({ kind: 'plain', text: '来源列表已截断' })
+  } else if (result?.card === 'web') {
+    details.push({
+      kind: 'plain',
+      text: `${result.statusCode} · ${result.url}${result.truncated ? ' · 内容已截断' : ''}`,
+    })
+    details.push(...contentDetails(node.content))
+  } else if (result?.card === 'generic') {
+    details.push(...contentDetails(node.content))
+  } else {
+    details.push(...contentDetails(node.content))
+  }
+  if (node.meta !== undefined) {
+    details.push({ kind: 'code', text: jsonText(node.meta), language: 'json', caption: '元数据' })
+  }
+  return details.filter(value => value.text !== '')
+}
+
+function runningViewDetails(node: RunningToolCall): ToolDetail[] {
   const view = node.callView
   if (view?.card === 'terminal') {
     return [
-      ...(view.description === undefined ? [] : [view.description]),
-      `${view.cwd ?? '(当前工作区)'}\n$ ${view.title}`,
+      ...(view.description === undefined ? [] : [{ kind: 'plain' as const, text: view.description }]),
+      { kind: 'plain', text: `${view.cwd ?? '(当前工作区)'}\n$ ${view.title}` },
     ]
   }
-  if (view?.card === 'diff') return [diffText(view.diffs)]
-  if (view?.card === 'generic' && view.rawInput !== undefined) return [jsonText(view.rawInput)]
-  return [prettyArgs(node.argsRaw)]
+  if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs), language: 'diff' }]
+  if (view?.card === 'generic') {
+    return [
+      ...(view.rawInput === undefined ? [] : [rawInputDetail(view.rawInput)]),
+      ...(view.content === undefined ? [] : contentDetails(view.content)),
+    ]
+  }
+  return [{ kind: 'code', text: prettyArgs(node.argsRaw), language: 'json' }]
 }
 
-function toolBlockText(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): string {
+function detailRow(detail: ToolDetail): TranscriptRow {
+  if (detail.kind === 'plain') return { format: 'plain', text: detail.text }
+  if (detail.kind === 'markdown') return { format: 'markdown', text: detail.text }
+  return {
+    format: 'code',
+    text: detail.text,
+    ...(detail.language === undefined ? {} : { language: detail.language }),
+    ...(detail.caption === undefined ? {} : { caption: detail.caption }),
+    ...(detail.lineNumbers === undefined ? {} : { lineNumbers: detail.lineNumbers }),
+  }
+}
+
+function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): TranscriptRow[] {
   const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
   if ('kind' in block) {
     const duration = block.callTime === null ? '' : ` · ${Math.max(0, block.time - block.callTime)} ms`
     const state = settledToolFailed(block) ? color.danger('失败') : color.success('完成')
-    const detail = preferences.tools === 'expanded' ? viewDetails(block).join('\n') : ''
-    const children = block.subCalls.map(child => toolBlockText(child, preferences, depth + 1)).filter(Boolean)
-    return `${prefix}${color.accent(toolTitle(block))} · ${state}${duration}${detail === '' ? '' : `\n${detail}`}${children.length === 0 ? '' : `\n${children.join('\n')}`}`
+    return [
+      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))} · ${state}${duration}` },
+      ...(preferences.tools === 'expanded' ? viewDetails(block).map(detailRow) : []),
+      ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
+    ]
   }
-  const detail = preferences.tools === 'expanded' ? `\n${runningViewDetails(block).join('\n')}` : ''
-  const children = block.subCalls.map(child => toolBlockText(child, preferences, depth + 1)).filter(Boolean)
-  return `${prefix}${color.accent(toolTitle(block))} · ${color.warning('运行中')}${detail}${children.length === 0 ? '' : `\n${children.join('\n')}`}`
+  return [
+    {
+      format: 'plain',
+      text: `${prefix}${color.accent(toolTitle(block))} · ${color.warning('运行中')}`,
+      pulse: 'marker',
+    },
+    ...(preferences.tools === 'expanded' ? runningViewDetails(block).map(detailRow) : []),
+    ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
+  ]
+}
+
+function toolBlockText(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): string {
+  return toolBlockRows(block, preferences, depth).map(row => row.format === 'image'
+    ? imageLabel(row.attachment)
+    : row.text).join('\n')
 }
 
 function nodeText(node: ConversationNode, preferences: TranscriptPreferences): string {
@@ -695,11 +882,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   if (node.kind === 'tool-call') {
     if (preferences.tools === 'hidden') return []
     const data = toolChatData(node.data)
-    return data === undefined ? [] : grouped([{
-      format: 'plain',
-      text: toolBlockText(data.root, preferences, 0),
-      ...('kind' in data.root ? {} : { pulse: 'marker' as const }),
-    }])
+    return data === undefined ? [] : grouped(toolBlockRows(data.root, preferences, 0))
   }
   if (node.kind === 'manual-compaction') return manualCompactionRows(node.data, preferences)
   if (node.kind === 'model-retry') return retryRows(node.data, preferences)
@@ -750,6 +933,8 @@ export class Transcript implements Component, Focusable {
   private readonly pendingImages = new Set<string>()
   private imageGeneration = 0
   private imageLoader: TranscriptImageLoader | undefined
+  private snapshot: ConversationSnapshot | undefined
+  private emptyMessage = '在下方输入消息，或用 /help 查看命令。'
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
@@ -809,6 +994,8 @@ export class Transcript implements Component, Focusable {
   empty(message = '在下方输入消息，或用 /help 查看命令。'): void {
     this.imageGeneration += 1
     this.imageLoader = undefined
+    this.snapshot = undefined
+    this.emptyMessage = message
     this.sessionId = undefined
     this.pendingImages.clear()
     this.imageComponents.clear()
@@ -824,6 +1011,7 @@ export class Transcript implements Component, Focusable {
    * @param imageLoader - authenticated reader for references in this Session.
    */
   update(snapshot: ConversationSnapshot, imageLoader?: TranscriptImageLoader): void {
+    this.snapshot = snapshot
     const sessionId = String(snapshot.sessionId)
     if (sessionId !== this.sessionId) {
       this.imageGeneration += 1
@@ -853,11 +1041,7 @@ export class Transcript implements Component, Focusable {
       ]))
     }
     if (preferences.tools !== 'hidden' && !visibleNodes.some(node => node.kind === 'tool-call')) {
-      rows.push(...snapshot.runningCalls.flatMap(call => grouped([{
-        format: 'plain' as const,
-        text: toolBlockText(call, preferences, 0),
-        pulse: 'marker' as const,
-      }])))
+      rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0))))
     }
     this.emptyState = rows.length === 0
     if (this.emptyState) rows.push({
@@ -865,6 +1049,24 @@ export class Transcript implements Component, Focusable {
       text: `${color.brand('deepseek')}\n${color.muted('探索未至之境')}\n${color.muted('直接描述你想完成的事')}`,
     })
     this.replace(rows)
+  }
+
+  /**
+   * Rebuild colorized rows after a live theme or lazy grammar change.
+   * The current viewport and durable turn cursor remain unchanged.
+   */
+  refreshPresentation(): void {
+    const scrollOffset = this.scrollOffset
+    const turnCursor = this.turnCursor
+    const snapshot = this.snapshot
+    if (snapshot === undefined) {
+      this.replace([{ format: 'plain', text: color.muted(this.emptyMessage) }])
+    } else {
+      this.update(snapshot, this.imageLoader)
+    }
+    this.scrollOffset = scrollOffset
+    this.turnCursor = turnCursor
+    this.requestRender()
   }
 
   invalidate(): void {
@@ -1043,6 +1245,7 @@ export class Transcript implements Component, Focusable {
         ? new Text(escapeTerminalText(row.text), 0, 0)
         : new PulsingRow(row.text, row.pulse, () => this.pulseFrame)
     }
+    if (row.format === 'code') return new CodeRow(row)
     const cacheKey = `${this.sessionId ?? 'none'}:${row.key}`
     const cached = this.imageComponents.get(cacheKey)
     if (cached !== undefined) return cached

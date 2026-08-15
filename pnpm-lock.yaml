@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@mariozechner/pi-tui@0.73.1': 9db834928e0bcc7c2257ed2462eb306a4f5e55ae5904d69e8c34e721f03306f2
+  '@mariozechner/pi-tui@0.73.1': 7d95e956b3ba0dca9460ba312b126b864bf4b49bf880b095158948f20f74e7de
 
 importers:
 
@@ -119,6 +119,15 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: 3.18.1
         version: 3.18.1
+      '@shikijs/core':
+        specifier: 4.4.3
+        version: 4.4.3
+      '@shikijs/engine-javascript':
+        specifier: 4.4.3
+        version: 4.4.3
+      '@shikijs/langs':
+        specifier: 4.4.3
+        version: 4.4.3
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -143,7 +152,7 @@ importers:
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
       '@mariozechner/pi-tui':
         specifier: 0.73.1
-        version: 0.73.1(patch_hash=9db834928e0bcc7c2257ed2462eb306a4f5e55ae5904d69e8c34e721f03306f2)
+        version: 0.73.1(patch_hash=7d95e956b3ba0dca9460ba312b126b864bf4b49bf880b095158948f20f74e7de)
       '@types/cross-spawn':
         specifier: 6.0.6
         version: 6.0.6
@@ -3198,7 +3207,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@mariozechner/pi-tui@0.73.1(patch_hash=9db834928e0bcc7c2257ed2462eb306a4f5e55ae5904d69e8c34e721f03306f2)':
+  '@mariozechner/pi-tui@0.73.1(patch_hash=7d95e956b3ba0dca9460ba312b126b864bf4b49bf880b095158948f20f74e7de)':
     dependencies:
       '@types/mime-types': 2.1.4
       chalk: 5.6.2
