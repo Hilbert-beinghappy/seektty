@@ -112,6 +112,12 @@ const ROLE_SCOPES: Readonly<Record<Exclude<keyof TuiSyntaxThemeColors, 'backgrou
   regexp: ['string.regexp'],
 }
 
+const DIFF_SCOPES = {
+  inserted: ['markup.inserted', 'punctuation.definition.inserted'],
+  deleted: ['markup.deleted', 'punctuation.definition.deleted'],
+  header: ['meta.diff.header', 'meta.diff.range'],
+} as const
+
 function languageOf(value: string | undefined): SupportedLanguage | undefined {
   if (value === undefined) return undefined
   const normalized = value.trim().toLowerCase().split(/[\s,{]/u, 1)[0] ?? ''
@@ -151,6 +157,9 @@ function themeRegistration(theme: ResolvedTuiTheme, name: string): ThemeRegistra
       scope: [...scope],
       settings: { foreground: theme.syntax[role as keyof typeof ROLE_SCOPES] },
     })),
+    { scope: [...DIFF_SCOPES.inserted], settings: { foreground: theme.colors.success } },
+    { scope: [...DIFF_SCOPES.deleted], settings: { foreground: theme.colors.danger } },
+    { scope: [...DIFF_SCOPES.header], settings: { foreground: theme.colors.accent } },
     ...theme.tokenColors.map(rule => ({
       scope: [...rule.scope],
       settings: {

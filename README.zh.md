@@ -18,6 +18,20 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 
 最新视图会铺满终端，并让输入框与状态栏始终沉在底部。未使用的行属于中间的对话视口，会随着输出增长逐行收缩；更长的对话继续进入终端原生滚动记录。
 
+## 界面与代码主题自定义，并可导入 VS Code 主题
+
+主题能力是 SeekTTY 的核心特色：界面背景与文字颜色可自定义，代码块的背景、文字、语法高亮及粗体／斜体可独立自定义，`/theme import` 可导入本地 VS Code JSON/JSONC 主题并保留可移植的 TextMate Token 配色；还可以输入 3–16 个颜色，自动生成一套可预览、可继续调整的亮色或暗色主题。
+
+### DeepSeek 亮色界面中的 TypeScript
+
+![SeekTTY 亮色 TypeScript 语法高亮](assets/seektty-code-light.png)
+
+### DeepSeek 暗色界面中的工具参数、文件读取与 Diff
+
+![SeekTTY 暗色工具调用与 Diff 语法高亮](assets/seektty-code-dark.png)
+
+Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指令、结构化工具参数、文件读取、JSON 和 Diff 使用同一套代码主题，普通对话文字仍保持界面样式。每块代码背景都连续覆盖真实终端单元格，不会出现逐行断开的横纹。
+
 ## 已经接入的 Harness 能力
 
 当前版本覆盖以下能力：
@@ -53,7 +67,7 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
@@ -70,7 +84,7 @@ deepseek --profile team-tui
 也可以只使用 dsh 的原生入口：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 dsh --profile tui
 ```
 
@@ -116,7 +130,7 @@ dsh --profile tui
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
@@ -124,7 +138,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 ```
 
 ## 直接插拔
@@ -138,7 +152,7 @@ dsh plugin --profile tui remove seektty
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 ```
 
 安装结果直接写入目标 Harness Profile 的依赖、Bundle 顺序和 pnpm lockfile。TUI 的 `/plugin` 与原生 `dsh plugin` 操作同一份 Profile 状态。
@@ -204,4 +218,4 @@ pnpm test:stock
 
 当前兼容基线是官方 `0.1.0-rc.6`。dsh 发布新版本后，在本仓库更新精确依赖和兼容快照，并完成 add／boot／remove／re-add 契约验证，即可发布新的兼容范围。
 
-源码仓库公开；当前未发布 npm 包或 GitHub Release，请使用上方 GitHub 地址安装。
+源码仓库与稳定版 `v1.0.0` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。

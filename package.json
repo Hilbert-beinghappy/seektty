@@ -1,6 +1,6 @@
 {
   "name": "seektty",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [
@@ -42,6 +42,8 @@
     "lib/*.js",
     "assets/seektty-tui.png",
     "assets/seektty-tui-dark.png",
+    "assets/seektty-code-light.png",
+    "assets/seektty-code-dark.png",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",

@@ -77,6 +77,23 @@ describe('Shiki terminal syntax rendering', () => {
     }
   })
 
+  it('uses theme status colors for Diff insertions and deletions', async () => {
+    truecolor()
+    const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)
+    try {
+      const rendered = highlighter.highlight([
+        '--- a/src/theme.ts',
+        '+++ b/src/theme.ts',
+        "-const codeTheme = 'dark'",
+        '+const codeTheme = interfaceTone',
+      ].join('\n'), 'diff').join('\n')
+      expect(rendered).toContain('\u001B[38;2;240;113;127m')
+      expect(rendered).toContain('\u001B[38;2;66;201;154m')
+    } finally {
+      highlighter.dispose()
+    }
+  })
+
   it('degrades unknown languages and NO_COLOR terminals without leaking control sequences', async () => {
     truecolor()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)

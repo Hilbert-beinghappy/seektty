@@ -18,6 +18,20 @@ SeekTTY joins Harness as a Profile Bundle and uses its native Agent, Session, mo
 
 The live view fills the terminal and keeps the composer and status at the bottom. Unused rows remain inside the conversation viewport and disappear as output grows; longer conversations continue into native terminal scrollback.
 
+## Custom interface and code themes, including VS Code imports
+
+Theme customization is a first-class SeekTTY feature: interface background and text colors are editable, code-block colors and syntax styles are independently editable, and `/theme import` accepts local VS Code JSON/JSONC themes with portable TextMate token colors. A palette of 3–16 colors can also generate a complete light or dark theme for preview and further adjustment.
+
+### TypeScript in the DeepSeek light interface
+
+![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png)
+
+### Tool parameters, file reads, and Diff in the DeepSeek dark interface
+
+![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png)
+
+Markdown fences disappear into continuous code surfaces. Assistant code, Shell commands, structured tool parameters, file reads, JSON, and Diff use the same active code theme; ordinary conversation text keeps the interface style. Every code background occupies continuous terminal cells instead of producing disconnected per-line stripes.
+
 ## Harness capabilities available in the TUI
 
 The current release covers these capabilities:
@@ -53,7 +67,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 The repository is public and can be installed directly from GitHub without private-repository authentication.
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
@@ -70,7 +84,7 @@ deepseek --profile team-tui
 The native dsh entry remains available:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 dsh --profile tui
 ```
 
@@ -116,7 +130,7 @@ Replace the former global package once. The new `deepseek` launcher then uses na
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
@@ -124,7 +138,7 @@ Custom Profiles migrate independently on first launch, for example `deepseek --p
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 ```
 
 ## Plug and unplug
@@ -138,7 +152,7 @@ dsh plugin --profile tui remove seektty
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 ```
 
 Installation writes directly to the target Harness Profile dependencies, Bundle order, and pnpm lockfile. TUI `/plugin` and native `dsh plugin` operate on that same Profile state.
@@ -204,4 +218,4 @@ pnpm test:stock
 
 The current compatibility baseline is official `0.1.0-rc.6`. For each new dsh release, update the exact dependencies and compatibility snapshots here, then complete the add/boot/remove/re-add contract before publishing the expanded range.
 
-The source repository is public. No npm package or GitHub Release is currently published; install from the GitHub source above.
+The source repository and the stable `v1.0.0` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.

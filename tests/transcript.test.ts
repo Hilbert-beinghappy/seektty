@@ -425,14 +425,17 @@ describe('conversation viewport', () => {
     vi.stubEnv('COLORTERM', 'truecolor')
     const transcript = new Transcript(() => 12)
     transcript.update(snapshot([
-      assistant('a1', '示例：\n\n```ts\nconst answer = 42\n```'),
+      assistant('a1', '示例：\n\n```ts\nconst answer = 42\nreturn answer\n```'),
     ]))
 
     const rendered = transcript.render(44)
-    const codeLine = rendered.find(row => row.includes('const answer'))
-    expect(codeLine).toBeDefined()
-    expect(codeLine).toContain('\u001B[48;2;17;24;39m')
-    expect(codeLine).toMatch(/ +\u001B\[0m\s*$/u)
+    const codeLines = rendered.filter(row => row.includes('const answer') || row.includes('return answer'))
+    expect(codeLines).toHaveLength(2)
+    for (const codeLine of codeLines) {
+      expect(codeLine).toContain('\u001B[48;2;17;24;39m')
+      expect(codeLine).toMatch(/ +\u001B\[0m\s*$/u)
+    }
+    expect(codeLines.map(codeLine => stripAnsi(codeLine).length)).toEqual([42, 42])
     expect(stripAnsi(rendered.join('\n'))).not.toContain('```')
   })
 
