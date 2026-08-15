@@ -276,12 +276,16 @@ function ansi(code: number, text: string): string {
 export interface TerminalTextStyle {
   readonly foreground?: string
   readonly background?: string
+  readonly bold?: boolean
+  readonly italic?: boolean
+  readonly underline?: boolean
+  readonly strikethrough?: boolean
 }
 
 /**
  * Paint untrusted token text using arbitrary theme colors.
  * @param text - raw token content.
- * @param style - foreground and background colors.
+ * @param style - foreground/background colors and portable code-token styles.
  * @returns escaped terminal text with capability-aware SGR sequences.
  */
 export function styleTerminalText(text: string, style: TerminalTextStyle): string {
@@ -291,6 +295,10 @@ export function styleTerminalText(text: string, style: TerminalTextStyle): strin
   const sequences: string[] = []
   if (style.foreground !== undefined) sequences.push(foregroundSequence(semanticColor(style.foreground), level))
   if (style.background !== undefined) sequences.push(backgroundSequence(semanticColor(style.background), level))
+  if (style.bold === true) sequences.push('\u001B[1m')
+  if (style.italic === true) sequences.push('\u001B[3m')
+  if (style.underline === true) sequences.push('\u001B[4m')
+  if (style.strikethrough === true) sequences.push('\u001B[9m')
   return sequences.length === 0 ? safeText : `${sequences.join('')}${safeText}${RESET}`
 }
 

@@ -6,6 +6,7 @@ import {
   normalizeAppearance,
   normalizeCustomTheme,
   normalizeThemeColor,
+  normalizeThemeColorOn,
   parseThemePalette,
   resolveTheme,
   themeContrast,
@@ -18,6 +19,7 @@ describe('theme colors and generated palettes', () => {
     expect(normalizeThemeColor('#abc')).toBe('#AABBCC')
     expect(normalizeThemeColor('rgb(10, 20, 30)')).toBe('#0A141E')
     expect(normalizeThemeColor('rgb(100% 0% 0%)')).toBe('#FF0000')
+    expect(normalizeThemeColorOn('#FFFFFF80', '#000000')).toBe('#808080')
     expect(() => normalizeThemeColor('rgba(1, 2, 3, .5)')).toThrow('无透明度')
   })
 
@@ -78,7 +80,7 @@ describe('durable custom theme validation', () => {
     })).toThrow('控制字符')
   })
 
-  it('normalizes complete manual theme colors and rejects unsupported sources', () => {
+  it('normalizes complete manual and VS Code theme values and rejects unsupported sources', () => {
     const theme = editableTheme(BUILT_IN_THEMES.dark, 'custom', 'Custom')
     const normalized = normalizeCustomTheme({
       ...theme,
@@ -87,7 +89,21 @@ describe('durable custom theme validation', () => {
     })
     expect(normalized.colors.brand).toBe('#3156D8')
     expect(normalized.syntax.keyword).toBe('#AABBCC')
-    expect(() => normalizeCustomTheme({ ...theme, source: 'vscode' })).toThrow('source')
+    const imported = normalizeCustomTheme({
+      ...theme,
+      source: 'vscode',
+      tokenColors: [{
+        scope: ['comment.line'],
+        foreground: '#abc',
+        fontStyle: ['italic', 'bold'],
+      }],
+    })
+    expect(imported.tokenColors[0]).toEqual({
+      scope: ['comment.line'],
+      foreground: '#AABBCC',
+      fontStyle: ['italic', 'bold'],
+    })
+    expect(() => normalizeCustomTheme({ ...theme, source: 'market' })).toThrow('source')
   })
 
   it('reports low contrast without silently changing manual colors', () => {

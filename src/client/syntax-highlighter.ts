@@ -135,7 +135,7 @@ export function syntaxLanguageForPath(path: string, explicit?: string): string |
 }
 
 function themeHash(theme: ResolvedTuiTheme): string {
-  const value = JSON.stringify([theme.tone, theme.colors, theme.syntax])
+  const value = JSON.stringify([theme.tone, theme.colors, theme.syntax, theme.tokenColors])
   let hash = 2166136261
   for (const character of value) {
     hash ^= character.codePointAt(0) ?? 0
@@ -150,6 +150,14 @@ function themeRegistration(theme: ResolvedTuiTheme, name: string): ThemeRegistra
     ...Object.entries(ROLE_SCOPES).map(([role, scope]) => ({
       scope: [...scope],
       settings: { foreground: theme.syntax[role as keyof typeof ROLE_SCOPES] },
+    })),
+    ...theme.tokenColors.map(rule => ({
+      scope: [...rule.scope],
+      settings: {
+        ...(rule.foreground === undefined ? {} : { foreground: rule.foreground }),
+        ...(rule.background === undefined ? {} : { background: rule.background }),
+        ...(rule.fontStyle === undefined ? {} : { fontStyle: rule.fontStyle.join(' ') }),
+      },
     })),
   ]
   return {
@@ -172,9 +180,14 @@ function safeTokenColor(value: string | undefined, fallback: string): string {
 }
 
 function renderToken(token: ThemedToken, theme: ResolvedTuiTheme): string {
+  const fontStyle = token.fontStyle ?? 0
   return styleTerminalText(token.content, {
     foreground: safeTokenColor(token.color, theme.syntax.foreground),
     background: safeTokenColor(token.bgColor, theme.syntax.background),
+    italic: (fontStyle & 1) !== 0,
+    bold: (fontStyle & 2) !== 0,
+    underline: (fontStyle & 4) !== 0,
+    strikethrough: (fontStyle & 8) !== 0,
   })
 }
 

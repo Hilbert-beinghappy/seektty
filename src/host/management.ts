@@ -15,6 +15,7 @@ import type {
 import {
   DEFAULT_TUI_THEME,
   MAX_CUSTOM_THEMES,
+  MAX_TEXTMATE_RULES,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
@@ -79,13 +80,20 @@ const SyntaxThemeColorsSchema = z.object({
   attribute: ThemeColorSchema.required(),
   regexp: ThemeColorSchema.required(),
 }).required()
+const TextMateRuleSchema = z.object({
+  scope: z.array(z.string().min(1).max(256)).min(1).max(64).required(),
+  foreground: ThemeColorSchema,
+  background: ThemeColorSchema,
+  fontStyle: z.array(z.union(['bold', 'italic', 'underline', 'strikethrough'])).max(4),
+})
 const CustomThemeSchema = z.object({
   id: z.string().pattern(/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u).max(48).required(),
   name: z.string().min(1).max(80).pattern(/^[^\u0000-\u001F\u007F-\u009F]+$/u).required(),
   tone: z.union(['dark', 'light']).required(),
-  source: z.union(['manual', 'palette']).required(),
+  source: z.union(['manual', 'palette', 'vscode']).required(),
   colors: ThemeUiColorsSchema,
   syntax: SyntaxThemeColorsSchema,
+  tokenColors: z.array(TextMateRuleSchema).max(MAX_TEXTMATE_RULES).default([]),
 })
 const AppearanceSettingsSchema = z.object({
   theme: z.string().pattern(/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)

@@ -23,7 +23,18 @@ export type TuiThemeId = TuiBuiltInTheme | `custom:${string}`
 export type TuiThemeTone = 'dark' | 'light'
 
 /** How one custom theme was originally created. */
-export type TuiThemeSource = 'manual' | 'palette'
+export type TuiThemeSource = 'manual' | 'palette' | 'vscode'
+
+/** Portable terminal styles imported from one VS Code TextMate rule. */
+export type TuiTokenFontStyle = 'bold' | 'italic' | 'underline' | 'strikethrough'
+
+/** One sanitized TextMate scope rule applied only inside code regions. */
+export interface TuiTextMateRule {
+  readonly scope: readonly string[]
+  readonly foreground?: string
+  readonly background?: string
+  readonly fontStyle?: readonly TuiTokenFontStyle[]
+}
 
 /** Complete terminal chrome palette persisted for one custom theme. */
 export interface TuiThemeUiColors {
@@ -69,6 +80,7 @@ export interface TuiCustomTheme {
   readonly source: TuiThemeSource
   readonly colors: TuiThemeUiColors
   readonly syntax: TuiSyntaxThemeColors
+  readonly tokenColors: readonly TuiTextMateRule[]
 }
 
 /** Complete appearance value owned by the SeekTTY Settings namespace. */
@@ -82,6 +94,9 @@ export const DEFAULT_TUI_THEME: TuiThemeId = 'dark'
 
 /** Maximum named themes accepted by one Settings document. */
 export const MAX_CUSTOM_THEMES = 32
+
+/** Maximum imported TextMate rules stored in one custom theme. */
+export const MAX_TEXTMATE_RULES = 4_096
 
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {

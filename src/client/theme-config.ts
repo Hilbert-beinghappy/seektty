@@ -2,13 +2,16 @@
 
 import {
   MAX_CUSTOM_THEMES,
+  MAX_TEXTMATE_RULES,
   type TuiAppearanceSettings,
   type TuiCustomTheme,
   type TuiSyntaxThemeColors,
+  type TuiTextMateRule,
   type TuiThemeId,
   type TuiThemeSource,
   type TuiThemeTone,
   type TuiThemeUiColors,
+  type TuiTokenFontStyle,
 } from '@deepseek-ai/dsh-tui-protocol'
 
 interface Rgb {
@@ -41,6 +44,7 @@ export interface ResolvedTuiTheme {
   readonly source: 'builtin' | TuiThemeSource
   readonly colors: TuiThemeUiColors
   readonly syntax: TuiSyntaxThemeColors
+  readonly tokenColors: readonly TuiTextMateRule[]
 }
 
 /** Dark/light generated candidates plus the automatically recommended direction. */
@@ -78,6 +82,7 @@ const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
     operator: '#91A7FF', punctuation: '#8993AA', tag: '#6682FF', attribute: '#E5AA59',
     regexp: '#F0717F',
   },
+  tokenColors: [],
 })
 
 const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
@@ -97,6 +102,7 @@ const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
     operator: '#3156D8', punctuation: '#667085', tag: '#3156D8', attribute: '#925700',
     regexp: '#C2384E',
   },
+  tokenColors: [],
 })
 
 /** Immutable built-in DeepSeek themes. */
@@ -194,6 +200,24 @@ export function normalizeThemeColor(value: string): string {
     throw new Error(`颜色 ${JSON.stringify(value)} 必须是无透明度的 HEX 或 RGB`)
   }
   return hexOf(parsed)
+}
+
+/**
+ * Normalize a VS Code color, compositing its optional alpha over an opaque background.
+ * @param value - VS Code HEX/RGB color value.
+ * @param background - opaque fallback layer used for alpha colors.
+ * @returns uppercase six-digit HEX.
+ */
+export function normalizeThemeColorOn(value: string, background: string): string {
+  const parsed = parseRgba(value)
+  if (parsed === undefined) throw new Error(`颜色 ${JSON.stringify(value)} 不是有效的 HEX 或 RGB`)
+  if (parsed.alpha === 1) return hexOf(parsed)
+  const base = rgbOf(normalizeThemeColor(background))
+  return hexOf({
+    red: parsed.red * parsed.alpha + base.red * (1 - parsed.alpha),
+    green: parsed.green * parsed.alpha + base.green * (1 - parsed.alpha),
+    blue: parsed.blue * parsed.alpha + base.blue * (1 - parsed.alpha),
+  })
 }
 
 function rgbOf(color: string): Rgb {
@@ -398,6 +422,7 @@ function candidateTheme(
     source: 'palette',
     colors: { text, muted, border, brand, accent, success, warning, danger, canvas, surface, selection },
     syntax: generatedSyntax(surface, text, muted, syntaxAccents),
+    tokenColors: [],
   }
   const paletteContrast = colors.reduce((sum, color) => sum + themeContrast(color, canvas), 0) / colors.length
   return { theme, score: themeContrast(text, canvas) * 2 + themeContrast(brand, canvas) + paletteContrast }
@@ -476,6 +501,53 @@ function colorRecord<T extends string>(
   return Object.fromEntries(keys.map(key => [key, normalizeThemeColor(stringOf(record, key, label))])) as Record<T, string>
 }
 
+const TOKEN_FONT_STYLES = new Set<TuiTokenFontStyle>(['bold', 'italic', 'underline', 'strikethrough'])
+
+function textMateRules(value: unknown): readonly TuiTextMateRule[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > MAX_TEXTMATE_RULES) {
+    throw new Error(`customThemes[].tokenColors 最多包含 ${String(MAX_TEXTMATE_RULES)} 条规则`)
+  }
+  return value.map((entry, index): TuiTextMateRule => {
+    const label = `customThemes[].tokenColors[${String(index)}]`
+    const record = recordOf(entry, label)
+    if (!Array.isArray(record.scope) || record.scope.length === 0 || record.scope.length > 64) {
+      throw new Error(`${label}.scope 必须包含 1–64 个 TextMate scope`)
+    }
+    const scope = [...new Set(record.scope.map((item) => {
+      if (typeof item !== 'string' || item === '' || item.length > 256 || /[\u0000-\u001F\u007F-\u009F]/u.test(item)) {
+        throw new Error(`${label}.scope 包含无效值`)
+      }
+      return item
+    }))]
+    const foreground = record.foreground === undefined
+      ? undefined
+      : normalizeThemeColor(stringOf(record, 'foreground', label))
+    const background = record.background === undefined
+      ? undefined
+      : normalizeThemeColor(stringOf(record, 'background', label))
+    let fontStyle: readonly TuiTokenFontStyle[] | undefined
+    if (record.fontStyle !== undefined) {
+      if (!Array.isArray(record.fontStyle)) throw new Error(`${label}.fontStyle 必须是数组`)
+      fontStyle = [...new Set(record.fontStyle.map((style) => {
+        if (typeof style !== 'string' || !TOKEN_FONT_STYLES.has(style as TuiTokenFontStyle)) {
+          throw new Error(`${label}.fontStyle 包含不支持的样式`)
+        }
+        return style as TuiTokenFontStyle
+      }))]
+    }
+    if (foreground === undefined && background === undefined && fontStyle === undefined) {
+      throw new Error(`${label} 没有颜色或代码字体样式`)
+    }
+    return {
+      scope,
+      ...(foreground === undefined ? {} : { foreground }),
+      ...(background === undefined ? {} : { background }),
+      ...(fontStyle === undefined ? {} : { fontStyle }),
+    }
+  })
+}
+
 /**
  * Validate and normalize one custom theme crossing the Settings boundary.
  * @param value - untrusted durable value.
@@ -491,7 +563,7 @@ export function normalizeCustomTheme(value: unknown): TuiCustomTheme {
   if (name === '' || name.length > 80) throw new Error('自定义主题名称必须为 1–80 个字符')
   if (/[\u0000-\u001F\u007F-\u009F]/u.test(name)) throw new Error('自定义主题名称不能包含终端控制字符')
   if (tone !== 'dark' && tone !== 'light') throw new Error(`自定义主题 tone ${JSON.stringify(tone)} 无效`)
-  if (source !== 'manual' && source !== 'palette') {
+  if (source !== 'manual' && source !== 'palette' && source !== 'vscode') {
     throw new Error(`自定义主题 source ${JSON.stringify(source)} 无效`)
   }
   return {
@@ -501,6 +573,7 @@ export function normalizeCustomTheme(value: unknown): TuiCustomTheme {
     source,
     colors: colorRecord(record.colors, UI_COLOR_KEYS, 'customThemes[].colors') as unknown as TuiThemeUiColors,
     syntax: colorRecord(record.syntax, SYNTAX_COLOR_KEYS, 'customThemes[].syntax') as unknown as TuiSyntaxThemeColors,
+    tokenColors: textMateRules(record.tokenColors),
   }
 }
 
@@ -567,6 +640,9 @@ export function themeContrastWarnings(theme: ResolvedTuiTheme | TuiCustomTheme):
     .filter(key => key !== 'background' && key !== 'foreground')
     .filter(key => themeContrast(theme.syntax[key], theme.syntax.background) < 3)
   if (lowTokens.length > 0) warnings.push(`代码颜色对比度偏低：${lowTokens.join('、')}`)
+  const lowImported = theme.tokenColors.filter(rule => rule.foreground !== undefined
+    && themeContrast(rule.foreground, rule.background ?? theme.syntax.background) < 3).length
+  if (lowImported > 0) warnings.push(`${String(lowImported)} 条导入的 TextMate 规则对比度低于 3:1`)
   return warnings
 }
 
@@ -582,8 +658,13 @@ export function editableTheme(theme: ResolvedTuiTheme, id: string, name: string)
     id,
     name,
     tone: theme.tone,
-    source: 'manual',
+    source: theme.source === 'vscode' ? 'vscode' : 'manual',
     colors: { ...theme.colors },
     syntax: { ...theme.syntax },
+    tokenColors: theme.tokenColors.map(rule => ({
+      ...rule,
+      scope: [...rule.scope],
+      ...(rule.fontStyle === undefined ? {} : { fontStyle: [...rule.fontStyle] }),
+    })),
   }
 }

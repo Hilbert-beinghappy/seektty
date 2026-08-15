@@ -61,6 +61,7 @@ import {
   themeIdFromName,
   type ResolvedTuiTheme,
 } from './theme-config.ts'
+import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import {
   background,
   color,
@@ -135,6 +136,48 @@ function argumentPair(args: string): { first: string; rest: string } {
   return match === null
     ? { first: '', rest: '' }
     : { first: match[1] ?? '', rest: match[2]?.trim() ?? '' }
+}
+
+function commandArguments(args: string): readonly string[] {
+  const values: string[] = []
+  let current = ''
+  let started = false
+  let quote: "'" | '"' | undefined
+  for (let index = 0; index < args.length; index += 1) {
+    const character = args[index] ?? ''
+    if (quote !== undefined) {
+      if (character === quote) {
+        quote = undefined
+      } else if (character === '\\' && quote === '"' && index + 1 < args.length) {
+        index += 1
+        current += args[index] ?? ''
+      } else {
+        current += character
+      }
+      started = true
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      started = true
+    } else if (/\s/u.test(character)) {
+      if (started) {
+        values.push(current)
+        current = ''
+        started = false
+      }
+    } else if (character === '\\' && index + 1 < args.length) {
+      index += 1
+      current += args[index] ?? ''
+      started = true
+    } else {
+      current += character
+      started = true
+    }
+  }
+  if (quote !== undefined) throw new Error('命令参数的引号没有闭合')
+  if (started) values.push(current)
+  return values
 }
 
 const THEME_UI_FIELDS: Readonly<Record<keyof TuiCustomTheme['colors'], string>> = {
@@ -890,8 +933,9 @@ export class TuiActions {
       case 'use': await this.themeUse(parsed.rest); return
       case 'edit': await this.themeEdit(parsed.rest); return
       case 'palette': await this.themePalette(parsed.rest); return
+      case 'import': await this.themeImport(parsed.rest); return
       case 'delete': await this.themeDelete(parsed.rest); return
-      default: throw new Error('用法：/theme [dark|light|use|edit|palette|delete]')
+      default: throw new Error('用法：/theme [dark|light|use|edit|palette|import|delete]')
     }
   }
 
@@ -905,18 +949,19 @@ export class TuiActions {
       ...appearance.customThemes.map(theme => ({
         id: customThemeId(theme),
         label: theme.name,
-        description: `${theme.tone === 'dark' ? '暗色' : '亮色'} · ${theme.source === 'palette' ? '颜色组生成' : '手动配色'}`,
+        description: `${theme.tone === 'dark' ? '暗色' : '亮色'} · ${theme.source === 'palette' ? '颜色组生成' : theme.source === 'vscode' ? 'VS Code 导入' : '手动配色'}`,
       })),
     ]
     choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
     choices.push(
       { id: '__edit__', label: '自定义颜色与代码高亮', description: '修改背景、文字和语法颜色' },
       { id: '__palette__', label: '用颜色组合自动配置', description: '输入 3–16 个 HEX/RGB 颜色代码' },
+      { id: '__import__', label: '导入 VS Code 主题', description: '本地 JSON/JSONC · 支持相对 include' },
       { id: '__delete__', label: '删除主题', description: '管理命名自定义主题' },
     )
     const selected = await this.host.overlays.select({
       title: '主题',
-      detail: '手动自定义颜色，或用颜色组合自动生成',
+      detail: '手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC',
       choices: choices.map(choice => ({
         ...choice,
         label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
@@ -926,6 +971,7 @@ export class TuiActions {
     })
     if (selected === undefined) return
     if (selected.id === '__palette__') await this.themePalette('')
+    else if (selected.id === '__import__') await this.themeImport('')
     else if (selected.id === '__edit__') await this.themeEdit('')
     else if (selected.id === '__delete__') await this.themeDelete('')
     else await this.activateTheme(selected.id as TuiThemeId)
@@ -1015,6 +1061,28 @@ export class TuiActions {
     const first = candidates[candidates.recommended]
     const alternate = candidates[candidates.recommended === 'dark' ? 'light' : 'dark']
     await this.previewAndSaveTheme(document, first, alternate)
+  }
+
+  private async themeImport(args: string): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const appearance = appearanceFromSettings(document)
+    const [first = '', ...rest] = commandArguments(args)
+    const looksLikePath = /^(?:[./~]|file:)/u.test(first) || /\.jsonc?$/iu.test(first)
+    const requestedName = looksLikePath ? '' : first
+    const suppliedPath = (looksLikePath ? [first, ...rest] : rest).join(' ')
+    const path = suppliedPath !== '' ? suppliedPath : await this.host.overlays.input({
+      title: '导入 VS Code 主题',
+      detail: '读取本地 JSON/JSONC；相对 include 会从主题文件目录递归解析。',
+      placeholder: '~/.vscode/extensions/.../themes/theme.json',
+      options: { width: '95%', maxHeight: '80%', anchor: 'center', margin: 1 },
+    })
+    if (path === undefined || path.trim() === '') return
+    const loaded = await loadVsCodeThemeFile(path)
+    const name = requestedName === '' ? loaded.suggestedName : requestedName
+    const identity = await this.themeIdentity(name, appearance)
+    if (identity === undefined) return
+    await this.previewAndSaveTheme(document, convertVsCodeTheme(loaded, identity.id, identity.name))
   }
 
   private async themeEdit(requested: string): Promise<void> {
@@ -1115,7 +1183,7 @@ export class TuiActions {
       const normalized = normalizeThemeColor(value)
       theme = section === 'ui'
         ? { ...theme, source: 'manual', colors: { ...theme.colors, [key]: normalized } }
-        : { ...theme, source: 'manual', syntax: { ...theme.syntax, [key]: normalized } }
+        : { ...theme, source: 'manual', syntax: { ...theme.syntax, [key]: normalized }, tokenColors: [] }
     }
   }
 

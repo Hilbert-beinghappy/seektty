@@ -77,6 +77,7 @@ type TranscriptRow = ({
   readonly language?: string
   readonly caption?: string
   readonly lineNumbers?: readonly number[]
+  readonly prefix?: string
 } | {
   readonly format: 'image'
   readonly key: string
@@ -118,16 +119,19 @@ class CodeRow implements Component {
 
   render(width: number): string[] {
     const safeWidth = Math.max(1, width)
+    const requestedPrefix = escapeTerminalText(this.row.prefix ?? '')
+    const prefix = visibleWidth(requestedPrefix) < safeWidth ? requestedPrefix : ''
+    const prefixWidth = visibleWidth(prefix)
     const numbers = this.row.lineNumbers
     const highest = numbers?.reduce((value, number) => Math.max(value, number), 0) ?? 0
-    const numberWidth = numbers !== undefined && safeWidth >= 8
+    const numberWidth = numbers !== undefined && safeWidth - prefixWidth >= 8
       ? String(highest).length + 2
       : 0
-    const codeWidth = Math.max(1, safeWidth - numberWidth)
+    const codeWidth = Math.max(1, safeWidth - prefixWidth - numberWidth)
     const highlighted = highlightCodeLines(this.row.text, this.row.language)
     const rows: string[] = []
     if (this.row.caption !== undefined) {
-      rows.push(...new Text(color.muted(escapeTerminalText(this.row.caption)), 0, 0).render(safeWidth))
+      rows.push(...new Text(`${color.muted(prefix)}${color.muted(escapeTerminalText(this.row.caption))}`, 0, 0).render(safeWidth))
     }
     for (const [index, sourceLine] of highlighted.entries()) {
       const wrapped = wrapTextWithAnsi(sourceLine, codeWidth)
@@ -140,7 +144,12 @@ class CodeRow implements Component {
             ? `${String(number).padStart(numberWidth - 1)} `
             : ' '.repeat(numberWidth))
         const padded = `${part}${' '.repeat(Math.max(0, codeWidth - visibleWidth(part)))}`
-        rows.push(`${gutter}${background.code(padded)}`)
+        const connector = prefix === ''
+          ? ''
+          : this.row.caption === undefined && index === 0 && partIndex === 0
+            ? color.muted(prefix)
+            : ' '.repeat(prefixWidth)
+        rows.push(`${connector}${gutter}${background.code(padded)}`)
       }
     }
     return rows
@@ -388,6 +397,11 @@ function toolTitle(node: ToolResultNode | RunningToolCall): string {
   const name = 'kind' in node ? node.call?.name : node.name
   const productTitle = name === undefined ? undefined : PRODUCT_TOOL_TITLES[name]
   if (productTitle !== undefined) return productTitle
+  const callView = node.callView
+  if (callView?.card === 'terminal') {
+    const description = callView.description?.trim()
+    return description === undefined || description === '' ? '执行 Shell 指令' : description
+  }
   if ('kind' in node) {
     return node.resultView?.title ?? node.callView?.title ?? node.call?.name ?? node.callId
   }
@@ -447,28 +461,66 @@ function contentDetails(content: readonly unknown[]): ToolDetail[] {
   })
 }
 
-function rawInputDetail(value: unknown): ToolDetail {
-  return typeof value === 'string'
-    ? { kind: 'plain', text: value }
-    : { kind: 'code', text: jsonText(value), language: 'json' }
+function invocationCode(name: string, value: unknown): ToolDetail {
+  const argumentsText = typeof value === 'object' && value !== null
+    && !Array.isArray(value) && Object.keys(value).length === 0
+    ? ''
+    : jsonText(value)
+  return { kind: 'code', text: `${name}(${argumentsText})`, language: 'typescript' }
+}
+
+function toolInvocationDetail(name: string, argsRaw: string): ToolDetail {
+  try {
+    return invocationCode(name, JSON.parse(argsRaw))
+  } catch {
+    return { kind: 'code', text: `${name}(${argsRaw})`, language: 'typescript' }
+  }
+}
+
+function fallbackInvocationDetail(value: unknown): ToolDetail {
+  return invocationCode('tool', value)
+}
+
+function terminalCommandDetail(value: unknown): ToolDetail | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const view = value as Readonly<Record<string, unknown>>
+  if (view.card !== 'terminal' || typeof view.title !== 'string' || view.title === '') return undefined
+  return { kind: 'code', text: `$ ${view.title}`, language: 'bash' }
+}
+
+function readInvocationFallback(node: ToolResultNode): ToolDetail | undefined {
+  const result = node.resultView
+  if (result?.card === 'read') return invocationCode('read', { file_path: String(result.path) })
+  const call = node.callView
+  if (call?.card !== 'generic' || call.kind !== 'read') return undefined
+  const locations = Array.isArray(call.locations) ? call.locations as readonly unknown[] : []
+  const location = locations.find((candidate): candidate is { readonly path: string } =>
+    typeof candidate === 'object' && candidate !== null
+    && 'path' in candidate && typeof candidate.path === 'string' && candidate.path !== '')
+  return location === undefined ? undefined : invocationCode('read', { file_path: location.path })
+}
+
+function settledInvocationDetails(node: ToolResultNode): ToolDetail[] {
+  const call = node.callView
+  const details: ToolDetail[] = []
+  if (call?.card === 'terminal') {
+    const command = terminalCommandDetail(call)
+    if (command !== undefined) details.push(command)
+  } else if (call?.card === 'diff') {
+    details.push({ kind: 'code', text: diffText(call.diffs), language: 'diff' })
+  } else if (node.call !== null) {
+    details.push(toolInvocationDetail(node.call.name, node.call.argsRaw))
+  } else if (call?.card === 'generic' && call.rawInput !== undefined) {
+    details.push(fallbackInvocationDetail(call.rawInput))
+  }
+  const readFallback = details.length === 0 ? readInvocationFallback(node) : undefined
+  if (readFallback !== undefined) details.push(readFallback)
+  return details
 }
 
 function viewDetails(node: ToolResultNode): ToolDetail[] {
-  const details: ToolDetail[] = []
-  const call = node.callView
-  if (call === null && node.call?.argsRaw !== undefined) {
-    details.push({ kind: 'code', text: prettyArgs(node.call.argsRaw), language: 'json' })
-  }
-  if (call?.card === 'generic') {
-    if (call.rawInput !== undefined) details.push(rawInputDetail(call.rawInput))
-    if (call.content !== undefined) details.push(...contentDetails(call.content))
-  }
-  if (call?.card === 'terminal') {
-    if (call.description !== undefined) details.push({ kind: 'plain', text: call.description })
-    details.push({ kind: 'plain', text: `${call.cwd ?? '(当前工作区)'}\n$ ${call.title}` })
-  }
-  if (call?.card === 'diff') details.push({ kind: 'code', text: diffText(call.diffs), language: 'diff' })
   const result = node.resultView
+  const details = settledInvocationDetails(node)
   if (result?.card === 'terminal') {
     if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
     if (result.exitCode !== undefined) details.push({ kind: 'plain', text: `退出码 ${result.exitCode}` })
@@ -534,22 +586,14 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
 function runningViewDetails(node: RunningToolCall): ToolDetail[] {
   const view = node.callView
   if (view?.card === 'terminal') {
-    return [
-      ...(view.description === undefined ? [] : [{ kind: 'plain' as const, text: view.description }]),
-      { kind: 'plain', text: `${view.cwd ?? '(当前工作区)'}\n$ ${view.title}` },
-    ]
+    const command = terminalCommandDetail(view)
+    return command === undefined ? [] : [command]
   }
   if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs), language: 'diff' }]
-  if (view?.card === 'generic') {
-    return [
-      ...(view.rawInput === undefined ? [] : [rawInputDetail(view.rawInput)]),
-      ...(view.content === undefined ? [] : contentDetails(view.content)),
-    ]
-  }
-  return [{ kind: 'code', text: prettyArgs(node.argsRaw), language: 'json' }]
+  return [toolInvocationDetail(node.name, node.argsRaw)]
 }
 
-function detailRow(detail: ToolDetail): TranscriptRow {
+function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
   if (detail.kind === 'plain') return { format: 'plain', text: detail.text }
   if (detail.kind === 'markdown') return { format: 'markdown', text: detail.text }
   return {
@@ -558,27 +602,32 @@ function detailRow(detail: ToolDetail): TranscriptRow {
     ...(detail.language === undefined ? {} : { language: detail.language }),
     ...(detail.caption === undefined ? {} : { caption: detail.caption }),
     ...(detail.lineNumbers === undefined ? {} : { lineNumbers: detail.lineNumbers }),
+    prefix: `${'  '.repeat(depth + 1)}⎿  `,
   }
 }
 
 function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): TranscriptRow[] {
   const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
   if ('kind' in block) {
-    const duration = block.callTime === null ? '' : ` · ${Math.max(0, block.time - block.callTime)} ms`
-    const state = settledToolFailed(block) ? color.danger('失败') : color.success('完成')
+    const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
+    const failed = settledToolFailed(block)
+    const details = preferences.tools === 'expanded'
+      ? viewDetails(block)
+      : settledInvocationDetails(block)
     return [
-      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))} · ${state}${duration}` },
-      ...(preferences.tools === 'expanded' ? viewDetails(block).map(detailRow) : []),
+      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger('失败')}` : ''}${duration}` },
+      ...details.map(detail => detailRow(detail, depth)),
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
   }
+  const details = runningViewDetails(block)
   return [
     {
       format: 'plain',
       text: `${prefix}${color.accent(toolTitle(block))} · ${color.warning('运行中')}`,
       pulse: 'marker',
     },
-    ...(preferences.tools === 'expanded' ? runningViewDetails(block).map(detailRow) : []),
+    ...details.map(detail => detailRow(detail, depth)),
     ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
   ]
 }
@@ -709,6 +758,12 @@ function durationText(milliseconds: number): string {
   if (seconds < 60) return `${String(Math.round(seconds * 10) / 10)}s`
   const whole = Math.round(seconds)
   return `${String(Math.floor(whole / 60))}m${String(whole % 60)}s`
+}
+
+function toolDurationText(milliseconds: number): string {
+  if (milliseconds <= 0) return '<1ms'
+  if (milliseconds < 1_000) return `${String(Math.round(milliseconds))}ms`
+  return durationText(milliseconds)
 }
 
 function tokenText(value: number): string {

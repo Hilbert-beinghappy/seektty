@@ -53,6 +53,30 @@ describe('Shiki terminal syntax rendering', () => {
     }
   })
 
+  it('applies imported TextMate colors and portable styles only to code tokens', async () => {
+    truecolor()
+    const imported = {
+      ...BUILT_IN_THEMES.dark,
+      id: 'custom:vscode-test' as const,
+      name: 'VS Code Test',
+      source: 'vscode' as const,
+      tokenColors: [{
+        scope: ['comment'],
+        foreground: '#FF66CC',
+        fontStyle: ['italic', 'bold'] as const,
+      }],
+    }
+    const highlighter = await SyntaxHighlighter.create(imported, () => undefined)
+    try {
+      const rendered = highlighter.highlight('// imported comment', 'typescript').join('\n')
+      expect(rendered).toContain('\u001B[38;2;255;102;204m')
+      expect(rendered).toContain('\u001B[1m')
+      expect(rendered).toContain('\u001B[3m')
+    } finally {
+      highlighter.dispose()
+    }
+  })
+
   it('degrades unknown languages and NO_COLOR terminals without leaking control sequences', async () => {
     truecolor()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)

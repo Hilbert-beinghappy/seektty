@@ -32,7 +32,7 @@ The current release covers these capabilities:
 | Human interaction | Single choice, multi-select, custom answers, skip, cancel, plan review, and `/pending` recovery when an interaction needs to be retried |
 | Image attachments | Add PNG, JPEG, GIF, or WebP by path or paste; enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
 | Plan, Goal, Todo, and compaction | Native `/plan`, `/goal`, and `/compact` commands with plan review, goal state, Todo counts, and compaction records in the transcript |
-| Tools and produced files | Dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted JSON and Diff views, safe native terminal ANSI, generic fallback cards, produced-file listing, path copy, and confirmed external open |
+| Tools and produced files | `◆ action · duration` headers with connected invocation code, dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted Shell/JSON/Diff views, safe native terminal ANSI, generic fallback cards, produced-file listing, path copy, and confirmed external open |
 | Subagents | Inspect direct children, activity, tree state, token use, and duration; open continuable or read-only sessions and stop an active child turn |
 | Background jobs and workflows | Job type, status, start/end times, duration, and detail views; workflow phases, members, results, and failure states in the transcript |
 | Statistics and trajectory | Per-turn steps, LLM/tool time, first-token latency, throughput, cache hit, input/output tokens, model requests, running calls, and structured trajectory inspection |
@@ -42,7 +42,7 @@ The current release covers these capabilities:
 | Skills and MCP | Dynamic user-invocable Skill discovery and native command insertion; MCP tools, instances, settings, load state, and separate process/remote-service risk information |
 | Feedback | Session feedback plus positive/negative Assistant-message ratings, optional notes, and feedback removal |
 | Status and diagnostics | Harness, Node, platform, Profile, workspace, session, mode, model, permission, pnpm, plugin state, and actionable diagnostics |
-| Themes | DeepSeek dark/light plus named custom themes; manual background, text, and syntax-highlight colors; automatic theme generation from 3–16 color codes; live preview, contrast warnings, True Color/256-color/16-color fallbacks, and `NO_COLOR` |
+| Themes | DeepSeek dark/light plus named custom themes; manual colors; automatic generation from 3–16 colors; local VS Code JSON/JSONC import with TextMate colors and portable token styles; live preview, contrast warnings, terminal-color fallbacks, and `NO_COLOR` |
 
 Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, Skills, MCP, and marketplace sources are discovered from the running Harness. New capabilities registered by upstream or third-party Bundles enter the dynamic catalogs, with Schema controls, structured details, and actionable diagnostics available while dedicated views evolve.
 
@@ -164,14 +164,15 @@ SeekTTY starts with its DeepSeek dark theme. `/theme` opens a complete theme cen
 /theme use <name>
 /theme edit [name]
 /theme palette [name]
+/theme import [name] [local-file]
 /theme delete <name>
 ```
 
-Theme customization has two paths. `/theme edit` changes the TUI background and text colors plus the code syntax-highlight colors. `/theme palette` accepts 3–16 HEX/RGB color codes, automatically builds dark and light candidates, and opens a live preview before saving. Low-contrast manual colors are never silently replaced; the preview identifies the affected roles and asks for a second confirmation.
+Theme customization has three paths. `/theme edit` changes the TUI background and text colors plus the code syntax-highlight colors. `/theme palette` accepts 3–16 HEX/RGB color codes and builds dark and light candidates. `/theme import` reads a local VS Code JSON/JSONC theme, recursively resolves relative `include` files, maps editor and semantic-token colors, and preserves portable TextMate foreground, background, bold, italic, underline, and strikethrough rules. Every path opens a live preview before saving. Low-contrast colors are never silently replaced; the preview identifies the affected roles and asks for a second confirmation.
 
-Custom themes cover the terminal canvas, panels, selection, text, border, brand and status colors, code background and foreground, and semantic roles for comments, keywords, strings, numbers, constants, functions, types, variables, properties, parameters, operators, punctuation, tags, attributes, and regular expressions. Common grammars are ready at startup; other supported grammars load on demand and redraw in place. Theme changes recolor existing messages without moving the transcript, losing expanded state, or changing the draft.
+Custom themes cover the terminal canvas, panels, selection, text, border, brand and status colors, code background and foreground, and semantic roles for comments, keywords, strings, numbers, constants, functions, types, variables, properties, parameters, operators, punctuation, tags, attributes, and regular expressions. Assistant Markdown code, Shell invocations, structured tool parameters, file reads, JSON, and Diff all use the same code theme. Tool calls render as a compact action/duration header followed by `⎿`-connected invocation code; collapsed cards retain the invocation while expanded cards add results. Common grammars are ready at startup; other supported grammars load on demand and redraw in place. Theme changes recolor existing messages without moving the transcript, losing expanded state, or changing the draft.
 
-Theme selection and named definitions live in the `seektty-appearance` Harness Settings namespace as one revision-protected update. `/settings` can therefore edit the same data through its generic Schema UI. Theme names are case-insensitively unique; overwrites and deletion require confirmation, and deleting the active theme atomically returns to DeepSeek dark. Terminal fonts remain controlled by the terminal; SeekTTY theme customization stays focused on the two workflows above.
+Theme selection and named definitions live in the `seektty-appearance` Harness Settings namespace as one revision-protected update. `/settings` can therefore edit the same data through its generic Schema UI. Theme names are case-insensitively unique; overwrites and deletion require confirmation, and deleting the active theme atomically returns to DeepSeek dark. VS Code font families and sizes are deliberately ignored because the terminal owns the character-grid font; imported bold/italic and related styles apply only to code tokens and never restyle ordinary Chinese, English, system text, or tool titles.
 
 ## Verified scope
 

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
 import type { OverlayQueue } from '../src/client/overlays.ts'
@@ -135,6 +138,39 @@ describe('/theme commands', () => {
     expect(state.mutate).not.toHaveBeenCalled()
     expect(host.applyTheme).toHaveBeenCalledTimes(2)
     expect(host.applyTheme).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'dark' }))
+  })
+
+  it('imports a local VS Code JSONC theme and saves it through Harness Settings', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'seektty-theme-action-'))
+    try {
+      const themeDirectory = join(root, 'themes with spaces')
+      await mkdir(themeDirectory)
+      const path = join(themeDirectory, 'ocean.jsonc')
+      await writeFile(path, `{
+        "name": "Ocean Imported",
+        "type": "dark",
+        "colors": { "editor.background": "#0B1020", "editor.foreground": "#E8ECF5" },
+        "tokenColors": [
+          { "scope": "keyword", "settings": { "foreground": "#91A7FF", "fontStyle": "bold" } }
+        ]
+      }`, 'utf8')
+      const state = settingsState({ theme: 'dark', customThemes: [] })
+      const select = vi.fn().mockResolvedValue({ id: 'apply', label: '应用并保存' })
+      const { actions, host } = actionHarness(state.settings, { select } as Partial<OverlayQueue>)
+
+      await actions.execute('theme', `import "${path}"`)
+
+      const appearance = state.current().value as TuiAppearanceSettings
+      expect(appearance.theme).toBe('custom:ocean-imported')
+      expect(appearance.customThemes[0]).toMatchObject({
+        name: 'Ocean Imported',
+        source: 'vscode',
+        tokenColors: [{ scope: ['keyword'], foreground: '#91A7FF', fontStyle: ['bold'] }],
+      })
+      expect(host.applyTheme).toHaveBeenCalledTimes(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('requires confirmation before editing and overwriting a named theme', async () => {

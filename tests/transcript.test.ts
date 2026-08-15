@@ -102,13 +102,17 @@ function tool(
   callView: unknown,
   resultView: unknown,
   content: readonly unknown[] = [],
+  call: { readonly name: string; readonly argsRaw: string } = {
+    name: 'fixture_tool',
+    argsRaw: '{"path":"src/index.ts"}',
+  },
 ): ChatConversationViewNode {
   return {
     ...chatNode(key, {
       root: {
         kind: 'tool-result',
         callId: key,
-        call: { name: 'fixture_tool', argsRaw: '{"path":"src/index.ts"}' },
+        call,
         callView,
         resultView,
         content,
@@ -195,12 +199,17 @@ describe('conversation viewport', () => {
     transcript.update(snapshot([], {
       runningCalls: [{
         callId: 'call-1',
-        name: 'Russia Ukraine war latest news ceasefire 2025',
-        argsRaw: '{}',
+        name: 'web_search',
+        argsRaw: '{"query":"Russia Ukraine war latest news ceasefire 2025"}',
         turn: 1,
         step: 1,
         time: 1,
-        callView: null,
+        callView: {
+          card: 'generic',
+          title: 'Russia Ukraine war latest news ceasefire 2025',
+          kind: 'search',
+          rawInput: 'Russia Ukraine war latest news ceasefire 2025',
+        },
         subCalls: [],
       }],
     }))
@@ -208,6 +217,8 @@ describe('conversation viewport', () => {
     const dim = transcript.render(80).join('\n')
     expect(dim).toContain('\u001B[38;2;52;65;95m◆')
     expect(dim).toContain('Russia Ukraine war latest news ceasefire 2025')
+    expect(dim).toContain('web_search({')
+    expect(dim).toContain('"query": "Russia Ukraine war latest news ceasefire 2025"')
     expect(dim).toContain('运行中')
 
     vi.advanceTimersByTime(640)
@@ -391,11 +402,82 @@ describe('conversation viewport', () => {
     expect(stripAnsi(rendered.join('\n'))).not.toContain('```')
   })
 
+  it('renders tool headers as action and duration with connected themed invocation code', () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const transcript = new Transcript(() => 16)
+    transcript.update(snapshot([
+      tool(
+        'terminal-1',
+        {
+          card: 'terminal',
+          title: 'printf "%s\\n" "$HOME"',
+          description: '检查主题支持',
+          cwd: '/tmp',
+        },
+        { card: 'terminal', output: 'RESULT', exitCode: 0 },
+      ),
+    ]))
+
+    const rendered = transcript.render(70)
+    const plain = stripAnsi(rendered.join('\n'))
+    const command = rendered.find(row => row.includes('$ printf'))
+    expect(plain).toContain('◆ 检查主题支持 · 15ms')
+    expect(plain).not.toContain('完成')
+    expect(plain).not.toContain('RESULT')
+    expect(command).toContain('⎿')
+    expect(command).toContain('\u001B[48;2;17;24;39m')
+  })
+
+  it('shows structured tool parameters as connected JSON code while collapsed', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      tool(
+        'json-1',
+        { card: 'generic', title: 'Inspect', rawInput: { path: 'src/index.ts', line: 12 } },
+        { card: 'generic', content: [{ type: 'text', text: 'done' }] },
+      ),
+    ]))
+
+    const rendered = transcript.render(60).join('\n')
+    expect(rendered).toContain('◆ Inspect · 15ms')
+    expect(rendered).toContain('⎿  fixture_tool({')
+    expect(rendered).toContain('"path": "src/index.ts"')
+    expect(rendered).not.toContain('done')
+  })
+
+  it('renders a search as its tool invocation instead of repeating the title', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      tool(
+        'search-1',
+        {
+          card: 'generic',
+          title: 'Donald Trump latest news today',
+          kind: 'search',
+          rawInput: 'Donald Trump latest news today',
+        },
+        { card: 'generic', content: [{ type: 'text', text: 'search result' }] },
+        [],
+        { name: 'web_search', argsRaw: '{"query":"Donald Trump latest news today"}' },
+      ),
+    ]))
+
+    const rendered = transcript.render(80).join('\n')
+    expect(rendered).toContain('◆ Donald Trump latest news today · 15ms')
+    expect(rendered).toContain('⎿  web_search({')
+    expect(rendered).toContain('"query": "Donald Trump latest news today"')
+    expect(rendered.split('\n').map(line => line.trim())).not.toContain('Donald Trump latest news today')
+  })
+
   it('routes only code regions through syntax highlighting and leaves Chinese prose untouched', () => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm-256color')
     vi.stubEnv('COLORTERM', 'truecolor')
-    const highlighter = vi.fn((code: string) => code.split('\n'))
+    const highlighter = vi.fn((code: string) => code.split('\n').map(line => `\u001B[3m${line}\u001B[0m`))
     setCodeHighlighter(highlighter)
     const transcript = new Transcript(() => 16)
     transcript.update(snapshot([
@@ -407,6 +489,8 @@ describe('conversation viewport', () => {
     const highlighted = highlighter.mock.calls.map(call => call[0]).join('\n')
     expect(rendered).toContain('普通中文输入，不应高亮')
     expect(rendered).toContain('中文说明保持原样。')
+    expect(rendered.split('\n').find(line => line.includes('中文说明保持原样。'))).not.toContain('\u001B[3m')
+    expect(rendered.split('\n').find(line => line.includes('const answer = 42'))).toContain('\u001B[3m')
     expect(highlighted).toContain('const answer = 42')
     expect(highlighted).not.toContain('普通中文输入')
     expect(highlighted).not.toContain('中文说明')
@@ -431,13 +515,52 @@ describe('conversation viewport', () => {
             { number: 11, text: 'export { answer }' },
           ],
         },
+        [],
+        { name: 'read', argsRaw: '{"file_path":"src/example.ts","offset":10,"limit":2}' },
       ),
     ]))
 
     const rendered = transcript.render(60).join('\n')
     expect(rendered).toContain('src/example.ts · 10–11 / 30')
+    expect(rendered).toContain('⎿  read({')
+    expect(rendered).toContain('"file_path": "src/example.ts"')
+    expect(rendered).toContain('⎿  src/example.ts · 10–11 / 30')
     expect(rendered).toContain('10 const answer = 42')
     expect(rendered).toContain('11 export { answer }')
+  })
+
+  it('keeps the actual read invocation connected while tool results are collapsed', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      tool(
+        'read-collapsed',
+        {
+          card: 'generic',
+          title: 'Reading bwq1gladk',
+          kind: 'read',
+          locations: [{ path: 'tasks/bwq1gladk.output' }],
+        },
+        {
+          card: 'read',
+          path: '/private/tmp/claude-501/tasks/bwq1gladk.output',
+          offset: 1,
+          totalLines: 1,
+          lines: [{ number: 1, text: 'complete' }],
+        },
+        [],
+        {
+          name: 'read',
+          argsRaw: '{"file_path":"/private/tmp/claude-501/tasks/bwq1gladk.output"}',
+        },
+      ),
+    ]))
+
+    const rendered = transcript.render(100).join('\n')
+    expect(rendered).toContain('◆ Reading bwq1gladk · 15ms')
+    expect(rendered).toContain('  ⎿  read({')
+    expect(rendered).toContain('"file_path": "/private/tmp/claude-501/tasks/bwq1gladk.output"')
+    expect(rendered).not.toContain('complete')
   })
 
   it('highlights tool JSON and diffs while leaving terminal ANSI output untouched', () => {
@@ -478,7 +601,7 @@ describe('conversation viewport', () => {
     expect(rendered).toContain('diff -- src/index.ts')
     expect(rendered).toContain('+new')
     expect(rendered).toContain('\u001B[31mRED\u001B[0m')
-    expect(highlighter.mock.calls.map(call => call[1])).toEqual(expect.arrayContaining(['json', 'diff']))
+    expect(highlighter.mock.calls.map(call => call[1])).toEqual(expect.arrayContaining(['typescript', 'diff']))
     expect(highlighter.mock.calls.some(call => call[0].includes('RED'))).toBe(false)
   })
 
