@@ -13,6 +13,7 @@ import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
   type TuiAppearanceSettings,
+  type TuiCodeThemeId,
   type TuiCustomTheme,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
@@ -47,15 +48,18 @@ import {
   appearanceFromSettings,
   appearanceSettings,
   deleteCustomTheme,
+  saveCodeTheme,
   saveCustomTheme,
   saveTheme,
   themeFromAppearance,
 } from './appearance.ts'
 import {
+  composeResolvedTheme,
   editableTheme,
   generateThemeCandidates,
   normalizeCustomTheme,
   normalizeThemeColor,
+  resolveCodeTheme,
   resolveTheme,
   themeContrastWarnings,
   themeIdFromName,
@@ -219,7 +223,7 @@ function customThemeId(theme: TuiCustomTheme): TuiThemeId {
 }
 
 function resolvedCustomTheme(theme: TuiCustomTheme): ResolvedTuiTheme {
-  return { ...theme, id: customThemeId(theme) }
+  return { ...theme, id: customThemeId(theme), syntaxTone: theme.tone }
 }
 
 function themePreviewText(theme: TuiCustomTheme, warnings: readonly string[]): string {
@@ -930,12 +934,13 @@ export class TuiActions {
       case '': await this.themeCenter(); return
       case 'dark':
       case 'light': await this.activateTheme(parsed.command); return
+      case 'code': await this.themeCode(parsed.rest); return
       case 'use': await this.themeUse(parsed.rest); return
       case 'edit': await this.themeEdit(parsed.rest); return
       case 'palette': await this.themePalette(parsed.rest); return
       case 'import': await this.themeImport(parsed.rest); return
       case 'delete': await this.themeDelete(parsed.rest); return
-      default: throw new Error('用法：/theme [dark|light|use|edit|palette|import|delete]')
+      default: throw new Error('用法：/theme [dark|light|code|use|edit|palette|import|delete]')
     }
   }
 
@@ -943,6 +948,7 @@ export class TuiActions {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe())
     const appearance = appearanceFromSettings(document)
+    const activeCodeTheme = resolveCodeTheme(appearance)
     const choices: OverlayChoice[] = [
       { id: 'dark', label: 'DeepSeek 暗色', description: '内置 · 深灰蓝画布' },
       { id: 'light', label: 'DeepSeek 亮色', description: '内置 · 柔和冷白画布' },
@@ -954,6 +960,11 @@ export class TuiActions {
     ]
     choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
     choices.push(
+      {
+        id: '__code__',
+        label: '代码块主题',
+        description: `${appearance.codeTheme === 'auto' ? '自动匹配' : '独立指定'} · 当前 ${activeCodeTheme.name}`,
+      },
       { id: '__edit__', label: '自定义颜色与代码高亮', description: '修改背景、文字和语法颜色' },
       { id: '__palette__', label: '用颜色组合自动配置', description: '输入 3–16 个 HEX/RGB 颜色代码' },
       { id: '__import__', label: '导入 VS Code 主题', description: '本地 JSON/JSONC · 支持相对 include' },
@@ -970,7 +981,8 @@ export class TuiActions {
       options: { width: 68, maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     if (selected === undefined) return
-    if (selected.id === '__palette__') await this.themePalette('')
+    if (selected.id === '__code__') await this.themeCode('')
+    else if (selected.id === '__palette__') await this.themePalette('')
     else if (selected.id === '__import__') await this.themeImport('')
     else if (selected.id === '__edit__') await this.themeEdit('')
     else if (selected.id === '__delete__') await this.themeDelete('')
@@ -982,7 +994,7 @@ export class TuiActions {
     const document = appearanceSettings(await bridge.describe())
     const appearance = appearanceFromSettings(document)
     const resolved = resolveTheme(appearance, target)
-    if (target === appearance.theme) {
+    if (target === appearance.theme && appearance.codeTheme === 'auto') {
       this.host.notice(`${resolved.name}已启用`, 'info')
       return
     }
@@ -1004,6 +1016,54 @@ export class TuiActions {
       candidate.id === requested || candidate.name.toLowerCase() === folded)
     if (theme === undefined) throw new Error(`找不到主题 ${JSON.stringify(value)}`)
     await this.activateTheme(customThemeId(theme))
+  }
+
+  private async themeCode(value: string): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe())
+    const appearance = appearanceFromSettings(document)
+    let target: TuiCodeThemeId | undefined
+    if (value !== '') {
+      if (value === 'auto' || value === 'dark' || value === 'light') target = value
+      else {
+        const requested = value.startsWith('custom:') ? value.slice('custom:'.length) : value
+        const folded = requested.toLowerCase()
+        const custom = appearance.customThemes.find(candidate =>
+          candidate.id === requested || candidate.name.toLowerCase() === folded)
+        if (custom === undefined) throw new Error(`找不到代码主题 ${JSON.stringify(value)}`)
+        target = customThemeId(custom)
+      }
+    } else {
+      const selected = await this.host.overlays.select({
+        title: '代码块主题',
+        detail: '只改变代码块、工具指令、文件内容、JSON 与 Diff；界面颜色保持不变。',
+        choices: [
+          {
+            id: 'auto',
+            label: `${currentMark(appearance.codeTheme === 'auto')}自动匹配`,
+            description: '代码背景、高亮颜色和暗亮方向跟随界面主题',
+          },
+          { id: 'dark', label: `${currentMark(appearance.codeTheme === 'dark')}DeepSeek 暗色代码` },
+          { id: 'light', label: `${currentMark(appearance.codeTheme === 'light')}DeepSeek 亮色代码` },
+          ...appearance.customThemes.map(theme => ({
+            id: customThemeId(theme),
+            label: `${currentMark(appearance.codeTheme === customThemeId(theme))}${theme.name}`,
+            description: `${theme.tone === 'dark' ? '暗色' : '亮色'} · ${theme.source === 'vscode' ? 'VS Code 导入' : '自定义'}`,
+          })),
+        ],
+        footer: '↑↓ 选择 · Enter 确认 · Esc 关闭',
+        options: { width: 72, maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+      target = selected?.id as TuiCodeThemeId | undefined
+    }
+    if (target === undefined) return
+    if (target === appearance.codeTheme) {
+      this.host.notice(`代码主题 ${resolveCodeTheme(appearance).name} 已启用`, 'info')
+      return
+    }
+    const updated = await saveCodeTheme(bridge, document, target)
+    const stored = appearanceFromSettings(updated)
+    await this.settingsChanged(updated, `代码主题 ${resolveCodeTheme(stored).name}`)
   }
 
   private async themeIdentity(
@@ -1082,7 +1142,12 @@ export class TuiActions {
     const name = requestedName === '' ? loaded.suggestedName : requestedName
     const identity = await this.themeIdentity(name, appearance)
     if (identity === undefined) return
-    await this.previewAndSaveTheme(document, convertVsCodeTheme(loaded, identity.id, identity.name))
+    await this.previewAndSaveTheme(
+      document,
+      convertVsCodeTheme(loaded, identity.id, identity.name),
+      undefined,
+      'code',
+    )
   }
 
   private async themeEdit(requested: string): Promise<void> {
@@ -1191,19 +1256,28 @@ export class TuiActions {
     document: TuiSettingsDocument,
     initial: TuiCustomTheme,
     initialAlternate?: TuiCustomTheme,
+    activation: 'both' | 'code' = 'both',
   ): Promise<void> {
     const original = themeFromAppearance(document)
+    const interfaceTheme = resolveTheme(appearanceFromSettings(document))
     let candidate = initial
     let alternate = initialAlternate
     while (true) {
       const warnings = themeContrastWarnings(candidate)
-      this.host.applyTheme(resolvedCustomTheme(candidate))
+      const resolvedCandidate = resolvedCustomTheme(candidate)
+      this.host.applyTheme(activation === 'code'
+        ? composeResolvedTheme(interfaceTheme, resolvedCandidate)
+        : resolvedCandidate)
       const selected = await this.host.overlays.select({
-        title: `主题预览 · ${candidate.name}`,
+        title: `${activation === 'code' ? '代码主题' : '主题'}预览 · ${candidate.name}`,
         detail: themePreviewText(candidate, warnings),
         searchable: false,
         choices: [
-          { id: 'apply', label: '应用并保存', description: '写入 Harness Settings' },
+          {
+            id: 'apply',
+            label: '应用并保存',
+            description: activation === 'code' ? '只替换代码呈现，界面主题保持不变' : '写入 Harness Settings',
+          },
           ...(alternate === undefined ? [] : [{ id: 'toggle', label: `切换为${alternate.tone === 'dark' ? '暗色' : '亮色'}方向`, description: '使用同一组颜色重新预览' }]),
           { id: 'edit', label: '继续调整', description: '修改界面或代码颜色' },
           { id: 'cancel', label: '取消', description: '恢复原主题' },
@@ -1242,8 +1316,9 @@ export class TuiActions {
           this.capabilities.managementBridge().settings,
           document,
           normalizeCustomTheme(candidate),
+          activation,
         )
-        await this.settingsChanged(updated, candidate.name)
+        await this.settingsChanged(updated, `${activation === 'code' ? '代码主题 ' : ''}${candidate.name}`)
       } catch (error) {
         this.host.applyTheme(original)
         throw error
@@ -1266,7 +1341,11 @@ export class TuiActions {
         choices: appearance.customThemes.map(candidate => ({
           id: candidate.id,
           label: candidate.name,
-          description: appearance.theme === customThemeId(candidate) ? '当前 · 删除后切换到 DeepSeek 暗色' : candidate.tone === 'dark' ? '暗色' : '亮色',
+          description: [
+            appearance.theme === customThemeId(candidate) ? '当前界面' : undefined,
+            appearance.codeTheme === customThemeId(candidate) ? '当前代码' : undefined,
+            candidate.tone === 'dark' ? '暗色' : '亮色',
+          ].filter((value): value is string => value !== undefined).join(' · '),
         })),
       })
       if (selected === undefined) return
@@ -1275,9 +1354,13 @@ export class TuiActions {
     if (theme === undefined) return
     const confirmed = await this.host.overlays.confirm(
       `删除主题 ${theme.name}？`,
-      appearance.theme === customThemeId(theme)
-        ? '该主题会从 Harness Settings 删除，并立即切换到 DeepSeek 暗色。'
-        : '该主题会从 Harness Settings 删除；当前主题不变。',
+      appearance.theme === customThemeId(theme) && appearance.codeTheme === customThemeId(theme)
+        ? '该主题会从 Harness Settings 删除；界面切换到 DeepSeek 暗色，代码主题恢复自动匹配。'
+        : appearance.theme === customThemeId(theme)
+          ? '该主题会从 Harness Settings 删除，界面立即切换到 DeepSeek 暗色。'
+          : appearance.codeTheme === customThemeId(theme)
+            ? '该主题会从 Harness Settings 删除，代码主题恢复自动匹配。'
+            : '该主题会从 Harness Settings 删除；当前界面和代码主题不变。',
       '删除',
     )
     if (!confirmed) return

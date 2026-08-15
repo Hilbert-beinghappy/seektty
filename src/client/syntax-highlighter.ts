@@ -135,7 +135,7 @@ export function syntaxLanguageForPath(path: string, explicit?: string): string |
 }
 
 function themeHash(theme: ResolvedTuiTheme): string {
-  const value = JSON.stringify([theme.tone, theme.colors, theme.syntax, theme.tokenColors])
+  const value = JSON.stringify([theme.syntaxTone, theme.colors, theme.syntax, theme.tokenColors])
   let hash = 2166136261
   for (const character of value) {
     hash ^= character.codePointAt(0) ?? 0
@@ -163,7 +163,7 @@ function themeRegistration(theme: ResolvedTuiTheme, name: string): ThemeRegistra
   return {
     name,
     displayName: theme.name,
-    type: theme.tone,
+    type: theme.syntaxTone,
     fg: theme.syntax.foreground,
     bg: theme.syntax.background,
     settings,

@@ -13,6 +13,7 @@ import type {
   TuiSettingsDocument,
 } from '@deepseek-ai/dsh-tui-protocol'
 import {
+  DEFAULT_TUI_CODE_THEME,
   DEFAULT_TUI_THEME,
   MAX_CUSTOM_THEMES,
   MAX_TEXTMATE_RULES,
@@ -98,7 +99,10 @@ const CustomThemeSchema = z.object({
 const AppearanceSettingsSchema = z.object({
   theme: z.string().pattern(/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
     .default(DEFAULT_TUI_THEME)
-    .description('SeekTTY 当前使用的内置或命名自定义主题。'),
+    .description('SeekTTY 当前使用的界面主题。'),
+  codeTheme: z.string().pattern(/^(?:auto|dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
+    .default(DEFAULT_TUI_CODE_THEME)
+    .description('代码块独立主题；auto 跟随当前界面主题。'),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
     .description('SeekTTY 命名自定义主题。'),
 })

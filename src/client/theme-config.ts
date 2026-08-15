@@ -1,8 +1,10 @@
 /** Pure theme validation, color conversion, and palette generation. */
 
 import {
+  DEFAULT_TUI_CODE_THEME,
   MAX_CUSTOM_THEMES,
   MAX_TEXTMATE_RULES,
+  type TuiCodeThemeId,
   type TuiAppearanceSettings,
   type TuiCustomTheme,
   type TuiSyntaxThemeColors,
@@ -41,6 +43,7 @@ export interface ResolvedTuiTheme {
   readonly id: TuiThemeId
   readonly name: string
   readonly tone: TuiThemeTone
+  readonly syntaxTone: TuiThemeTone
   readonly source: 'builtin' | TuiThemeSource
   readonly colors: TuiThemeUiColors
   readonly syntax: TuiSyntaxThemeColors
@@ -69,6 +72,7 @@ const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
   id: 'dark',
   name: 'DeepSeek 暗色',
   tone: 'dark',
+  syntaxTone: 'dark',
   source: 'builtin',
   colors: {
     text: '#DDE2EE', muted: '#8993AA', border: '#34415F', brand: '#6682FF', accent: '#91A7FF',
@@ -89,6 +93,7 @@ const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
   id: 'light',
   name: 'DeepSeek 亮色',
   tone: 'light',
+  syntaxTone: 'light',
   source: 'builtin',
   colors: {
     text: '#1D2433', muted: '#667085', border: '#C6D0E7', brand: '#3156D8', accent: '#415FC9',
@@ -606,7 +611,17 @@ export function normalizeAppearance(value: unknown): TuiAppearanceSettings {
   if (theme.startsWith('custom:') && !ids.has(theme.slice('custom:'.length))) {
     throw new Error(`当前自定义主题 ${JSON.stringify(theme)} 不存在`)
   }
-  return { theme, customThemes }
+  const rawCodeTheme = record.codeTheme === undefined
+    ? DEFAULT_TUI_CODE_THEME
+    : stringOf(record, 'codeTheme', 'SeekTTY appearance')
+  if (!/^(?:auto|dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u.test(rawCodeTheme)) {
+    throw new Error(`SeekTTY 代码主题 ${JSON.stringify(rawCodeTheme)} 不受支持`)
+  }
+  const codeTheme = rawCodeTheme as TuiCodeThemeId
+  if (codeTheme.startsWith('custom:') && !ids.has(codeTheme.slice('custom:'.length))) {
+    throw new Error(`当前自定义代码主题 ${JSON.stringify(codeTheme)} 不存在`)
+  }
+  return { theme, codeTheme, customThemes }
 }
 
 /**
@@ -623,7 +638,50 @@ export function resolveTheme(
   const id = requested.slice('custom:'.length)
   const theme = appearance.customThemes.find(candidate => candidate.id === id)
   if (theme === undefined) throw new Error(`自定义主题 ${JSON.stringify(id)} 不存在`)
-  return { ...theme, id: requested }
+  return { ...theme, id: requested, syntaxTone: theme.tone }
+}
+
+/**
+ * Resolve the independent code theme, including automatic interface-theme pairing.
+ * @param appearance - validated appearance value.
+ * @param requested - optional code-theme override.
+ * @param interfaceTheme - interface selection used when requested is auto.
+ * @returns complete source theme whose syntax fields should render code regions.
+ */
+export function resolveCodeTheme(
+  appearance: TuiAppearanceSettings,
+  requested: TuiCodeThemeId = appearance.codeTheme,
+  interfaceTheme: TuiThemeId = appearance.theme,
+): ResolvedTuiTheme {
+  const selected = requested === 'auto' ? interfaceTheme : requested
+  return resolveTheme(appearance, selected)
+}
+
+/**
+ * Combine interface colors with an independently resolved code theme.
+ * @param interfaceTheme - source of terminal chrome colors.
+ * @param codeTheme - source of syntax colors and TextMate rules.
+ * @returns renderer-ready theme containing both selections.
+ */
+export function composeResolvedTheme(
+  interfaceTheme: ResolvedTuiTheme,
+  codeTheme: ResolvedTuiTheme,
+): ResolvedTuiTheme {
+  return {
+    ...interfaceTheme,
+    syntaxTone: codeTheme.syntaxTone,
+    syntax: codeTheme.syntax,
+    tokenColors: codeTheme.tokenColors,
+  }
+}
+
+/**
+ * Resolve the active interface and code selections into one renderer value.
+ * @param appearance - validated appearance value.
+ * @returns renderer-ready theme with independent interface and code colors.
+ */
+export function resolveAppearanceTheme(appearance: TuiAppearanceSettings): ResolvedTuiTheme {
+  return composeResolvedTheme(resolveTheme(appearance), resolveCodeTheme(appearance))
 }
 
 /**

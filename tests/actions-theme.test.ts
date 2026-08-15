@@ -86,7 +86,7 @@ function actionHarness(
 
 describe('/theme commands', () => {
   it('switches a built-in theme through Harness Settings and applies the resolved theme live', async () => {
-    const state = settingsState({ theme: 'dark', customThemes: [] })
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
     const { actions, host } = actionHarness(state.settings)
 
     await actions.execute('theme', 'light')
@@ -94,14 +94,51 @@ describe('/theme commands', () => {
     expect(state.current().value).toMatchObject({ theme: 'light' })
     expect(state.mutate).toHaveBeenCalledWith(
       TUI_APPEARANCE_SETTINGS_NAMESPACE,
-      [{ op: 'set', path: ['theme'], value: 'light' }],
+      [
+        { op: 'set', path: ['theme'], value: 'light' },
+        { op: 'set', path: ['codeTheme'], value: 'auto' },
+      ],
       0,
     )
     expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'light' }))
+    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({
+      syntax: BUILT_IN_THEMES.light.syntax,
+    }))
+  })
+
+  it('restores matching light code when the light interface is selected again', async () => {
+    const state = settingsState({ theme: 'light', codeTheme: 'dark', customThemes: [] })
+    const { actions, host } = actionHarness(state.settings)
+
+    await actions.execute('theme', 'light')
+
+    expect(state.current().value).toEqual({ theme: 'light', codeTheme: 'auto', customThemes: [] })
+    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'light',
+      syntax: BUILT_IN_THEMES.light.syntax,
+    }))
+  })
+
+  it('switches to dark code independently while keeping the light interface', async () => {
+    const state = settingsState({ theme: 'light', codeTheme: 'auto', customThemes: [] })
+    const { actions, host } = actionHarness(state.settings)
+
+    await actions.execute('theme', 'code dark')
+
+    expect(state.current().value).toMatchObject({ theme: 'light', codeTheme: 'dark' })
+    expect(state.mutate).toHaveBeenCalledWith(
+      TUI_APPEARANCE_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['codeTheme'], value: 'dark' }],
+      0,
+    )
+    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'light',
+      syntax: BUILT_IN_THEMES.dark.syntax,
+    }))
   })
 
   it('generates, previews, and atomically saves a named palette theme', async () => {
-    const state = settingsState({ theme: 'dark', customThemes: [] })
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
     const input = vi.fn()
       .mockResolvedValueOnce('Ocean')
       .mockResolvedValueOnce('#071426 #F4F8FF #6682FF #37C99B #E7AE5B #F0717F')
@@ -112,6 +149,7 @@ describe('/theme commands', () => {
 
     const appearance = state.current().value as TuiAppearanceSettings
     expect(appearance.theme).toBe('custom:ocean')
+    expect(appearance.codeTheme).toBe('custom:ocean')
     expect(appearance.customThemes).toHaveLength(1)
     expect(appearance.customThemes[0]).toMatchObject({ id: 'ocean', name: 'Ocean', source: 'palette' })
     expect(state.mutate).toHaveBeenCalledWith(
@@ -119,6 +157,7 @@ describe('/theme commands', () => {
       [
         expect.objectContaining({ op: 'set', path: ['customThemes'] }),
         { op: 'set', path: ['theme'], value: 'custom:ocean' },
+        { op: 'set', path: ['codeTheme'], value: 'custom:ocean' },
       ],
       0,
     )
@@ -126,7 +165,7 @@ describe('/theme commands', () => {
   })
 
   it('restores the original theme when a palette preview is cancelled', async () => {
-    const state = settingsState({ theme: 'dark', customThemes: [] })
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
     const input = vi.fn()
       .mockResolvedValueOnce('Ocean')
       .mockResolvedValueOnce('#071426 #F4F8FF #6682FF')
@@ -154,20 +193,25 @@ describe('/theme commands', () => {
           { "scope": "keyword", "settings": { "foreground": "#91A7FF", "fontStyle": "bold" } }
         ]
       }`, 'utf8')
-      const state = settingsState({ theme: 'dark', customThemes: [] })
+      const state = settingsState({ theme: 'light', codeTheme: 'auto', customThemes: [] })
       const select = vi.fn().mockResolvedValue({ id: 'apply', label: '应用并保存' })
       const { actions, host } = actionHarness(state.settings, { select } as Partial<OverlayQueue>)
 
       await actions.execute('theme', `import "${path}"`)
 
       const appearance = state.current().value as TuiAppearanceSettings
-      expect(appearance.theme).toBe('custom:ocean-imported')
+      expect(appearance.theme).toBe('light')
+      expect(appearance.codeTheme).toBe('custom:ocean-imported')
       expect(appearance.customThemes[0]).toMatchObject({
         name: 'Ocean Imported',
         source: 'vscode',
         tokenColors: [{ scope: ['keyword'], foreground: '#91A7FF', fontStyle: ['bold'] }],
       })
       expect(host.applyTheme).toHaveBeenCalledTimes(2)
+      expect(host.applyTheme).toHaveBeenLastCalledWith(expect.objectContaining({
+        id: 'light',
+        syntaxTone: 'dark',
+      }))
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -175,7 +219,7 @@ describe('/theme commands', () => {
 
   it('requires confirmation before editing and overwriting a named theme', async () => {
     const custom = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
-    const state = settingsState({ theme: 'custom:ocean', customThemes: [custom] })
+    const state = settingsState({ theme: 'custom:ocean', codeTheme: 'custom:ocean', customThemes: [custom] })
     const confirm = vi.fn().mockResolvedValue(false)
     const select = vi.fn()
     const { actions } = actionHarness(state.settings, { confirm, select } as Partial<OverlayQueue>)
@@ -193,14 +237,14 @@ describe('/theme commands', () => {
 
   it('confirms deletion and atomically returns an active custom theme to DeepSeek dark', async () => {
     const custom = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
-    const state = settingsState({ theme: 'custom:ocean', customThemes: [custom] })
+    const state = settingsState({ theme: 'custom:ocean', codeTheme: 'custom:ocean', customThemes: [custom] })
     const confirm = vi.fn().mockResolvedValue(true)
     const { actions, host } = actionHarness(state.settings, { confirm } as Partial<OverlayQueue>)
 
     await actions.execute('theme', 'delete Ocean')
 
     expect(confirm).toHaveBeenCalledTimes(1)
-    expect(state.current().value).toEqual({ theme: 'dark', customThemes: [] })
+    expect(state.current().value).toEqual({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
     expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'dark' }))
   })
 })

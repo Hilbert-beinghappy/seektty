@@ -42,7 +42,7 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 | Skills 与 MCP | 动态列出当前可调用 Skills 并插入原生命令；查看 MCP 工具、实例、设置、加载状态和独立进程/远端服务风险 |
 | 反馈 | 记录会话反馈；对 Assistant 回复提交好评、差评和可选说明，也可删除已有消息反馈 |
 | 状态与诊断 | 查看 Harness、Node、平台、Profile、工作区、会话、模式、模型、权限、pnpm、插件运行状态及诊断信息 |
-| 主题 | DeepSeek 暗色/亮色与命名自定义主题；手动配色、输入 3–16 个颜色自动生成、本地导入 VS Code JSON/JSONC 并保留 TextMate 颜色和可移植 Token 样式；实时预览、对比度警告、终端颜色降级和 `NO_COLOR` |
+| 主题 | 界面主题与代码块主题独立；自动模式下代码颜色跟随 DeepSeek 暗色／亮色；支持命名自定义主题、手动配色、输入 3–16 个颜色自动生成，以及本地导入 VS Code JSON/JSONC 并保留 TextMate 颜色和可移植 Token 样式；实时预览、对比度警告、终端颜色降级和 `NO_COLOR` |
 
 模型、Provider、Agent Preset、权限、Host 命令、工具、Settings、Skills、MCP 和插件来源都从当前 Harness 运行时读取。上游或第三方 Bundle 注册新能力后，SeekTTY 会将它加入动态目录；需要专用界面的能力也保留 Schema、结构化详情和错误诊断入口。
 
@@ -162,6 +162,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 ```text
 /theme dark
 /theme light
+/theme code [auto|dark|light|<主题名>]
 /theme use <主题名>
 /theme edit [主题名]
 /theme palette [主题名]
@@ -169,18 +170,20 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 /theme delete <主题名>
 ```
 
-主题自定义有三条路径。`/theme edit` 修改 TUI 背景、文字和代码语法高亮颜色；`/theme palette` 接收 3–16 个 HEX/RGB 颜色并生成暗色与亮色候选方案；`/theme import` 读取本地 VS Code JSON/JSONC，递归解析相对 `include`，映射编辑器颜色与语义 Token，并保留可移植的 TextMate 前景、背景、粗体、斜体、下划线和删除线规则。三种方式保存前都会进入实时预览。低对比度颜色不会被静默修改；预览会标出问题角色并要求再次确认。
+界面主题与代码块主题彼此独立。`/theme light`、`/theme dark` 和 `/theme use <主题名>` 会选择暗亮方向一致的完整界面／代码组合。使用 `/theme code auto` 时，代码背景、正文、语法颜色和暗亮方向都跟随当前界面主题，因此 DeepSeek 亮色界面使用亮色代码块；`/theme code dark`、`/theme code light` 或 `/theme code <主题名>` 只覆盖代码呈现，直到再次选择完整界面主题。`/theme edit` 编辑完整命名主题，`/theme palette` 接收 3–16 个 HEX/RGB 颜色并生成暗色与亮色候选方案。
+
+`/theme import` 读取本地 VS Code JSON/JSONC，递归解析相对 `include`，映射编辑器颜色与语义 Token，并保留可移植的 TextMate 前景、背景、粗体、斜体、下划线和删除线规则。导入后只切换代码主题，不会覆盖当前界面主题。所有自定义路径保存前都会进入实时预览。低对比度颜色不会被静默修改；预览会标出问题角色并要求再次确认。
 
 自定义主题覆盖终端画布、面板、选中状态、正文、边框、品牌色、状态色、代码背景与正文，以及注释、关键字、字符串、数字、常量、函数、类型、变量、属性、参数、运算符、标点、标签、属性名和正则表达式等语法角色。助手 Markdown 代码、Shell 指令、结构化工具参数、文件读取、JSON 和 Diff 共用同一套代码主题。工具调用显示为紧凑的操作／耗时标题，下一行使用 `⎿` 连接调用代码；工具运行时从 Harness 调用时间开始同步计时，结束后停在最终耗时。折叠状态保留调用内容，展开状态再增加结果。常用语法随启动加载，其他支持的语法按需加载并原地重绘。切换主题会立即重新着色已有消息，不会改变当前滚动位置、展开状态或未发送草稿。
 
-主题选择与命名定义保存在 `seektty-appearance` Harness Settings 命名空间中，一次 revision 保护写入即可同时保存主题并切换当前选择。因此 `/settings` 也能通过 Schema 通用界面编辑同一份数据。主题名不区分大小写且不可重复；覆盖与删除都必须确认，删除当前主题会原子切回 DeepSeek 暗色。VS Code 的字体族和字号不会导入，因为字符网格字体由终端统一控制；导入的粗体、斜体等样式只作用于代码 Token，不会改变普通中文、英文、系统文字或工具标题。
+界面选择、独立代码选择与命名定义都保存在 `seektty-appearance` Harness Settings 命名空间中，并使用 revision 保护写入，因此 `/settings` 也能通过 Schema 通用界面编辑同一份数据。主题名不区分大小写且不可重复；覆盖与删除都必须确认。删除正在使用的界面主题会切回 DeepSeek 暗色，删除正在使用的代码主题会恢复自动搭配。VS Code 的字体族和字号不会导入，因为字符网格字体由终端统一控制；导入的粗体、斜体等样式只作用于代码 Token，不会改变普通中文、英文、系统文字或工具标题。
 
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.6` 隔离安装、配置装配和 PTY 启动。
 - `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
-- 暗色、亮色与配色生成主题的真实 PTY 渲染、`/theme` 即时切换、80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
+- 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
 - macOS 和 Linux；不支持 Windows。

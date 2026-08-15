@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleWidth } from '@mariozechner/pi-tui'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  type TuiAppearanceSettings,
   type TuiCustomTheme,
   type TuiManagementBridge,
   type TuiSettingsDocument,
@@ -10,6 +11,7 @@ import {
 import {
   appearanceSettings,
   deleteCustomTheme,
+  saveCodeTheme,
   saveCustomTheme,
   saveTheme,
   themeFromAppearance,
@@ -29,11 +31,12 @@ function appearance(
   theme: TuiThemeId,
   revision = 0,
   customThemes: readonly TuiCustomTheme[] = [],
+  codeTheme: TuiAppearanceSettings['codeTheme'] = 'auto',
 ): TuiSettingsDocument {
   return {
     namespace: TUI_APPEARANCE_SETTINGS_NAMESPACE,
     schema: {},
-    value: { theme, customThemes },
+    value: { theme, codeTheme, customThemes },
     revision,
     applies: 'live',
     secrets: [],
@@ -105,10 +108,20 @@ describe('appearance settings', () => {
     const document = appearance('light')
     expect(appearanceSettings([document])).toBe(document)
     expect(themeFromAppearance(document).id).toBe('light')
+    expect(themeFromAppearance(document).syntax).toEqual(BUILT_IN_THEMES.light.syntax)
     expect(themeFromAppearance({ ...document, value: { theme: 'dark' } }).id).toBe('dark')
     expect(() => appearanceSettings([])).toThrow('Harness 未注册设置')
     expect(() => themeFromAppearance({ ...document, value: { theme: 'sepia' } }))
       .toThrow('不受支持')
+  })
+
+  it('renders a light code surface inside the automatic DeepSeek light interface', () => {
+    enableTruecolor()
+    setTheme(themeFromAppearance(appearance('light')))
+
+    expect(background.canvas('interface')).toContain('\u001B[48;2;246;248;253m')
+    expect(background.code('const answer = 42')).toContain('\u001B[48;2;255;255;255m')
+    expect(background.code('const answer = 42')).toContain('\u001B[38;2;29;36;51m')
   })
 
   it('persists a change through the revision-protected Harness Settings path', async () => {
@@ -120,7 +133,24 @@ describe('appearance settings', () => {
     await expect(saveTheme(settings, before, 'light')).resolves.toEqual(after)
     expect(mutate).toHaveBeenCalledWith(
       TUI_APPEARANCE_SETTINGS_NAMESPACE,
-      [{ op: 'set', path: ['theme'], value: 'light' }],
+      [
+        { op: 'set', path: ['theme'], value: 'light' },
+        { op: 'set', path: ['codeTheme'], value: 'auto' },
+      ],
+      4,
+    )
+  })
+
+  it('persists an independent code theme without changing the interface theme', async () => {
+    const before = appearance('light', 4)
+    const after = appearance('light', 5, [], 'light')
+    const mutate = vi.fn().mockResolvedValue(after)
+    const settings = { mutate } as unknown as TuiManagementBridge['settings']
+
+    await expect(saveCodeTheme(settings, before, 'light')).resolves.toEqual(after)
+    expect(mutate).toHaveBeenCalledWith(
+      TUI_APPEARANCE_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['codeTheme'], value: 'light' }],
       4,
     )
   })
@@ -128,7 +158,7 @@ describe('appearance settings', () => {
   it('saves a named theme and selects it in one revision-protected mutation', async () => {
     const theme = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
     const before = appearance('dark', 2)
-    const after = appearance('custom:ocean', 3, [theme])
+    const after = appearance('custom:ocean', 3, [theme], 'custom:ocean')
     const mutate = vi.fn().mockResolvedValue(after)
     const settings = { mutate } as unknown as TuiManagementBridge['settings']
 
@@ -138,6 +168,7 @@ describe('appearance settings', () => {
       [
         { op: 'set', path: ['customThemes'], value: [theme] },
         { op: 'set', path: ['theme'], value: 'custom:ocean' },
+        { op: 'set', path: ['codeTheme'], value: 'custom:ocean' },
       ],
       2,
     )
@@ -145,7 +176,7 @@ describe('appearance settings', () => {
 
   it('atomically falls back to DeepSeek dark when deleting the active custom theme', async () => {
     const theme = editableTheme(BUILT_IN_THEMES.light, 'paper', 'Paper')
-    const before = appearance('custom:paper', 7, [theme])
+    const before = appearance('custom:paper', 7, [theme], 'custom:paper')
     const after = appearance('dark', 8)
     const mutate = vi.fn().mockResolvedValue(after)
     const settings = { mutate } as unknown as TuiManagementBridge['settings']
@@ -156,6 +187,25 @@ describe('appearance settings', () => {
       [
         { op: 'set', path: ['customThemes'], value: [] },
         { op: 'set', path: ['theme'], value: 'dark' },
+        { op: 'set', path: ['codeTheme'], value: 'auto' },
+      ],
+      7,
+    )
+  })
+
+  it('keeps the interface and restores automatic code matching when deleting a code-only theme', async () => {
+    const theme = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
+    const before = appearance('light', 7, [theme], 'custom:ocean')
+    const after = appearance('light', 8)
+    const mutate = vi.fn().mockResolvedValue(after)
+    const settings = { mutate } as unknown as TuiManagementBridge['settings']
+
+    await expect(deleteCustomTheme(settings, before, 'ocean')).resolves.toEqual(after)
+    expect(mutate).toHaveBeenCalledWith(
+      TUI_APPEARANCE_SETTINGS_NAMESPACE,
+      [
+        { op: 'set', path: ['customThemes'], value: [] },
+        { op: 'set', path: ['codeTheme'], value: 'auto' },
       ],
       7,
     )

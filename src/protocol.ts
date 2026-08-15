@@ -19,6 +19,9 @@ export type TuiBuiltInTheme = 'dark' | 'light'
 /** Persisted built-in or named custom theme selection. */
 export type TuiThemeId = TuiBuiltInTheme | `custom:${string}`
 
+/** Independent code-theme selection or automatic pairing with the interface theme. */
+export type TuiCodeThemeId = 'auto' | TuiThemeId
+
 /** Dark or light contrast direction used by one resolved theme. */
 export type TuiThemeTone = 'dark' | 'light'
 
@@ -86,11 +89,15 @@ export interface TuiCustomTheme {
 /** Complete appearance value owned by the SeekTTY Settings namespace. */
 export interface TuiAppearanceSettings {
   readonly theme: TuiThemeId
+  readonly codeTheme: TuiCodeThemeId
   readonly customThemes: readonly TuiCustomTheme[]
 }
 
 /** First-run color scheme when no user override has been stored. */
 export const DEFAULT_TUI_THEME: TuiThemeId = 'dark'
+
+/** Default code pairing follows the active interface theme. */
+export const DEFAULT_TUI_CODE_THEME: TuiCodeThemeId = 'auto'
 
 /** Maximum named themes accepted by one Settings document. */
 export const MAX_CUSTOM_THEMES = 32

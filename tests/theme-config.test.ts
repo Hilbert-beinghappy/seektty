@@ -8,6 +8,8 @@ import {
   normalizeThemeColor,
   normalizeThemeColorOn,
   parseThemePalette,
+  resolveAppearanceTheme,
+  resolveCodeTheme,
   resolveTheme,
   themeContrast,
   themeContrastWarnings,
@@ -58,10 +60,27 @@ describe('theme colors and generated palettes', () => {
 
 describe('durable custom theme validation', () => {
   it('migrates legacy dark/light values and resolves named themes', () => {
-    expect(normalizeAppearance({ theme: 'light' })).toEqual({ theme: 'light', customThemes: [] })
+    expect(normalizeAppearance({ theme: 'light' })).toEqual({
+      theme: 'light', codeTheme: 'auto', customThemes: [],
+    })
     const ocean = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
     const appearance = normalizeAppearance({ theme: 'custom:ocean', customThemes: [ocean] })
     expect(resolveTheme(appearance).name).toBe('Ocean')
+  })
+
+  it('pairs DeepSeek light with light code by default and accepts an explicit dark code theme', () => {
+    const automatic = normalizeAppearance({ theme: 'light' })
+    expect(resolveCodeTheme(automatic).id).toBe('light')
+    expect(resolveAppearanceTheme(automatic)).toMatchObject({
+      id: 'light',
+      tone: 'light',
+      syntaxTone: 'light',
+      colors: BUILT_IN_THEMES.light.colors,
+      syntax: BUILT_IN_THEMES.light.syntax,
+    })
+
+    const explicit = normalizeAppearance({ theme: 'light', codeTheme: 'dark' })
+    expect(resolveAppearanceTheme(explicit).syntax).toEqual(BUILT_IN_THEMES.dark.syntax)
   })
 
   it('rejects duplicate names case-insensitively, duplicate ids, and dangling selections', () => {
@@ -74,6 +93,8 @@ describe('durable custom theme validation', () => {
       .toThrow('id')
     expect(() => normalizeAppearance({ theme: 'custom:missing', customThemes: [first] }))
       .toThrow('不存在')
+    expect(() => normalizeAppearance({ theme: 'dark', codeTheme: 'custom:missing', customThemes: [first] }))
+      .toThrow('代码主题')
     expect(() => normalizeAppearance({
       theme: 'dark',
       customThemes: [{ ...first, name: 'Ocean\nspoof' }],
