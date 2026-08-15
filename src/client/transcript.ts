@@ -31,7 +31,9 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
-import { color, escapeTerminalText, markdownTheme } from './theme.ts'
+import { color, escapeTerminalText, markdownTheme, terminalColorLevel } from './theme.ts'
+
+const PULSE_FRAME_MS = 160
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
 export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
@@ -69,6 +71,31 @@ type TranscriptRow = ({
   readonly gapBefore?: boolean
   /** Mark the first rendered row of one durable user turn. */
   readonly userTurn?: boolean
+  /** Animate one active marker without changing row geometry or surrounding text. */
+  readonly pulse?: 'thinking' | 'marker'
+}
+
+function thinkingRow(): TranscriptRow {
+  return { format: 'plain', text: '正在思考…', pulse: 'thinking' }
+}
+
+class PulsingRow implements Component {
+  constructor(
+    private readonly text: string,
+    private readonly mode: 'thinking' | 'marker',
+    private readonly frame: () => number,
+  ) {}
+
+  render(width: number): string[] {
+    const marker = color.pulse('◆', this.frame())
+    const safeText = escapeTerminalText(this.text)
+    const text = this.mode === 'thinking'
+      ? `${marker} ${color.muted(safeText)}`
+      : safeText.replace('◆', marker)
+    return new Text(text, 0, 0).render(width)
+  }
+
+  invalidate(): void {}
 }
 
 function imageAttachment(value: unknown): TranscriptImageAttachment | undefined {
@@ -581,15 +608,11 @@ function assistantStepRows(data: unknown, preferences: TranscriptPreferences): T
   const content = step.blocks.flatMap(block => block.kind === 'tool-call' ? [] : assistantBlockRows(block, preferences))
   const hasFoldedReasoning = !preferences.reasoning
     && step.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
+  const hasAnswer = step.blocks.some(block => block.kind === 'text' && block.text !== '')
   if (content.length === 0 && step.status === 'settled' && !hasFoldedReasoning) return []
   const rows: TranscriptRow[] = []
-  if (hasFoldedReasoning && step.status === 'running') {
-    rows.push({
-      format: 'plain',
-      text: color.muted('◆ 正在思考…'),
-    })
-  } else if (content.length === 0 && step.status === 'running') {
-    rows.push({ format: 'plain', text: color.muted('◆ 正在思考…') })
+  if (!hasAnswer && step.status === 'running' && (hasFoldedReasoning || content.length === 0)) {
+    rows.push(thinkingRow())
   }
   rows.push(...content)
   if (step.status === 'interrupted') rows.push({ format: 'plain', text: color.warning('已停止') })
@@ -675,6 +698,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
     return data === undefined ? [] : grouped([{
       format: 'plain',
       text: toolBlockText(data.root, preferences, 0),
+      ...('kind' in data.root ? {} : { pulse: 'marker' as const }),
     }])
   }
   if (node.kind === 'manual-compaction') return manualCompactionRows(node.data, preferences)
@@ -736,6 +760,8 @@ export class Transcript implements Component, Focusable {
   private renderedLineCount = 0
   private turnAnchors: readonly number[] = []
   private turnCursor: number | undefined
+  private pulseFrame = 0
+  private pulseTimer: ReturnType<typeof setInterval> | undefined
   focused = false
 
   /**
@@ -821,7 +847,7 @@ export class Transcript implements Component, Focusable {
       const partialRows = snapshot.partial.blocks.flatMap(block => assistantBlockRows(block, preferences))
       rows.push(...grouped([
         ...(partialRows.length === 0
-          ? [{ format: 'plain' as const, text: color.muted('◆ 正在思考…') }]
+          ? [thinkingRow()]
           : []),
         ...partialRows,
       ]))
@@ -830,6 +856,7 @@ export class Transcript implements Component, Focusable {
       rows.push(...snapshot.runningCalls.flatMap(call => grouped([{
         format: 'plain' as const,
         text: toolBlockText(call, preferences, 0),
+        pulse: 'marker' as const,
       }])))
     }
     this.emptyState = rows.length === 0
@@ -846,6 +873,7 @@ export class Transcript implements Component, Focusable {
 
   /** Stop pending attachment presentation updates during terminal teardown. */
   dispose(): void {
+    this.stopPulseAnimation()
     this.imageGeneration += 1
     this.imageLoader = undefined
     this.pendingImages.clear()
@@ -1005,11 +1033,16 @@ export class Transcript implements Component, Focusable {
     this.rows = rows
     this.turnCursor = undefined
     this.components = rows.map(row => this.component(row))
+    this.syncPulseAnimation(rows.some(row => row.pulse !== undefined))
   }
 
   private component(row: TranscriptRow): Component {
     if (row.format === 'markdown') return new Markdown(escapeTerminalText(row.text), 0, 0, markdownTheme)
-    if (row.format === 'plain') return new Text(escapeTerminalText(row.text), 0, 0)
+    if (row.format === 'plain') {
+      return row.pulse === undefined
+        ? new Text(escapeTerminalText(row.text), 0, 0)
+        : new PulsingRow(row.text, row.pulse, () => this.pulseFrame)
+    }
     const cacheKey = `${this.sessionId ?? 'none'}:${row.key}`
     const cached = this.imageComponents.get(cacheKey)
     if (cached !== undefined) return cached
@@ -1047,5 +1080,25 @@ export class Transcript implements Component, Focusable {
       this.requestRender()
     })
     return fallback
+  }
+
+  private syncPulseAnimation(active: boolean): void {
+    if (!active || terminalColorLevel() === 0) {
+      this.stopPulseAnimation()
+      return
+    }
+    if (this.pulseTimer !== undefined) return
+    this.pulseFrame = 0
+    this.pulseTimer = setInterval(() => {
+      this.pulseFrame = this.pulseFrame === Number.MAX_SAFE_INTEGER ? 0 : this.pulseFrame + 1
+      this.requestRender()
+    }, PULSE_FRAME_MS)
+    this.pulseTimer.unref()
+  }
+
+  private stopPulseAnimation(): void {
+    if (this.pulseTimer !== undefined) clearInterval(this.pulseTimer)
+    this.pulseTimer = undefined
+    this.pulseFrame = 0
   }
 }

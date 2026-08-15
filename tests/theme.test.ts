@@ -44,11 +44,15 @@ describe('terminal themes', () => {
     setTheme('dark')
     expect(background.canvas('frame')).toContain('\u001B[48;2;9;14;27m')
     expect(color.brand('brand')).toContain('\u001B[38;2;102;130;255m')
+    expect(color.pulse('◆', 0)).toContain('\u001B[38;2;52;65;95m')
+    expect(color.pulse('◆', 4)).toContain('\u001B[38;2;145;167;255m')
 
     setTheme('light')
     expect(currentTheme()).toBe('light')
     expect(background.canvas('frame')).toContain('\u001B[48;2;246;248;253m')
     expect(color.brand('brand')).toContain('\u001B[38;2;49;86;216m')
+    expect(color.pulse('◆', 0)).toContain('\u001B[38;2;170;185;235m')
+    expect(color.pulse('◆', 4)).toContain('\u001B[38;2;65;95;201m')
   })
 
   it('restores a panel background after nested foreground resets', () => {

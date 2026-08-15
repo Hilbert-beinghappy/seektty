@@ -18,9 +18,24 @@ function chatNode(key: string, data: unknown): ChatConversationViewNode {
   }
 }
 
+function assistantStep(
+  key: string,
+  status: 'running' | 'settled',
+  blocks: readonly unknown[],
+): ChatConversationViewNode {
+  return {
+    ...chatNode(key, { status, turn: 1, step: 1, blocks, time: 1 }),
+    kind: 'assistant-step',
+  }
+}
+
 function snapshot(
   nodes: readonly ChatConversationViewNode[],
-  history: { readonly hasMore?: boolean; readonly loadingOlder?: boolean } = {},
+  history: {
+    readonly hasMore?: boolean
+    readonly loadingOlder?: boolean
+    readonly runningCalls?: ConversationSnapshot['runningCalls']
+  } = {},
 ): ConversationSnapshot {
   const byKey = new Map(nodes.map(node => [node.key, node]))
   return {
@@ -43,7 +58,7 @@ function snapshot(
     turnTimings: new Map(),
     turnEnds: new Map(),
     partial: null,
-    runningCalls: [],
+    runningCalls: history.runningCalls ?? [],
     pending: [],
     queue: [],
     running: false,
@@ -80,9 +95,96 @@ const assistant = (key: string, text: string): ChatConversationViewNode => chatN
   ],
 })
 
-afterEach(() => { vi.unstubAllEnvs() })
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllEnvs()
+})
 
 describe('conversation viewport', () => {
+  it('breathes while reasoning and stops as soon as answer text begins', () => {
+    vi.useFakeTimers()
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const requestRender = vi.fn()
+    const transcript = new Transcript(() => 5, requestRender)
+    transcript.update(snapshot([
+      assistantStep('a1', 'running', [{ kind: 'reasoning', text: '内部推理' }]),
+    ]))
+
+    const dim = transcript.render(40).join('\n')
+    expect(dim).toContain('\u001B[38;2;52;65;95m◆')
+    expect(dim).toContain('正在思考…')
+
+    vi.advanceTimersByTime(640)
+    const bright = transcript.render(40).join('\n')
+    expect(bright).toContain('\u001B[38;2;145;167;255m◆')
+    expect(requestRender).toHaveBeenCalledTimes(4)
+
+    transcript.update(snapshot([
+      assistantStep('a1', 'running', [
+        { kind: 'reasoning', text: '内部推理' },
+        { kind: 'text', text: '开始回答' },
+      ]),
+    ]))
+    expect(transcript.render(40).join('\n')).not.toContain('正在思考…')
+    const calls = requestRender.mock.calls.length
+    vi.advanceTimersByTime(640)
+    expect(requestRender).toHaveBeenCalledTimes(calls)
+    transcript.dispose()
+  })
+
+  it('keeps a static thinking indicator when terminal color is disabled', () => {
+    vi.useFakeTimers()
+    vi.stubEnv('NO_COLOR', '1')
+    const requestRender = vi.fn()
+    const transcript = new Transcript(() => 5, requestRender)
+    transcript.update(snapshot([
+      assistantStep('a1', 'running', [{ kind: 'reasoning', text: '内部推理' }]),
+    ]))
+
+    expect(transcript.render(40).join('\n')).toContain('◆ 正在思考…')
+    vi.advanceTimersByTime(640)
+    expect(requestRender).not.toHaveBeenCalled()
+    transcript.dispose()
+  })
+
+  it('breathes on a running tool marker and stops when the tool leaves the running set', () => {
+    vi.useFakeTimers()
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const requestRender = vi.fn()
+    const transcript = new Transcript(() => 5, requestRender)
+    transcript.update(snapshot([], {
+      runningCalls: [{
+        callId: 'call-1',
+        name: 'Russia Ukraine war latest news ceasefire 2025',
+        argsRaw: '{}',
+        turn: 1,
+        step: 1,
+        time: 1,
+        callView: null,
+        subCalls: [],
+      }],
+    }))
+
+    const dim = transcript.render(80).join('\n')
+    expect(dim).toContain('\u001B[38;2;52;65;95m◆')
+    expect(dim).toContain('Russia Ukraine war latest news ceasefire 2025')
+    expect(dim).toContain('运行中')
+
+    vi.advanceTimersByTime(640)
+    expect(transcript.render(80).join('\n')).toContain('\u001B[38;2;145;167;255m◆')
+    expect(requestRender).toHaveBeenCalledTimes(4)
+
+    transcript.update(snapshot([]))
+    const calls = requestRender.mock.calls.length
+    vi.advanceTimersByTime(640)
+    expect(requestRender).toHaveBeenCalledTimes(calls)
+    transcript.dispose()
+  })
+
   it('grows a short conversation upward from the composer edge', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 8)

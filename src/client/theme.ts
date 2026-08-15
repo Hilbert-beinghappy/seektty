@@ -29,6 +29,7 @@ interface ThemePalette {
   readonly text: SemanticColor
   readonly brand: SemanticColor
   readonly accent: SemanticColor
+  readonly pulse: readonly SemanticColor[]
   readonly muted: SemanticColor
   readonly border: SemanticColor
   readonly success: SemanticColor
@@ -44,6 +45,16 @@ const palettes: Readonly<Record<TuiTheme, ThemePalette>> = {
     text: { rgb: [221, 226, 238], xterm: 253, ansi: 97 },
     brand: { rgb: [102, 130, 255], xterm: 69, ansi: 94 },
     accent: { rgb: [145, 167, 255], xterm: 111, ansi: 96 },
+    pulse: [
+      { rgb: [52, 65, 95], xterm: 60, ansi: 90 },
+      { rgb: [70, 87, 139], xterm: 60, ansi: 90 },
+      { rgb: [84, 105, 187], xterm: 68, ansi: 94 },
+      { rgb: [102, 130, 255], xterm: 69, ansi: 94 },
+      { rgb: [145, 167, 255], xterm: 111, ansi: 96 },
+      { rgb: [102, 130, 255], xterm: 69, ansi: 94 },
+      { rgb: [84, 105, 187], xterm: 68, ansi: 94 },
+      { rgb: [70, 87, 139], xterm: 60, ansi: 90 },
+    ],
     muted: { rgb: [137, 147, 170], xterm: 102, ansi: 90 },
     border: { rgb: [52, 65, 95], xterm: 60, ansi: 90 },
     success: { rgb: [66, 201, 154], xterm: 78, ansi: 32 },
@@ -57,6 +68,16 @@ const palettes: Readonly<Record<TuiTheme, ThemePalette>> = {
     text: { rgb: [29, 36, 51], xterm: 234, ansi: 30 },
     brand: { rgb: [49, 86, 216], xterm: 62, ansi: 34 },
     accent: { rgb: [65, 95, 201], xterm: 68, ansi: 34 },
+    pulse: [
+      { rgb: [170, 185, 235], xterm: 189, ansi: 90 },
+      { rgb: [133, 156, 232], xterm: 111, ansi: 94 },
+      { rgb: [90, 122, 226], xterm: 69, ansi: 94 },
+      { rgb: [49, 86, 216], xterm: 62, ansi: 94 },
+      { rgb: [65, 95, 201], xterm: 68, ansi: 34 },
+      { rgb: [49, 86, 216], xterm: 62, ansi: 94 },
+      { rgb: [90, 122, 226], xterm: 69, ansi: 94 },
+      { rgb: [133, 156, 232], xterm: 111, ansi: 94 },
+    ],
     muted: { rgb: [102, 112, 133], xterm: 60, ansi: 90 },
     border: { rgb: [198, 208, 231], xterm: 146, ansi: 90 },
     success: { rgb: [19, 122, 88], xterm: 29, ansi: 32 },
@@ -209,6 +230,11 @@ export function currentTheme(): TuiTheme { return selectedTheme }
 export const color = {
   brand: (text: string): string => paint(palettes[selectedTheme].brand, text),
   accent: (text: string): string => paint(palettes[selectedTheme].accent, text),
+  pulse: (text: string, frame: number): string => {
+    const values = palettes[selectedTheme].pulse
+    const index = ((Math.floor(frame) % values.length) + values.length) % values.length
+    return paint(values[index] ?? palettes[selectedTheme].brand, text)
+  },
   muted: (text: string): string => paint(palettes[selectedTheme].muted, text),
   border: (text: string): string => paint(palettes[selectedTheme].border, text),
   success: (text: string): string => paint(palettes[selectedTheme].success, text),
