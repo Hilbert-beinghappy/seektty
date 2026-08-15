@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process'
+import crossSpawn from 'cross-spawn'
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const dsh = process.env.DSH_BIN?.trim()
 const pluginSpec = process.env.SEEKTTY_SPEC?.trim()
+const spawnSync = crossSpawn.sync
 
 if (!dsh || !pluginSpec) {
   process.stderr.write('用法：DSH_BIN=/path/to/dsh SEEKTTY_SPEC=/path/to/seektty.tgz pnpm test:stock\n')

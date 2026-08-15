@@ -32,6 +32,7 @@ export interface SelectOverlayRequest {
   readonly title: string
   readonly detail?: string
   readonly choices: readonly OverlayChoice[]
+  readonly initialChoiceId?: string
   readonly footer?: string
   readonly searchable?: boolean
   readonly maxVisible?: number
@@ -56,13 +57,52 @@ export interface DetailOverlayRequest {
   readonly options?: OverlayOptions
 }
 
+/** Shared prompt surface implemented by both standalone and navigated overlays. */
+export interface OverlayPrompts {
+  select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined>
+  input(request: InputOverlayRequest): Promise<string | undefined>
+  secretInput(request: InputOverlayRequest): Promise<string | undefined>
+  multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined>
+  detail(request: DetailOverlayRequest): Promise<void>
+  confirm(title: string, detail: string, confirmLabel?: string): Promise<boolean>
+}
+
+/** One logical overlay session whose page stack owns all back navigation. */
+export interface OverlayNavigation<TResult = void> extends OverlayPrompts {
+  selectPage(
+    request: SelectOverlayRequest,
+    onSelect: (choice: OverlayChoice) => void | Promise<void>,
+  ): Promise<void>
+  replaceSelectPage(
+    request: SelectOverlayRequest,
+    onSelect: (choice: OverlayChoice) => void | Promise<void>,
+  ): void
+  back(): void
+  finish(value?: TResult): void
+}
+
 interface QueueEntry<T> {
-  readonly create: (settle: (value: T | undefined) => void) => Component
+  readonly create: (
+    settle: (value: T | undefined) => void,
+    reject: (error: unknown) => void,
+  ) => Component
   readonly options: OverlayOptions
   readonly resolve: (value: T | undefined) => void
   readonly reject: (error: unknown) => void
   settled: boolean
   handle?: OverlayHandle
+  component?: Component
+}
+
+interface DisposableComponent extends Component {
+  dispose?(): void
+}
+
+interface NavigationEntry {
+  component: DisposableComponent
+  readonly dismiss: () => void
+  busy: boolean
+  active: boolean
 }
 
 function rowOf(choice: OverlayChoice, descriptionWidth: number): SelectItem {
@@ -132,7 +172,7 @@ function wrappedDetail(detail: string, width: number, maxLines = 4): string[] {
   return visible.map(line => color.muted(line))
 }
 
-/** Search input plus SelectList, with disabled-row and Escape-first semantics. */
+/** Search input plus SelectList; the owning navigator handles Escape and abort. */
 class SearchSelectOverlay implements Component {
   focused = false
   private readonly input = new Input()
@@ -143,12 +183,11 @@ class SearchSelectOverlay implements Component {
 
   constructor(
     private readonly request: SelectOverlayRequest,
-    private readonly settle: (value: OverlayChoice | undefined) => void,
+    private readonly submit: (value: OverlayChoice) => void,
   ) {
     this.filtered = request.choices
-    this.list = this.createList(this.filtered)
+    this.list = this.createList(this.filtered, request.initialChoiceId)
     this.input.onSubmit = () => { this.choose() }
-    this.input.onEscape = () => { this.escape() }
   }
 
   invalidate(): void {
@@ -174,15 +213,11 @@ class SearchSelectOverlay implements Component {
     }
     lines.push(...this.list.render(safeWidth))
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
-    lines.push(color.muted(this.request.footer ?? '↑↓ 选择 · Enter 确认 · Esc 清空/关闭'))
+    lines.push(color.muted(this.request.footer ?? '↑↓ 选择 · Enter 确认 · Esc 返回/关闭'))
     return modalFrame(this.request.title, lines, width)
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))) {
-      this.escape()
-      return
-    }
     if (matchesKey(data, Key.tab)) {
       this.choose()
       return
@@ -210,7 +245,6 @@ class SearchSelectOverlay implements Component {
     const preferredIndex = preferredId === undefined ? 0 : rows.findIndex(row => row.value === preferredId)
     list.setSelectedIndex(Math.max(0, preferredIndex))
     list.onSelect = () => { this.choose() }
-    list.onCancel = () => { this.escape() }
     return list
   }
 
@@ -233,16 +267,7 @@ class SearchSelectOverlay implements Component {
       this.notice = choice.disabledReason
       return
     }
-    this.settle(choice)
-  }
-
-  private escape(): void {
-    if (this.request.searchable !== false && this.input.getValue() !== '') {
-      this.input.setValue('')
-      this.applyFilter('')
-      return
-    }
-    this.settle(undefined)
+    this.submit(choice)
   }
 }
 
@@ -253,11 +278,10 @@ class TextInputOverlay implements Component {
 
   constructor(
     private readonly request: InputOverlayRequest,
-    private readonly settle: (value: string | undefined) => void,
+    private readonly submit: (value: string) => void,
   ) {
     this.input.setValue(escapeTerminalText(request.initialValue ?? ''))
-    this.input.onSubmit = (value) => { settle(escapeTerminalText(value)) }
-    this.input.onEscape = () => { settle(undefined) }
+    this.input.onSubmit = (value) => { submit(escapeTerminalText(value)) }
   }
 
   invalidate(): void { this.input.invalidate() }
@@ -270,15 +294,11 @@ class TextInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       this.input.render(safeWidth)[0] ?? color.muted(this.request.placeholder ?? ''),
-      color.muted('Enter 确认 · Esc 取消'),
+      color.muted('Enter 确认 · Esc 返回/关闭'),
     ], width)
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))) {
-      this.settle(undefined)
-      return
-    }
     this.input.handleInput(data)
   }
 }
@@ -290,10 +310,9 @@ class SecretInputOverlay implements Component {
 
   constructor(
     private readonly request: InputOverlayRequest,
-    private readonly settle: (value: string | undefined) => void,
+    private readonly submit: (value: string) => void,
   ) {
     this.input.onSubmit = (value) => { this.finish(value) }
-    this.input.onEscape = () => { this.finish(undefined) }
   }
 
   invalidate(): void { this.input.invalidate() }
@@ -310,21 +329,19 @@ class SecretInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       truncateToWidth(masked, safeWidth, '…'),
-      color.muted('输入内容不会回显或写入日志 · Enter 保存 · Esc 取消'),
+      color.muted('输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭'),
     ], width)
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.ctrl('c'))) {
-      this.finish(undefined)
-      return
-    }
     this.input.handleInput(data)
   }
 
-  private finish(value: string | undefined): void {
+  dispose(): void { this.input.setValue('') }
+
+  private finish(value: string): void {
     this.input.setValue('')
-    this.settle(value)
+    this.submit(value)
   }
 }
 
@@ -339,7 +356,7 @@ class MultiSelectOverlay implements Component {
 
   constructor(
     private readonly request: SelectOverlayRequest,
-    private readonly settle: (value: readonly OverlayChoice[] | undefined) => void,
+    private readonly submit: (value: readonly OverlayChoice[]) => void,
   ) {
     this.filtered = request.choices
     this.list = this.createList()
@@ -365,20 +382,11 @@ class MultiSelectOverlay implements Component {
         : wrappedDetail(this.request.detail, safeWidth)),
       `${color.muted('搜索 ')}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
       ...this.list.render(safeWidth),
-      color.muted(this.request.footer ?? '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 取消'),
+      color.muted(this.request.footer ?? '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭'),
     ], width)
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))) {
-      if (this.input.getValue() !== '') {
-        this.input.setValue('')
-        this.applyFilter('')
-      } else {
-        this.settle(undefined)
-      }
-      return
-    }
     if (matchesKey(data, Key.space)) {
       const item = this.list.getSelectedItem()
       if (item === null) return
@@ -388,7 +396,7 @@ class MultiSelectOverlay implements Component {
       return
     }
     if (matchesKey(data, Key.enter)) {
-      this.settle(this.request.choices.filter(choice => this.selected.has(choice.id)))
+      this.submit(this.request.choices.filter(choice => this.selected.has(choice.id)))
       return
     }
     if (matchesKey(data, Key.home)) {
@@ -458,13 +466,12 @@ class ScrollableDetailOverlay implements Component {
     const position = `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} 行`
     return modalFrame(this.request.title, [
       ...lines.slice(this.offset, end),
-      color.muted(this.request.footer ?? `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/Esc 关闭`),
+      color.muted(this.request.footer ?? `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`),
     ], width)
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl('c'))
-      || matchesKey(data, Key.enter) || data === 'q') {
+    if (matchesKey(data, Key.enter) || data === 'q') {
       this.settle()
       return
     }
@@ -478,8 +485,216 @@ class ScrollableDetailOverlay implements Component {
   }
 }
 
-/** One-focus-owner FIFO for every built-in terminal modal. */
-export class OverlayQueue {
+/** A single mounted modal with a logical page stack and one Escape owner. */
+class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult> {
+  focused = false
+  private readonly stack: NavigationEntry[] = []
+  private closed = false
+  private pendingBack: NavigationEntry | undefined
+
+  constructor(
+    run: (navigation: OverlayNavigation<TResult>) => void | Promise<void>,
+    private readonly settle: (value: TResult | undefined) => void,
+    private readonly reject: (error: unknown) => void,
+    private readonly requestRender: () => void,
+  ) {
+    try {
+      void Promise.resolve(run(this)).then(
+        () => { this.finish() },
+        error => { this.fail(error) },
+      )
+    } catch (error) {
+      queueMicrotask(() => { this.fail(error) })
+    }
+  }
+
+  invalidate(): void { this.current()?.component.invalidate() }
+
+  render(width: number): string[] {
+    const component = this.current()?.component
+    if (component === undefined) return []
+    if ('focused' in component) {
+      (component as Component & { focused: boolean }).focused = this.focused
+    }
+    return component.render(width)
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.ctrl('c'))) {
+      this.finish()
+      return
+    }
+    const current = this.current()
+    if (current === undefined) return
+    if (matchesKey(data, Key.escape)) {
+      if (current.busy) this.pendingBack = current
+      else this.back()
+      return
+    }
+    if (current.busy) return
+    current.component.handleInput?.(data)
+  }
+
+  selectPage(
+    request: SelectOverlayRequest,
+    onSelect: (choice: OverlayChoice) => void | Promise<void>,
+  ): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let entry: NavigationEntry
+      entry = {
+        component: new SearchSelectOverlay(request, choice => {
+          this.dispatch(entry, () => onSelect(choice))
+        }),
+        dismiss: resolve,
+        busy: false,
+        active: true,
+      }
+      this.stack.push(entry)
+      this.requestRender()
+    })
+  }
+
+  replaceSelectPage(
+    request: SelectOverlayRequest,
+    onSelect: (choice: OverlayChoice) => void | Promise<void>,
+  ): void {
+    if (this.closed) return
+    const entry = this.current()
+    if (entry === undefined) throw new Error('没有可替换的 overlay 页面')
+    this.disposeComponent(entry.component)
+    entry.component = new SearchSelectOverlay(request, choice => {
+      this.dispatch(entry, () => onSelect(choice))
+    })
+    this.requestRender()
+  }
+
+  select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined> {
+    return this.prompt(submit => new SearchSelectOverlay(request, submit))
+  }
+
+  input(request: InputOverlayRequest): Promise<string | undefined> {
+    return this.prompt(submit => new TextInputOverlay(request, submit))
+  }
+
+  secretInput(request: InputOverlayRequest): Promise<string | undefined> {
+    return this.prompt(submit => new SecretInputOverlay(request, submit))
+  }
+
+  multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined> {
+    return this.prompt(submit => new MultiSelectOverlay(request, submit))
+  }
+
+  async detail(request: DetailOverlayRequest): Promise<void> {
+    await this.prompt<void>(submit => new ScrollableDetailOverlay(request, () => { submit() }))
+  }
+
+  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+    const selected = await this.select({
+      title,
+      detail,
+      searchable: false,
+      choices: [
+        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
+        { id: 'cancel', label: '取消', description: '保持当前状态' },
+      ],
+      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
+    return selected?.id === 'confirm'
+  }
+
+  back(): void {
+    const entry = this.current()
+    if (entry === undefined) return
+    this.remove(entry)
+    entry.dismiss()
+  }
+
+  finish(value?: TResult): void {
+    if (this.closed) return
+    this.closed = true
+    this.pendingBack = undefined
+    this.dismissAll()
+    this.settle(value)
+  }
+
+  dispose(): void {
+    if (this.closed) return
+    this.closed = true
+    this.pendingBack = undefined
+    this.dismissAll()
+  }
+
+  private prompt<T>(create: (submit: (value: T) => void) => DisposableComponent): Promise<T | undefined> {
+    if (this.closed) return Promise.resolve(undefined)
+    return new Promise<T | undefined>((resolve) => {
+      let entry: NavigationEntry
+      entry = {
+        component: create((value) => {
+          if (!this.remove(entry)) return
+          resolve(value)
+        }),
+        dismiss: () => { resolve(undefined) },
+        busy: false,
+        active: true,
+      }
+      this.stack.push(entry)
+      this.requestRender()
+    })
+  }
+
+  private dispatch(entry: NavigationEntry, action: () => void | Promise<void>): void {
+    if (this.closed || this.current() !== entry || entry.busy) return
+    entry.busy = true
+    void Promise.resolve().then(action).catch(error => {
+      this.fail(error)
+    }).finally(() => {
+      if (entry.active) entry.busy = false
+      if (this.pendingBack === entry) {
+        this.pendingBack = undefined
+        this.back()
+      }
+      this.requestRender()
+    })
+  }
+
+  private current(): NavigationEntry | undefined { return this.stack.at(-1) }
+
+  private remove(entry: NavigationEntry): boolean {
+    if (!entry.active || this.current() !== entry) return false
+    this.stack.pop()
+    if (this.pendingBack === entry) this.pendingBack = undefined
+    entry.active = false
+    this.disposeComponent(entry.component)
+    this.requestRender()
+    return true
+  }
+
+  private dismissAll(): void {
+    for (const entry of this.stack.splice(0).reverse()) {
+      entry.active = false
+      this.disposeComponent(entry.component)
+      entry.dismiss()
+    }
+    this.requestRender()
+  }
+
+  private fail(error: unknown): void {
+    if (this.closed) return
+    this.closed = true
+    this.pendingBack = undefined
+    this.dismissAll()
+    this.reject(error)
+  }
+
+  private disposeComponent(component: DisposableComponent): void {
+    try { component.dispose?.() } catch { /* page cleanup must not mask the navigation result */ }
+  }
+}
+
+/** One-focus-owner FIFO for independent overlay navigation sessions. */
+export class OverlayQueue implements OverlayPrompts {
   private readonly entries: Array<QueueEntry<unknown>> = []
   private active: QueueEntry<unknown> | undefined
   private accepting = true
@@ -494,15 +709,33 @@ export class OverlayQueue {
   hasActive(): boolean { return this.active !== undefined }
 
   /**
+   * Mount one physical overlay whose navigator owns every logical child page.
+   * @param run - navigation session body.
+   * @param options - fixed modal placement for the complete session.
+   * @returns the explicit session result, or undefined after root Back/abort.
+   */
+  navigate<TResult>(
+    run: (navigation: OverlayNavigation<TResult>) => void | Promise<void>,
+    options?: OverlayOptions,
+  ): Promise<TResult | undefined> {
+    return this.enqueue(
+      (settle, reject) => new NavigationOverlay(run, settle, reject, () => {
+        this.tui.requestRender()
+      }),
+      options,
+    )
+  }
+
+  /**
    * Open a searchable choice selector in FIFO order.
    * @param request - selector content and presentation options.
    * @returns the selected choice, or undefined after cancellation.
    */
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined> {
-    return this.enqueue(
-      settle => new SearchSelectOverlay(request, settle),
-      request.options,
-    )
+    return this.navigate<OverlayChoice>(async (navigation) => {
+      const selected = await navigation.select(request)
+      navigation.finish(selected)
+    }, request.options)
   }
 
   /**
@@ -511,10 +744,10 @@ export class OverlayQueue {
    * @returns submitted text, or undefined after cancellation.
    */
   input(request: InputOverlayRequest): Promise<string | undefined> {
-    return this.enqueue(
-      settle => new TextInputOverlay(request, settle),
-      request.options,
-    )
+    return this.navigate<string>(async (navigation) => {
+      const value = await navigation.input(request)
+      navigation.finish(value)
+    }, request.options)
   }
 
   /**
@@ -523,10 +756,10 @@ export class OverlayQueue {
    * @returns submitted secret, or undefined after cancellation.
    */
   secretInput(request: InputOverlayRequest): Promise<string | undefined> {
-    return this.enqueue(
-      settle => new SecretInputOverlay(request, settle),
-      request.options,
-    )
+    return this.navigate<string>(async (navigation) => {
+      const value = await navigation.secretInput(request)
+      navigation.finish(value)
+    }, request.options)
   }
 
   /**
@@ -535,10 +768,10 @@ export class OverlayQueue {
    * @returns selected choices, or undefined after cancellation.
    */
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined> {
-    return this.enqueue(
-      settle => new MultiSelectOverlay(request, settle),
-      request.options,
-    )
+    return this.navigate<readonly OverlayChoice[]>(async (navigation) => {
+      const selected = await navigation.multiSelect(request)
+      navigation.finish(selected)
+    }, request.options)
   }
 
   /**
@@ -546,10 +779,10 @@ export class OverlayQueue {
    * @param request - title, complete content, and viewport options.
    */
   async detail(request: DetailOverlayRequest): Promise<void> {
-    await this.enqueue<void>(
-      settle => new ScrollableDetailOverlay(request, () => { settle(undefined) }),
-      request.options,
-    )
+    await this.navigate<void>(async (navigation) => {
+      await navigation.detail(request)
+      navigation.finish()
+    }, request.options)
   }
 
   /**
@@ -568,7 +801,7 @@ export class OverlayQueue {
         { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
         { id: 'cancel', label: '取消', description: '保持当前状态' },
       ],
-      footer: '↑↓ 选择 · Enter 确认 · Esc 取消',
+      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'
@@ -583,13 +816,16 @@ export class OverlayQueue {
   }
 
   private enqueue<T>(
-    create: (settle: (value: T | undefined) => void) => Component,
+    create: (
+      settle: (value: T | undefined) => void,
+      reject: (error: unknown) => void,
+    ) => Component,
     options: OverlayOptions | undefined,
   ): Promise<T | undefined> {
     if (!this.accepting) return Promise.resolve(undefined)
     return new Promise<T | undefined>((resolve, reject) => {
       const entry: QueueEntry<T> = {
-        create: settle => create(settle),
+        create,
         options: modalOptions(options),
         resolve,
         reject,
@@ -605,8 +841,16 @@ export class OverlayQueue {
     const entry = this.entries.shift()
     if (entry === undefined) return
     this.active = entry
-    const component = entry.create((value) => { this.settle(entry, value) })
     try {
+      const component = entry.create(
+        value => { this.settle(entry, value) },
+        error => { this.fail(entry, error) },
+      )
+      entry.component = component
+      if (entry.settled) {
+        this.disposeComponent(component)
+        return
+      }
       entry.handle = this.tui.showOverlay(component, entry.options)
       this.tui.requestRender()
     } catch (error) {
@@ -617,6 +861,7 @@ export class OverlayQueue {
   private settle(entry: QueueEntry<unknown>, value: unknown): void {
     if (entry.settled) return
     entry.settled = true
+    this.disposeComponent(entry.component)
     entry.handle?.hide()
     if (this.active === entry) this.active = undefined
     const queued = this.entries.indexOf(entry)
@@ -629,9 +874,18 @@ export class OverlayQueue {
   private fail(entry: QueueEntry<unknown>, error: unknown): void {
     if (entry.settled) return
     entry.settled = true
+    this.disposeComponent(entry.component)
+    entry.handle?.hide()
     if (this.active === entry) this.active = undefined
+    const queued = this.entries.indexOf(entry)
+    if (queued >= 0) this.entries.splice(queued, 1)
     entry.reject(error)
     this.tui.requestRender()
     queueMicrotask(() => { this.activateNext() })
+  }
+
+  private disposeComponent(component: Component | undefined): void {
+    if (component === undefined || !('dispose' in component)) return
+    try { (component as DisposableComponent).dispose?.() } catch { /* teardown remains best effort */ }
   }
 }

@@ -34,7 +34,12 @@ import type {
   TuiSettingsDocument,
   TuiSettingsPathOp,
 } from './management.ts'
-import type { OverlayChoice } from './overlays.ts'
+import type {
+  OverlayChoice,
+  OverlayNavigation,
+  OverlayPrompts,
+  SelectOverlayRequest,
+} from './overlays.ts'
 import { OverlayQueue } from './overlays.ts'
 import {
   formatSettingsValue,
@@ -905,9 +910,12 @@ export class TuiActions {
     this.host.notice(`模型已切换为 ${selection.provider}/${selection.model}`, 'success')
   }
 
-  private async reasoningSelection(option: TuiModelOption): Promise<TuiModelOption['selection'] | undefined> {
+  private async reasoningSelection(
+    option: TuiModelOption,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<TuiModelOption['selection'] | undefined> {
     if (option.efforts.length === 0) return option.selection
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: `${option.label} · 推理强度`,
       choices: [
         {
@@ -1493,12 +1501,12 @@ export class TuiActions {
     const bridge = this.capabilities.managementBridge().settings
     const documents = await bridge.describe()
     if (documents.length === 0) throw new Error('当前 Profile 未注册任何 Settings 命名空间')
-    let document: TuiSettingsDocument | undefined
     if (args !== '') {
-      document = documents.find(candidate => candidate.namespace === args)
+      const document = documents.find(candidate => candidate.namespace === args)
       if (document === undefined) throw new Error(`Settings 命名空间 ${JSON.stringify(args)} 不存在`)
-    } else {
-      const selected = await this.host.overlays.select({
+    }
+    await this.host.overlays.navigate<void>(async (navigation) => {
+      const root = navigation.selectPage({
         title: '设置',
         detail: '搜索并修改全部功能设置',
         choices: documents.map(candidate => ({
@@ -1506,19 +1514,29 @@ export class TuiActions {
           label: candidate.namespace,
           description: `${settingsSectionLabel(candidate.namespace)} · ${candidate.applies === 'live' ? '立即生效' : '需重启'}`,
         })),
-        options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      }, async (selected) => {
+        await this.settingsNamespace(navigation, selected.id)
       })
-      if (selected === undefined) return
-      document = documents.find(candidate => candidate.namespace === selected.id)
-    }
-    if (document === undefined) return
-    const fields = settingsFields(document)
-    const special = this.settingsSpecialChoices(document)
+      if (args !== '') await this.settingsNamespace(navigation, args)
+      await root
+    }, { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 })
+  }
+
+  private async settingsNamespace(
+    navigation: OverlayNavigation<void>,
+    namespace: string,
+  ): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const initialDocument = (await bridge.describe()).find(candidate => candidate.namespace === namespace)
+    if (initialDocument === undefined) throw new Error(`Settings 命名空间 ${JSON.stringify(namespace)} 不存在`)
+    let document: TuiSettingsDocument = initialDocument
+    let fields = settingsFields(document)
+    let special = this.settingsSpecialChoices(document)
     if (fields.length + special.length === 0) {
       this.host.notice(`${document.namespace} 没有可见设置字段`, 'info')
       return
     }
-    const selected = await this.host.overlays.select({
+    const request = (initialChoiceId?: string): SelectOverlayRequest => ({
       title: `设置 · ${document.namespace}`,
       detail: `${settingsSectionLabel(document.namespace)} · ${document.applies === 'live' ? '修改立即生效' : '修改后需重启'}`,
       choices: [
@@ -1530,16 +1548,32 @@ export class TuiActions {
           ...(field.disabled ? { disabledReason: '该字段当前不可编辑' } : {}),
         })),
       ],
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
     })
-    if (selected === undefined) return
-    if (selected.id.startsWith('__settings_')) {
-      await this.editSpecialSetting(document, selected.id)
-      return
+    const handle = async (selected: OverlayChoice): Promise<void> => {
+      if (selected.id.startsWith('__settings_')) {
+        await this.editSpecialSetting(navigation, document, selected.id)
+      } else {
+        const field = fields.find(candidate => JSON.stringify(candidate.path) === selected.id)
+        if (field !== undefined) await this.editSetting(navigation, document, field)
+      }
+      const refreshed = (await bridge.describe()).find(candidate => candidate.namespace === namespace)
+      if (refreshed === undefined) {
+        this.host.notice(`Settings 命名空间 ${namespace} 已不可用`, 'warning')
+        navigation.back()
+        return
+      }
+      document = refreshed
+      fields = settingsFields(document)
+      special = this.settingsSpecialChoices(document)
+      if (fields.length + special.length === 0) {
+        this.host.notice(`${document.namespace} 没有可见设置字段`, 'info')
+        navigation.back()
+        return
+      }
+      navigation.replaceSelectPage(request(selected.id), handle)
     }
-    const field = fields.find(candidate => JSON.stringify(candidate.path) === selected.id)
-    if (field === undefined) return
-    await this.editSetting(document, field)
+    await navigation.selectPage(request(), handle)
   }
 
   private settingsSpecialChoices(document: TuiSettingsDocument): readonly OverlayChoice[] {
@@ -1572,22 +1606,26 @@ export class TuiActions {
     }
   }
 
-  private async editSpecialSetting(document: TuiSettingsDocument, action: string): Promise<void> {
+  private async editSpecialSetting(
+    overlays: OverlayPrompts,
+    document: TuiSettingsDocument,
+    action: string,
+  ): Promise<void> {
     switch (action) {
-      case '__settings_default_model__': await this.editDefaultModel(document); return
-      case '__settings_default_permission__': await this.editDefaultPermission(document); return
-      case '__settings_default_mode__': await this.editDefaultMode(document); return
-      case '__settings_plugin_sources__': await this.pluginSources(''); return
+      case '__settings_default_model__': await this.editDefaultModel(overlays, document); return
+      case '__settings_default_permission__': await this.editDefaultPermission(overlays, document); return
+      case '__settings_default_mode__': await this.editDefaultMode(overlays, document); return
+      case '__settings_plugin_sources__': await this.pluginSources('', overlays); return
       default: throw new Error(`未知 Settings 专用动作 ${JSON.stringify(action)}`)
     }
   }
 
-  private async editDefaultModel(document: TuiSettingsDocument): Promise<void> {
+  private async editDefaultModel(overlays: OverlayPrompts, document: TuiSettingsDocument): Promise<void> {
     const directory = await this.capabilities.listModels()
     const current = typeof document.value === 'object' && document.value !== null
       ? document.value as Record<string, unknown>
       : {}
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: '新会话默认模型',
       detail: '保存后只影响未来创建且未单独选择模型的会话',
       choices: [
@@ -1607,7 +1645,7 @@ export class TuiActions {
     if (selected === undefined) return
     const option = directory.options.find(candidate => candidate.id === selected.id)
     if (option === undefined) return
-    const selection = await this.reasoningSelection(option)
+    const selection = await this.reasoningSelection(option, overlays)
     if (selection === undefined) return
     const ops: TuiSettingsPathOp[] = [
       { op: 'set', path: ['provider'], value: selection.provider },
@@ -1621,14 +1659,14 @@ export class TuiActions {
       ops,
       document.revision,
     )
-    await this.settingsChanged(updated, '新会话默认模型')
+    await this.settingsChanged(updated, '新会话默认模型', overlays)
   }
 
-  private async editDefaultPermission(document: TuiSettingsDocument): Promise<void> {
+  private async editDefaultPermission(overlays: OverlayPrompts, document: TuiSettingsDocument): Promise<void> {
     const field = settingsFields(document).find(candidate => candidate.path.length === 1 && candidate.path[0] === 'defaultPreset')
     if (field === undefined) throw new Error('当前设置没有默认权限选项；仍可使用下方通用控件')
     const options = this.capabilities.listPermissions()
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: '新会话默认权限',
       detail: '保存后只影响未来创建的会话；当前会话权限保持不变',
       choices: options.map(option => ({
@@ -1641,7 +1679,7 @@ export class TuiActions {
     const option = options.find(candidate => candidate.id === selected.id)
     if (option === undefined || Object.is(field.value, option.id)) return
     if (option.needsConfirmation) {
-      const confirmed = await this.host.overlays.confirm(
+      const confirmed = await overlays.confirm(
         option.id === 'danger-full-access' ? '新会话默认使用完全访问？' : '使用未知风险默认权限？',
         `${permissionLabel(option)}：${permissionDescription(option)}。以后创建的会话会采用该权限；现有会话不会改变。`,
         '确认保存',
@@ -1653,14 +1691,14 @@ export class TuiActions {
       [{ op: 'set', path: field.path, value: option.id }],
       document.revision,
     )
-    await this.settingsChanged(updated, '新会话默认权限')
+    await this.settingsChanged(updated, '新会话默认权限', overlays)
   }
 
-  private async editDefaultMode(document: TuiSettingsDocument): Promise<void> {
+  private async editDefaultMode(overlays: OverlayPrompts, document: TuiSettingsDocument): Promise<void> {
     const field = settingsFields(document).find(candidate => candidate.path.length === 1 && candidate.path[0] === 'default')
     if (field === undefined) throw new Error('当前设置没有默认模式选项；仍可使用下方通用控件')
     const modes = await this.capabilities.listModes()
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: '新会话默认模式',
       detail: '保存后只影响未来创建且未显式选择 Agent Preset 的会话',
       choices: modes.map(mode => ({
@@ -1678,10 +1716,14 @@ export class TuiActions {
       [{ op: 'set', path: field.path, value: mode.id }],
       document.revision,
     )
-    await this.settingsChanged(updated, '新会话默认模式')
+    await this.settingsChanged(updated, '新会话默认模式', overlays)
   }
 
-  private async editSetting(document: TuiSettingsDocument, field: TuiSettingsField): Promise<void> {
+  private async editSetting(
+    overlays: OverlayPrompts,
+    document: TuiSettingsDocument,
+    field: TuiSettingsField,
+  ): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const actions: OverlayChoice[] = [
       { id: 'edit', label: field.control === 'secret' ? '写入新 Secret…' : '修改值…', description: `控件：${field.control}` },
@@ -1697,7 +1739,7 @@ export class TuiActions {
         ]
         : []),
     ]
-    const action = await this.host.overlays.select({
+    const action = await overlays.select({
       title: field.label,
       detail: `${field.description ?? '暂无说明'}
 当前：${field.control === 'secret' ? (field.secretSet ? '已配置（不可回显）' : '未配置') : formatSettingsValue(field.value)}
@@ -1707,22 +1749,23 @@ export class TuiActions {
     })
     if (action === undefined) return
     if (action.id === 'credential-set' || action.id === 'credential-unset') {
-      await this.manageCredential(document, field, action.id === 'credential-set')
+      await this.manageCredential(overlays, document, field, action.id === 'credential-set')
       return
     }
     const updated = action.id === 'reset'
       ? await bridge.mutate(document.namespace, [{ op: 'unset', path: field.path }], document.revision)
-      : await this.writeSetting(document, field)
-    if (updated !== undefined) await this.settingsChanged(updated, `${document.namespace}.${field.path.join('.')}`)
+      : await this.writeSetting(overlays, document, field)
+    if (updated !== undefined) await this.settingsChanged(updated, `${document.namespace}.${field.path.join('.')}`, overlays)
   }
 
   private async writeSetting(
+    overlays: OverlayPrompts,
     document: TuiSettingsDocument,
     field: TuiSettingsField,
   ): Promise<TuiSettingsDocument | undefined> {
     let value: unknown
     if (field.control === 'boolean') {
-      const choice = await this.host.overlays.select({
+      const choice = await overlays.select({
         title: field.label,
         choices: [
           { id: 'true', label: '开启', description: 'true' },
@@ -1733,7 +1776,7 @@ export class TuiActions {
       if (choice === undefined) return undefined
       value = choice.id === 'true'
     } else if (field.control === 'enum') {
-      const choice = await this.host.overlays.select({
+      const choice = await overlays.select({
         title: field.label,
         choices: field.choices.map(option => ({
           id: option.id,
@@ -1745,7 +1788,7 @@ export class TuiActions {
       if (choice === undefined) return undefined
       value = field.choices.find(option => option.id === choice.id)?.value
     } else if (field.control === 'secret') {
-      const secret = await this.host.overlays.secretInput({
+      const secret = await overlays.secretInput({
         title: `写入 ${field.label}`,
         detail: '现有值不会回显；保存后将替换原值',
         placeholder: '输入新 Secret',
@@ -1756,7 +1799,7 @@ export class TuiActions {
       const initialValue = field.control === 'json'
         ? JSON.stringify(field.value, null, 2)
         : (typeof field.value === 'string' ? field.value : '')
-      const text = await this.host.overlays.input({
+      const text = await overlays.input({
         title: `修改 ${field.label}`,
         ...(field.description === undefined ? {} : { detail: field.description }),
         initialValue,
@@ -1772,6 +1815,7 @@ export class TuiActions {
   }
 
   private async manageCredential(
+    overlays: OverlayPrompts,
     document: TuiSettingsDocument,
     field: TuiSettingsField,
     set: boolean,
@@ -1780,7 +1824,7 @@ export class TuiActions {
     let ref = typeof field.value === 'string' ? field.value.trim() : ''
     let writeReference = false
     if (ref === '') {
-      const entered = await this.host.overlays.input({
+      const entered = await overlays.input({
         title: 'Credential Ref',
         detail: '这是引用名，不是 Secret 值',
         placeholder: '例如 DEEPSEEK_API_KEY',
@@ -1792,7 +1836,7 @@ export class TuiActions {
     const info = await bridge.credentialInfo(ref)
     if (!info.writable) throw new Error(`Credential ${JSON.stringify(ref)} 由系统管理，不能在这里修改`)
     if (set) {
-      const secret = await this.host.overlays.secretInput({
+      const secret = await overlays.secretInput({
         title: `配置 Credential ${ref}`,
         detail: `状态：${info.configured ? '已配置' : '未配置'}。原值不会回显；保存后将替换原值。`,
         placeholder: '输入 Secret',
@@ -1806,7 +1850,7 @@ export class TuiActions {
         )
       }
       await bridge.setCredential(ref, secret)
-      await this.settingsChanged(document, `Credential ${ref}`)
+      await this.settingsChanged(document, `Credential ${ref}`, overlays)
       return
     }
     if (writeReference) return
@@ -1814,17 +1858,21 @@ export class TuiActions {
       this.host.notice(`Credential ${ref} 未配置`, 'info')
       return
     }
-    const confirmed = await this.host.overlays.confirm(
+    const confirmed = await overlays.confirm(
       `清除 Credential ${ref}？`,
       '密钥将被清除，Settings 中的引用名会保留。',
       '清除',
     )
     if (!confirmed) return
     await bridge.unsetCredential(ref)
-    await this.settingsChanged(document, `Credential ${ref}`)
+    await this.settingsChanged(document, `Credential ${ref}`, overlays)
   }
 
-  private async settingsChanged(document: TuiSettingsDocument, label: string): Promise<void> {
+  private async settingsChanged(
+    document: TuiSettingsDocument,
+    label: string,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     if (document.applies === 'live') {
       if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) {
         this.host.applyTheme(themeFromAppearance(document))
@@ -1832,7 +1880,7 @@ export class TuiActions {
       this.host.notice(`${label} 已更新并立即生效`, 'success')
       return
     }
-    const restart = await this.host.overlays.confirm(
+    const restart = await overlays.confirm(
       `${label} 需要重启`,
       '可立即受控重启并恢复工作区、会话、草稿和附件路径，或稍后使用 /restart。',
       '立即重启',
@@ -2150,7 +2198,10 @@ pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager �
     await this.restartAfterPluginChange('调整 Bundle 顺序')
   }
 
-  private async pluginSources(args: string): Promise<void> {
+  private async pluginSources(
+    args: string,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     const bridge = this.capabilities.managementBridge().plugins
     const parsed = commandParts(args)
     if (parsed.command === 'add') {
@@ -2186,7 +2237,7 @@ pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager �
       throw new Error('用法：/plugin source [list|add <id> <URL>|remove|enable|disable]')
     }
     const snapshot = await bridge.sources()
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: '插件市场来源',
       detail: 'npm 与插件提供的目录为只读；你添加的插件目录可在这里管理',
       choices: [
@@ -2201,22 +2252,26 @@ pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager �
     })
     if (selected === undefined) return
     if (selected.id === '__add__') {
-      await this.addPluginSource(snapshot.sources, snapshot.revision)
+      await this.addPluginSource(overlays, snapshot.sources, snapshot.revision)
       return
     }
     const source = snapshot.sources.find(item => item.id === selected.id.slice('source:'.length))
     if (source === undefined) return
-    await this.editPluginSource(source, snapshot.sources, snapshot.revision)
+    await this.editPluginSource(overlays, source, snapshot.sources, snapshot.revision)
   }
 
-  private async addPluginSource(sources: readonly TuiMarketplaceSource[], revision: number): Promise<void> {
-    const id = await this.host.overlays.input({ title: '插件目录 ID', placeholder: '小写 kebab-case' })
+  private async addPluginSource(
+    overlays: OverlayPrompts,
+    sources: readonly TuiMarketplaceSource[],
+    revision: number,
+  ): Promise<void> {
+    const id = await overlays.input({ title: '插件目录 ID', placeholder: '小写 kebab-case' })
     if (id === undefined || id.trim() === '') return
-    const label = await this.host.overlays.input({ title: '插件目录名称', initialValue: id.trim() })
+    const label = await overlays.input({ title: '插件目录名称', initialValue: id.trim() })
     if (label === undefined || label.trim() === '') return
-    const url = await this.host.overlays.input({ title: '目录 URL 或文件', placeholder: 'https://example/catalog.json' })
+    const url = await overlays.input({ title: '目录 URL 或文件', placeholder: 'https://example/catalog.json' })
     if (url === undefined || url.trim() === '') return
-    const credentialRef = await this.host.overlays.input({
+    const credentialRef = await overlays.input({
       title: 'Credential Ref（可选）',
       detail: '只输入引用名，不要在 URL 或此处粘贴 Secret',
       placeholder: '留空表示无认证',
@@ -2233,10 +2288,11 @@ pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager �
     }
     await this.capabilities.managementBridge().plugins.saveSources([...sources, source], revision)
     this.host.notice(`已添加插件目录 ${source.id}`, 'success')
-    if (source.credentialRef !== undefined) await this.configureSourceCredential(source.credentialRef)
+    if (source.credentialRef !== undefined) await this.configureSourceCredential(overlays, source.credentialRef)
   }
 
   private async editPluginSource(
+    overlays: OverlayPrompts,
     source: TuiMarketplaceSource,
     sources: readonly TuiMarketplaceSource[],
     revision: number,
@@ -2257,7 +2313,7 @@ pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager �
         { id: 'credential', label: '配置 Credential…', description: source.credentialRef ?? '尚未设置 Credential Ref' },
         { id: 'remove', label: '移除插件目录…' },
       ]
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: source.label,
       detail: `${source.url}
 ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：${source.credentialRef}`}`,
@@ -2268,19 +2324,19 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     if (selected.id === 'credential') {
       let ref = source.credentialRef
       if (ref === undefined || ref === '') {
-        const entered = await this.host.overlays.input({ title: 'Credential Ref', placeholder: '输入引用名，不是 Secret' })
+        const entered = await overlays.input({ title: 'Credential Ref', placeholder: '输入引用名，不是 Secret' })
         if (entered === undefined || entered.trim() === '') return
         ref = entered.trim()
         const credentialRef = ref
         const updated = sources.map(item => item.id === source.id ? { ...item, credentialRef } : item)
         await this.capabilities.managementBridge().plugins.saveSources(updated, revision)
       }
-      await this.configureSourceCredential(ref)
+      await this.configureSourceCredential(overlays, ref)
       return
     }
     if (source.builtIn) return
     if (selected.id === 'remove') {
-      const confirmed = await this.host.overlays.confirm(`移除 ${source.label}？`, '该目录将不再参与搜索；已安装插件不受影响。', '移除')
+      const confirmed = await overlays.confirm(`移除 ${source.label}？`, '该目录将不再参与搜索；已安装插件不受影响。', '移除')
       if (!confirmed) return
     }
     const next = selected.id === 'remove'
@@ -2290,14 +2346,14 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     this.host.notice(`插件目录 ${source.id} 已${selected.id === 'remove' ? '移除' : source.enabled ? '停用' : '启用'}`, 'success')
   }
 
-  private async configureSourceCredential(ref: string): Promise<void> {
+  private async configureSourceCredential(overlays: OverlayPrompts, ref: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const info = await bridge.credentialInfo(ref)
     if (!info.writable) {
       this.host.notice(`Credential ${ref} 由系统管理，无需在这里配置`, 'info')
       return
     }
-    const secret = await this.host.overlays.secretInput({
+    const secret = await overlays.secretInput({
       title: `配置 Credential ${ref}`,
       detail: '值不会回显；保存后将替换原值',
       placeholder: '输入 Secret；Esc 跳过',
