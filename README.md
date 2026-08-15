@@ -16,6 +16,8 @@ SeekTTY joins Harness as a Profile Bundle and uses its native Agent, Session, mo
 
 ![SeekTTY DeepSeek dark start screen](assets/seektty-tui-dark.png)
 
+The live view fills the terminal and keeps the composer and status at the bottom. Unused rows remain inside the conversation viewport and disappear as output grows; longer conversations continue into native terminal scrollback.
+
 ## Harness capabilities available in the TUI
 
 The current release covers these capabilities:

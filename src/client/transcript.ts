@@ -1050,6 +1050,14 @@ export class Transcript implements Component, Focusable {
   }
 
   /**
+   * Report whether the transcript is showing non-durable empty-session guidance.
+   * @returns true while the conversation has no visible durable content.
+   */
+  isEmptyState(): boolean {
+    return this.emptyState
+  }
+
+  /**
    * Replace the transcript with non-durable empty-selection guidance.
    * @param message - guidance rendered when no Session is active.
    */

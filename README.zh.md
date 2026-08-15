@@ -16,6 +16,8 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 
 ![SeekTTY DeepSeek 暗色首屏](assets/seektty-tui-dark.png)
 
+最新视图会铺满终端，并让输入框与状态栏始终沉在底部。未使用的行属于中间的对话视口，会随着输出增长逐行收缩；更长的对话继续进入终端原生滚动记录。
+
 ## 已经接入的 Harness 能力
 
 当前版本覆盖以下能力：

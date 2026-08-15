@@ -94,6 +94,10 @@ function isHorizontalRule(line: string): boolean {
   return /^(?:─+|─── [↑↓] \d+ more ─*)$/u.test(plain)
 }
 
+function isBlankMultiline(text: string): boolean {
+  return /[\r\n]/u.test(text) && text.trim() === ''
+}
+
 /**
  * Keep the composer and shortcut row visible while the editor or autocomplete grows.
  *
@@ -104,6 +108,66 @@ function isHorizontalRule(line: string): boolean {
 export function transcriptViewportRows(terminalRows: number, editorRows: number): number {
   // Context (1) + top/bottom breathing room (2) + permission status (1).
   return Math.max(1, terminalRows - 4 - editorRows)
+}
+
+/** Full-height chat layout whose composer and status remain at the viewport bottom. */
+export class BottomAnchoredLayout implements Component {
+  /**
+   * @param viewportRows - current terminal height in rows.
+   * @param context - one-row execution context.
+   * @param transcript - conversation content that grows into terminal scrollback.
+   * @param composer - prompt editor and its autocomplete rows.
+   * @param status - one-row permission and runtime status.
+   * @param centerTranscript - whether spare conversation rows surround the transcript.
+   */
+  constructor(
+    private readonly viewportRows: () => number,
+    private readonly context: Component,
+    private readonly transcript: Component,
+    private readonly composer: Component,
+    private readonly status: Component,
+    private readonly centerTranscript: () => boolean = () => false,
+  ) {}
+
+  invalidate(): void {
+    this.context.invalidate()
+    this.transcript.invalidate()
+    this.composer.invalidate()
+    this.status.invalidate()
+  }
+
+  /**
+   * Give unused viewport rows to the conversation area above the composer.
+   * @param width - current terminal width in character cells.
+   * @returns a full viewport or the complete longer conversation.
+   */
+  render(width: number): string[] {
+    const contextRows = this.context.render(width)
+    const transcriptRows = this.transcript.render(width)
+    const composerRows = this.composer.render(width)
+    const statusRows = this.status.render(width)
+    const naturalRows = contextRows.length + transcriptRows.length
+      + composerRows.length + statusRows.length + 2
+    const requestedRows = Math.floor(this.viewportRows())
+    const minimumRows = Number.isFinite(requestedRows)
+      ? Math.max(1, requestedRows)
+      : naturalRows
+    const flexibleRows = Math.max(0, minimumRows - naturalRows)
+    const flexibleBefore = this.centerTranscript()
+      ? Math.floor(flexibleRows / 2)
+      : 0
+    const flexibleAfter = flexibleRows - flexibleBefore
+    return [
+      ...contextRows,
+      '',
+      ...Array.from({ length: flexibleBefore }, () => ''),
+      ...transcriptRows,
+      ...Array.from({ length: flexibleAfter }, () => ''),
+      '',
+      ...composerRows,
+      ...statusRows,
+    ]
+  }
 }
 
 /** One quiet context row containing only live execution state on the right. */
@@ -216,6 +280,16 @@ export class PromptEditor extends Editor {
   /** Return the composer to its connected blank-session facts. */
   setEmpty(): void {
     this.facts = 'deepseek · 标准'
+  }
+
+  override setText(text: string): void {
+    super.setText(isBlankMultiline(text) ? '' : text)
+  }
+
+  override handleInput(data: string): void {
+    super.handleInput(data)
+    const text = this.getText()
+    if (isBlankMultiline(text)) super.setText('')
   }
 
   override render(width: number): string[] {

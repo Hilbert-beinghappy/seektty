@@ -5,7 +5,6 @@ import {
   Key,
   matchesKey,
   ProcessTerminal,
-  Spacer,
   TUI,
   type Terminal,
 } from '@mariozechner/pi-tui'
@@ -14,7 +13,13 @@ import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
-import { ContextBar, PromptEditor, StatusBar, transcriptViewportRows } from './chrome.ts'
+import {
+  BottomAnchoredLayout,
+  ContextBar,
+  PromptEditor,
+  StatusBar,
+  transcriptViewportRows,
+} from './chrome.ts'
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
 import { OverlayQueue } from './overlays.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
@@ -132,12 +137,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const status = new StatusBar()
     const canvas = new Box(0, 0, background.canvas)
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
-    canvas.addChild(contextBar)
-    canvas.addChild(new Spacer(1))
-    canvas.addChild(transcript)
-    canvas.addChild(new Spacer(1))
-    canvas.addChild(editor)
-    canvas.addChild(status)
+    canvas.addChild(new BottomAnchoredLayout(
+      () => terminal.rows,
+      contextBar,
+      transcript,
+      editor,
+      status,
+      () => transcript.isEmptyState(),
+    ))
     tui.addChild(canvas)
     tui.setFocus(editor)
 
