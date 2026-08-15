@@ -2742,6 +2742,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       footer: 'Enter 确认 · Esc 安全拒绝',
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
     })
+    this.host.transcript.followLatest()
     await this.capabilities.answerApproval(wait, selected?.id === 'allow' ? 'allowed-once' : 'rejected')
   }
 
@@ -2774,6 +2775,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
           options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
         })
         if (picked === undefined) {
+          this.host.transcript.followLatest()
           await this.capabilities.cancelQuestion(wait)
           return
         }
@@ -2804,6 +2806,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
         options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
       })
       if (picked === undefined) {
+        this.host.transcript.followLatest()
         await this.capabilities.cancelQuestion(wait)
         return
       }
@@ -2814,6 +2817,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
           options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
         })
         if (custom === undefined) {
+          this.host.transcript.followLatest()
           await this.capabilities.cancelQuestion(wait)
           return
         }
@@ -2824,6 +2828,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
         answers.push({ id: question.id, selected: [picked.id.slice('option:'.length)] })
       }
     }
+    this.host.transcript.followLatest()
     await this.capabilities.answerQuestion(wait, { answers })
   }
 }
