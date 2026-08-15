@@ -9,7 +9,7 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
-import { color, editorTheme, surfaceRow } from './theme.ts'
+import { color, editorTheme } from './theme.ts'
 
 function fit(text: string, width: number): string {
   return truncateToWidth(text, Math.max(1, width), '…')
@@ -66,26 +66,16 @@ function permissionLabel(value: string): string {
   }
 }
 
-function framedRule(
-  start: '╭' | '╰',
-  end: '╮' | '╯',
+function horizontalRule(
   label: string,
   width: number,
   paint: (text: string) => string,
-  align: 'left' | 'right' = 'left',
 ): string {
-  if (width <= 2) return paint('─'.repeat(Math.max(1, width)))
-  const labelWidth = Math.max(0, width - 7)
+  if (width <= 1) return paint('─'.repeat(Math.max(1, width)))
+  const labelWidth = Math.max(0, width - 2)
   const safeLabel = labelWidth === 0 ? '' : truncateToWidth(label, labelWidth, '…')
-  const interiorWidth = width - 2
-  let interior: string
-  if (align === 'right' && safeLabel !== '') {
-    interior = `${'─'.repeat(Math.max(0, interiorWidth - visibleWidth(safeLabel) - 3))} ${safeLabel} ─`
-  } else {
-    const lead = safeLabel === '' ? '─' : `─ ${safeLabel} `
-    interior = `${lead}${'─'.repeat(Math.max(0, interiorWidth - visibleWidth(lead)))}`
-  }
-  return paint(`${start}${truncateToWidth(interior, width - 2)}${end}`)
+  const suffix = safeLabel === '' ? '' : ` ${safeLabel}`
+  return paint(`${'─'.repeat(Math.max(1, width - visibleWidth(suffix)))}${suffix}`)
 }
 
 function compactFacts(label: string, width: number): string {
@@ -204,7 +194,7 @@ export class StatusBar implements Component {
   }
 }
 
-/** Framed Grok-style composer with only live model facts in its lower border. */
+/** Open Grok-style composer with live model facts aligned to its lower rule. */
 export class PromptEditor extends Editor {
   private facts = 'deepseek · 标准'
 
@@ -213,7 +203,7 @@ export class PromptEditor extends Editor {
   }
 
   /**
-   * Embed current Harness Session facts in the composer border.
+   * Embed current Harness Session facts in the composer's lower rule.
    * @param facts - Current authoritative Session facts.
    */
   setFacts(facts: TuiHeaderFacts): void {
@@ -232,8 +222,7 @@ export class PromptEditor extends Editor {
     this.borderColor = this.focused ? color.brand : color.border
     if (width < 8) return super.render(width)
     const { prefix, innerWidth: frameWidth } = gutter(width)
-    const innerWidth = frameWidth - 2
-    const lines = super.render(innerWidth)
+    const lines = super.render(frameWidth)
     const lowerRule = lines.findIndex((line, index) => index > 0 && isHorizontalRule(line))
     const split = lowerRule < 0 ? lines.length - 1 : lowerRule
     const editorRows = lines.slice(1, split)
@@ -243,19 +232,18 @@ export class PromptEditor extends Editor {
       const cursor = this.focused ? `${CURSOR_MARKER}\u001B[7m \u001B[0m` : ''
       editorRows[0] = padded(
         `${color.brand('❯')} ${cursor}${color.muted('输入消息，/ 打开命令')}`,
-        innerWidth,
+        frameWidth,
       )
     } else if (editorRows.length > 0) {
       editorRows[0] = `${color.brand('❯')} ${editorRows[0]?.slice(2) ?? ''}`
     }
 
-    const vertical = this.borderColor('│')
-    const body = [...editorRows, ...autocompleteRows].map(row => `${vertical}${padded(row, innerWidth)}${vertical}`)
-    const compactedFacts = compactFacts(this.facts, Math.max(0, frameWidth - 7))
+    const body = [...editorRows, ...autocompleteRows].map(row => padded(row, frameWidth))
+    const compactedFacts = compactFacts(this.facts, Math.max(0, frameWidth - 2))
     return [
-      framedRule('╭', '╮', '', frameWidth, this.borderColor),
+      horizontalRule('', frameWidth, this.borderColor),
       ...body,
-      framedRule('╰', '╯', compactedFacts, frameWidth, this.borderColor, 'right'),
-    ].map(line => `${prefix}${surfaceRow(line, frameWidth)}`)
+      horizontalRule(compactedFacts, frameWidth, this.borderColor),
+    ].map(line => `${prefix}${line}`)
   }
 }
