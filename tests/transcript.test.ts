@@ -141,6 +141,24 @@ afterEach(() => {
 })
 
 describe('conversation viewport', () => {
+  it('renders every loaded line into the default terminal scrollback', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript()
+    transcript.update(snapshot([
+      user('u1', '第一个问题'),
+      assistant('a1', '第一段回答\n第二段回答\n第三段回答'),
+      user('u2', '最新问题'),
+      assistant('a2', '最新回答'),
+    ]))
+
+    const rendered = transcript.render(40).join('\n')
+    expect(rendered).toContain('第一个问题')
+    expect(rendered).toContain('第三段回答')
+    expect(rendered).toContain('最新问题')
+    expect(rendered).toContain('最新回答')
+    expect(rendered).not.toContain('行更早内容')
+  })
+
   it('breathes while reasoning and stops as soon as answer text begins', () => {
     vi.useFakeTimers()
     vi.stubEnv('NO_COLOR', undefined)

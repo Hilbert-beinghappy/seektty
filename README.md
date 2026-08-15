@@ -93,7 +93,8 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 | Input | Action |
 | --- | --- |
-| Mouse wheel / trackpad | Browse older or newer conversation content while the composer remains active |
+| Left-button drag, then Command+C | Use the terminal's native selection and copy for any visible TUI text on macOS |
+| Mouse wheel / trackpad | Browse the native terminal scrollback while the composer remains active |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
 | Tab / Escape | Switch between composer and transcript / return or close the active overlay |
