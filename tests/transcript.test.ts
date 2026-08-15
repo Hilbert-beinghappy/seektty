@@ -189,8 +189,35 @@ describe('conversation viewport', () => {
     transcript.dispose()
   })
 
+  it('keeps a running tool duration live when color animation is disabled', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(20_000)
+    vi.stubEnv('NO_COLOR', '1')
+    const requestRender = vi.fn()
+    const transcript = new Transcript(() => 8, requestRender)
+    transcript.update(snapshot([], {
+      runningCalls: [{
+        callId: 'call-no-color',
+        name: 'read',
+        argsRaw: '{"file_path":"package.json"}',
+        turn: 1,
+        step: 1,
+        time: 20_000,
+        callView: { card: 'generic', title: 'Read package.json', kind: 'read' },
+        subCalls: [],
+      }],
+    }))
+
+    expect(transcript.render(60).join('\n')).toContain('◆ Read package.json · 0s')
+    vi.advanceTimersByTime(2_000)
+    expect(transcript.render(60).join('\n')).toContain('◆ Read package.json · 2s')
+    expect(requestRender).toHaveBeenCalled()
+    transcript.dispose()
+  })
+
   it('breathes on a running tool marker and stops when the tool leaves the running set', () => {
     vi.useFakeTimers()
+    vi.setSystemTime(10_000)
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm-256color')
     vi.stubEnv('COLORTERM', 'truecolor')
@@ -203,7 +230,7 @@ describe('conversation viewport', () => {
         argsRaw: '{"query":"Russia Ukraine war latest news ceasefire 2025"}',
         turn: 1,
         step: 1,
-        time: 1,
+        time: 10_000,
         callView: {
           card: 'generic',
           title: 'Russia Ukraine war latest news ceasefire 2025',
@@ -219,11 +246,15 @@ describe('conversation viewport', () => {
     expect(dim).toContain('Russia Ukraine war latest news ceasefire 2025')
     expect(dim).toContain('web_search({')
     expect(dim).toContain('"query": "Russia Ukraine war latest news ceasefire 2025"')
-    expect(dim).toContain('运行中')
+    expect(dim).toContain(' · 0s')
+    expect(dim).not.toContain('运行中')
 
     vi.advanceTimersByTime(640)
     expect(transcript.render(80).join('\n')).toContain('\u001B[38;2;145;167;255m◆')
     expect(requestRender).toHaveBeenCalledTimes(4)
+
+    vi.advanceTimersByTime(5_360)
+    expect(transcript.render(80).join('\n')).toContain(' · 6s')
 
     transcript.update(snapshot([]))
     const calls = requestRender.mock.calls.length

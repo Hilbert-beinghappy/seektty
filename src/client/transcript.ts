@@ -89,6 +89,8 @@ type TranscriptRow = ({
   readonly userTurn?: boolean
   /** Animate one active marker without changing row geometry or surrounding text. */
   readonly pulse?: 'thinking' | 'marker'
+  /** Unix epoch ms used to render an in-flight duration beside this row. */
+  readonly liveDurationSince?: number
 }
 
 function thinkingRow(): TranscriptRow {
@@ -100,11 +102,15 @@ class PulsingRow implements Component {
     private readonly text: string,
     private readonly mode: 'thinking' | 'marker',
     private readonly frame: () => number,
+    private readonly liveDurationSince?: number,
   ) {}
 
   render(width: number): string[] {
     const marker = color.pulse('◆', this.frame())
-    const safeText = escapeTerminalText(this.text)
+    const liveDuration = this.liveDurationSince === undefined
+      ? ''
+      : ` · ${durationText(Math.max(0, Date.now() - this.liveDurationSince))}`
+    const safeText = escapeTerminalText(`${this.text}${liveDuration}`)
     const text = this.mode === 'thinking'
       ? `${marker} ${color.muted(safeText)}`
       : safeText.replace('◆', marker)
@@ -624,8 +630,9 @@ function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences,
   return [
     {
       format: 'plain',
-      text: `${prefix}${color.accent(toolTitle(block))} · ${color.warning('运行中')}`,
+      text: `${prefix}${color.accent(toolTitle(block))}`,
       pulse: 'marker',
+      liveDurationSince: block.time,
     },
     ...details.map(detail => detailRow(detail, depth)),
     ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
@@ -1290,7 +1297,8 @@ export class Transcript implements Component, Focusable {
     this.rows = rows
     this.turnCursor = undefined
     this.components = rows.map(row => this.component(row))
-    this.syncPulseAnimation(rows.some(row => row.pulse !== undefined))
+    this.syncPulseAnimation(rows.some(row => row.liveDurationSince !== undefined
+      || (row.pulse !== undefined && terminalColorLevel() !== 0)))
   }
 
   private component(row: TranscriptRow): Component {
@@ -1298,7 +1306,7 @@ export class Transcript implements Component, Focusable {
     if (row.format === 'plain') {
       return row.pulse === undefined
         ? new Text(escapeTerminalText(row.text), 0, 0)
-        : new PulsingRow(row.text, row.pulse, () => this.pulseFrame)
+        : new PulsingRow(row.text, row.pulse, () => this.pulseFrame, row.liveDurationSince)
     }
     if (row.format === 'code') return new CodeRow(row)
     const cacheKey = `${this.sessionId ?? 'none'}:${row.key}`
@@ -1341,7 +1349,7 @@ export class Transcript implements Component, Focusable {
   }
 
   private syncPulseAnimation(active: boolean): void {
-    if (!active || terminalColorLevel() === 0) {
+    if (!active) {
       this.stopPulseAnimation()
       return
     }
