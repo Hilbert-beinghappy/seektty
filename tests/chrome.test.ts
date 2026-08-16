@@ -5,6 +5,7 @@ import {
   PromptEditor,
   transcriptViewportRows,
 } from '../src/client/chrome.ts'
+import { setUiLocale } from '../src/client/locale.ts'
 
 function editor(): PromptEditor {
   return new PromptEditor({
@@ -20,7 +21,10 @@ function rows(...values: string[]): Component {
   }
 }
 
-afterEach(() => { vi.unstubAllEnvs() })
+afterEach(() => {
+  vi.unstubAllEnvs()
+  setUiLocale('zh')
+})
 
 describe('composer chrome', () => {
   it('uses spare viewport rows above the composer instead of below it', () => {
@@ -110,6 +114,31 @@ describe('composer chrome', () => {
     expect(rows[1]).toContain('❯')
     expect(rows[2]).toMatch(/^  ─+ deepseek · 标准$/u)
     expect(rows.map(visibleWidth)).toEqual([38, 38, 38])
+  })
+
+  it('rebuilds composer chrome in English without changing the draft', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const composer = editor()
+    composer.setText('保留这段用户输入')
+    composer.setFacts({
+      hostVersion: '0.1.0',
+      nodeVersion: '24.0.0',
+      platform: 'darwin',
+      architecture: 'arm64',
+      profile: 'tui',
+      workspace: '/workspace',
+      session: 'session',
+      mode: 'standard',
+      model: 'deepseek-official/deepseek-v4-pro · max',
+      permission: 'workspace-write',
+      running: false,
+    })
+
+    setUiLocale('en')
+    const rendered = composer.render(60).join('\n')
+
+    expect(rendered).toContain('保留这段用户输入')
+    expect(rendered).toMatch(/v4-pro · Maximum reasoning · Standard$/mu)
   })
 
   it('keeps an empty newline draft on the single placeholder row', () => {

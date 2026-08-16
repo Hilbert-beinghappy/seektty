@@ -113,6 +113,12 @@
       config:
         maxNoteBytes: 8192
 
+    # Register the official Harness-owned zh/en preference. SeekTTY reads and
+    # writes this same locale.preference value instead of persisting a second
+    # terminal-only language setting.
+    - id: locale
+      name: '@deepseek-ai/dsh-client-locale'
+
     - id: workspace
       name: '@deepseek-ai/dsh-workspace'
 

@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path'
 import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
+import { localeFromEnvironment, setUiLocale, ui } from '../client/locale.ts'
 import { APP_HANDOFF_ENV, consumeAppHandoff, writeAppHandoff } from './app-handoff.ts'
 import { ProfilePluginManager } from './profile-plugin-manager.ts'
 
@@ -79,19 +80,28 @@ function activeProfile(argv: readonly string[] = process.argv.slice(2)): string 
       if (value !== '') return value
     }
   }
-  throw new Error('TUI Bundle 必须通过 dsh --profile <name> 启动')
+  throw new Error(ui(
+    'TUI Bundle 必须通过 dsh --profile <name> 启动',
+    'The TUI Bundle must be started through dsh --profile <name>',
+  ))
 }
 
 function dshInstallAnchor(): string {
   const entry = process.argv[1]
-  if (entry === undefined) throw new Error('无法定位 dsh 安装目录')
+  if (entry === undefined) throw new Error(ui(
+    '无法定位 dsh 安装目录',
+    'Cannot locate the dsh installation directory',
+  ))
   return resolve(dirname(realpathSync(entry)), '../package.json')
 }
 
 function restartProvider(ctx: Context): AppRestart {
   return async (request) => {
     const entry = process.argv[1]
-    if (entry === undefined) throw new Error('无法定位 dsh 启动文件')
+    if (entry === undefined) throw new Error(ui(
+      '无法定位 dsh 启动文件',
+      'Cannot locate the dsh entry file',
+    ))
     const handoffPath = request.handoff === undefined
       ? undefined
       : writeAppHandoff(request.handoff.channel, request.handoff.payload)
@@ -120,12 +130,24 @@ function restartProvider(ctx: Context): AppRestart {
 function tuiCommand(): Command {
   return new Command()
     .name('deepseek')
-    .description('启动 DeepSeek Harness 终端界面。')
-    .helpOption('-h, --help', '显示帮助')
-    .option('--cwd <path>', '在指定工作目录开始；默认使用当前目录')
-    .option('--resume [sessionId]', '恢复指定会话；省略 id 时恢复最近会话')
-    .argument('[task...]', '进入后立即发送的初始任务')
-    .addHelpText('after', `
+    .description(ui(
+      '启动 DeepSeek Harness 终端界面。',
+      'Start the DeepSeek Harness terminal interface.',
+    ))
+    .helpOption('-h, --help', ui('显示帮助', 'Display help'))
+    .option('--cwd <path>', ui(
+      '在指定工作目录开始；默认使用当前目录',
+      'Start in the specified working directory; defaults to the current directory',
+    ))
+    .option('--resume [sessionId]', ui(
+      '恢复指定会话；省略 id 时恢复最近会话',
+      'Resume a session; omit the id to resume the most recent session',
+    ))
+    .argument('[task...]', ui(
+      '进入后立即发送的初始任务',
+      'Initial task to send after entering the interface',
+    ))
+    .addHelpText('after', ui(`
 启动器选项：
   deepseek --profile <name> ...    覆盖默认 tui Profile；必须写在任务和 TUI 参数之前
 
@@ -136,7 +158,18 @@ function tuiCommand(): Command {
   deepseek --resume <sessionId>   恢复指定会话
   deepseek --cwd ../project       在指定目录开始
   deepseek --profile team-tui     使用指定 Harness Profile
-`)
+`, `
+Launcher options:
+  deepseek --profile <name> ...    Override the default tui Profile; place it before the task and TUI options
+
+Examples:
+  deepseek                         Open a new session in the current directory
+  deepseek "review this project"   Open the interface and immediately send a task
+  deepseek --resume               Resume the most recent session
+  deepseek --resume <sessionId>   Resume the specified session
+  deepseek --cwd ../project       Start in the specified directory
+  deepseek --profile team-tui     Use the specified Harness Profile
+`))
 }
 
 function restartHandoff(value: unknown): TuiRestartHandoff | undefined {
@@ -167,6 +200,10 @@ function restartHandoff(value: unknown): TuiRestartHandoff | undefined {
  * @param ctx - Host context carrying the launcher argument snapshot.
  */
 export function apply(ctx: Context): void {
+  // Commander renders help before the Settings service is available. Use the
+  // terminal locale here; the interactive Surface replaces it with an
+  // explicit Harness locale.preference after connecting.
+  setUiLocale(localeFromEnvironment())
   const profile = activeProfile()
   ctx.provide('profilePluginManager', new ProfilePluginManager({
     profile,

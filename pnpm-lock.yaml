@@ -32,6 +32,9 @@ importers:
       '@deepseek-ai/dsh-client-connection':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(4d97f918f32bf0a0e5cc153682aa7b50)
+      '@deepseek-ai/dsh-client-locale':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(e0840b9b429800c4579201e27bbd8020)
       '@deepseek-ai/dsh-client-schema-form':
         specifier: 0.1.0-rc.6
         version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))

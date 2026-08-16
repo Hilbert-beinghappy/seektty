@@ -34,9 +34,15 @@ describe('out-of-tree Bundle contract', () => {
     const patch = load(patchText, { schema: entryListSchema })
     expect(Array.isArray(patch)).toBe(true)
     expect(patchText).toContain("name: 'seektty/marketplace-provider'")
+    expect(patchText).toContain("name: '@deepseek-ai/dsh-client-locale'")
     expect(patchText).toContain("name: 'seektty/in-process'")
     expect(patchText).toContain("name: 'seektty/startup'")
     expect(patchText).toContain("name: 'seektty'")
+  })
+
+  it('uses the exact official locale plugin from the tested Harness baseline', () => {
+    expect((manifest.dependencies as Record<string, string>)['@deepseek-ai/dsh-client-locale'])
+      .toBe('0.1.0-rc.6')
   })
 
   it('does not retain the in-tree TUI Bundle identity', () => {

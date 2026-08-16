@@ -59,6 +59,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 | 反馈 | 记录会话反馈；对 Assistant 回复提交好评、差评和可选说明，也可删除已有消息反馈 |
 | 状态与诊断 | 查看 Harness、Node、平台、Profile、工作区、会话、模式、模型、权限、pnpm、插件运行状态及诊断信息 |
 | 主题 | 界面主题与代码块主题独立；自动模式下代码颜色跟随 DeepSeek 暗色／亮色；支持命名自定义主题、手动配色、输入 3–16 个颜色自动生成，以及本地导入 VS Code JSON/JSONC 并保留 TextMate 颜色和可移植 Token 样式；实时预览、对比度警告、终端颜色降级和 `NO_COLOR` |
+| 界面语言 | 通过 `/language` 在中文和英文之间实时切换；显式偏好通过官方 `locale.preference` Settings 与 Harness Web 共用，`auto` 则跟随终端语言环境 |
 
 模型、Provider、Agent Preset、权限、Host 命令、工具、Settings、Skills、MCP 和插件来源都从当前 Harness 运行时读取。上游或第三方 Bundle 注册新能力后，SeekTTY 会将它加入动态目录；需要专用界面的能力也保留 Schema、结构化详情和错误诊断入口。
 
@@ -100,7 +101,7 @@ dsh --profile tui
 | 运行交互 | `/queue`、`/steer`、`/attach`、`/attachments`、`/pending` |
 | 运行内容 | `/tools`、`/files`、`/jobs`、`/subagents`、`/trajectory` |
 | 扩展 | `/plugin`、`/plugins`、`/skills`、`/mcp` |
-| 配置与诊断 | `/settings`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart` |
+| 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart` |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
 `/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。
@@ -173,6 +174,16 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 
 `/settings` 会列出当前 Profile 注册的全部设置命名空间。默认模型、默认权限、默认 Agent 模式和插件来源使用专用选择器；布尔、枚举、数字、文本、JSON、Secret 和 Credential Ref 等其他字段由 Schema 通用界面处理。界面同时显示继承值、用户覆盖、重置操作以及立即生效或重启生效状态，写入时使用 revision 防止覆盖并发修改。Secret 只显示是否已配置，输入时不会回显。
 
+SeekTTY 的终端界面同时提供中文和英文。`/language` 会打开语言选择器，也可以直接输入以下命令快速切换：
+
+```text
+/language auto
+/language zh
+/language en
+```
+
+语言选择由官方 `@deepseek-ai/dsh-client-locale` Host 插件存储在 `locale.preference`，因此 TUI 与 Harness Web 共用同一个显式偏好。`auto` 会删除显式覆盖：SeekTTY 依次检查 `LC_ALL`、`LC_MESSAGES`、`LANGUAGE` 和 `LANG`，浏览器则继续使用自己的平台语言回退。切换会立即重建终端边框和对话呈现，不会改写模型、工具、用户、Provider 或插件提供的原始内容。
+
 SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心，内置主题和命名自定义主题也可以直接管理：
 
 ```text
@@ -200,6 +211,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 - `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
 - 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
+- 中英文语言解析、带 revision 保护的共享偏好写入、终端实时切换，以及未知外部内容保持原样。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
 - macOS 和 Linux；不支持 Windows。

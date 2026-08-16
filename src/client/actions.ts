@@ -1,6 +1,10 @@
 /** Product command and pending-interaction orchestration for the TUI Surface. */
 
 import { visibleWidth } from '@mariozechner/pi-tui'
+import {
+  LOCALE_SETTINGS_NAMESPACE,
+  type LocaleId,
+} from '@deepseek-ai/dsh-client-locale'
 import type {
   QuestionResponsePayload, SessionId, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-remotes/node-client'
@@ -72,6 +76,15 @@ import {
 } from './theme-config.ts'
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import {
+  languageSelection,
+  localeFromSettings,
+  localeSettings,
+  saveLanguage,
+  translateUiText,
+  ui,
+  type TuiLanguageSelection,
+} from './locale.ts'
+import {
   background,
   color,
   highlightCodeLines,
@@ -86,6 +99,7 @@ export interface TuiActionHost {
   refresh(): void
   refreshHeader(): void
   applyTheme(theme: ResolvedTuiTheme): void
+  applyLocale(locale: LocaleId): void
   setEditor(text: string): void
   copy(text: string): void
   close(code: number): void
@@ -102,23 +116,23 @@ function workspaceIdOf(value: string): WorkspaceId {
 }
 
 function currentMark(current: boolean): string {
-  return current ? '当前 · ' : ''
+  return current ? ui('当前 · ', 'Current · ') : ''
 }
 
 function permissionDescription(option: TuiPermissionOption): string {
   switch (option.id) {
-    case 'read-only': return '只能读取文件，不能修改工作区'
-    case 'workspace-write': return '可以修改当前工作区内的文件'
-    case 'danger-full-access': return '可以访问工作区外文件，并运行不受工作区限制的命令'
-    default: return option.description ?? '此权限没有详细说明，请按高风险权限处理'
+    case 'read-only': return ui('只能读取文件，不能修改工作区', 'Can read files but cannot modify the workspace')
+    case 'workspace-write': return ui('可以修改当前工作区内的文件', 'Can modify files inside the current workspace')
+    case 'danger-full-access': return ui('可以访问工作区外文件，并运行不受工作区限制的命令', 'Can access files outside the workspace and run unrestricted commands')
+    default: return option.description ?? ui('此权限没有详细说明，请按高风险权限处理', 'No details are available; treat this as a high-risk permission')
   }
 }
 
 function permissionLabel(option: TuiPermissionOption): string {
   switch (option.id) {
-    case 'read-only': return '只读'
-    case 'workspace-write': return '工作区'
-    case 'danger-full-access': return '完全访问'
+    case 'read-only': return ui('只读', 'Read only')
+    case 'workspace-write': return ui('工作区', 'Workspace')
+    case 'danger-full-access': return ui('完全访问', 'Full access')
     default: return option.label
   }
 }
@@ -127,9 +141,9 @@ function queuePlacementLabel(
   placement: ConversationSnapshot['queue'][number]['placement'],
 ): string {
   switch (placement) {
-    case 'queued': return '等待下一轮'
-    case 'steering': return '正在引导当前轮次'
-    case 'context': return '正在并入上下文'
+    case 'queued': return ui('等待下一轮', 'Waiting for the next turn')
+    case 'steering': return ui('正在引导当前轮次', 'Steering the current turn')
+    case 'context': return ui('正在并入上下文', 'Being merged into context')
   }
 }
 
@@ -184,7 +198,7 @@ function commandArguments(args: string): readonly string[] {
       started = true
     }
   }
-  if (quote !== undefined) throw new Error('命令参数的引号没有闭合')
+  if (quote !== undefined) throw new Error(ui('命令参数的引号没有闭合', 'A quoted command argument is not closed'))
   if (started) values.push(current)
   return values
 }
@@ -236,11 +250,11 @@ function themePreviewText(theme: TuiCustomTheme, warnings: readonly string[]): s
     .map(line => background.code(`${line}${' '.repeat(Math.max(0, 42 - visibleWidth(line)))}`))
     .join('\n')
   return [
-    `${color.brand('deepseek')} · ${color.accent(theme.name)} · ${theme.tone === 'dark' ? '暗色' : '亮色'}`,
-    `${markdownTheme.heading('Markdown 标题')}  ${markdownTheme.bold('粗体')}  ${markdownTheme.code('inline code')}`,
-    `${color.success('成功')} · ${color.warning('警告')} · ${color.danger('错误')} · ${color.muted('弱化文字')}`,
-    codeBlock('const deepseek = "探索未至之境"', 'typescript'),
-    codeBlock('@@ 主题预览 @@\n+ 新增内容\n- 删除内容', 'diff'),
+    `${color.brand('deepseek')} · ${color.accent(theme.name)} · ${theme.tone === 'dark' ? ui('暗色', 'Dark') : ui('亮色', 'Light')}`,
+    `${markdownTheme.heading(ui('Markdown 标题', 'Markdown heading'))}  ${markdownTheme.bold(ui('粗体', 'Bold'))}  ${markdownTheme.code('inline code')}`,
+    `${color.success(ui('成功', 'Success'))} · ${color.warning(ui('警告', 'Warning'))} · ${color.danger(ui('错误', 'Error'))} · ${color.muted(ui('弱化文字', 'Muted text'))}`,
+    codeBlock(ui('const deepseek = "探索未至之境"', 'const deepseek = "explore beyond the known"'), 'typescript'),
+    codeBlock(ui('@@ 主题预览 @@\n+ 新增内容\n- 删除内容', '@@ Theme preview @@\n+ Added content\n- Removed content'), 'diff'),
     ...warnings.map(warning => color.warning(`⚠ ${warning}`)),
   ].join('\n')
 }
@@ -250,7 +264,7 @@ function detailText(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2)
   } catch {
-    return typeof value === 'bigint' ? value.toString() : '[内容无法序列化]'
+    return typeof value === 'bigint' ? value.toString() : ui('[内容无法序列化]', '[content cannot be serialized]')
   }
 }
 
@@ -259,14 +273,20 @@ function pluginIdentity(plugin: TuiPluginEntry): string {
 }
 
 function pluginDescription(plugin: TuiPluginEntry): string {
-  const state = plugin.bundle ? (plugin.active ? '已启用 Bundle' : '未启用 Bundle') : '普通 Profile 依赖'
-  const diagnostics = plugin.diagnostics.length === 0 ? '' : ` · ${plugin.diagnostics.join('；')}`
+  const state = plugin.bundle
+    ? (plugin.active ? ui('已启用 Bundle', 'Enabled Bundle') : ui('未启用 Bundle', 'Disabled Bundle'))
+    : ui('普通 Profile 依赖', 'Regular Profile dependency')
+  const diagnostics = plugin.diagnostics.length === 0
+    ? ''
+    : ` · ${plugin.diagnostics.map(translateUiText).join(ui('；', '; '))}`
   return `${plugin.source} · ${state} · ${plugin.spec}${diagnostics}`
 }
 
 function candidateDescription(candidate: TuiMarketplaceCandidate): string {
-  const scripts = candidate.scripts.length === 0 ? '无生命周期脚本' : `脚本 ${candidate.scripts.join(', ')}`
-  const mutable = candidate.immutable ? '不可变定位' : '可变来源'
+  const scripts = candidate.scripts.length === 0
+    ? ui('无生命周期脚本', 'No lifecycle scripts')
+    : ui(`脚本 ${candidate.scripts.join(', ')}`, `Scripts ${candidate.scripts.join(', ')}`)
+  const mutable = candidate.immutable ? ui('不可变定位', 'Immutable reference') : ui('可变来源', 'Mutable source')
   return `${candidate.source} · ${mutable} · ${scripts}`
 }
 
@@ -276,39 +296,39 @@ function toolBoundary(tool: TuiToolOption): { readonly label: string; readonly d
   const name = tool.name.toLowerCase()
   if (name.startsWith('mcp__')) {
     return {
-      label: 'MCP · 外部服务',
-      detail: 'MCP 工具可能运行在独立进程或远端服务中，不受 Agent 沙箱保护；它能访问的内容由其配置、凭证和网络权限决定。',
+      label: ui('MCP · 外部服务', 'MCP · external service'),
+      detail: ui('MCP 工具可能运行在独立进程或远端服务中，不受 Agent 沙箱保护；它能访问的内容由其配置、凭证和网络权限决定。', 'MCP tools may run in a separate process or remote service outside the Agent sandbox; their configuration, credentials, and network permissions determine what they can access.'),
     }
   }
   if (EXTERNAL_COMMAND_TOOLS.has(name)) {
     return {
-      label: '外部命令',
-      detail: '此工具可能启动 Shell 子进程。当前权限和逐次审批仍适用；获准后，子进程可按执行器权限访问文件、进程或网络。',
+      label: ui('外部命令', 'External command'),
+      detail: ui('此工具可能启动 Shell 子进程。当前权限和逐次审批仍适用；获准后，子进程可按执行器权限访问文件、进程或网络。', 'This tool may start a shell subprocess. Current permissions and per-call approvals still apply; after approval, the subprocess can access files, processes, or the network as allowed by its executor.'),
     }
   }
   return {
-    label: 'Agent 工具',
-    detail: '此工具由 Agent 调用，并受当前权限和逐次审批控制。若它继续启动外部进程或服务，确认前请查看审批说明。',
+    label: ui('Agent 工具', 'Agent tool'),
+    detail: ui('此工具由 Agent 调用，并受当前权限和逐次审批控制。若它继续启动外部进程或服务，确认前请查看审批说明。', 'The Agent invokes this tool under the current permission and per-call approval controls. If it starts another process or service, review the approval details before confirming.'),
   }
 }
 
 function fieldState(field: TuiSettingsField): string {
   const current = field.control === 'secret'
-    ? (field.secretSet ? '已配置' : '未配置')
+    ? (field.secretSet ? ui('已配置', 'Configured') : ui('未配置', 'Not configured'))
     : formatSettingsValue(field.value)
   const origin = field.overridden
-    ? '用户覆盖'
-    : `继承 ${formatSettingsValue(field.inherited)}`
-  return `${current} · ${origin}${field.required ? ' · 必填' : ''}`
+    ? ui('用户覆盖', 'User override')
+    : ui(`继承 ${formatSettingsValue(field.inherited)}`, `Inherited ${formatSettingsValue(field.inherited)}`)
+  return `${current} · ${origin}${field.required ? ui(' · 必填', ' · required') : ''}`
 }
 
 function jobStatusLabel(status: string): string {
   switch (status) {
-    case 'running': return '运行中'
-    case 'stopping': return '正在停止'
-    case 'completed': return '已完成'
-    case 'killed': return '已终止'
-    case 'failed': return '失败'
+    case 'running': return ui('运行中', 'Running')
+    case 'stopping': return ui('正在停止', 'Stopping')
+    case 'completed': return ui('已完成', 'Completed')
+    case 'killed': return ui('已终止', 'Terminated')
+    case 'failed': return ui('失败', 'Failed')
     default: return status
   }
 }
@@ -316,9 +336,9 @@ function jobStatusLabel(status: string): string {
 function jobDetailLabel(detail: string | undefined): string | undefined {
   if (detail === undefined) return undefined
   const exit = /^exit code: (-?\d+)$/u.exec(detail)
-  if (exit !== null) return `退出码 ${exit[1]}`
+  if (exit !== null) return ui(`退出码 ${exit[1]}`, `Exit code ${exit[1]}`)
   const signal = /^signal: (.+)$/u.exec(detail)
-  return signal === null ? detail : `信号 ${signal[1]}`
+  return signal === null ? detail : ui(`信号 ${signal[1]}`, `Signal ${signal[1]}`)
 }
 
 function elapsedLabel(milliseconds: number): string {
@@ -359,6 +379,7 @@ export class TuiActions {
         case 'profile': await this.profile(args); break
         case 'mode': await this.mode(); break
         case 'model': await this.model(); break
+        case 'language': await this.language(args); break
         case 'theme': await this.theme(args); break
         case 'permission': await this.permission(args); break
         case 'queue': await this.queue(); break
@@ -908,6 +929,73 @@ export class TuiActions {
     await this.capabilities.selectModel(selection)
     this.host.refreshHeader()
     this.host.notice(`模型已切换为 ${selection.provider}/${selection.model}`, 'success')
+  }
+
+  private async language(
+    args: string,
+    overlays: OverlayPrompts = this.host.overlays,
+    suppliedDocument?: TuiSettingsDocument,
+  ): Promise<void> {
+    const settings = this.capabilities.managementBridge().settings
+    const document = suppliedDocument ?? localeSettings(await settings.describe())
+    const requested = args.toLowerCase()
+    const aliases = new Map<string, TuiLanguageSelection>([
+      ['auto', 'auto'],
+      ['zh', 'zh'],
+      ['zh-cn', 'zh'],
+      ['chinese', 'zh'],
+      ['中文', 'zh'],
+      ['en', 'en'],
+      ['en-us', 'en'],
+      ['english', 'en'],
+      ['英语', 'en'],
+    ])
+    let selection = requested === '' ? undefined : aliases.get(requested)
+    if (requested !== '' && selection === undefined) {
+      throw new Error(ui(
+        '用法：/language [auto|zh|en]',
+        'Usage: /language [auto|zh|en]',
+      ))
+    }
+    if (selection === undefined) {
+      const current = languageSelection(document)
+      const selected = await overlays.select({
+        title: ui('界面语言', 'Interface language'),
+        detail: ui(
+          '与 DeepSeek Harness Web 共用 locale.preference；修改会立即作用于当前终端。',
+          'Shares locale.preference with DeepSeek Harness Web; changes apply to this terminal immediately.',
+        ),
+        choices: [
+          {
+            id: 'auto',
+            label: ui('自动', 'Automatic'),
+            description: ui('终端使用 LANG/LC_*；浏览器使用 navigator.language', 'Terminal uses LANG/LC_*; browser uses navigator.language'),
+            active: current === 'auto',
+          },
+          {
+            id: 'zh',
+            label: ui('中文', 'Chinese'),
+            description: 'zh',
+            active: current === 'zh',
+          },
+          {
+            id: 'en',
+            label: 'English',
+            description: 'en',
+            active: current === 'en',
+          },
+        ],
+        searchable: false,
+      })
+      if (selected === undefined) return
+      selection = selected.id as TuiLanguageSelection
+    }
+    const saved = await saveLanguage(settings, document, selection)
+    this.host.applyLocale(saved.locale)
+    this.host.notice(ui(
+      `界面语言已切换为${selection === 'auto' ? '自动' : selection === 'zh' ? '中文' : '英语'}`,
+      `Interface language changed to ${selection === 'auto' ? 'Automatic' : selection === 'zh' ? 'Chinese' : 'English'}`,
+    ), 'success')
   }
 
   private async reasoningSelection(
@@ -1578,6 +1666,12 @@ export class TuiActions {
 
   private settingsSpecialChoices(document: TuiSettingsDocument): readonly OverlayChoice[] {
     switch (document.namespace) {
+      case LOCALE_SETTINGS_NAMESPACE:
+        return [{
+          id: '__settings_language__',
+          label: ui('选择界面语言…', 'Choose interface language…'),
+          description: ui('与 Harness Web 共用同一语言偏好', 'Shares the same preference with Harness Web'),
+        }]
       case 'agent-default-model':
         return [{
           id: '__settings_default_model__',
@@ -1612,6 +1706,7 @@ export class TuiActions {
     action: string,
   ): Promise<void> {
     switch (action) {
+      case '__settings_language__': await this.language('', overlays, document); return
       case '__settings_default_model__': await this.editDefaultModel(overlays, document); return
       case '__settings_default_permission__': await this.editDefaultPermission(overlays, document); return
       case '__settings_default_mode__': await this.editDefaultMode(overlays, document); return
@@ -1877,6 +1972,9 @@ export class TuiActions {
       if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) {
         this.host.applyTheme(themeFromAppearance(document))
       }
+      if (document.namespace === LOCALE_SETTINGS_NAMESPACE) {
+        this.host.applyLocale(localeFromSettings([document]))
+      }
       this.host.notice(`${label} 已更新并立即生效`, 'success')
       return
     }
@@ -1965,15 +2063,25 @@ export class TuiActions {
   }
 
   private async installedPlugin(plugin: TuiPluginEntry): Promise<void> {
-    const selected = await this.host.overlays.select({
-      title: pluginIdentity(plugin),
-      detail: `${plugin.description ?? '无包说明'}
+    const detail = ui(
+      `${plugin.description ?? '无包说明'}
 spec：${plugin.spec}
 来源：${plugin.source}
 Bundle：${plugin.bundle ? (plugin.active ? '已启用' : '未启用') : '否'}
 patch：${plugin.patch ?? '未声明'} · ${plugin.patchValid ? '有效' : '无效'}
 生命周期脚本：${plugin.scripts.length === 0 ? '无' : plugin.scripts.join(', ')}
 诊断：${plugin.diagnostics.length === 0 ? '无' : plugin.diagnostics.join('；')}`,
+      `${plugin.description ?? 'No package description'}
+spec: ${plugin.spec}
+Source: ${plugin.source}
+Bundle: ${plugin.bundle ? (plugin.active ? 'enabled' : 'disabled') : 'no'}
+patch: ${plugin.patch ?? 'not declared'} · ${plugin.patchValid ? 'valid' : 'invalid'}
+Lifecycle scripts: ${plugin.scripts.length === 0 ? 'none' : plugin.scripts.join(', ')}
+Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map(translateUiText).join('; ')}`,
+    )
+    const selected = await this.host.overlays.select({
+      title: pluginIdentity(plugin),
+      detail,
       choices: [
         { id: 'update', label: '更新…', description: `pnpm update ${plugin.name}` },
         { id: 'remove', label: '移除…', description: `pnpm remove ${plugin.name}` },
@@ -2042,7 +2150,8 @@ patch：${plugin.patch ?? '未声明'} · ${plugin.patchValid ? '有效' : '无�
   }
 
   private candidateDetail(candidate: TuiMarketplaceCandidate): string {
-    return `${candidate.description ?? '无包说明'}
+    return ui(
+      `${candidate.description ?? '无包说明'}
 发布者：${candidate.publisher ?? '未知'}
 来源：${candidate.sourceId} / ${candidate.source}
 spec：${candidate.spec}
@@ -2051,7 +2160,18 @@ Bundle patch：${candidate.bundle ? (candidate.patchValid ? '声明且有效' : 
 生命周期脚本：${candidate.scripts.length === 0 ? '无或尚未知' : candidate.scripts.join(', ')}
 诊断：${candidate.diagnostics.length === 0 ? '无' : candidate.diagnostics.join('；')}
 信任边界：Profile 插件安装器（pnpm），不受当前 Agent permission 或 sandbox 约束；包脚本以启动 deepseek 的本机用户权限运行。
-注意：结构验证不代表安全、信任或质量审核。`
+注意：结构验证不代表安全、信任或质量审核。`,
+      `${candidate.description ?? 'No package description'}
+Publisher: ${candidate.publisher ?? 'unknown'}
+Source: ${candidate.sourceId} / ${candidate.source}
+spec: ${candidate.spec}
+Reference: ${candidate.immutable ? 'immutable' : 'mutable; future content may change'}
+Bundle patch: ${candidate.bundle ? (candidate.patchValid ? 'declared and valid' : 'declared but invalid') : 'not declared / not yet validated'}
+Lifecycle scripts: ${candidate.scripts.length === 0 ? 'none or not yet known' : candidate.scripts.join(', ')}
+Diagnostics: ${candidate.diagnostics.length === 0 ? 'none' : candidate.diagnostics.map(translateUiText).join('; ')}
+Trust boundary: the Profile plugin installer (pnpm) is outside the current Agent permission and sandbox; package scripts run with the local account that started DeepSeek.
+Warning: structural validation is not a security, trust, or quality review.`,
+    )
   }
 
   private async pluginInstall(spec: string): Promise<void> {
@@ -2076,10 +2196,16 @@ Bundle patch：${candidate.bundle ? (candidate.patchValid ? '声明且有效' : 
     const profile = this.capabilities.currentProfile()
     const confirmed = await this.host.overlays.confirm(
       `安装 ${candidate.name} 到 ${profile}？`,
-      `${this.candidateDetail(candidate)}
+      ui(
+        `${this.candidateDetail(candidate)}
 将执行：pnpm add --save-exact ${candidate.spec}
 目标 Profile：${profile}
 pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager 再验证。此操作不使用 Agent 沙箱。`,
+        `${this.candidateDetail(candidate)}
+Will run: pnpm add --save-exact ${candidate.spec}
+Target Profile: ${profile}
+pnpm may run the package scripts listed above; a Git package can be revalidated by the native Manager only after installation. This operation does not use the Agent sandbox.`,
+      ),
       '理解风险并安装',
     )
     if (!confirmed) return
@@ -2375,7 +2501,10 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     const enabledInstances = inventory.filter(item => item.enabled).length
     const selected = await this.host.overlays.select({
       title: `诊断 · ${report.profile}`,
-      detail: `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm：${report.pnpm ?? '不可用'} · ${errors} 个错误 · ${warnings} 个警告 · ${enabledInstances} 个插件运行中`,
+      detail: ui(
+        `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm：${report.pnpm ?? '不可用'} · ${errors} 个错误 · ${warnings} 个警告 · ${enabledInstances} 个插件运行中`,
+        `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm: ${report.pnpm ?? 'unavailable'} · ${errors} error(s) · ${warnings} warning(s) · ${enabledInstances} plugin(s) running`,
+      ),
       choices: [
         {
           id: 'runtime',
@@ -2384,7 +2513,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
         },
         ...report.diagnostics.map((item, index) => ({
           id: `plugin:${index}`,
-          label: `${item.level === 'error' ? '✕' : item.level === 'warning' ? '!' : '✓'} ${item.message}`,
+          label: `${item.level === 'error' ? '✕' : item.level === 'warning' ? '!' : '✓'} ${translateUiText(item.message)}`,
           description: item.level,
         })),
         ...failedInstances.map(item => ({
@@ -2399,20 +2528,35 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     if (selected === undefined) return
     if (selected.id === 'runtime') {
       await this.host.overlays.detail({
-        title: '运行环境详情',
-        content: [
-          `Harness：${status.hostVersion}`,
-          `Node：${status.nodeVersion}`,
-          `系统：${status.platform}/${status.architecture}`,
-          `pnpm：${report.pnpm ?? '不可用'}`,
-          `Profile：${report.profile}`,
-          `工作区：${status.workspace}`,
-          `会话：${status.session}`,
-          `模式：${status.mode}`,
-          `模型：${status.model}`,
-          `权限：${status.permission}`,
-          `状态：${status.running ? '运行中' : '空闲'}`,
-        ].join('\n'),
+        title: ui('运行环境详情', 'Runtime details'),
+        content: ui(
+          [
+            `Harness：${status.hostVersion}`,
+            `Node：${status.nodeVersion}`,
+            `系统：${status.platform}/${status.architecture}`,
+            `pnpm：${report.pnpm ?? '不可用'}`,
+            `Profile：${report.profile}`,
+            `工作区：${status.workspace}`,
+            `会话：${status.session}`,
+            `模式：${status.mode}`,
+            `模型：${status.model}`,
+            `权限：${status.permission}`,
+            `状态：${status.running ? '运行中' : '空闲'}`,
+          ].join('\n'),
+          [
+            `Harness: ${status.hostVersion}`,
+            `Node: ${status.nodeVersion}`,
+            `System: ${status.platform}/${status.architecture}`,
+            `pnpm: ${report.pnpm ?? 'unavailable'}`,
+            `Profile: ${report.profile}`,
+            `Workspace: ${status.workspace}`,
+            `Session: ${status.session}`,
+            `Mode: ${status.mode}`,
+            `Model: ${status.model}`,
+            `Permission: ${status.permission}`,
+            `Status: ${status.running ? 'running' : 'idle'}`,
+          ].join('\n'),
+        ),
         options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
       })
       return
@@ -2424,7 +2568,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       const level = diagnostic.level === 'error' ? '错误' : diagnostic.level === 'warning' ? '警告' : '信息'
       await this.host.overlays.detail({
         title: `诊断详情 · ${level}`,
-        content: diagnostic.message,
+        content: translateUiText(diagnostic.message),
         options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
       })
       return
@@ -2433,12 +2577,20 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     if (loader === undefined) return
     await this.host.overlays.detail({
       title: `插件实例详情 · ${loader.moduleName}`,
-      content: [
-        `模块：${loader.moduleName}`,
-        `实例：${loader.entryId}`,
-        `状态：${loader.enabled ? '已启用' : '已禁用'}`,
-        `加载阶段：${loader.fiberPhase ?? '未挂载'}`,
-      ].join('\n'),
+      content: ui(
+        [
+          `模块：${loader.moduleName}`,
+          `实例：${loader.entryId}`,
+          `状态：${loader.enabled ? '已启用' : '已禁用'}`,
+          `加载阶段：${loader.fiberPhase ?? '未挂载'}`,
+        ].join('\n'),
+        [
+          `Module: ${loader.moduleName}`,
+          `Instance: ${loader.entryId}`,
+          `Status: ${loader.enabled ? 'enabled' : 'disabled'}`,
+          `Load phase: ${loader.fiberPhase ?? 'not mounted'}`,
+        ].join('\n'),
+      ),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
   }
@@ -2489,7 +2641,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     const boundary = tool === undefined ? undefined : toolBoundary(tool)
     await this.host.overlays.detail({
       title: selected.label,
-      content: `${boundary === undefined ? '' : `${boundary.detail}\n\n`}参数 / 数据：\n${detailText(value)}`,
+      content: `${boundary === undefined ? '' : `${boundary.detail}\n\n`}${ui('参数 / 数据', 'Parameters / data')}:\n${detailText(value)}`,
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
   }
@@ -2556,16 +2708,28 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     const duration = Math.max(0, (finishedAt ?? Date.now()) - job.startedAt)
     await this.host.overlays.detail({
       title: `后台任务 · ${job.label}`,
-      content: [
-        `状态：${jobStatusLabel(job.status)}`,
-        `类型：${job.kind}`,
-        `任务 ID：${job.id}`,
-        `开始：${new Date(job.startedAt).toISOString()}`,
-        `结束：${finishedAt === undefined ? '仍在运行' : new Date(finishedAt).toISOString()}`,
-        `耗时：${elapsedLabel(duration)}`,
-        '',
-        `详情：${jobDetailLabel(job.detail) ?? '没有任务详情。'}`,
-      ].join('\n'),
+      content: ui(
+        [
+          `状态：${jobStatusLabel(job.status)}`,
+          `类型：${job.kind}`,
+          `任务 ID：${job.id}`,
+          `开始：${new Date(job.startedAt).toISOString()}`,
+          `结束：${finishedAt === undefined ? '仍在运行' : new Date(finishedAt).toISOString()}`,
+          `耗时：${elapsedLabel(duration)}`,
+          '',
+          `详情：${jobDetailLabel(job.detail) ?? '没有任务详情。'}`,
+        ].join('\n'),
+        [
+          `Status: ${jobStatusLabel(job.status)}`,
+          `Type: ${job.kind}`,
+          `Job ID: ${job.id}`,
+          `Started: ${new Date(job.startedAt).toISOString()}`,
+          `Ended: ${finishedAt === undefined ? 'still running' : new Date(finishedAt).toISOString()}`,
+          `Duration: ${elapsedLabel(duration)}`,
+          '',
+          `Details: ${jobDetailLabel(job.detail) ?? 'No job details.'}`,
+        ].join('\n'),
+      ),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
   }
@@ -2766,9 +2930,21 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       title: 'MCP',
       detail: '查看 MCP 工具、实例和设置。MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护。',
       choices: [
-        ...tools.map(tool => ({ id: `tool:${tool.name}`, label: `工具 · ${tool.name}`, description: `${tool.description} · 外部服务` })),
-        ...plugins.map(item => ({ id: `plugin:${item.entryId}`, label: `实例 · ${item.moduleName}`, description: `${item.enabled ? '启用' : '禁用'} · ${item.fiberPhase ?? '未挂载'}` })),
-        ...settings.map(document => ({ id: `settings:${document.namespace}`, label: `设置 · ${document.namespace}`, description: document.applies === 'live' ? '立即生效' : '需要重启' })),
+        ...tools.map(tool => ({
+          id: `tool:${tool.name}`,
+          label: ui(`工具 · ${tool.name}`, `Tool · ${tool.name}`),
+          description: `${tool.description} · ${ui('外部服务', 'external service')}`,
+        })),
+        ...plugins.map(item => ({
+          id: `plugin:${item.entryId}`,
+          label: ui(`实例 · ${item.moduleName}`, `Instance · ${item.moduleName}`),
+          description: `${item.enabled ? ui('启用', 'enabled') : ui('禁用', 'disabled')} · ${item.fiberPhase ?? ui('未挂载', 'not mounted')}`,
+        })),
+        ...settings.map(document => ({
+          id: `settings:${document.namespace}`,
+          label: ui(`设置 · ${document.namespace}`, `Settings · ${document.namespace}`),
+          description: document.applies === 'live' ? ui('立即生效', 'Applies immediately') : ui('需要重启', 'Restart required'),
+        })),
       ],
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
@@ -2779,19 +2955,31 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     }
     const plugin = plugins.find(candidate => `plugin:${candidate.entryId}` === selected.id)
     if (plugin !== undefined) {
-      const phase = plugin.fiberPhase ?? '未挂载'
+      const phase = plugin.fiberPhase ?? ui('未挂载', 'not mounted')
       const followUp = await this.host.overlays.select({
         title: `MCP 实例 · ${plugin.moduleName}`,
-        detail: [
-          `模块：${plugin.moduleName}`,
-          `实例 ID：${plugin.entryId}`,
-          `运行状态：${plugin.enabled ? '已启用' : '已禁用'} · ${phase}`,
-          '作用范围：当前 Profile；工具是否可用取决于当前会话和模型。',
-          '安全提示：MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护；请单独检查其配置、凭证、文件和网络权限。',
-          phase === 'failed'
-            ? '诊断：实例启动失败；运行 /doctor，并检查对应的 MCP 设置。'
-            : '诊断：运行 /doctor 查看完整检查结果。',
-        ].join('\n'),
+        detail: ui(
+          [
+            `模块：${plugin.moduleName}`,
+            `实例 ID：${plugin.entryId}`,
+            `运行状态：${plugin.enabled ? '已启用' : '已禁用'} · ${phase}`,
+            '作用范围：当前 Profile；工具是否可用取决于当前会话和模型。',
+            '安全提示：MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护；请单独检查其配置、凭证、文件和网络权限。',
+            phase === 'failed'
+              ? '诊断：实例启动失败；运行 /doctor，并检查对应的 MCP 设置。'
+              : '诊断：运行 /doctor 查看完整检查结果。',
+          ].join('\n'),
+          [
+            `Module: ${plugin.moduleName}`,
+            `Instance ID: ${plugin.entryId}`,
+            `Runtime status: ${plugin.enabled ? 'enabled' : 'disabled'} · ${phase}`,
+            'Scope: current Profile; tool availability depends on the current session and model.',
+            'Security: MCP may run in another process or remote service outside the Agent sandbox; review its configuration, credentials, file access, and network access separately.',
+            phase === 'failed'
+              ? 'Diagnostics: the instance failed to start; run /doctor and inspect the corresponding MCP Settings.'
+              : 'Diagnostics: run /doctor for the complete report.',
+          ].join('\n'),
+        ),
         choices: [
           { id: 'close', label: '关闭' },
           { id: 'doctor', label: '运行 /doctor', description: '检查 Profile、插件和运行环境' },
@@ -2814,7 +3002,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     if (tool !== undefined) {
       await this.host.overlays.detail({
         title: tool.name,
-        content: `${toolBoundary(tool).detail}\n\n参数：\n${detailText(tool.parameters)}`,
+        content: `${toolBoundary(tool).detail}\n\n${ui('参数', 'Parameters')}:\n${detailText(tool.parameters)}`,
       })
     }
   }
@@ -2827,7 +3015,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       title: '状态与统计',
       detail: [
         `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}`,
-        `Profile ${status.profile} · ${status.running ? '运行中' : '空闲'}`,
+        `Profile ${status.profile} · ${status.running ? ui('运行中', 'running') : ui('空闲', 'idle')}`,
         status.workspace,
         `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
         ...statistics.lines,

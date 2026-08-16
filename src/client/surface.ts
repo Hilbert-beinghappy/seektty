@@ -21,6 +21,12 @@ import {
   transcriptViewportRows,
 } from './chrome.ts'
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
+import {
+  localeFromSettings,
+  setUiLocale,
+  translateUiText,
+  ui,
+} from './locale.ts'
 import { OverlayQueue } from './overlays.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
@@ -36,7 +42,10 @@ export const internals: {
   createTerminal: () => new ProcessTerminal(),
   isInteractive: () => process.stdin.isTTY && process.stdout.isTTY,
   reportCleanupError: (error) => {
-    process.stderr.write(`${escapeTerminalText(`deepseek: 终端清理失败：${error.message}`)}\n`)
+    process.stderr.write(`${escapeTerminalText(ui(
+      `deepseek: 终端清理失败：${error.message}`,
+      `deepseek: terminal cleanup failed: ${error.message}`,
+    ))}\n`)
   },
   startClient: startTuiClient,
 }
@@ -76,11 +85,12 @@ function pastedImagePath(data: string): string | undefined {
 }
 
 function noticeText(message: string, tone: NoticeTone): string {
+  const text = translateUiText(message)
   switch (tone) {
-    case 'success': return color.success(message)
-    case 'warning': return color.warning(message)
-    case 'error': return color.danger(message)
-    case 'info': return color.brand(message)
+    case 'success': return color.success(text)
+    case 'warning': return color.warning(text)
+    case 'error': return color.danger(text)
+    case 'info': return color.brand(text)
   }
 }
 
@@ -91,16 +101,19 @@ function noticeText(message: string, tone: NoticeTone): string {
  */
 export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurfaceHandle> {
   if (!internals.isInteractive()) {
-    throw new Error('需要交互式 TTY；非交互任务请使用 dsh --profile headless')
+    throw new Error(ui(
+      '需要交互式 TTY；非交互任务请使用 dsh --profile headless',
+      'An interactive TTY is required; use dsh --profile headless for non-interactive tasks',
+    ))
   }
+  const settingsDocuments = await options.management.settings.describe()
+  setUiLocale(localeFromSettings(settingsDocuments))
   const terminal = internals.createTerminal()
   const client = await internals.startClient(options)
   let stopConstructedTui = (): void => undefined
   let disposeConstructedSyntax = (): void => undefined
   try {
-    const initialTheme = themeFromAppearance(appearanceSettings(
-      await options.management.settings.describe(),
-    ))
+    const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
@@ -169,7 +182,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const updateTranscript = (current: TuiActiveSession): void => {
       transcript.update(current.session.getSnapshot(), async (attachment) => {
         const result = await current.session.readAttachment(attachment.attachmentId)
-        if (!result.ok) throw new Error(`图片读取失败：${result.error.message}`)
+        if (!result.ok) throw new Error(ui(
+          `图片读取失败：${result.error.message}`,
+          `Failed to load image: ${result.error.message}`,
+        ))
         return {
           attachment: result.value.attachment,
           data: Buffer.from(result.value.data).toString('base64'),
@@ -188,33 +204,33 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (stopping !== undefined) return
       const snapshot = active?.session.getSnapshot()
       if (snapshot === undefined) {
-        status.setDetail(color.warning('未打开会话'))
+        status.setDetail(color.warning(translateUiText('未打开会话')))
         return
       }
       const pendingCount = snapshot.pending.length
       const primary = snapshot.removed
-        ? color.danger('会话已删除')
+        ? color.danger(translateUiText('会话已删除'))
         : snapshot.promptError !== null
-          ? color.danger(`${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`)
+          ? color.danger(translateUiText(`${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`))
           : pendingCount > 0
-            ? color.warning(`/pending 处理 ${String(pendingCount)} 项交互`)
+            ? color.warning(translateUiText(`/pending 处理 ${String(pendingCount)} 项交互`))
             : snapshot.running
-              ? color.accent('生成中 · Ctrl+C 停止')
+              ? color.accent(translateUiText('生成中 · Ctrl+C 停止'))
               : undefined
       const facts: string[] = []
-      if (snapshot.queue.length > 0) facts.push(`队列 ${String(snapshot.queue.length)}`)
+      if (snapshot.queue.length > 0) facts.push(translateUiText(`队列 ${String(snapshot.queue.length)}`))
       const jobs = active === undefined ? undefined : capabilities.jobs()
       const jobCount = jobs?.filter(job => job.status === 'running' || job.status === 'stopping').length ?? 0
-      if (jobCount > 0) facts.push(`后台 ${String(jobCount)}`)
+      if (jobCount > 0) facts.push(translateUiText(`后台 ${String(jobCount)}`))
       const todos = active?.session.projections.faceOf('todos').getSnapshot()
-      if (Array.isArray(todos) && todos.length > 0) facts.push(`任务 ${String(todos.length)}`)
+      if (Array.isArray(todos) && todos.length > 0) facts.push(translateUiText(`任务 ${String(todos.length)}`))
       const plan = active?.session.projections.faceOf('plan').getSnapshot()
       if (typeof plan === 'object' && plan !== null && 'active' in plan && plan.active === true) facts.push('Plan')
       const goal = active?.session.projections.faceOf('goal').getSnapshot()
-      if (goal !== null && goal !== undefined) facts.push('目标')
+      if (goal !== null && goal !== undefined) facts.push(translateUiText('目标'))
       const attachmentCount = capabilities.draftAttachments().length
-      if (attachmentCount > 0) facts.push(`图片 ${String(attachmentCount)}`)
-      if (restartRequired !== undefined) facts.push('需要重启')
+      if (attachmentCount > 0) facts.push(translateUiText(`图片 ${String(attachmentCount)}`))
+      if (restartRequired !== undefined) facts.push(translateUiText('需要重启'))
       const secondary = notice === undefined
         ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
           .filter((value): value is string => value !== undefined)
@@ -306,6 +322,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setTheme(theme)
         syntax.setTheme(theme)
         transcript.refreshPresentation()
+        tui.invalidate()
+        tui.requestRender(true)
+      },
+      applyLocale: (locale) => {
+        setUiLocale(locale)
+        transcript.refreshPresentation()
+        refreshHeader(false)
+        refresh()
         tui.invalidate()
         tui.requestRender(true)
       },

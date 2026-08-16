@@ -9,6 +9,7 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
+import { translateUiText, ui } from './locale.ts'
 import { color, editorTheme } from './theme.ts'
 
 function fit(text: string, width: number): string {
@@ -36,10 +37,10 @@ function gutter(width: number): { readonly prefix: string; readonly innerWidth: 
 
 function modeLabel(value: string): string {
   switch (value) {
-    case 'standard': return '标准'
+    case 'standard': return ui('标准', 'Standard')
     case 'code': return 'PTC'
-    case 'minimal': return '极简'
-    case 'cordis': return '创造'
+    case 'minimal': return ui('极简', 'Minimal')
+    case 'cordis': return ui('创造', 'Create')
     default: return value
   }
 }
@@ -50,18 +51,26 @@ function modelLabel(value: string): string {
     ? rawRoute.slice('deepseek-official/'.length)
     : rawRoute
   const route = providerless.startsWith('deepseek-') ? providerless.slice('deepseek-'.length) : providerless
-  const reasoning = effort === undefined ? '' : ` · ${{
-    low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大', ultra: '极致',
-  }[effort] ?? effort}推理`
+  const reasoningLabel = effort === undefined
+    ? ''
+    : ({
+      low: ui('低', 'Low'),
+      medium: ui('中', 'Medium'),
+      high: ui('高', 'High'),
+      xhigh: ui('极高', 'Extra high'),
+      max: ui('最大', 'Maximum'),
+      ultra: ui('极致', 'Ultra'),
+    }[effort] ?? effort)
+  const reasoning = effort === undefined ? '' : ui(` · ${reasoningLabel}推理`, ` · ${reasoningLabel} reasoning`)
   return `${route}${reasoning}`
 }
 
 function permissionLabel(value: string): string {
   switch (value) {
-    case 'read-only': return '只读'
-    case 'workspace-write': return '工作区'
-    case 'danger-full-access': return '完全访问'
-    case 'custom': return '自定义'
+    case 'read-only': return ui('只读', 'Read only')
+    case 'workspace-write': return ui('工作区', 'Workspace')
+    case 'danger-full-access': return ui('完全访问', 'Full access')
+    case 'custom': return ui('自定义', 'Custom')
     default: return value
   }
 }
@@ -213,13 +222,15 @@ export class ContextBar implements Component {
     if (this.state.kind === 'facts') {
       const facts = this.state.facts
       const context = facts.context?.split(' · ', 1)[0]
-      const runtime = facts.running ? color.accent('● 生成中') : color.muted('就绪')
+      const runtime = facts.running ? color.accent(ui('● 生成中', '● Generating')) : color.muted(ui('就绪', 'Ready'))
       const right = context === undefined ? runtime : `${color.muted(context)} · ${runtime}`
       return [`${prefix}${columns('', right, innerWidth)}`]
     }
     const state = this.state.kind === 'error'
-      ? color.danger(this.state.message)
-      : color.muted(this.state.kind === 'loading' ? '正在连接 Harness…' : '未打开会话')
+      ? color.danger(translateUiText(this.state.message))
+      : color.muted(this.state.kind === 'loading'
+        ? ui('正在连接 Harness…', 'Connecting to Harness…')
+        : ui('未打开会话', 'No session open'))
     return [`${prefix}${columns('', state, innerWidth)}`]
   }
 }
@@ -245,7 +256,10 @@ export class StatusBar implements Component {
 
   render(width: number): string[] {
     const { prefix, innerWidth } = gutter(width)
-    const label = `使用权限：${permissionLabel(this.permission)}`
+    const label = ui(
+      `使用权限：${permissionLabel(this.permission)}`,
+      `Permission: ${permissionLabel(this.permission)}`,
+    )
     const permission = `${color.brand('▸▸')} ${
       this.permission === 'danger-full-access'
         ? color.danger(label)
@@ -260,7 +274,7 @@ export class StatusBar implements Component {
 
 /** Open Grok-style composer with live model facts aligned to its lower rule. */
 export class PromptEditor extends Editor {
-  private facts = 'deepseek · 标准'
+  private facts: TuiHeaderFacts | undefined
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -271,15 +285,12 @@ export class PromptEditor extends Editor {
    * @param facts - Current authoritative Session facts.
    */
   setFacts(facts: TuiHeaderFacts): void {
-    this.facts = [
-      facts.model === '' ? undefined : modelLabel(facts.model),
-      modeLabel(facts.mode),
-    ].filter((value): value is string => value !== undefined).join(' · ')
+    this.facts = facts
   }
 
   /** Return the composer to its connected blank-session facts. */
   setEmpty(): void {
-    this.facts = 'deepseek · 标准'
+    this.facts = undefined
   }
 
   override setText(text: string): void {
@@ -305,7 +316,7 @@ export class PromptEditor extends Editor {
     if (this.getText() === '' && !this.isShowingAutocomplete() && editorRows.length > 0) {
       const cursor = this.focused ? `${CURSOR_MARKER}\u001B[7m \u001B[0m` : ''
       editorRows[0] = padded(
-        `${color.brand('❯')} ${cursor}${color.muted('输入消息，/ 打开命令')}`,
+        `${color.brand('❯')} ${cursor}${color.muted(ui('输入消息，/ 打开命令', 'Enter a message; / opens commands'))}`,
         frameWidth,
       )
     } else if (editorRows.length > 0) {
@@ -313,7 +324,13 @@ export class PromptEditor extends Editor {
     }
 
     const body = [...editorRows, ...autocompleteRows].map(row => padded(row, frameWidth))
-    const compactedFacts = compactFacts(this.facts, Math.max(0, frameWidth - 2))
+    const facts = this.facts === undefined
+      ? ui('deepseek · 标准', 'deepseek · Standard')
+      : [
+        this.facts.model === '' ? undefined : modelLabel(this.facts.model),
+        modeLabel(this.facts.mode),
+      ].filter((value): value is string => value !== undefined).join(' · ')
+    const compactedFacts = compactFacts(facts, Math.max(0, frameWidth - 2))
     return [
       horizontalRule('', frameWidth, this.borderColor),
       ...body,

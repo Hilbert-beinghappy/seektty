@@ -32,6 +32,7 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
+import { translateUiText, ui } from './locale.ts'
 import {
   background,
   color,
@@ -94,7 +95,7 @@ type TranscriptRow = ({
 }
 
 function thinkingRow(): TranscriptRow {
-  return { format: 'plain', text: '正在思考…', pulse: 'thinking' }
+  return { format: 'plain', text: ui('正在思考…', 'Thinking…'), pulse: 'thinking' }
 }
 
 class PulsingRow implements Component {
@@ -186,16 +187,21 @@ function imageRow(attachment: TranscriptImageAttachment): TranscriptRow {
 
 function imageLabel(attachment: TranscriptImageAttachment): string {
   const name = attachment.name ?? String(attachment.attachmentId)
-  return `[图片 · ${name} · ${attachment.width}×${attachment.height} · ${attachment.mediaType} · ${attachment.bytes} 字节]`
+  return ui(
+    `[图片 · ${name} · ${attachment.width}×${attachment.height} · ${attachment.mediaType} · ${attachment.bytes} 字节]`,
+    `[Image · ${name} · ${attachment.width}×${attachment.height} · ${attachment.mediaType} · ${attachment.bytes} bytes]`,
+  )
 }
 
 function jsonText(value: unknown): string {
   if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return String(value)
   try {
     const rendered = JSON.stringify(value, null, 2)
-    return rendered.length > 8_000 ? `${rendered.slice(0, 8_000)}\n…（终端显示已截断）` : rendered
+    return rendered.length > 8_000
+      ? `${rendered.slice(0, 8_000)}\n${ui('…（终端显示已截断）', '… (terminal display truncated)')}`
+      : rendered
   } catch {
-    return typeof value === 'bigint' ? value.toString() : '[内容无法序列化]'
+    return typeof value === 'bigint' ? value.toString() : ui('[内容无法序列化]', '[content cannot be serialized]')
   }
 }
 
@@ -205,70 +211,81 @@ function contentBlockText(block: unknown): string {
   if (value.type === 'text' || value.type === 'reasoning') {
     return typeof value.text === 'string' ? value.text : `[${value.type}]`
   }
-  if (value.type === 'image') return '[图片附件]'
-  if (value.type === 'tool-result') return '[工具结果]'
-  return `[${typeof value.type === 'string' ? value.type : '内容'}]`
+  if (value.type === 'image') return ui('[图片附件]', '[image attachment]')
+  if (value.type === 'tool-result') return ui('[工具结果]', '[tool result]')
+  return `[${typeof value.type === 'string' ? value.type : ui('内容', 'content')}]`
 }
 
 function permissionCommandText(node: Extract<ConversationNode, { kind: 'command' }>): string | undefined {
   if (node.name !== 'permission' || node.outcome?.kind !== 'success') return undefined
   const preset = /^preset\s+(\S+)/u.exec(node.outcome.text ?? '')?.[1] ?? node.args?.trim()
-  if (preset === undefined || preset === '') return color.success('权限已切换')
+  if (preset === undefined || preset === '') return color.success(ui('权限已切换', 'Permission changed'))
   const label = preset === 'read-only'
-    ? '只读'
-    : preset === 'workspace-write' ? '工作区' : preset === 'danger-full-access' ? '完全访问' : preset
-  return color.success(`权限已切换为${label}`)
+    ? ui('只读', 'Read only')
+    : preset === 'workspace-write'
+      ? ui('工作区', 'Workspace')
+      : preset === 'danger-full-access' ? ui('完全访问', 'Full access') : preset
+  return color.success(ui(`权限已切换为${label}`, `Permission changed to ${label}`))
 }
 
 function planCommandText(node: Extract<ConversationNode, { kind: 'command' }>): string | undefined {
   if (node.name !== 'plan') return undefined
-  if (node.outcome === null) return color.warning('正在切换计划模式')
+  if (node.outcome === null) return color.warning(ui('正在切换计划模式', 'Switching plan mode'))
   if (node.outcome.kind !== 'success') {
-    return color.danger(`计划模式切换失败${node.outcome.text === undefined ? '' : `\n${node.outcome.text}`}`)
+    return color.danger(ui(
+      `计划模式切换失败${node.outcome.text === undefined ? '' : `\n${node.outcome.text}`}`,
+      `Failed to switch plan mode${node.outcome.text === undefined ? '' : `\n${node.outcome.text}`}`,
+    ))
   }
   const text = node.outcome.text ?? ''
   if (node.args?.trim() === 'off') {
-    if (text.includes('entry cancelled')) return color.success('已取消进入计划模式')
-    if (text.includes('already inactive')) return color.muted('计划模式未开启')
-    if (text.startsWith('Leaving ')) return color.success('计划模式将在下一步关闭')
-    return color.success('计划模式已关闭')
+    if (text.includes('entry cancelled')) return color.success(ui('已取消进入计划模式', 'Plan-mode entry cancelled'))
+    if (text.includes('already inactive')) return color.muted(ui('计划模式未开启', 'Plan mode is not active'))
+    if (text.startsWith('Leaving ')) return color.success(ui('计划模式将在下一步关闭', 'Plan mode will stop on the next step'))
+    return color.success(ui('计划模式已关闭', 'Plan mode disabled'))
   }
   return color.success(text.startsWith('Entering ')
-    ? '计划模式将在下一步开启'
-    : '计划模式已开启')
+    ? ui('计划模式将在下一步开启', 'Plan mode will start on the next step')
+    : ui('计划模式已开启', 'Plan mode enabled'))
 }
 
 function goalCommandText(node: Extract<ConversationNode, { kind: 'command' }>): string | undefined {
   if (node.name !== 'goal') return undefined
-  if (node.outcome === null) return color.warning('正在处理目标')
+  if (node.outcome === null) return color.warning(ui('正在处理目标', 'Processing goal'))
   const args = node.args?.trim() ?? ''
   const action = args.toLowerCase()
   if (node.outcome.kind !== 'success') {
     if (node.outcome.text?.startsWith('A goal is already ') === true) {
-      return color.danger('已有进行中的目标；可编辑或清除后重新创建')
+      return color.danger(ui('已有进行中的目标；可编辑或清除后重新创建', 'A goal is already active; edit or clear it before creating another'))
     }
-    if (action === 'edit') return color.danger('请提供新的目标内容')
-    if (node.outcome.text?.startsWith('No goal is currently set') === true) return color.danger('当前没有目标')
-    return color.danger('当前状态不能执行此目标操作')
+    if (action === 'edit') return color.danger(ui('请提供新的目标内容', 'Provide the new goal text'))
+    if (node.outcome.text?.startsWith('No goal is currently set') === true) return color.danger(ui('当前没有目标', 'No active goal'))
+    return color.danger(ui('当前状态不能执行此目标操作', 'This goal action is not valid in the current state'))
   }
   if (action === 'clear') {
-    return color.success(node.outcome.text === 'No goal to clear.' ? '当前没有目标' : '目标已清除')
+    return color.success(node.outcome.text === 'No goal to clear.'
+      ? ui('当前没有目标', 'No active goal')
+      : ui('目标已清除', 'Goal cleared'))
   }
-  if (action === 'pause') return color.success('目标已暂停')
-  if (action === 'resume') return color.success('目标已继续')
-  if (action.startsWith('edit ')) return color.success(`目标已更新：${args.slice(5).trim()}`)
-  if (args !== '') return color.success(`目标已创建：${args}`)
-  if (node.outcome.text?.startsWith('No goal is currently set.') === true) return color.muted('当前没有目标')
+  if (action === 'pause') return color.success(ui('目标已暂停', 'Goal paused'))
+  if (action === 'resume') return color.success(ui('目标已继续', 'Goal resumed'))
+  if (action.startsWith('edit ')) return color.success(ui(`目标已更新：${args.slice(5).trim()}`, `Goal updated: ${args.slice(5).trim()}`))
+  if (args !== '') return color.success(ui(`目标已创建：${args}`, `Goal created: ${args}`))
+  if (node.outcome.text?.startsWith('No goal is currently set.') === true) return color.muted(ui('当前没有目标', 'No active goal'))
   const objective = /^Objective: (.*)$/mu.exec(node.outcome.text ?? '')?.[1]
   const phase = /^Status: (\S+)$/mu.exec(node.outcome.text ?? '')?.[1]
   const blocker = /^Blocker: (.*)$/mu.exec(node.outcome.text ?? '')?.[1]
   const phaseLabel = phase === 'active'
-    ? '进行中'
-    : phase === 'paused' ? '已暂停' : phase === 'blocked' ? '受阻' : phase === 'complete' ? '已完成' : undefined
+    ? ui('进行中', 'In progress')
+    : phase === 'paused'
+      ? ui('已暂停', 'Paused')
+      : phase === 'blocked'
+        ? ui('受阻', 'Blocked')
+        : phase === 'complete' ? ui('已完成', 'Completed') : undefined
   return [
-    objective === undefined ? '当前目标' : `目标：${objective}`,
-    ...(phaseLabel === undefined ? [] : [`状态：${phaseLabel}`]),
-    ...(blocker === undefined ? [] : [`阻塞原因：${blocker}`]),
+    objective === undefined ? ui('当前目标', 'Current goal') : ui(`目标：${objective}`, `Goal: ${objective}`),
+    ...(phaseLabel === undefined ? [] : [ui(`状态：${phaseLabel}`, `Status: ${phaseLabel}`)]),
+    ...(blocker === undefined ? [] : [ui(`阻塞原因：${blocker}`, `Blocked by: ${blocker}`)]),
   ].join('\n')
 }
 
@@ -286,7 +303,7 @@ function contentRows(content: readonly unknown[]): TranscriptRow[] {
     if (value.type === 'image') {
       const attachment = imageAttachment(value.attachment)
       return attachment === undefined
-        ? [{ format: 'plain', text: color.warning('[图片附件元数据无效]') }]
+        ? [{ format: 'plain', text: color.warning(ui('[图片附件元数据无效]', '[invalid image attachment metadata]')) }]
         : [imageRow(attachment)]
     }
     return [{ format: 'plain', text: contentBlockText(block) }]
@@ -298,7 +315,7 @@ function userContentRows(content: readonly unknown[], steering = false): Transcr
     ? { ...row, format: 'plain' as const }
     : row)
   const prefix = steering
-    ? `${color.brand('>')} ${color.muted('引导')} `
+    ? `${color.brand('>')} ${color.muted(ui('引导', 'Steering'))} `
     : `${color.brand('>')} `
   const first = rows[0]
   if (first === undefined) return [{ format: 'plain', text: prefix.trimEnd(), userTurn: true }]
@@ -311,12 +328,12 @@ function userContentRows(content: readonly unknown[], steering = false): Transcr
 function assistantBlockText(block: AssistantBlock, preferences: TranscriptPreferences): string {
   switch (block.kind) {
     case 'text': return block.text
-    case 'reasoning': return preferences.reasoning ? color.muted(`思考\n${block.text}`) : ''
-    case 'image': return color.muted('[图片附件]')
+    case 'reasoning': return preferences.reasoning ? color.muted(`${ui('思考', 'Reasoning')}\n${block.text}`) : ''
+    case 'image': return color.muted(ui('[图片附件]', '[image attachment]'))
     case 'tool-call':
       if (preferences.tools === 'hidden') return ''
       return color.accent(`◆ ${block.name}${preferences.tools === 'expanded' ? `\n${prettyArgs(block.argsRaw)}` : ''}`)
-    case 'other': return color.muted('模型扩展内容 · /trajectory 查看详情')
+    case 'other': return color.muted(ui('模型扩展内容 · /trajectory 查看详情', 'Extended model content · use /trajectory for details'))
   }
 }
 
@@ -327,7 +344,7 @@ function assistantBlockRows(block: AssistantBlock, preferences: TranscriptPrefer
       if (!preferences.reasoning || block.text === '') return []
       return [{
         format: 'markdown',
-        text: `> **思考**\n>\n${block.text.split('\n').map(line => `> ${line}`).join('\n')}`,
+        text: `> **${ui('思考', 'Reasoning')}**\n>\n${block.text.split('\n').map(line => `> ${line}`).join('\n')}`,
       }]
     case 'image': return [imageRow(block.attachment)]
     case 'tool-call':
@@ -338,7 +355,7 @@ function assistantBlockRows(block: AssistantBlock, preferences: TranscriptPrefer
       }, ...(preferences.tools === 'expanded'
         ? [{ format: 'code' as const, text: prettyArgs(block.argsRaw), language: 'json' }]
         : [])]
-    case 'other': return [{ format: 'plain', text: color.muted('模型扩展内容 · /trajectory 查看详情') }]
+    case 'other': return [{ format: 'plain', text: color.muted(ui('模型扩展内容 · /trajectory 查看详情', 'Extended model content · use /trajectory for details')) }]
   }
 }
 
@@ -380,33 +397,35 @@ function diffText(value: unknown): string {
   }
   const visible = rows.length <= 80
     ? rows
-    : [...rows.slice(0, 40), `@@ … 省略 ${rows.length - 80} 行 … @@`, ...rows.slice(-40)]
-  visible.push(`# +${added} -${removed} · ${paths.size} 个文件`)
+    : [...rows.slice(0, 40), ui(`@@ … 省略 ${rows.length - 80} 行 … @@`, `@@ … ${rows.length - 80} lines omitted … @@`), ...rows.slice(-40)]
+  visible.push(ui(`# +${added} -${removed} · ${paths.size} 个文件`, `# +${added} -${removed} · ${paths.size} file(s)`))
   return visible.join('\n')
 }
 
-const PRODUCT_TOOL_TITLES: Readonly<Record<string, string>> = {
-  ask_user_question: '向用户提问',
-  create_goal: '创建目标',
-  exit_plan_mode: '计划审查',
-  get_goal: '查看目标',
-  job_kill: '停止后台任务',
-  job_list: '查看后台任务',
-  job_output: '读取后台任务',
-  subagent: '子 Agent',
-  todo_write: '更新任务清单',
-  update_goal: '更新目标',
-  workflow: '工作流',
+const PRODUCT_TOOL_TITLES: Readonly<Record<string, readonly [zh: string, en: string]>> = {
+  ask_user_question: ['向用户提问', 'Ask user'],
+  create_goal: ['创建目标', 'Create goal'],
+  exit_plan_mode: ['计划审查', 'Plan review'],
+  get_goal: ['查看目标', 'View goal'],
+  job_kill: ['停止后台任务', 'Stop background job'],
+  job_list: ['查看后台任务', 'View background jobs'],
+  job_output: ['读取后台任务', 'Read background job'],
+  subagent: ['子 Agent', 'Subagent'],
+  todo_write: ['更新任务清单', 'Update task list'],
+  update_goal: ['更新目标', 'Update goal'],
+  workflow: ['工作流', 'Workflow'],
 }
 
 function toolTitle(node: ToolResultNode | RunningToolCall): string {
   const name = 'kind' in node ? node.call?.name : node.name
   const productTitle = name === undefined ? undefined : PRODUCT_TOOL_TITLES[name]
-  if (productTitle !== undefined) return productTitle
+  if (productTitle !== undefined) return ui(productTitle[0], productTitle[1])
   const callView = node.callView
   if (callView?.card === 'terminal') {
     const description = callView.description?.trim()
-    return description === undefined || description === '' ? '执行 Shell 指令' : description
+    return description === undefined || description === ''
+      ? ui('执行 Shell 指令', 'Run shell command')
+      : description
   }
   if ('kind' in node) {
     return node.resultView?.title ?? node.callView?.title ?? node.call?.name ?? node.callId
@@ -529,8 +548,14 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
   const details = settledInvocationDetails(node)
   if (result?.card === 'terminal') {
     if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
-    if (result.exitCode !== undefined) details.push({ kind: 'plain', text: `退出码 ${result.exitCode}` })
-    if (result.signal !== undefined) details.push({ kind: 'plain', text: `信号 ${result.signal}` })
+    if (result.exitCode !== undefined) details.push({
+      kind: 'plain',
+      text: ui(`退出码 ${result.exitCode}`, `Exit code ${result.exitCode}`),
+    })
+    if (result.signal !== undefined) details.push({
+      kind: 'plain',
+      text: ui(`信号 ${result.signal}`, `Signal ${result.signal}`),
+    })
   } else if (result?.card === 'diff') {
     details.push({ kind: 'code', text: diffText(result.diffs), language: 'diff' })
   } else if (result?.card === 'generic' && result.content !== undefined) {
@@ -560,10 +585,16 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
         lineNumbers: file.matches.map(match => match.lineNumber),
       })
     }
-    if (result.truncated) details.push({ kind: 'plain', text: `只显示部分结果 · 共 ${String(result.total)} 项` })
+    if (result.truncated) details.push({
+      kind: 'plain',
+      text: ui(`只显示部分结果 · 共 ${String(result.total)} 项`, `Partial results · ${String(result.total)} item(s) total`),
+    })
   } else if (result?.card === 'search') {
     details.push({ kind: 'plain', text: result.paths.join('\n') })
-    if (result.truncated) details.push({ kind: 'plain', text: `只显示部分结果 · 共 ${String(result.total)} 项` })
+    if (result.truncated) details.push({
+      kind: 'plain',
+      text: ui(`只显示部分结果 · 共 ${String(result.total)} 项`, `Partial results · ${String(result.total)} item(s) total`),
+    })
   } else if (result?.card === 'web' && result.kind === 'search') {
     if (result.answer !== undefined) details.push({ kind: 'markdown', text: result.answer })
     const sources = result.sources as readonly WebSourceView[]
@@ -571,11 +602,11 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
       kind: 'plain' as const,
       text: `${source.title ?? source.url}\n${source.url}${source.snippet === undefined ? '' : `\n${source.snippet}`}`,
     })))
-    if (result.truncated) details.push({ kind: 'plain', text: '来源列表已截断' })
+    if (result.truncated) details.push({ kind: 'plain', text: ui('来源列表已截断', 'Source list truncated') })
   } else if (result?.card === 'web') {
     details.push({
       kind: 'plain',
-      text: `${result.statusCode} · ${result.url}${result.truncated ? ' · 内容已截断' : ''}`,
+      text: `${result.statusCode} · ${result.url}${result.truncated ? ui(' · 内容已截断', ' · content truncated') : ''}`,
     })
     details.push(...contentDetails(node.content))
   } else if (result?.card === 'generic') {
@@ -584,7 +615,7 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
     details.push(...contentDetails(node.content))
   }
   if (node.meta !== undefined) {
-    details.push({ kind: 'code', text: jsonText(node.meta), language: 'json', caption: '元数据' })
+    details.push({ kind: 'code', text: jsonText(node.meta), language: 'json', caption: ui('元数据', 'Metadata') })
   }
   return details.filter(value => value.text !== '')
 }
@@ -621,7 +652,7 @@ function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences,
       ? viewDetails(block)
       : settledInvocationDetails(block)
     return [
-      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger('失败')}` : ''}${duration}` },
+      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}` },
       ...details.map(detail => detailRow(detail, depth)),
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
@@ -650,29 +681,41 @@ function nodeText(node: ConversationNode, preferences: TranscriptPreferences): s
     case 'user':
       return `${color.brand('>')} ${contentText(node.content)}`
     case 'steering':
-      return `${color.brand('>')} ${color.muted('引导')} ${contentText(node.content)}`
+      return `${color.brand('>')} ${color.muted(ui('引导', 'Steering'))} ${contentText(node.content)}`
     case 'context':
-      return `${color.muted(`${node.provenance.role === 'recall' ? '召回' : '上下文'}${node.provenance.label === null ? '' : ` · ${node.provenance.label}`}${node.form === null ? ' · 未知格式' : ` · ${node.form}`}`)}\n${contentText(node.content)}`
+      return `${color.muted(`${node.provenance.role === 'recall' ? ui('召回', 'Recall') : ui('上下文', 'Context')}${node.provenance.label === null ? '' : ` · ${node.provenance.label}`}${node.form === null ? ui(' · 未知格式', ' · unknown format') : ` · ${node.form}`}`)}\n${contentText(node.content)}`
     case 'assistant':
-      return `${node.blocks.map((block: AssistantBlock) => assistantBlockText(block, preferences)).filter(Boolean).join('\n')}${node.interrupted === true ? color.warning('\n已停止') : ''}`
+      return `${node.blocks.map((block: AssistantBlock) => assistantBlockText(block, preferences)).filter(Boolean).join('\n')}${node.interrupted === true ? color.warning(ui('\n已停止', '\nStopped')) : ''}`
     case 'command':
       return permissionCommandText(node) ?? planCommandText(node) ?? goalCommandText(node) ?? (node.outcome === null
-        ? color.warning(`命令 /${node.name ?? 'unknown'}${node.args ?? ''} · 执行中`)
-        : `${node.outcome.kind === 'success' ? color.success('命令完成') : color.danger('命令失败')} /${node.name ?? 'unknown'}${node.args ?? ''}${node.outcome.text === undefined ? '' : `\n${node.outcome.text}`}`)
+        ? color.warning(ui(
+          `命令 /${node.name ?? 'unknown'}${node.args ?? ''} · 执行中`,
+          `Command /${node.name ?? 'unknown'}${node.args ?? ''} · running`,
+        ))
+        : `${node.outcome.kind === 'success' ? color.success(ui('命令完成', 'Command completed')) : color.danger(ui('命令失败', 'Command failed'))} /${node.name ?? 'unknown'}${node.args ?? ''}${node.outcome.text === undefined ? '' : `\n${node.outcome.text}`}`)
     case 'tool-result':
       return preferences.tools === 'hidden' ? '' : toolBlockText(node, preferences, 0)
     case 'compaction':
-      return color.muted(`上下文已压缩${node.shadowedItemCount === null ? '' : ` · ${node.shadowedItemCount} 项`}${node.shadowedTokenCount === null ? '' : ` · 约 ${node.shadowedTokenCount} Token`}${node.summary === null ? '' : `\n${node.summary}`}`)
+      return color.muted(ui(
+        `上下文已压缩${node.shadowedItemCount === null ? '' : ` · ${node.shadowedItemCount} 项`}${node.shadowedTokenCount === null ? '' : ` · 约 ${node.shadowedTokenCount} Token`}${node.summary === null ? '' : `\n${node.summary}`}`,
+        `Context compacted${node.shadowedItemCount === null ? '' : ` · ${node.shadowedItemCount} item(s)`}${node.shadowedTokenCount === null ? '' : ` · about ${node.shadowedTokenCount} tokens`}${node.summary === null ? '' : `\n${node.summary}`}`,
+      ))
     case 'model-retry':
-      return color.warning(`模型请求${node.retryState === 'scheduled' ? '等待重试' : node.retryState === 'started' ? '正在重试' : '重试已取消'} · ${node.provider} · 第 ${node.retry} 次${node.mode === 'normal' ? `/${node.maxRetries}` : ''} · ${node.delayMs} ms`)
+      return color.warning(ui(
+        `模型请求${node.retryState === 'scheduled' ? '等待重试' : node.retryState === 'started' ? '正在重试' : '重试已取消'} · ${node.provider} · 第 ${node.retry} 次${node.mode === 'normal' ? `/${node.maxRetries}` : ''} · ${node.delayMs} ms`,
+        `Model request ${node.retryState === 'scheduled' ? 'waiting to retry' : node.retryState === 'started' ? 'retrying' : 'retry cancelled'} · ${node.provider} · attempt ${node.retry}${node.mode === 'normal' ? `/${node.maxRetries}` : ''} · ${node.delayMs} ms`,
+      ))
     case 'turn-error':
-      return color.danger(`本轮执行失败${node.code === undefined ? '' : ` [${node.code}]`}\n${node.message}`)
+      return color.danger(ui(
+        `本轮执行失败${node.code === undefined ? '' : ` [${node.code}]`}\n${node.message}`,
+        `Turn failed${node.code === undefined ? '' : ` [${node.code}]`}\n${node.message}`,
+      ))
     case 'turn-max-tokens':
-      return color.warning('本轮已达到最大 Token 数')
+      return color.warning(ui('本轮已达到最大 Token 数', 'This turn reached the token limit'))
     case 'unknown':
-      return color.muted(`未知事件 ${node.type} · /trajectory 查看详情`)
+      return color.muted(ui(`未知事件 ${node.type} · /trajectory 查看详情`, `Unknown event ${node.type} · use /trajectory for details`))
     default:
-      return color.muted('未知会话事件 · /trajectory 查看详情')
+      return color.muted(ui('未知会话事件 · /trajectory 查看详情', 'Unknown session event · use /trajectory for details'))
   }
 }
 
@@ -694,11 +737,11 @@ function isConversationNode(value: unknown): value is ConversationNode {
 
 function workflowStatusLabel(status: string): string {
   switch (status) {
-    case 'running': return '运行中'
-    case 'completed': return '已完成'
-    case 'failed': return '失败'
-    case 'cancelled': return '已取消'
-    case 'interrupted': return '已中断'
+    case 'running': return ui('运行中', 'Running')
+    case 'completed': return ui('已完成', 'Completed')
+    case 'failed': return ui('失败', 'Failed')
+    case 'cancelled': return ui('已取消', 'Cancelled')
+    case 'interrupted': return ui('已中断', 'Interrupted')
     default: return escapeTerminalText(status)
   }
 }
@@ -717,7 +760,7 @@ function workflowStatusText(status: string): string {
 
 function workflowMemberLabel(member: WorkflowRunMemberData): string {
   const safe = escapeTerminalText(member.label.trim())
-  if (safe === '') return `成员 ${member.seq}`
+  if (safe === '') return ui(`成员 ${member.seq}`, `Member ${member.seq}`)
   const generated = /^agent-([a-z0-9]+)$/iu.exec(safe)
   return generated === null ? safe : `Agent ${generated[1] ?? String(member.seq)}`
 }
@@ -732,13 +775,13 @@ function workflowText(value: unknown): string | undefined {
   const rows = phases.flatMap((phase: WorkflowRunPhaseData) => {
     const phaseLabel = phase.phase === null
       ? undefined
-      : escapeTerminalText(phase.phase.trim()) || '未命名阶段'
+      : escapeTerminalText(phase.phase.trim()) || ui('未命名阶段', 'Unnamed phase')
     const members = phase.members.map((member: WorkflowRunMemberData) =>
       `    ${workflowStatusText(member.status)} · ${workflowMemberLabel(member)}`)
     return phaseLabel === undefined ? members.map(row => row.slice(2)) : [`  ${color.muted(phaseLabel)}`, ...members]
   })
   const name = escapeTerminalText(workflow.name)
-  return `${color.accent(`工作流 · ${name}`)} · ${workflowStatusText(workflow.status)}${rows.length === 0 ? '' : `\n${rows.join('\n')}`}`
+  return `${color.accent(ui(`工作流 · ${name}`, `Workflow · ${name}`))} · ${workflowStatusText(workflow.status)}${rows.length === 0 ? '' : `\n${rows.join('\n')}`}`
 }
 
 function deliverablesText(node: ChatConversationViewNode, data: unknown): string {
@@ -749,7 +792,9 @@ function deliverablesText(node: ChatConversationViewNode, data: unknown): string
     location.turn.data.get('deliverables'),
     data.seq,
   )
-  return produced.length === 0 ? '' : `\n${color.success(`生成文件 · ${produced.join(' · ')}`)}`
+  return produced.length === 0
+    ? ''
+    : `\n${color.success(ui(`生成文件 · ${produced.join(' · ')}`, `Produced files · ${produced.join(' · ')}`))}`
 }
 
 function grouped(rows: readonly TranscriptRow[]): TranscriptRow[] {
@@ -796,13 +841,13 @@ function turnTailText(data: unknown): string {
   const usage = recordOf(value.usage)
   const groups: string[] = []
   const steps = nonnegativeNumber(statistics?.steps)
-  if (steps !== undefined && steps > 0) groups.push(`1 轮 · ${tokenText(steps)} 步`)
+  if (steps !== undefined && steps > 0) groups.push(ui(`1 轮 · ${tokenText(steps)} 步`, `1 turn · ${tokenText(steps)} steps`))
 
   const llmMs = nonnegativeNumber(statistics?.llmMs)
   const toolMs = nonnegativeNumber(statistics?.toolMs)
   const durations = [
     ...(llmMs === undefined || llmMs === 0 ? [] : [`LLM ${durationText(llmMs)}`]),
-    ...(toolMs === undefined || toolMs === 0 ? [] : [`工具调用 ${durationText(toolMs)}`]),
+    ...(toolMs === undefined || toolMs === 0 ? [] : [ui(`工具调用 ${durationText(toolMs)}`, `Tools ${durationText(toolMs)}`)]),
   ]
   if (durations.length > 0) groups.push(durations.join(' · '))
 
@@ -813,7 +858,7 @@ function turnTailText(data: unknown): string {
   const performance = [
     ...(ttftMs === undefined || ttftSteps === undefined || ttftSteps === 0
       ? []
-      : [`首 token 平均 ${durationText(ttftMs / ttftSteps)}`]),
+      : [ui(`首 token 平均 ${durationText(ttftMs / ttftSteps)}`, `Average first token ${durationText(ttftMs / ttftSteps)}`)]),
     ...(decodeMs === undefined || decodeTokens === undefined || decodeMs === 0
       ? []
       : [`${String(Math.round(decodeTokens / (decodeMs / 1_000) * 10) / 10)} tok/s`]),
@@ -826,15 +871,21 @@ function turnTailText(data: unknown): string {
   const output = nonnegativeNumber(usage?.outputTokens)
   if (uncached !== undefined && cacheRead !== undefined && cacheWrite !== undefined && output !== undefined) {
     const input = uncached + cacheRead + cacheWrite
-    if (input > 0) groups.push(`缓存命中 ${String(Math.round(cacheRead / input * 100))}%`)
-    if (input > 0 || output > 0) groups.push(`输入 ${tokenText(input)} tok · 输出 ${tokenText(output)} tok`)
+    if (input > 0) groups.push(ui(
+      `缓存命中 ${String(Math.round(cacheRead / input * 100))}%`,
+      `Cache hit ${String(Math.round(cacheRead / input * 100))}%`,
+    ))
+    if (input > 0 || output > 0) groups.push(ui(
+      `输入 ${tokenText(input)} tok · 输出 ${tokenText(output)} tok`,
+      `Input ${tokenText(input)} tok · output ${tokenText(output)} tok`,
+    ))
   }
   if (groups.length > 0) return color.muted(groups.join('  |  '))
 
   const legacy = [
     ...nonnegativeNumber(value.ttftMs) === undefined
       ? []
-      : [`首 token ${durationText(nonnegativeNumber(value.ttftMs) ?? 0)}`],
+      : [ui(`首 token ${durationText(nonnegativeNumber(value.ttftMs) ?? 0)}`, `First token ${durationText(nonnegativeNumber(value.ttftMs) ?? 0)}`)],
     ...nonnegativeNumber(value.tokensPerSecond) === undefined
       ? []
       : [`${String(Math.round((nonnegativeNumber(value.tokensPerSecond) ?? 0) * 10) / 10)} tok/s`],
@@ -864,7 +915,7 @@ function assistantStepRows(data: unknown, preferences: TranscriptPreferences): T
     rows.push(thinkingRow())
   }
   rows.push(...content)
-  if (step.status === 'interrupted') rows.push({ format: 'plain', text: color.warning('已停止') })
+  if (step.status === 'interrupted') rows.push({ format: 'plain', text: color.warning(ui('已停止', 'Stopped')) })
   return grouped(rows)
 }
 
@@ -884,13 +935,13 @@ function compactContextRows(node: Extract<ConversationNode, { kind: 'context' }>
   if (node.form === 'notice' && typeof node.source === 'object' && node.source !== null
     && 'kind' in node.source && node.source.kind === 'plugin'
     && 'plugin' in node.source && node.source.plugin === 'tool-jobs') {
-    return grouped([{ format: 'plain', text: color.muted('◆ 后台任务已结束') }])
+    return grouped([{ format: 'plain', text: color.muted(ui('◆ 后台任务已结束', '◆ Background job finished')) }])
   }
   if (node.provenance.role === 'recall') {
     const source = node.provenance.label === null ? '' : ` · ${node.provenance.label}`
     return grouped([{
       format: 'plain',
-      text: color.muted(`跨会话召回${source} · /trajectory 查看`),
+      text: color.muted(ui(`跨会话召回${source} · /trajectory 查看`, `Cross-session recall${source} · view with /trajectory`)),
     }])
   }
   if (node.form === 'notice' && typeof node.source === 'object' && node.source !== null
@@ -905,13 +956,13 @@ function subagentUserRows(node: Extract<ConversationNode, { kind: 'user' }>): Tr
   if (node.source.kind === 'subagent-settled') {
     return grouped([{
       format: 'plain',
-      text: color.muted('◆ 子 Agent 已结束'),
+      text: color.muted(ui('◆ 子 Agent 已结束', '◆ Subagent finished')),
       userTurn: true,
     }])
   }
   if (node.source.kind !== 'subagent-report') return undefined
   return grouped([
-    { format: 'plain', text: `${color.brand('>')} ${color.muted('子 Agent 报告')}`, userTurn: true },
+    { format: 'plain', text: `${color.brand('>')} ${color.muted(ui('子 Agent 报告', 'Subagent report'))}`, userTurn: true },
     ...contentRows(node.content.slice(1)),
   ])
 }
@@ -961,7 +1012,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
       const rows: TranscriptRow[] = [
         ...node.data.blocks.flatMap((block: AssistantBlock) => assistantBlockRows(block, preferences)),
       ]
-      if (node.data.interrupted === true) rows.push({ format: 'plain', text: color.warning('已停止') })
+      if (node.data.interrupted === true) rows.push({ format: 'plain', text: color.warning(ui('已停止', 'Stopped')) })
       const deliverables = deliverablesText(node, node.data)
       if (deliverables !== '') rows.push({ format: 'plain', text: deliverables.trimStart() })
       return grouped(rows)
@@ -983,7 +1034,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   }
   return grouped([{
     format: 'plain',
-    text: color.muted(`扩展节点 ${node.kind} · /trajectory 查看详情`),
+    text: color.muted(ui(`扩展节点 ${node.kind} · /trajectory 查看详情`, `Extended node ${node.kind} · use /trajectory for details`)),
   }])
 }
 
@@ -1072,7 +1123,7 @@ export class Transcript implements Component, Focusable {
     this.emptyState = true
     this.hasMore = false
     this.loadingOlder = false
-    this.replace([{ format: 'plain', text: color.muted(message) }])
+    this.replace([{ format: 'plain', text: color.muted(translateUiText(message)) }])
   }
 
   /**
@@ -1116,7 +1167,7 @@ export class Transcript implements Component, Focusable {
     this.emptyState = rows.length === 0
     if (this.emptyState) rows.push({
       format: 'plain',
-      text: `${color.brand('deepseek')}\n${color.muted('探索未至之境')}\n${color.muted('直接描述你想完成的事')}`,
+      text: `${color.brand('deepseek')}\n${color.muted(ui('探索未至之境', 'Explore beyond the known'))}\n${color.muted(ui('直接描述你想完成的事', 'Describe what you want to accomplish'))}`,
     })
     this.replace(rows)
   }
@@ -1130,7 +1181,7 @@ export class Transcript implements Component, Focusable {
     const turnCursor = this.turnCursor
     const snapshot = this.snapshot
     if (snapshot === undefined) {
-      this.replace([{ format: 'plain', text: color.muted(this.emptyMessage) }])
+      this.replace([{ format: 'plain', text: color.muted(translateUiText(this.emptyMessage)) }])
     } else {
       this.update(snapshot, this.imageLoader)
     }
@@ -1158,11 +1209,11 @@ export class Transcript implements Component, Focusable {
     const withInset = (values: readonly string[]): string[] => values.map(line =>
       line === '' ? '' : `${' '.repeat(inset)}${line}`)
     const olderMarker = (count: number): string => {
-      if (this.loadingOlder) return color.muted('↑ 正在加载更早内容…')
-      const hint = this.focused ? 'PgUp/Home' : '滚轮上翻'
+      if (this.loadingOlder) return color.muted(ui('↑ 正在加载更早内容…', '↑ Loading older content…'))
+      const hint = this.focused ? 'PgUp/Home' : ui('滚轮上翻', 'Scroll up')
       return color.muted(count === 0
-        ? `↑ 还有更早内容 · ${hint}`
-        : `↑ ${String(count)} 行更早内容 · ${hint}`)
+        ? ui(`↑ 还有更早内容 · ${hint}`, `↑ Older content available · ${hint}`)
+        : ui(`↑ ${String(count)} 行更早内容 · ${hint}`, `↑ ${String(count)} older line(s) · ${hint}`))
     }
     const lines: string[] = []
     const anchors: number[] = []
@@ -1237,8 +1288,11 @@ export class Transcript implements Component, Focusable {
       visible[0] = olderMarker(0)
     }
     if (end < lines.length && visible.length > 0) {
-      const hint = this.focused ? 'PgDn/End' : '滚轮下翻'
-      visible[visible.length - 1] = color.muted(`↓ ${String(lines.length - end)} 行更新内容 · ${hint}`)
+      const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
+      visible[visible.length - 1] = color.muted(ui(
+        `↓ ${String(lines.length - end)} 行更新内容 · ${hint}`,
+        `↓ ${String(lines.length - end)} newer line(s) · ${hint}`,
+      ))
     }
     return withInset(visible)
   }
@@ -1343,7 +1397,10 @@ export class Transcript implements Component, Focusable {
       if (generation !== this.imageGeneration) return
       const message = error instanceof Error ? error.message : String(error)
       this.imageComponents.set(cacheKey, new Text(
-        color.danger(`${imageLabel(row.attachment)} · 读取失败：${message}`),
+        color.danger(ui(
+          `${imageLabel(row.attachment)} · 读取失败：${message}`,
+          `${imageLabel(row.attachment)} · failed to load: ${message}`,
+        )),
         0,
         0,
       ))
