@@ -18,7 +18,7 @@ describe('out-of-tree Bundle contract', () => {
   })
 
   it('ships only for the supported terminal platforms', () => {
-    expect(manifest.os).toEqual(['darwin', 'linux'])
+    expect(manifest.os).toEqual(['darwin', 'linux', 'win32'])
   })
 
   it('contains no consumer workspace dependency', () => {

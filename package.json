@@ -25,7 +25,8 @@
   },
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "main": "lib/index.js",
   "exports": {

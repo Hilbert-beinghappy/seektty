@@ -65,7 +65,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 
 ## Install the bare command
 
-The repository is public and can be installed directly from GitHub without private-repository authentication.
+The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows.
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
@@ -110,7 +110,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 | Input | Action |
 | --- | --- |
-| Left-button drag, then Command+C | Use the terminal's native selection and copy for any visible TUI text on macOS |
+| Left-button drag, then the terminal copy shortcut | Use the terminal's native selection and copy for any visible TUI text (`Command+C` on macOS; normally `Ctrl+Shift+C` on Linux and Windows terminals) |
 | Mouse wheel / trackpad | Browse the native terminal scrollback while the composer remains active |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
@@ -214,7 +214,7 @@ The interface selection, independent code selection, and named definitions live 
 - Chinese/English locale resolution, revision-protected shared preference writes, live terminal switching, and preservation of unknown external content.
 - Native removal clears the dependency, Bundle, and config entries; re-add boots again.
 - A fresh global install exposes bare `deepseek`, which provisions and boots the `tui` Profile.
-- macOS and Linux only; Windows is unsupported.
+- Installation, startup, keyboard navigation, and terminal interaction are supported on macOS, Linux, and Windows.
 
 A real multi-turn live-provider session was verified with a valid DeepSeek credential injected only into the test process: `v4-flash` returned `DSH_THEME_LIVE_OK` and `DSH_MULTI_TURN_OK` with rendered TypeScript and JSON highlighted blocks. The credential was not written to a Profile, settings file, log, or the repository.
 

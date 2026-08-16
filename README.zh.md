@@ -65,7 +65,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 
 ## 安装并使用裸命令
 
-仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。
+仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
@@ -110,7 +110,7 @@ dsh --profile tui
 
 | 输入 | 操作 |
 | --- | --- |
-| 鼠标左键拖动，再按 Command+C | 使用 macOS 终端原生选区选中当前可见的任意 TUI 文字并复制 |
+| 鼠标左键拖动，再按终端复制快捷键 | 使用终端原生选区复制当前可见的任意 TUI 文字（macOS 使用 `Command+C`；Linux 和 Windows 终端通常使用 `Ctrl+Shift+C`） |
 | 鼠标滚轮 / 触控板 | 输入框保持激活时浏览终端原生滚动记录 |
 | `/` | 打开命令与 Skill 候选 |
 | Enter / Shift+Enter | 发送或确认 / 输入换行 |
@@ -214,7 +214,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 - 中英文语言解析、带 revision 保护的共享偏好写入、终端实时切换，以及未知外部内容保持原样。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
-- macOS 和 Linux；不支持 Windows。
+- macOS、Linux 和 Windows 均支持安装、启动、键盘导航与终端交互。
 
 已使用仅注入测试进程环境的有效 DeepSeek 凭据完成真实在线多轮响应验收：`v4-flash` 返回 `DSH_THEME_LIVE_OK` 与 `DSH_MULTI_TURN_OK`，并实际渲染 TypeScript 和 JSON 高亮代码块。凭据未写入 Profile、设置文件、日志或仓库。
 
