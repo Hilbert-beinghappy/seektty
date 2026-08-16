@@ -40,6 +40,7 @@ import type { TrajectorySnapshot } from '@deepseek-ai/dsh-client-ui-trajectory/p
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
+import { ui } from './locale.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -215,6 +216,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'profile', description: '管理 Profile', argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
   { name: 'mode', description: '切换模式', source: 'TUI', behavior: 'local' },
   { name: 'model', description: '切换模型和推理强度', source: 'TUI', behavior: 'local' },
+  { name: 'language', description: '切换界面语言', argumentHint: '[auto|zh|en]', source: 'TUI', behavior: 'local' },
   { name: 'theme', description: '切换界面或独立代码主题', argumentHint: '[dark|light|code|use|edit|palette|import|delete]', source: 'TUI', behavior: 'local' },
   { name: 'queue', description: '管理排队消息', source: 'TUI', behavior: 'local' },
   { name: 'steer', description: '发送引导消息', argumentHint: '<消息>', source: 'TUI', behavior: 'local' },
@@ -1025,13 +1027,16 @@ export class HarnessTuiCapabilities {
     const turns = nonnegativeNumber(stats, 'turns')
     const steps = nonnegativeNumber(stats, 'steps')
     if (turns !== undefined || steps !== undefined) {
-      lines.push(`轮次 ${turns === undefined ? '未知' : compactNumber(turns)} · 步骤 ${steps === undefined ? '未知' : compactNumber(steps)}`)
+      lines.push(ui(
+        `轮次 ${turns === undefined ? '未知' : compactNumber(turns)} · 步骤 ${steps === undefined ? '未知' : compactNumber(steps)}`,
+        `Turns ${turns === undefined ? 'unknown' : compactNumber(turns)} · Steps ${steps === undefined ? 'unknown' : compactNumber(steps)}`,
+      ))
     }
     const llmMs = nonnegativeNumber(stats, 'llmMs')
     const toolMs = nonnegativeNumber(stats, 'toolMs')
     const durations = [
-      ...(llmMs === undefined || llmMs === 0 ? [] : [`模型 ${durationText(llmMs)}`]),
-      ...(toolMs === undefined || toolMs === 0 ? [] : [`工具 ${durationText(toolMs)}`]),
+      ...(llmMs === undefined || llmMs === 0 ? [] : [ui(`模型 ${durationText(llmMs)}`, `Model ${durationText(llmMs)}`)]),
+      ...(toolMs === undefined || toolMs === 0 ? [] : [ui(`工具 ${durationText(toolMs)}`, `Tools ${durationText(toolMs)}`)]),
     ]
     if (durations.length > 0) lines.push(durations.join(' · '))
     const ttftMs = nonnegativeNumber(stats, 'ttftMs')
@@ -1041,7 +1046,7 @@ export class HarnessTuiCapabilities {
     const performance = [
       ...(ttftMs === undefined || ttftSteps === undefined || ttftSteps === 0
         ? []
-        : [`首 Token 平均 ${durationText(ttftMs / ttftSteps)}`]),
+        : [ui(`首 Token 平均 ${durationText(ttftMs / ttftSteps)}`, `Average first token ${durationText(ttftMs / ttftSteps)}`)]),
       ...(decodeMs === undefined || decodeTokens === undefined || decodeMs === 0
         ? []
         : [`${Math.round(decodeTokens / (decodeMs / 1_000) * 10) / 10} tok/s`]),
@@ -1055,7 +1060,10 @@ export class HarnessTuiCapabilities {
     if (uncached !== undefined && cacheRead !== undefined && cacheWrite !== undefined && output !== undefined) {
       const input = uncached + cacheRead + cacheWrite
       const cache = input === 0 ? undefined : Math.round(cacheRead / input * 100)
-      lines.push(`Token 输入 ${compactNumber(input)} · 输出 ${compactNumber(output)}${cache === undefined ? '' : ` · 缓存命中 ${cache}%`}`)
+      lines.push(ui(
+        `Token 输入 ${compactNumber(input)} · 输出 ${compactNumber(output)}${cache === undefined ? '' : ` · 缓存命中 ${cache}%`}`,
+        `Token input ${compactNumber(input)} · output ${compactNumber(output)}${cache === undefined ? '' : ` · cache hit ${cache}%`}`,
+      ))
     }
 
     const used = nonnegativeNumber(pressure, 'projectedTokens')
@@ -1064,13 +1072,16 @@ export class HarnessTuiCapabilities {
     const context = used === undefined || capacity === undefined || capacity === 0
       ? undefined
       : `${Math.min(100, Math.round(used / capacity * 100))}% · ~${compactNumber(used)}/${compactNumber(capacity)}`
-    if (context !== undefined) lines.push(`上下文 ${context}`)
+    if (context !== undefined) lines.push(ui(`上下文 ${context}`, `Context ${context}`))
 
     const system = nonnegativeNumber(breakdown, 'systemTokens')
     const tools = nonnegativeNumber(breakdown, 'toolsTokens')
     const messages = nonnegativeNumber(breakdown, 'messageTokens')
     if (system !== undefined && tools !== undefined && messages !== undefined) {
-      lines.push(`上下文估算：系统 ~${compactNumber(system)} · 工具 ~${compactNumber(tools)} · 消息 ~${compactNumber(messages)}`)
+      lines.push(ui(
+        `上下文估算：系统 ~${compactNumber(system)} · 工具 ~${compactNumber(tools)} · 消息 ~${compactNumber(messages)}`,
+        `Estimated context: system ~${compactNumber(system)} · tools ~${compactNumber(tools)} · messages ~${compactNumber(messages)}`,
+      ))
     }
     return { lines, ...(context === undefined ? {} : { context }) }
   }

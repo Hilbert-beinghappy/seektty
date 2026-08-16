@@ -75,6 +75,7 @@ function actionHarness(): {
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyLocale: vi.fn(),
     setEditor: vi.fn(),
     copy: vi.fn(),
     close: vi.fn(),

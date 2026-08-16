@@ -4,6 +4,7 @@ import type {
   ConversationSnapshot,
 } from '@deepseek-ai/dsh-client-runtime/node-client'
 import { Transcript } from '../src/client/transcript.ts'
+import { setUiLocale } from '../src/client/locale.ts'
 import { setCodeHighlighter, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 
@@ -138,9 +139,24 @@ afterEach(() => {
   vi.unstubAllEnvs()
   setCodeHighlighter()
   setTheme(BUILT_IN_THEMES.dark)
+  setUiLocale('zh')
 })
 
 describe('conversation viewport', () => {
+  it('localizes terminal presentation without translating assistant content', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    setUiLocale('en')
+    const empty = new Transcript(() => 5)
+    empty.update(snapshot([]))
+    expect(empty.render(60).join('\n')).toContain('Explore beyond the known')
+
+    const transcript = new Transcript(() => 5)
+    transcript.update(snapshot([assistant('a1', '命令面板')]))
+    const rendered = transcript.render(60).join('\n')
+    expect(rendered).toContain('命令面板')
+    expect(rendered).not.toContain('Command palette')
+  })
+
   it('renders every loaded line into the default terminal scrollback', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript()

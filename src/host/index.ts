@@ -8,6 +8,7 @@ import { InProcessApiClient, toFetchHandler, type IApiClient } from '@deepseek-a
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection'
 import type { TuiManagementBridge, TuiSurfaceOutcome } from '@deepseek-ai/dsh-tui-protocol'
 import { startTui } from '../client/index.ts'
+import { translateUiText } from '../client/locale.ts'
 import { createTuiManagementBridge } from './management.ts'
 import { TUI_STARTUP_SERVICE, type TuiStartupValues } from './startup.ts'
 
@@ -83,7 +84,7 @@ async function run(ctx: Context): Promise<void> {
       handoff: { channel: 'seektty-v1', payload: outcome.request },
     })
   } catch (error) {
-    internals.stderr.write(`deepseek: 重启失败：${error instanceof Error ? error.message : String(error)}\n`)
+    internals.stderr.write(`deepseek: ${translateUiText(`重启失败：${error instanceof Error ? error.message : String(error)}`)}\n`)
     process.exitCode = 1
   }
 }
@@ -95,7 +96,7 @@ async function run(ctx: Context): Promise<void> {
 export function apply(ctx: Context): void {
   void run(ctx).catch((error: unknown) => {
     if (!isActive(ctx)) return
-    internals.stderr.write(`deepseek: ${error instanceof Error ? error.message : String(error)}\n`)
+    internals.stderr.write(`deepseek: ${translateUiText(error instanceof Error ? error.message : String(error))}\n`)
     ctx.get('appExit')?.(1)
   })
 }

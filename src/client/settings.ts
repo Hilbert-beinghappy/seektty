@@ -6,7 +6,9 @@ import {
   rehydrateSchema,
   type SchemaNode,
 } from '@deepseek-ai/dsh-client-schema-form'
+import { LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
 import { TUI_APPEARANCE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-tui-protocol'
+import { ui, uiLocale } from './locale.ts'
 import type { TuiSettingsDocument } from './management.ts'
 
 /** Terminal control selected for one schema-addressed Settings field. */
@@ -40,7 +42,10 @@ function descriptionOf(node: SchemaNode): string | undefined {
   if (typeof description === 'string') return description
   if (typeof description !== 'object') return undefined
   const localized = description as Record<string, unknown>
-  for (const key of ['zh-CN', 'zh', 'en-US', 'en']) {
+  const preferred = uiLocale() === 'en'
+    ? ['en-US', 'en', 'zh-CN', 'zh']
+    : ['zh-CN', 'zh', 'en-US', 'en']
+  for (const key of preferred) {
     if (typeof localized[key] === 'string') return localized[key]
   }
   return Object.values(localized).find((value): value is string => typeof value === 'string')
@@ -141,18 +146,27 @@ export function parseSettingsValue(field: TuiSettingsField, text: string): unkno
   switch (field.control) {
     case 'number': {
       const value = Number(text)
-      if (!Number.isFinite(value)) throw new Error(`${field.label} 必须是有限数字`)
+      if (!Number.isFinite(value)) throw new Error(ui(
+        `${field.label} 必须是有限数字`,
+        `${field.label} must be a finite number`,
+      ))
       return value
     }
     case 'json': {
       try {
         return JSON.parse(text) as unknown
       } catch (error) {
-        throw new Error(`${field.label} 需要有效 JSON：${error instanceof Error ? error.message : String(error)}`)
+        throw new Error(ui(
+          `${field.label} 需要有效 JSON：${error instanceof Error ? error.message : String(error)}`,
+          `${field.label} requires valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        ))
       }
     }
     case 'boolean':
-    case 'enum': throw new Error(`${field.label} 应通过选择器写入`)
+    case 'enum': throw new Error(ui(
+      `${field.label} 应通过选择器写入`,
+      `${field.label} must be changed with the selector`,
+    ))
     case 'credential-ref':
     case 'secret':
     case 'text': return text
@@ -165,8 +179,8 @@ export function parseSettingsValue(field: TuiSettingsField, text: string): unkno
  * @returns compact display string.
  */
 export function formatSettingsValue(value: unknown): string {
-  if (value === undefined) return '未设置'
-  if (typeof value === 'string') return value === '' ? '空字符串' : value
+  if (value === undefined) return ui('未设置', 'Not set')
+  if (typeof value === 'string') return value === '' ? ui('空字符串', 'Empty string') : value
   return JSON.stringify(value)
 }
 
@@ -176,10 +190,11 @@ export function formatSettingsValue(value: unknown): string {
  * @returns dedicated-control or generic-settings label.
  */
 export function settingsSectionLabel(namespace: string): string {
-  if (namespace === 'permission') return '默认权限'
-  if (namespace === 'agent-presets') return '默认 Agent Preset'
-  if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return '模型与 Provider'
-  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return 'SeekTTY 主题'
-  if (namespace === 'tui-plugin-marketplace') return '插件市场来源'
-  return '通用设置'
+  if (namespace === LOCALE_SETTINGS_NAMESPACE) return ui('界面语言', 'Interface language')
+  if (namespace === 'permission') return ui('默认权限', 'Default permission')
+  if (namespace === 'agent-presets') return ui('默认 Agent Preset', 'Default Agent Preset')
+  if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return ui('模型与 Provider', 'Models and Providers')
+  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return ui('SeekTTY 主题', 'SeekTTY themes')
+  if (namespace === 'tui-plugin-marketplace') return ui('插件市场来源', 'Plugin marketplace sources')
+  return ui('通用设置', 'General settings')
 }

@@ -59,12 +59,13 @@ The current release covers these capabilities:
 | Feedback | Session feedback plus positive/negative Assistant-message ratings, optional notes, and feedback removal |
 | Status and diagnostics | Harness, Node, platform, Profile, workspace, session, mode, model, permission, pnpm, plugin state, and actionable diagnostics |
 | Themes | Independent interface and code-block themes; automatic code colors follow DeepSeek dark/light; named custom themes, manual colors, 3–16-color generation, and local VS Code JSON/JSONC import with TextMate colors and portable token styles; live preview, contrast warnings, terminal-color fallbacks, and `NO_COLOR` |
+| Interface language | Live Chinese/English switching through `/language`; the explicit preference is shared with Harness Web through the official `locale.preference` Settings value, while `auto` follows the terminal locale |
 
 Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, Skills, MCP, and marketplace sources are discovered from the running Harness. New capabilities registered by upstream or third-party Bundles enter the dynamic catalogs, with Schema controls, structured details, and actionable diagnostics available while dedicated views evolve.
 
 ## Install the bare command
 
-The repository is public and can be installed directly from GitHub without private-repository authentication.
+The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows.
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
@@ -100,7 +101,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Runtime interaction | `/queue`, `/steer`, `/attach`, `/attachments`, `/pending` |
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
-| Configuration and diagnostics | `/settings`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
+| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
 `/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts.
@@ -109,7 +110,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 | Input | Action |
 | --- | --- |
-| Left-button drag, then Command+C | Use the terminal's native selection and copy for any visible TUI text on macOS |
+| Left-button drag, then the terminal copy shortcut | Use the terminal's native selection and copy for any visible TUI text (`Command+C` on macOS; normally `Ctrl+Shift+C` on Linux and Windows terminals) |
 | Mouse wheel / trackpad | Browse the native terminal scrollback while the composer remains active |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
@@ -173,6 +174,16 @@ Bare `/plugin` opens the current Profile's plugin center, and `/plugins` is an a
 
 `/settings` lists every Settings namespace registered in the current Profile. Default model, default permission, default Agent mode, and marketplace sources have dedicated selectors. Boolean, enum, number, text, JSON, Secret, Credential Ref, and other fields remain editable through the generic Schema UI. It shows inherited values, user overrides, reset actions, and live/restart timing; revision checks protect concurrent writes. Secrets expose only whether a value is configured and use masked input.
 
+SeekTTY terminal copy ships in Chinese and English. `/language` opens the language selector, and direct forms are available for scripts or quick switching:
+
+```text
+/language auto
+/language zh
+/language en
+```
+
+The selection is stored by the official `@deepseek-ai/dsh-client-locale` Host plugin as `locale.preference`, so the TUI and Harness Web use the same explicit preference. `auto` removes that override: SeekTTY then checks `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, and `LANG`, while the browser keeps using its own platform-language fallback. Switching is live and rebuilds the terminal chrome and transcript presentation without changing model, tool, user, Provider, or plugin-authored content.
+
 SeekTTY starts with its DeepSeek dark theme. `/theme` opens a complete theme center; built-in and named themes can also be managed directly:
 
 ```text
@@ -200,9 +211,10 @@ The interface selection, independent code selection, and named definitions live 
 - `/doctor`: 95 Harness plugins running, 0 errors, 0 warnings.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
 - Real dark, light, and palette-generated PTY rendering, independent live interface/code switching, 80/120/160-column layouts, and persistence after restarting the same Profile.
+- Chinese/English locale resolution, revision-protected shared preference writes, live terminal switching, and preservation of unknown external content.
 - Native removal clears the dependency, Bundle, and config entries; re-add boots again.
 - A fresh global install exposes bare `deepseek`, which provisions and boots the `tui` Profile.
-- macOS and Linux only; Windows is unsupported.
+- Installation, startup, keyboard navigation, and terminal interaction are supported on macOS, Linux, and Windows.
 
 A real multi-turn live-provider session was verified with a valid DeepSeek credential injected only into the test process: `v4-flash` returned `DSH_THEME_LIVE_OK` and `DSH_MULTI_TURN_OK` with rendered TypeScript and JSON highlighted blocks. The credential was not written to a Profile, settings file, log, or the repository.
 

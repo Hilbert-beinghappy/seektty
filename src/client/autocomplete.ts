@@ -8,6 +8,7 @@ import {
   type SlashCommand,
 } from '@mariozechner/pi-tui'
 import type { HarnessTuiCapabilities } from './capabilities.ts'
+import { translateUiText } from './locale.ts'
 import { escapeTerminalText } from './theme.ts'
 
 /** Autocomplete provider that repulls only through the Harness-backed catalog cache. */
@@ -32,8 +33,10 @@ export class HarnessAutocompleteProvider implements AutocompleteProvider {
       if (options.signal.aborted) return null
       const commands: SlashCommand[] = catalog.map(command => ({
         name: command.name,
-        description: escapeTerminalText(command.description),
-        ...(command.argumentHint === undefined ? {} : { argumentHint: escapeTerminalText(command.argumentHint) }),
+        description: escapeTerminalText(translateUiText(command.description)),
+        ...(command.argumentHint === undefined
+          ? {}
+          : { argumentHint: escapeTerminalText(translateUiText(command.argumentHint)) }),
       }))
       const basePath = this.capabilities.active()?.workspacePath ?? process.cwd()
       const suggestions = await new CombinedAutocompleteProvider(commands, basePath).getSuggestions(

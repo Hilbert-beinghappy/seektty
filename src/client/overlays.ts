@@ -16,6 +16,7 @@ import {
   type SelectItem,
   type TUI,
 } from '@mariozechner/pi-tui'
+import { translateUiText } from './locale.ts'
 import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
 
 /** One row in a searchable terminal selector. */
@@ -110,10 +111,10 @@ function rowOf(choice: OverlayChoice, descriptionWidth: number): SelectItem {
   const description = choice.disabledReason ?? choice.description
   return {
     value: choice.id,
-    label: escapeTerminalText(`${state}${choice.label}`),
+    label: escapeTerminalText(`${state}${translateUiText(choice.label)}`),
     ...description === undefined
       ? {}
-      : { description: truncateToWidth(escapeTerminalText(description), descriptionWidth, '…') },
+      : { description: truncateToWidth(escapeTerminalText(translateUiText(description)), descriptionWidth, '…') },
   }
 }
 
@@ -148,7 +149,7 @@ function modalFrame(title: string, lines: readonly string[], width: number): str
   const vertical = color.border('│')
   const content = escapeFrame(lines.map(line => truncateToWidth(line, contentWidth, '…')))
     .map(line => `${vertical} ${line}${' '.repeat(Math.max(0, contentWidth - visibleWidth(line)))} ${vertical}`)
-  return [modalRule(title, width, true), ...content, modalRule(undefined, width, false)]
+  return [modalRule(translateUiText(title), width, true), ...content, modalRule(undefined, width, false)]
     .map(line => surfaceRow(line, width))
 }
 
@@ -164,7 +165,7 @@ function modalOptions(options: OverlayOptions | undefined): OverlayOptions {
 }
 
 function wrappedDetail(detail: string, width: number, maxLines = 4): string[] {
-  const lines = wrapTextWithAnsi(escapeTerminalText(detail), Math.max(1, width))
+  const lines = wrapTextWithAnsi(escapeTerminalText(translateUiText(detail)), Math.max(1, width))
   if (lines.length <= maxLines) return lines.map(line => color.muted(line))
   const visible = lines.slice(0, maxLines)
   const last = visible.at(-1) ?? ''
@@ -209,11 +210,11 @@ class SearchSelectOverlay implements Component {
     }
     if (this.request.searchable !== false) {
       this.input.focused = this.focused
-      lines.push(`${color.muted('搜索 ')}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
+      lines.push(`${color.muted(translateUiText('搜索 '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
     }
     lines.push(...this.list.render(safeWidth))
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
-    lines.push(color.muted(this.request.footer ?? '↑↓ 选择 · Enter 确认 · Esc 返回/关闭'))
+    lines.push(color.muted(translateUiText(this.request.footer ?? '↑↓ 选择 · Enter 确认 · Esc 返回/关闭')))
     return modalFrame(this.request.title, lines, width)
   }
 
@@ -293,8 +294,8 @@ class TextInputOverlay implements Component {
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
-      this.input.render(safeWidth)[0] ?? color.muted(this.request.placeholder ?? ''),
-      color.muted('Enter 确认 · Esc 返回/关闭'),
+      this.input.render(safeWidth)[0] ?? color.muted(translateUiText(this.request.placeholder ?? '')),
+      color.muted(translateUiText('Enter 确认 · Esc 返回/关闭')),
     ], width)
   }
 
@@ -322,14 +323,14 @@ class SecretInputOverlay implements Component {
     const length = Array.from(this.input.getValue()).length
     const cursor = this.focused ? CURSOR_MARKER : ''
     const masked = length === 0
-      ? `${cursor}${color.muted(this.request.placeholder ?? '输入新 Secret')}`
+      ? `${cursor}${color.muted(translateUiText(this.request.placeholder ?? '输入新 Secret'))}`
       : `${'•'.repeat(Math.min(length, 32))}${cursor}▌`
     return modalFrame(this.request.title, [
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       truncateToWidth(masked, safeWidth, '…'),
-      color.muted('输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭'),
+      color.muted(translateUiText('输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭')),
     ], width)
   }
 
@@ -380,9 +381,9 @@ class MultiSelectOverlay implements Component {
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
-      `${color.muted('搜索 ')}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
+      `${color.muted(translateUiText('搜索 '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
       ...this.list.render(safeWidth),
-      color.muted(this.request.footer ?? '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭'),
+      color.muted(translateUiText(this.request.footer ?? '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭')),
     ], width)
   }
 
@@ -418,10 +419,10 @@ class MultiSelectOverlay implements Component {
   private createList(preferredId?: string): SelectList {
     const rows = this.filtered.map(choice => ({
       value: choice.id,
-      label: escapeTerminalText(`${this.selected.has(choice.id) ? '[x]' : '[ ]'} ${choice.label}`),
+      label: escapeTerminalText(`${this.selected.has(choice.id) ? '[x]' : '[ ]'} ${translateUiText(choice.label)}`),
       ...(choice.description === undefined
         ? {}
-        : { description: truncateToWidth(escapeTerminalText(choice.description), this.descriptionWidth, '…') }),
+        : { description: truncateToWidth(escapeTerminalText(translateUiText(choice.description)), this.descriptionWidth, '…') }),
     }))
     const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList)
     const index = preferredId === undefined ? 0 : rows.findIndex(row => row.value === preferredId)
@@ -457,7 +458,7 @@ class ScrollableDetailOverlay implements Component {
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
     const content = escapeTerminalText(this.request.content)
-    const lines = wrapTextWithAnsi(content === '' ? '(无详情)' : content, safeWidth)
+    const lines = wrapTextWithAnsi(content === '' ? translateUiText('(无详情)') : content, safeWidth)
       .map(line => color.muted(line))
     this.lineCount = lines.length
     const maxOffset = Math.max(0, this.lineCount - this.viewportRows)
@@ -466,7 +467,7 @@ class ScrollableDetailOverlay implements Component {
     const position = `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} 行`
     return modalFrame(this.request.title, [
       ...lines.slice(this.offset, end),
-      color.muted(this.request.footer ?? `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`),
+      color.muted(translateUiText(this.request.footer ?? `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`)),
     ], width)
   }
 
