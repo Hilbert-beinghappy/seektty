@@ -24,6 +24,7 @@ import {
 import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
+import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
 import type {
   TuiMarketplaceCandidate,
@@ -1574,6 +1575,9 @@ export class TuiActions {
           ...(queued.length > 1
             ? [{ id: '__all_steer__', label: '整队引导', description: `按当前顺序处理 ${queued.length} 条排队消息` }]
             : []),
+          ...(queued.length > 0
+            ? [{ id: '__clear__', label: '清空全部', description: '删除所有排队消息，不影响当前轮次' }]
+            : []),
           ...rows.map(row => ({
             id: row.id,
             label: row.preview === '' ? '(空消息)' : row.preview,
@@ -1594,13 +1598,42 @@ export class TuiActions {
       this.host.notice('已请求整队引导', 'success')
       return
     }
+    if (id === '__clear__') {
+      const confirmed = await nav.confirm(
+        '清空输入队列？',
+        '将删除全部排队消息；正在处理的轮次不受影响。',
+        '清空全部',
+      )
+      if (!confirmed) return
+      for (const row of queued) await this.capabilities.updateQueue(row.id, { kind: 'remove' })
+      this.host.notice('已清空输入队列', 'success')
+      return
+    }
     const row = rows.find(candidate => candidate.id === id)
     if (row === undefined || row.placement !== 'queued') return
+    const index = queued.findIndex(candidate => candidate.id === row.id)
+    const canReorder = queued.length > 1 && queued.every(item => item.text !== null)
     const action = await nav.select({
       title: '队列操作',
       choices: [
         { id: 'steer', label: '转为引导', description: '并入当前轮次' },
         { id: 'edit', label: '编辑', ...(row.text === null ? { disabledReason: '含非文本内容，无法文本编辑' } : {}) },
+        {
+          id: 'up',
+          label: '上移',
+          description: '与上一条排队消息对调',
+          ...(!canReorder || index <= 0
+            ? { disabledReason: !canReorder ? '含非文本内容或不足两条，无法重排' : '已在队首' }
+            : {}),
+        },
+        {
+          id: 'down',
+          label: '下移',
+          description: '与下一条排队消息对调',
+          ...(!canReorder || index >= queued.length - 1
+            ? { disabledReason: !canReorder ? '含非文本内容或不足两条，无法重排' : '已在队尾' }
+            : {}),
+        },
         { id: 'remove', label: '删除', description: '从待处理队列移除' },
       ],
       searchable: false,
@@ -1612,7 +1645,30 @@ export class TuiActions {
       const text = await nav.input({ title: '编辑排队消息', initialValue: row.text })
       if (text !== undefined) await this.capabilities.updateQueue(row.id, { kind: 'edit', content: [{ type: 'text', text }] })
     }
+    if (action.id === 'up' || action.id === 'down') {
+      await this.reorderQueued(queued, index, action.id === 'up' ? -1 : 1)
+    }
     this.host.notice('队列操作已提交', 'success')
+  }
+
+  private async reorderQueued(
+    queued: ConversationSnapshot['queue'],
+    index: number,
+    direction: -1 | 1,
+  ): Promise<void> {
+    const movable = queued.filter(row => row.placement === 'queued')
+    if (movable.some(row => row.text === null)) throw new Error('含非文本内容，无法重排')
+    const ordered = moveIndex(movable, index, direction)
+    if (ordered.every((row, position) => row.id === movable[position]?.id)) return
+    const active = this.capabilities.active()
+    if (active === undefined) return
+    for (const row of movable) await this.capabilities.updateQueue(row.id, { kind: 'remove' })
+    for (const row of ordered) {
+      const text = row.text
+      if (text === null) continue
+      const result = await active.session.prompt([{ type: 'text', text }], 'queue')
+      if (!result.ok) throw new Error(`重排队列失败：${result.error.message}`)
+    }
   }
 
   private async steer(args: string): Promise<void> {
