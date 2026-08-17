@@ -58,6 +58,12 @@ import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 
 const PULSE_FRAME_MS = 160
 
+/** Replaceable counters used by incremental-render tests. */
+export const internals = {
+  markdownCreated: 0,
+  componentRenders: 0,
+}
+
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
 export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
 
@@ -851,6 +857,22 @@ function grouped(rows: readonly TranscriptRow[]): TranscriptRow[] {
   return rows.map((row, index) => index === 0 ? { ...row, gapBefore: true } : row)
 }
 
+function nodeFingerprint(
+  node: ChatConversationViewNode,
+  preferences: TranscriptPreferences,
+): string {
+  return JSON.stringify({
+    kind: node.kind,
+    data: node.data,
+    tools: preferences.tools,
+    reasoning: preferences.reasoning,
+    toolOutputLineLimit: preferences.toolOutputLineLimit,
+    diffContextLines: preferences.diffContextLines,
+    expanded: preferences.expandedTools.has(node.key),
+    collapsed: preferences.collapsedTools.has(node.key),
+  })
+}
+
 function nonnegativeNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }
@@ -1118,6 +1140,12 @@ export class Transcript implements Component, Focusable {
   private toolCursor = 0
   private readonly expandedTools = new Set<string>()
   private readonly collapsedTools = new Set<string>()
+  private readonly nodeCache = new Map<string, {
+    fingerprint: string
+    rows: TranscriptRow[]
+    components: Component[]
+  }>()
+  private readonly lineCache = new WeakMap<Component, { width: number; lines: readonly string[] }>()
   focused = false
 
   /**
@@ -1195,6 +1223,7 @@ export class Transcript implements Component, Focusable {
     this.sessionId = undefined
     this.pendingImages.clear()
     this.imageComponents.clear()
+    this.nodeCache.clear()
     this.emptyState = true
     this.hasMore = false
     this.loadingOlder = false
@@ -1217,6 +1246,7 @@ export class Transcript implements Component, Focusable {
       this.expandedTools.clear()
       this.collapsedTools.clear()
       this.toolCursor = 0
+      this.nodeCache.clear()
     }
     this.imageLoader = imageLoader
     this.hasMore = snapshot.hasMore
@@ -1233,22 +1263,66 @@ export class Transcript implements Component, Focusable {
       const node = snapshot.chat.nodes.get(key)
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
-    const rows: TranscriptRow[] = visibleNodes.flatMap(node => chatNodeRows(node, preferences))
+    const rows: TranscriptRow[] = []
+    const components: Component[] = []
+    const keep = new Set<string>()
+    const take = (key: string, fingerprint: string, build: () => TranscriptRow[]): void => {
+      keep.add(key)
+      const hit = this.nodeCache.get(key)
+      if (hit !== undefined && hit.fingerprint === fingerprint) {
+        rows.push(...hit.rows)
+        components.push(...hit.components)
+        return
+      }
+      const built = build()
+      const created = built.map(row => this.component(row))
+      this.nodeCache.set(key, { fingerprint, rows: built, components: created })
+      rows.push(...built)
+      components.push(...created)
+    }
+    for (const node of visibleNodes) {
+      take(node.key, nodeFingerprint(node, preferences), () => chatNodeRows(node, preferences))
+    }
     if (snapshot.partial !== null && !visibleNodes.some(node => node.kind === 'assistant-step')) {
-      const partialRows = snapshot.partial.blocks.flatMap(block => assistantBlockRows(block, preferences))
-      rows.push(...grouped([
-        ...(partialRows.length === 0
-          ? [thinkingRow()]
-          : []),
-        ...partialRows,
-      ]))
+      const partial = snapshot.partial
+      take('__partial__', JSON.stringify({
+        partial,
+        tools: preferences.tools,
+        reasoning: preferences.reasoning,
+        toolOutputLineLimit: preferences.toolOutputLineLimit,
+        diffContextLines: preferences.diffContextLines,
+      }), () => {
+        const partialRows = partial.blocks.flatMap(block => assistantBlockRows(block, preferences))
+        return grouped([
+          ...(partialRows.length === 0 ? [thinkingRow()] : []),
+          ...partialRows,
+        ])
+      })
     }
     if (preferences.tools !== 'hidden' && !visibleNodes.some(node => node.kind === 'tool-call')) {
-      rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0, call.callId))))
+      for (const call of snapshot.runningCalls) {
+        take(`__running__:${call.callId}`, JSON.stringify({
+          call,
+          tools: preferences.tools,
+          reasoning: preferences.reasoning,
+          toolOutputLineLimit: preferences.toolOutputLineLimit,
+          diffContextLines: preferences.diffContextLines,
+          expanded: preferences.expandedTools.has(call.callId),
+          collapsed: preferences.collapsedTools.has(call.callId),
+        }), () => grouped(toolBlockRows(call, preferences, 0, call.callId)))
+      }
     }
     this.emptyState = rows.length === 0
-    if (this.emptyState) rows.push(...this.emptySessionRows())
-    this.replace(rows)
+    if (this.emptyState) {
+      take('__empty__', JSON.stringify({
+        cursor: this.exampleCursor,
+        session: this.sessionId,
+      }), () => this.emptySessionRows())
+    }
+    for (const key of [...this.nodeCache.keys()]) {
+      if (!keep.has(key)) this.nodeCache.delete(key)
+    }
+    this.commit(rows, components)
     const keys = this.toolKeys()
     if (this.toolCursor >= keys.length) this.toolCursor = Math.max(0, keys.length - 1)
   }
@@ -1277,6 +1351,7 @@ export class Transcript implements Component, Focusable {
     const scrollOffset = this.scrollOffset
     const turnCursor = this.turnCursor
     const snapshot = this.snapshot
+    this.nodeCache.clear()
     if (snapshot === undefined) {
       this.replace([{ format: 'plain', text: color.muted(translateUiText(this.emptyMessage)) }])
     } else {
@@ -1288,7 +1363,10 @@ export class Transcript implements Component, Focusable {
   }
 
   invalidate(): void {
-    for (const component of this.components) component.invalidate()
+    for (const [index, component] of this.components.entries()) {
+      const row = this.rows[index]
+      if (row?.pulse !== undefined || row?.liveDurationSince !== undefined) component.invalidate()
+    }
   }
 
   /** Stop pending attachment presentation updates during terminal teardown. */
@@ -1326,7 +1404,16 @@ export class Transcript implements Component, Focusable {
         anchors.push(lines.length)
       }
       const row = this.rows[index]
-      const rendered = component.render(contentWidth)
+      const pulsing = row?.pulse !== undefined || row?.liveDurationSince !== undefined
+      const cached = pulsing ? undefined : this.lineCache.get(component)
+      const rendered = cached !== undefined && cached.width === contentWidth
+        ? cached.lines
+        : (() => {
+          internals.componentRenders += 1
+          const lines = component.render(contentWidth)
+          if (!pulsing) this.lineCache.set(component, { width: contentWidth, lines })
+          return lines
+        })()
       const escaped = row?.format === 'image'
         ? rendered
         : rendered.map(escapeTerminalText)
@@ -1665,15 +1752,22 @@ export class Transcript implements Component, Focusable {
   }
 
   private replace(rows: readonly TranscriptRow[]): void {
+    this.commit(rows, rows.map(row => this.component(row)))
+  }
+
+  private commit(rows: readonly TranscriptRow[], components: readonly Component[]): void {
     this.rows = rows
     this.turnCursor = undefined
-    this.components = rows.map(row => this.component(row))
+    this.components = [...components]
     this.syncPulseAnimation(rows.some(row => row.liveDurationSince !== undefined
       || (row.pulse !== undefined && terminalColorLevel() !== 0)))
   }
 
   private component(row: TranscriptRow): Component {
-    if (row.format === 'markdown') return new Markdown(escapeTerminalText(row.text), 0, 0, markdownTheme)
+    if (row.format === 'markdown') {
+      internals.markdownCreated += 1
+      return new Markdown(escapeTerminalText(row.text), 0, 0, markdownTheme)
+    }
     if (row.format === 'plain') {
       return row.pulse === undefined
         ? new Text(escapeTerminalText(row.text), 0, 0)
@@ -1716,7 +1810,22 @@ export class Transcript implements Component, Focusable {
     }).finally(() => {
       if (generation !== this.imageGeneration) return
       this.pendingImages.delete(cacheKey)
-      this.components = this.rows.map(current => this.component(current))
+      const image = this.imageComponents.get(cacheKey)
+      if (image === undefined) {
+        this.requestRender()
+        return
+      }
+      this.components = this.rows.map((current, index) =>
+        current.format === 'image' && `${this.sessionId ?? 'none'}:${current.key}` === cacheKey
+          ? image
+          : this.components[index] ?? this.component(current))
+      for (const entry of this.nodeCache.values()) {
+        for (const [index, current] of entry.rows.entries()) {
+          if (current.format === 'image' && `${this.sessionId ?? 'none'}:${current.key}` === cacheKey) {
+            entry.components[index] = image
+          }
+        }
+      }
       this.requestRender()
     })
     return fallback
