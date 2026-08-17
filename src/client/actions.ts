@@ -88,6 +88,7 @@ import {
   type ResolvedTuiTheme,
 } from './theme-config.ts'
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
+import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
 import {
   languageSelection,
   localeFromSettings,
@@ -1155,8 +1156,9 @@ export class TuiActions {
       case 'edit': await this.themeEdit(parsed.rest); return
       case 'palette': await this.themePalette(parsed.rest); return
       case 'import': await this.themeImport(parsed.rest); return
+      case 'export': await this.themeExport(parsed.rest); return
       case 'delete': await this.themeDelete(parsed.rest); return
-      default: throw new Error('用法：/theme [dark|light|code|use|edit|palette|import|delete]')
+      default: throw new Error('用法：/theme [dark|light|code|use|edit|palette|import|export|delete]')
     }
   }
 
@@ -1184,6 +1186,7 @@ export class TuiActions {
       { id: '__edit__', label: '自定义颜色与代码高亮', description: '修改背景、文字和语法颜色' },
       { id: '__palette__', label: '用颜色组合自动配置', description: '输入 3–16 个 HEX/RGB 颜色代码' },
       { id: '__import__', label: '导入 VS Code 主题', description: '本地 JSON/JSONC · 支持相对 include' },
+      { id: '__export__', label: '导出主题 JSON', description: '写出可分享的 SeekTTY 主题文件' },
       { id: '__delete__', label: '删除主题', description: '管理命名自定义主题' },
     )
     const selected = await this.host.overlays.select({
@@ -1200,6 +1203,7 @@ export class TuiActions {
     if (selected.id === '__code__') await this.themeCode('')
     else if (selected.id === '__palette__') await this.themePalette('')
     else if (selected.id === '__import__') await this.themeImport('')
+    else if (selected.id === '__export__') await this.themeExport('')
     else if (selected.id === '__edit__') await this.themeEdit('')
     else if (selected.id === '__delete__') await this.themeDelete('')
     else await this.activateTheme(selected.id as TuiThemeId)
@@ -1364,6 +1368,51 @@ export class TuiActions {
       undefined,
       'code',
     )
+  }
+
+  private async themeExport(args: string): Promise<void> {
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe())
+    const appearance = appearanceFromSettings(document)
+    const [first = '', ...rest] = commandArguments(args)
+    const looksLikePath = /^(?:[./~]|file:)/u.test(first) || /\.jsonc?$/iu.test(first)
+    const requested = looksLikePath ? '' : first
+    const suppliedPath = (looksLikePath ? [first, ...rest] : rest).join(' ')
+    let source: ResolvedTuiTheme
+    if (requested === '') source = resolveTheme(appearance)
+    else if (requested === 'dark' || requested === 'light') source = resolveTheme(appearance, requested)
+    else {
+      const folded = requested.toLowerCase()
+      const custom = appearance.customThemes.find(theme =>
+        theme.id === requested || theme.name.toLowerCase() === folded)
+      if (custom === undefined) throw new Error(`找不到主题 ${JSON.stringify(requested)}`)
+      source = resolvedCustomTheme(custom)
+    }
+    const payload = themeForExport(source)
+    const path = suppliedPath !== '' ? suppliedPath : await this.host.overlays.input({
+      title: ui('导出主题', 'Export theme'),
+      detail: ui(
+        `写出 ${payload.name} 的 JSON；目标文件必须还不存在。`,
+        `Write JSON for ${payload.name}; the destination must not already exist.`,
+      ),
+      placeholder: `./${payload.id}.json`,
+      options: { width: '95%', maxHeight: '80%', anchor: 'center', margin: 1 },
+    })
+    if (path === undefined || path.trim() === '') return
+    try {
+      const bytes = await writeThemeExport(path.trim(), serializeThemeExport(payload))
+      this.host.notice(ui(
+        `已导出 ${payload.name} → ${path.trim()} · ${bytes} B`,
+        `Exported ${payload.name} → ${path.trim()} · ${bytes} B`,
+      ), 'success')
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+        throw new Error(ui(
+          `文件已存在：${path.trim()}`,
+          `File already exists: ${path.trim()}`,
+        ))
+      }
+      throw error
+    }
   }
 
   private async themeEdit(requested: string): Promise<void> {
