@@ -713,6 +713,7 @@ export class TuiActions {
       `移除工作区注册 ${workspace.title}？`,
       `${workspace.path}\n目录、用户文件和全部会话记录都会保留；会话将成为未分组。`,
       '移除注册',
+      true,
     )
     if (!confirmed) return
     await this.capabilities.deleteWorkspace(workspace.workspaceId)
@@ -1176,6 +1177,7 @@ export class TuiActions {
         `覆盖主题 ${existing.name}？`,
         '原主题颜色会被新配置替换，其他命名主题不受影响。',
         '覆盖',
+        true,
       )
       return overwrite ? { id: existing.id, name: existing.name } : undefined
     }
@@ -1289,6 +1291,7 @@ export class TuiActions {
         `编辑并覆盖主题 ${source.name}？`,
         '保存后会替换这个命名主题；其他主题不受影响。',
         '继续编辑',
+        true,
       )
       if (!overwrite) return
       editable = editableTheme(source, source.id.slice('custom:'.length), source.name)
@@ -1458,6 +1461,7 @@ export class TuiActions {
             ? '该主题会从 Harness Settings 删除，代码主题恢复自动匹配。'
             : '该主题会从 Harness Settings 删除；当前界面和代码主题不变。',
       '删除',
+      true,
     )
     if (!confirmed) return
     const updated = await deleteCustomTheme(bridge, document, theme.id)
@@ -1493,6 +1497,7 @@ export class TuiActions {
         option.id === 'danger-full-access' ? '进入完全访问？' : '切换到未知风险权限？',
         `${permissionLabel(option)}：${permissionDescription(option)}。切换后立即作用于当前会话。`,
         '确认切换',
+        true,
       )
       if (!confirmed) return
     }
@@ -1778,6 +1783,7 @@ export class TuiActions {
         option.id === 'danger-full-access' ? '新会话默认使用完全访问？' : '使用未知风险默认权限？',
         `${permissionLabel(option)}：${permissionDescription(option)}。以后创建的会话会采用该权限；现有会话不会改变。`,
         '确认保存',
+        true,
       )
       if (!confirmed) return
     }
@@ -1957,6 +1963,7 @@ export class TuiActions {
       `清除 Credential ${ref}？`,
       '密钥将被清除，Settings 中的引用名会保留。',
       '清除',
+      true,
     )
     if (!confirmed) return
     await bridge.unsetCredential(ref)
@@ -2234,6 +2241,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       `从 ${snapshot.profile} 移除 ${target}？`,
       `将执行：pnpm remove ${target}。Bundle 列表会由原生 Manager 对账。`,
       '移除',
+      true,
     )
     if (!confirmed) return
     await this.pluginOperation(`移除 ${target}`, await this.capabilities.managementBridge().plugins.run(['remove', target]))
@@ -2260,6 +2268,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       target === '' ? `更新 ${snapshot.profile} 全部依赖？` : `更新 ${target}？`,
       `将执行：pnpm ${args.join(' ')}。解析结果由 Profile lockfile 持久化。`,
       '更新',
+      target === '',
     )
     if (!confirmed) return
     await this.pluginOperation(target === '' ? '更新全部插件' : `更新 ${target}`, await this.capabilities.managementBridge().plugins.run(args))
@@ -2462,7 +2471,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     }
     if (source.builtIn) return
     if (selected.id === 'remove') {
-      const confirmed = await overlays.confirm(`移除 ${source.label}？`, '该目录将不再参与搜索；已安装插件不受影响。', '移除')
+      const confirmed = await overlays.confirm(`移除 ${source.label}？`, '该目录将不再参与搜索；已安装插件不受影响。', '移除', true)
       if (!confirmed) return
     }
     const next = selected.id === 'remove'

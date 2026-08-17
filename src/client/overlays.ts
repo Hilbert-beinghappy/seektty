@@ -65,7 +65,7 @@ export interface OverlayPrompts {
   secretInput(request: InputOverlayRequest): Promise<string | undefined>
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined>
   detail(request: DetailOverlayRequest): Promise<void>
-  confirm(title: string, detail: string, confirmLabel?: string): Promise<boolean>
+  confirm(title: string, detail: string, confirmLabel?: string, dangerous?: boolean): Promise<boolean>
 }
 
 /** One logical overlay session whose page stack owns all back navigation. */
@@ -104,6 +104,28 @@ interface NavigationEntry {
   readonly dismiss: () => void
   busy: boolean
   active: boolean
+}
+
+function confirmChoices(confirmLabel: string, dangerous: boolean): readonly OverlayChoice[] {
+  const confirm = { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' }
+  const cancel = { id: 'cancel', label: '取消', description: '保持当前状态' }
+  return dangerous ? [cancel, confirm] : [confirm, cancel]
+}
+
+function confirmRequest(
+  title: string,
+  detail: string,
+  confirmLabel: string,
+  dangerous: boolean,
+): SelectOverlayRequest {
+  return {
+    title,
+    detail,
+    searchable: false,
+    choices: confirmChoices(confirmLabel, dangerous),
+    footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+    options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+  }
 }
 
 function rowOf(choice: OverlayChoice, descriptionWidth: number): SelectItem {
@@ -590,18 +612,8 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     await this.prompt<void>(submit => new ScrollableDetailOverlay(request, () => { submit() }))
   }
 
-  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
-    const selected = await this.select({
-      title,
-      detail,
-      searchable: false,
-      choices: [
-        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
-        { id: 'cancel', label: '取消', description: '保持当前状态' },
-      ],
-      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+  async confirm(title: string, detail: string, confirmLabel = '确认', dangerous = false): Promise<boolean> {
+    const selected = await this.select(confirmRequest(title, detail, confirmLabel, dangerous))
     return selected?.id === 'confirm'
   }
 
@@ -791,20 +803,11 @@ export class OverlayQueue implements OverlayPrompts {
    * @param title - concise risk prompt.
    * @param detail - complete impact description.
    * @param confirmLabel - affirmative action label.
+   * @param dangerous - when true, Cancel is focused so a bare Enter aborts.
    * @returns true only when the affirmative action was selected.
    */
-  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
-    const selected = await this.select({
-      title,
-      detail,
-      searchable: false,
-      choices: [
-        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
-        { id: 'cancel', label: '取消', description: '保持当前状态' },
-      ],
-      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+  async confirm(title: string, detail: string, confirmLabel = '确认', dangerous = false): Promise<boolean> {
+    const selected = await this.select(confirmRequest(title, detail, confirmLabel, dangerous))
     return selected?.id === 'confirm'
   }
 

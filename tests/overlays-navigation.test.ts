@@ -101,4 +101,28 @@ describe('overlay navigation', () => {
     await expect(session).resolves.toBeUndefined()
     expect(harness.hide).toHaveBeenCalledOnce()
   })
+
+  it('defaults a dangerous confirm onto cancel so Enter does not execute', async () => {
+    const harness = overlayHarness()
+    const confirmed = harness.overlays.confirm('删除主题？', '该主题会从 Settings 删除。', '删除', true)
+
+    const view = plain(harness.component().render(80))
+    expect(view).toMatch(/→\s+取消/u)
+    expect(view).not.toMatch(/→\s+删除/u)
+
+    harness.component().handleInput(ENTER)
+    await expect(confirmed).resolves.toBe(false)
+    expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
+  it('keeps low-risk confirms focused on the affirmative action', async () => {
+    const harness = overlayHarness()
+    const confirmed = harness.overlays.confirm('立即重启？', '会恢复当前会话。', '立即重启')
+
+    const view = plain(harness.component().render(80))
+    expect(view).toMatch(/→\s+立即重启/u)
+
+    harness.component().handleInput(ENTER)
+    await expect(confirmed).resolves.toBe(true)
+  })
 })

@@ -231,6 +231,7 @@ describe('/theme commands', () => {
       '编辑并覆盖主题 Ocean？',
       expect.stringContaining('替换这个命名主题'),
       '继续编辑',
+      true,
     )
     expect(select).not.toHaveBeenCalled()
     expect(state.mutate).not.toHaveBeenCalled()
@@ -245,6 +246,12 @@ describe('/theme commands', () => {
     await actions.execute('theme', 'delete Ocean')
 
     expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledWith(
+      '删除主题 Ocean？',
+      expect.stringContaining('该主题会从 Harness Settings 删除'),
+      '删除',
+      true,
+    )
     expect(state.current().value).toEqual({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
     expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'dark' }))
   })
