@@ -46,6 +46,7 @@ export interface InputOverlayRequest {
   readonly detail?: string
   readonly initialValue?: string
   readonly placeholder?: string
+  readonly footer?: string
   readonly options?: OverlayOptions
 }
 
@@ -295,7 +296,7 @@ class TextInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       this.input.render(safeWidth)[0] ?? color.muted(translateUiText(this.request.placeholder ?? '')),
-      color.muted(translateUiText('Enter 确认 · Esc 返回/关闭')),
+      color.muted(translateUiText(this.request.footer ?? 'Enter 确认 · Esc 返回/关闭')),
     ], width)
   }
 
@@ -330,7 +331,7 @@ class SecretInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       truncateToWidth(masked, safeWidth, '…'),
-      color.muted(translateUiText('输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭')),
+      color.muted(translateUiText(this.request.footer ?? '输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭')),
     ], width)
   }
 

@@ -53,7 +53,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 | 后台任务与工作流 | 查看 Jobs 的类型、状态、开始/结束时间、耗时和详情；在 Transcript 中显示工作流阶段、成员、结果和失败状态 |
 | 统计与轨迹 | 每轮显示步骤数、LLM/工具耗时、首 Token、吞吐率、缓存命中和输入/输出 Token；检查模型请求、运行中工具与结构化 Trajectory |
 | Profile | 查看、创建、复制和切换 Profile，诊断终端兼容性；受控重启会恢复工作区、会话、未发送草稿和附件 |
-| 设置与凭证 | 枚举当前 Profile 注册的全部 Settings；专用处理默认模型、默认权限、默认 Agent 模式和插件来源，其余字段通过 Schema 通用控件编辑；Secret 只写不回显 |
+| 设置与凭证 | 没有可用 Provider 时提供首次 API Key 引导；枚举当前 Profile 注册的全部 Settings；专用处理默认模型、默认权限、默认 Agent 模式和插件来源，其余字段通过 Schema 通用控件编辑；Secret 只写不回显 |
 | 插件与市场 | `/plugin` 插件中心、已安装列表、搜索、详情、安装、删除、更新、Bundle 排序、来源管理和诊断；支持 npm、Git、tarball 与本地路径安装 |
 | Skills 与 MCP | 动态列出当前可调用 Skills 并插入原生命令；查看 MCP 工具、实例、设置、加载状态和独立进程/远端服务风险 |
 | 反馈 | 记录会话反馈；对 Assistant 回复提交好评、差评和可选说明，也可删除已有消息反馈 |
@@ -88,6 +88,22 @@ deepseek --profile team-tui
 dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 dsh --profile tui
 ```
+
+## 首次配置 API Key
+
+如果当前 Profile 没有任何可用模型 Provider，并且 DeepSeek 官方 Provider 暴露的凭证引用尚未配置且允许写入，SeekTTY 会在首个界面帧出现前打开居中的只写输入框。启动环境已有凭证、Harness 凭证存储已有值，或存在使用环境认证／无 Key 认证的其他活跃 Provider 时，都不会弹出引导。
+
+### 暗色首次引导
+
+![SeekTTY 暗色首次 API Key 引导](assets/seektty-onboarding-dark.png)
+
+### 亮色首次引导
+
+![SeekTTY 亮色首次 API Key 引导](assets/seektty-onboarding-light.png)
+
+这里只粘贴 API Key 本身。输入内容始终显示为掩码；按 Enter 后，规范化后的值会直接交给 Harness `credentials.set`。SeekTTY 不会读回密钥，也不会自行写凭证文件，更不会把它放进 Settings、日志、截图或 Session 数据。保存时不会主动发起可能计费的在线验证请求；Key 是否有效由第一次真实模型请求通过 Harness Provider 的原生错误路径报告。
+
+按 Esc 可以稍后配置，同时继续进入 `/settings`、`/plugin` 等本地界面。之后发送普通消息、Skill 命令或带附件消息时会再次打开同一引导。`deepseek "初始任务"`、已经提交的文字和草稿附件都不会丢失：保存成功后自动继续原请求，再次跳过则恢复到输入框。如果 Provider 检查不可用、官方适配器不存在或凭证层只读，SeekTTY 不会显示无法完成的输入框，而是提示使用 `/settings` 与 `/doctor`，并保留 Harness 原有行为。
 
 ## 斜杠命令
 
@@ -210,13 +226,14 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.6` 隔离安装、配置装配和 PTY 启动。
 - `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
+- 隔离 `DSH_HOME` 下的首次 Provider 就绪检查、API Key 掩码输入、跳过后的草稿恢复、Harness 凭证持久化，以及重启后不再提示。
 - 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
 - 中英文语言解析、带 revision 保护的共享偏好写入、终端实时切换，以及未知外部内容保持原样。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
 - 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
 - macOS、Linux 和 Windows 均支持安装、启动、键盘导航与终端交互。
 
-已使用仅注入测试进程环境的有效 DeepSeek 凭据完成真实在线多轮响应验收：`v4-flash` 返回 `DSH_THEME_LIVE_OK` 与 `DSH_MULTI_TURN_OK`，并实际渲染 TypeScript 和 JSON 高亮代码块。凭据未写入 Profile、设置文件、日志或仓库。
+已在隔离 `DSH_HOME` 中把有效 DeepSeek 凭据粘贴进真实掩码引导并完成在线多轮验收：`v4-flash` 首轮返回 `REALCHECK_58597`，下一轮引用该结果后返回 `REALCHECK_58598`。同一 Profile 重启后没有再次弹出引导，Harness 凭证文件权限为 `0600`，凭据没有进入终端输出、截图或仓库；验收结束后已删除隔离凭证存储。
 
 可复用的 stock-dsh 插拔检查：
 

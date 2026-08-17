@@ -28,6 +28,12 @@ import {
   ui,
 } from './locale.ts'
 import { OverlayQueue } from './overlays.ts'
+import {
+  dispatchAfterProviderOnboarding,
+  inspectProviderReadiness,
+  ProviderOnboardingGate,
+  type ProviderOnboardingResult,
+} from './provider-onboarding.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
@@ -109,7 +115,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   const settingsDocuments = await options.management.settings.describe()
   setUiLocale(localeFromSettings(settingsDocuments))
   const terminal = internals.createTerminal()
-  const client = await internals.startClient(options)
+  const [client, initialProviderReadiness] = await Promise.all([
+    internals.startClient(options),
+    inspectProviderReadiness(options.api),
+  ])
   let stopConstructedTui = (): void => undefined
   let disposeConstructedSyntax = (): void => undefined
   try {
@@ -199,6 +208,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       updateStatus()
       renderWhileOpen()
     }
+
+    const onboarding = new ProviderOnboardingGate(
+      options.api,
+      overlays,
+      (message, tone) => { setNotice(message, tone) },
+      initialProviderReadiness,
+    )
 
     const updateStatus = (): void => {
       if (stopping !== undefined) return
@@ -398,26 +414,38 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       setNotice(`命令目录：${message}`, 'error')
     }))
 
-    const sendPrompt = async (text: string, mode: 'queue' | 'steer' = 'queue'): Promise<boolean> => {
-      const current = capabilities.active()
-      if (current === undefined) {
-        setNotice('当前没有打开的会话', 'error')
-        if (text !== '' && editor.getText() === '') editor.setText(text)
-        return false
-      }
-      const content = capabilities.promptContent(text)
-      if (content.length === 0) return false
-      const result = await current.session.prompt(content, mode)
-      if (!result.ok) {
-        setNotice(`${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`, 'error')
-        if (text !== '' && editor.getText() === '') editor.setText(text)
-        return false
-      }
-      capabilities.clearAttachments()
-      notice = undefined
-      updateStatus()
-      return true
+    const restoreDeferredPrompt = (text: string): void => {
+      if (text !== '' && editor.getText() === '') editor.setText(escapeTerminalText(text))
     }
+
+    const sendPrompt = async (
+      text: string,
+      mode: 'queue' | 'steer' = 'queue',
+      readiness: Promise<ProviderOnboardingResult> = onboarding.ensure(),
+    ): Promise<boolean> => dispatchAfterProviderOnboarding(
+      readiness,
+      () => { restoreDeferredPrompt(text) },
+      async () => {
+        const current = capabilities.active()
+        if (current === undefined) {
+          setNotice('当前没有打开的会话', 'error')
+          restoreDeferredPrompt(text)
+          return false
+        }
+        const content = capabilities.promptContent(text)
+        if (content.length === 0) return false
+        const result = await current.session.prompt(content, mode)
+        if (!result.ok) {
+          setNotice(`${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`, 'error')
+          restoreDeferredPrompt(text)
+          return false
+        }
+        capabilities.clearAttachments()
+        notice = undefined
+        updateStatus()
+        return true
+      },
+    )
 
     const dispatchCommand = async (line: string): Promise<void> => {
       const trimmed = line.trim()
@@ -573,13 +601,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return { consume: true }
     })
 
+    const startupOnboarding = onboarding.ensure()
     terminal.setTitle('DeepSeek Harness')
     tui.start()
     refreshHeader(true)
     refresh()
     if (options.startupNotice !== undefined) setNotice(options.startupNotice, 'success')
-    if (options.attachmentPaths !== undefined && options.attachmentPaths.length > 0) {
-      void (async () => {
+    const attachmentsReady = options.attachmentPaths !== undefined && options.attachmentPaths.length > 0
+      ? (async () => {
         const failures: string[] = []
         for (const path of options.attachmentPaths ?? []) {
           try { await capabilities.addAttachment(path) } catch (error) { failures.push(`${path}: ${capabilityError(error)}`) }
@@ -588,10 +617,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         else setNotice(`部分附件未恢复：${failures.join('；')}`, 'warning')
         refresh()
       })()
-    }
+      : Promise.resolve()
     if (options.task !== undefined) {
-      void sendPrompt(options.task).catch((error: unknown) => {
+      void attachmentsReady.then(() => sendPrompt(options.task ?? '', 'queue', startupOnboarding)).catch((error: unknown) => {
         setNotice(`发送初始任务失败：${capabilityError(error)}`, 'error')
+      })
+    } else {
+      void startupOnboarding.catch((error: unknown) => {
+        setNotice(`读取模型配置失败：${capabilityError(error)}`, 'warning')
       })
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
