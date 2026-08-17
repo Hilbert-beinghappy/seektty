@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  commandShadowDiagnostics,
   mergeCommandCatalog,
   TUI_COMMANDS,
 } from '../src/client/capabilities.ts'
@@ -30,5 +31,20 @@ describe('command catalog merge', () => {
     expect(result.catalog.some(command => command.name === 'help' && command.source === 'Skill')).toBe(false)
     expect(result.catalog.some(command => command.name === 'unique-skill')).toBe(true)
     expect(result.shadows).toEqual([])
+  })
+
+  it('reports Host shadows only for the active session', () => {
+    const shadows = new Map<string, readonly string[]>([
+      ['session-a', ['new']],
+      ['session-b', ['status']],
+    ])
+    expect(commandShadowDiagnostics(shadows, 'session-a')).toEqual([
+      '命令 /new 被 TUI 内置命令遮蔽',
+    ])
+    expect(commandShadowDiagnostics(shadows, 'session-b')).toEqual([
+      '命令 /status 被 TUI 内置命令遮蔽',
+    ])
+    expect(commandShadowDiagnostics(shadows, undefined)).toEqual([])
+    expect(commandShadowDiagnostics(shadows, 'missing')).toEqual([])
   })
 })

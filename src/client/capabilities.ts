@@ -244,8 +244,26 @@ export function mergeCommandCatalog(
   return {
     catalog,
     shadows,
-    diagnostics: shadows.map(name => `命令 /${name} 被 TUI 内置命令遮蔽`),
+    diagnostics: commandShadowMessages(shadows),
   }
+}
+
+/**
+ * Doctor copy for Host commands skipped because they collide with TUI builtins.
+ * @param shadowsBySession - Host names shadowed per Session.
+ * @param sessionId - Session whose catalog was last merged, if any.
+ * @returns warning lines for /doctor, or none when the Session has no shadows.
+ */
+export function commandShadowDiagnostics(
+  shadowsBySession: ReadonlyMap<string, readonly string[]>,
+  sessionId: string | undefined,
+): readonly string[] {
+  if (sessionId === undefined) return []
+  return commandShadowMessages(shadowsBySession.get(sessionId) ?? [])
+}
+
+function commandShadowMessages(names: readonly string[]): readonly string[] {
+  return names.map(name => `命令 /${name} 被 TUI 内置命令遮蔽`)
 }
 
 function shortFunctionDescription(description: string, fallback: string): string {
@@ -444,7 +462,7 @@ function workspaceFor(
  */
 export class HarnessTuiCapabilities {
   private readonly commandCatalogs = new Map<SessionId, Promise<readonly TuiCommandCandidate[]>>()
-  private readonly commandShadows: string[] = []
+  private readonly commandShadows = new Map<SessionId, readonly string[]>()
   private readonly modelCatalogs = new Map<SessionId, SessionModels>()
   private readonly modelLoads = new Map<SessionId, Promise<SessionModels>>()
   private readonly attachments: TuiDraftAttachment[] = []
@@ -463,15 +481,15 @@ export class HarnessTuiCapabilities {
     private readonly initialWorkspacePath: string,
     private readonly management?: TuiManagementBridge,
   ) {
-    ctx.remote.$on('commands/change', () => { this.commandCatalogs.clear() })
+    ctx.remote.$on('commands/change', () => { this.forgetCommandCatalogs() })
     ctx.remote.$on('agent-preset/selected', (sessionId: SessionId) => {
-      this.commandCatalogs.delete(sessionId)
+      this.forgetCommandCatalogs(sessionId)
       this.invalidateModels()
     })
     ctx.remote.$on('llm/adapters-updated', () => { this.invalidateModels() })
     ctx.remote.$on('settings/document-updated', () => { this.invalidateModels() })
     ctx.on('connection/reset', () => {
-      this.commandCatalogs.clear()
+      this.forgetCommandCatalogs()
       this.invalidateModels()
     })
   }
@@ -600,7 +618,7 @@ export class HarnessTuiCapabilities {
     const existing = this.commandCatalogs.get(sessionId)
     const request = existing ?? this.readCommandCatalog(sessionId)
       .catch((error: unknown) => {
-        this.commandCatalogs.delete(sessionId)
+        this.forgetCommandCatalogs(sessionId)
         throw error
       })
     if (existing === undefined) this.commandCatalogs.set(sessionId, request)
@@ -613,16 +631,25 @@ export class HarnessTuiCapabilities {
 
   /** Invalidate the current command/Skill snapshot and repull on next use. */
   invalidateCommandCatalog(): void {
-    const id = this.active()?.sessionId
-    if (id !== undefined) this.commandCatalogs.delete(id)
+    this.forgetCommandCatalogs(this.active()?.sessionId)
   }
 
   /**
    * Host commands skipped because they collide with TUI builtins.
-   * @returns doctor-ready shadow records for the last successful catalog merge.
+   * @returns doctor-ready shadow records for the active Session.
    */
   commandDiagnostics(): readonly string[] {
-    return this.commandShadows.map(name => `命令 /${name} 被 TUI 内置命令遮蔽`)
+    return commandShadowDiagnostics(this.commandShadows, this.active()?.sessionId)
+  }
+
+  private forgetCommandCatalogs(sessionId?: SessionId): void {
+    if (sessionId === undefined) {
+      this.commandCatalogs.clear()
+      this.commandShadows.clear()
+      return
+    }
+    this.commandCatalogs.delete(sessionId)
+    this.commandShadows.delete(sessionId)
   }
 
   /**
@@ -685,7 +712,7 @@ export class HarnessTuiCapabilities {
     if (!response.result.ok) throw new Error(`切换模式失败：${response.result.error.message}`)
     this.ctx.sessions.noteAgentPreset(target.sessionId, response.result.value.agentPreset)
     this.ctx.sessions.open(target.sessionId)
-    this.commandCatalogs.delete(target.sessionId)
+    this.forgetCommandCatalogs(target.sessionId)
     return target.sessionId
   }
 
@@ -1514,7 +1541,7 @@ export class HarnessTuiCapabilities {
       ? skillResponse.result.value.skills
       : []
     const merged = mergeCommandCatalog(hostResult.value as readonly HostCommandDescriptor[], skills)
-    this.commandShadows.splice(0, this.commandShadows.length, ...merged.shadows)
+    this.commandShadows.set(sessionId, merged.shadows)
     return merged.catalog
   }
 }

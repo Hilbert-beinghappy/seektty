@@ -668,6 +668,7 @@ const ENGLISH_PATTERNS: readonly {
   readonly pattern: RegExp
   readonly replace: (...groups: string[]) => string
 }[] = [
+  { pattern: /^(.+) · 立即生效$/u, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · applies immediately` },
   { pattern: /^命令 \/(.+) 被 TUI 内置命令遮蔽$/u, replace: name => `Command /${name} is shadowed by a TUI builtin` },
   { pattern: /^(.+) · 需重启$/u, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · restart required` },
   { pattern: /^设置 · (.+)$/u, replace: value => `Settings · ${value}` },

@@ -97,6 +97,8 @@ describe('terminal locale preference', () => {
     expect(ui('设置', 'Settings')).toBe('Settings')
     expect(translateUiText('命令面板')).toBe('Command palette')
     expect(translateUiText('队列 3')).toBe('Queue 3')
+    expect(translateUiText('插件 · 立即生效')).toBe('插件 · applies immediately')
+    expect(translateUiText('命令 /new 被 TUI 内置命令遮蔽')).toBe('Command /new is shadowed by a TUI builtin')
     expect(translateUiText('provider-authored 中文说明')).toBe('provider-authored 中文说明')
   })
 
