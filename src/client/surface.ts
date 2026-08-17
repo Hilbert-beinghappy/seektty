@@ -242,6 +242,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }))
     }
 
+    let actions!: TuiActions
+
     const updateStatus = (): void => {
       if (stopping !== undefined) return
       const snapshot = active?.session.getSnapshot()
@@ -306,6 +308,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(translateUiText('目标'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(translateUiText(`图片 ${String(attachmentCount)}`))
+      const allowedTools = actions.sessionAllowlistCount()
+      if (allowedTools > 0) {
+        facts.push(ui(`自动允许 ${String(allowedTools)} 个工具`, `Auto-allow ${String(allowedTools)} tool(s)`))
+      }
       if (restartRequired !== undefined) facts.push(translateUiText('需要重启'))
       const secondary = notice === undefined
         ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
@@ -397,7 +403,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return stopping
     }
 
-    const actions = new TuiActions(capabilities, {
+    actions = new TuiActions(capabilities, {
       overlays,
       transcript,
       notice: setNotice,

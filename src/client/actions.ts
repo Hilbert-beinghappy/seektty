@@ -26,6 +26,7 @@ import { lastFencedCode } from './copy-content.ts'
 import { formatByteSize } from './byte-size.ts'
 import { helpSectionChoices, helpSectionText, type HelpSectionId } from './help.ts'
 import { pluginFailureDetail } from './error-advice.ts'
+import { SessionToolAllowlist } from './session-tool-allowlist.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
@@ -351,6 +352,7 @@ function elapsedLabel(milliseconds: number): string {
 export class TuiActions {
   private readonly handledInteractions = new Set<string>()
   private interactionChain: Promise<void> = Promise.resolve()
+  private readonly sessionAllowlist = new SessionToolAllowlist()
 
   /** @param capabilities - Harness-backed compatibility controller. */
   constructor(
@@ -488,11 +490,34 @@ export class TuiActions {
     }
   }
 
+  /** Count of tools auto-allowed for the bound session. */
+  sessionAllowlistCount(): number {
+    return this.sessionAllowlist.size
+  }
+
+  /**
+   * Remember one tool for this session. Used by tests and `/pending` restore.
+   * @param sessionId - active session.
+   * @param toolName - Host tool name.
+   */
+  rememberSessionTool(sessionId: string, toolName: string): void {
+    this.sessionAllowlist.bind(sessionId)
+    this.sessionAllowlist.add(toolName)
+  }
+
+  /** Drop the session-scoped auto-allow list. */
+  revokeSessionAllowlist(): void {
+    this.sessionAllowlist.clear()
+    this.host.refresh()
+  }
+
   /**
    * Detect newly pending Runtime interactions and serialize them through the FIFO overlay owner.
    * @param snapshot - authoritative Runtime conversation snapshot.
    */
   syncPending(snapshot: ConversationSnapshot): void {
+    const sessionId = this.capabilities.active()?.sessionId
+    if (sessionId !== undefined) this.sessionAllowlist.bind(sessionId)
     const present = new Set(snapshot.pending.map(wait => wait.key))
     for (const key of [...this.handledInteractions]) {
       if (!present.has(key)) this.handledInteractions.delete(key)
@@ -3284,6 +3309,10 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
   private retryPending(): void {
     const snapshot = this.capabilities.active()?.session.getSnapshot()
     if (snapshot === undefined || snapshot.pending.length === 0) {
+      if (this.sessionAllowlist.size > 0) {
+        void this.revokeAllowlistPrompt()
+        return
+      }
       this.host.notice('当前没有待处理交互', 'info')
       return
     }
@@ -3291,12 +3320,36 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     this.syncPending(snapshot)
   }
 
+  private async revokeAllowlistPrompt(): Promise<void> {
+    const names = this.sessionAllowlist.names().join('、')
+    const confirmed = await this.host.overlays.confirm(
+      ui('撤销本会话自动允许？', 'Revoke this session auto-allow list?'),
+      ui(
+        `将重新询问：${names}\n作用范围：本会话`,
+        `Will ask again for: ${names}\nScope: this session`,
+      ),
+      ui('撤销', 'Revoke'),
+    )
+    if (!confirmed) return
+    this.revokeSessionAllowlist()
+    this.host.notice(ui('已撤销本会话自动允许', 'Session auto-allow list cleared'), 'success')
+  }
+
   private async handleInteraction(wait: PendingInteraction): Promise<void> {
     const current = this.capabilities.active()?.session.getSnapshot().pending
       .some(candidate => candidate.key === wait.key) === true
     if (!current) return
-    if (wait.kind === 'approval') await this.approval(wait)
-    else await this.question(wait)
+    if (wait.kind === 'approval') {
+      if (this.sessionAllowlist.has(wait.payload.toolName)) {
+        this.host.transcript.followLatest()
+        await this.capabilities.answerApproval(wait, 'allowed-once')
+        this.host.refresh()
+        return
+      }
+      await this.approval(wait)
+      return
+    }
+    await this.question(wait)
   }
 
   private async approval(wait: PendingWait<'approval'>): Promise<void> {
@@ -3305,14 +3358,25 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       detail: wait.payload.reason ?? `调用 ${wait.payload.callId ?? wait.payload.approvalId}`,
       searchable: false,
       choices: [
-        { id: 'allow', label: '仅本次允许', description: '只允许这一次工具调用' },
-        { id: 'reject', label: '拒绝', description: '本次工具调用不会执行' },
+        { id: 'allow', label: ui('仅本次允许', 'Allow this time'), description: ui('只允许这一次工具调用', 'Allow only this tool call') },
+        {
+          id: 'session',
+          label: ui('本会话不再询问此工具', 'Do not ask again for this tool'),
+          description: ui('作用范围：本会话', 'Scope: this session'),
+        },
+        { id: 'reject', label: ui('拒绝', 'Reject'), description: ui('本次工具调用不会执行', 'This tool call will not run') },
       ],
-      footer: 'Enter 确认 · Esc 安全拒绝',
+      footer: ui('Enter 确认 · Esc 安全拒绝', 'Enter to confirm · Esc rejects safely'),
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
     })
     this.host.transcript.followLatest()
-    await this.capabilities.answerApproval(wait, selected?.id === 'allow' ? 'allowed-once' : 'rejected')
+    if (selected?.id === 'session') {
+      const sessionId = this.capabilities.active()?.sessionId
+      if (sessionId !== undefined) this.sessionAllowlist.bind(sessionId)
+      this.sessionAllowlist.add(wait.payload.toolName)
+      this.host.refresh()
+    }
+    await this.capabilities.answerApproval(wait, selected?.id === 'reject' || selected === undefined ? 'rejected' : 'allowed-once')
   }
 
   private async question(wait: PendingWait<'question'>): Promise<void> {

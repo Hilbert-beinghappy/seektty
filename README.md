@@ -43,7 +43,7 @@ The current release covers these capabilities:
 | Workspaces | Start from the current directory; add, select, rename, unregister, reorder, and reorder sessions within a workspace; unregistering never deletes files or session logs |
 | Agent modes | Standard, Code/PTC, Minimal, and Cordis/Create baseline modes plus dynamically registered Agent Presets; switching an active conversation creates a new session in the same workspace |
 | Models and Providers | Dynamic Provider, model, and supported reasoning-effort discovery; current route display; per-session switching; catalog, credential, and routing diagnostics |
-| Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, and allow or reject one tool call at a time |
+| Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, allow one tool call, skip further prompts for a tool in this session, or reject |
 | Input queue and steering | Queue prompts while the Agent runs, inspect/edit/remove entries, steer one entry or the entire queue into the active turn, and send `/steer` directly |
 | Human interaction | Single choice, multi-select, custom answers, skip, cancel, and plan review; submitting an interaction returns to the latest output while the blocked turn resumes, with `/pending` recovery when retrying is needed |
 | Image attachments | Add PNG, JPEG, GIF, or WebP by path or by pasting a file path or clipboard bitmap (`pngpaste` / `wl-paste` / `xclip` / PowerShell); enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
