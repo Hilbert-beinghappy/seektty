@@ -32,6 +32,7 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
+import { splitDiffLines, unifiedHunks } from './line-diff.ts'
 import { translateUiText, ui } from './locale.ts'
 import {
   background,
@@ -364,8 +365,7 @@ function prettyArgs(argsRaw: string): string {
 }
 
 function contentLines(text: string): string[] {
-  if (text === '') return []
-  return (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
+  return splitDiffLines(text)
 }
 
 function diffText(value: unknown): string {
@@ -384,15 +384,12 @@ function diffText(value: unknown): string {
     rows.push(`diff -- ${path}`)
     rows.push(oldText === null ? '--- /dev/null' : `--- a/${path}`)
     rows.push(`+++ b/${path}`)
-    if (oldText !== null) {
-      for (const line of contentLines(oldText)) {
-        rows.push(`-${line}`)
-        removed += 1
-      }
-    }
-    for (const line of contentLines(newText)) {
-      rows.push(`+${line}`)
-      added += 1
+    const previous = oldText === null ? [] : contentLines(oldText)
+    const next = contentLines(newText)
+    for (const line of unifiedHunks(previous, next)) {
+      if (line.startsWith('+')) added += 1
+      else if (line.startsWith('-')) removed += 1
+      rows.push(line)
     }
   }
   const visible = rows.length <= 80

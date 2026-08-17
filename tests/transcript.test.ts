@@ -637,7 +637,7 @@ describe('conversation viewport', () => {
     vi.stubEnv('COLORTERM', 'truecolor')
     const highlighter = vi.fn((code: string, _language?: string) => code.split('\n'))
     setCodeHighlighter(highlighter)
-    const transcript = new Transcript(() => 24)
+    const transcript = new Transcript(() => 80)
     transcript.cycleToolVisibility()
     transcript.update(snapshot([
       tool(
@@ -672,6 +672,37 @@ describe('conversation viewport', () => {
     expect(highlighter.mock.calls.map(call => call[1])).toEqual(expect.arrayContaining(['typescript', 'diff']))
     expect(highlighter.mock.calls.some(call => call[0].includes('RED'))).toBe(false)
   })
+
+  it('renders a 200-line three-edit file as compact hunks instead of a whole-file rewrite', () => {
+    const previous = Array.from({ length: 200 }, (_, index) => `line ${index + 1}`).join('\n') + '\n'
+    const nextLines = Array.from({ length: 200 }, (_, index) => `line ${index + 1}`)
+    nextLines[9] = 'changed 10'
+    nextLines[49] = 'changed 50'
+    nextLines[149] = 'changed 150'
+    const transcript = new Transcript(() => 80)
+    transcript.cycleToolVisibility()
+    transcript.update(snapshot([
+      tool(
+        'diff-compact',
+        {
+          card: 'diff',
+          title: 'Edit file.ts',
+          diffs: [{ path: 'file.ts', oldText: previous, newText: `${nextLines.join('\n')}\n` }],
+        },
+        {
+          card: 'diff',
+          diffs: [{ path: 'file.ts', oldText: previous, newText: `${nextLines.join('\n')}\n` }],
+        },
+      ),
+    ]))
+    const rendered = transcript.render(100).join('\n')
+    expect(rendered).toContain('@@ -')
+    expect(rendered).toContain('+changed 10')
+    expect(rendered).not.toMatch(/-line 1(?!\d)/)
+    const diffLines = rendered.split('\n').filter(line => line.includes('file.ts') || line.includes('changed') || line.includes('@@'))
+    expect(diffLines.length).toBeLessThan(80)
+  })
+
 
   it('recolors existing history without moving the current viewport', () => {
     vi.stubEnv('NO_COLOR', undefined)
