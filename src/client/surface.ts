@@ -38,6 +38,7 @@ import { OverlayQueue } from './overlays.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
+import { formatElapsed } from './elapsed.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -182,6 +183,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let notice: { message: string; tone: NoticeTone } | undefined
     let restartRequired: string | undefined
     let headerGeneration = 0
+    let runningSince: number | undefined
+    let elapsedTimer: ReturnType<typeof setInterval> | undefined
 
     const focusEditor = (): void => {
       transcriptFocused = false
@@ -216,11 +219,30 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const updateStatus = (): void => {
       if (stopping !== undefined) return
       const snapshot = active?.session.getSnapshot()
+      if (snapshot?.running === true) {
+        runningSince ??= Date.now()
+        if (elapsedTimer === undefined && initialBehavior.statusElapsed) {
+          elapsedTimer = setInterval(() => {
+            if (stopping !== undefined) return
+            updateStatus()
+            renderWhileOpen()
+          }, 500)
+        }
+      } else {
+        runningSince = undefined
+        if (elapsedTimer !== undefined) {
+          clearInterval(elapsedTimer)
+          elapsedTimer = undefined
+        }
+      }
       if (snapshot === undefined) {
         status.setDetail(color.warning(translateUiText('未打开会话')))
         return
       }
       const pendingCount = snapshot.pending.length
+      const generating = initialBehavior.statusElapsed && runningSince !== undefined
+        ? `生成中 · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C 停止`
+        : '生成中 · Ctrl+C 停止'
       const primary = snapshot.removed
         ? color.danger(translateUiText('会话已删除'))
         : snapshot.promptError !== null
@@ -228,7 +250,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           : pendingCount > 0
             ? color.warning(translateUiText(`/pending 处理 ${String(pendingCount)} 项交互`))
             : snapshot.running
-              ? color.accent(translateUiText('生成中 · Ctrl+C 停止'))
+              ? color.accent(translateUiText(generating))
               : undefined
       const facts: string[] = []
       if (snapshot.queue.length > 0) facts.push(translateUiText(`队列 ${String(snapshot.queue.length)}`))
@@ -256,7 +278,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const generation = ++headerGeneration
       void capabilities.headerFacts(forceModel).then((facts) => {
         if (stopping !== undefined || generation !== headerGeneration) return
-        contextBar.setFacts(facts)
+        contextBar.setFacts({
+          ...facts,
+          ...(runningSince === undefined ? {} : { runningSince }),
+          statusElapsed: initialBehavior.statusElapsed,
+        })
         editor.setFacts(facts)
         status.setPermission(facts.permission)
         renderWhileOpen()
@@ -294,6 +320,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (stopping !== undefined) return stopping
       stopping = (async () => {
         const failures: unknown[] = []
+        if (elapsedTimer !== undefined) {
+          clearInterval(elapsedTimer)
+          elapsedTimer = undefined
+        }
         overlays.dispose()
         transcript.dispose()
         setCodeHighlighter(undefined)

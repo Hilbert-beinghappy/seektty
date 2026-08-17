@@ -105,6 +105,10 @@ export interface TuiHeaderFacts {
   readonly permission: string
   readonly running: boolean
   readonly context?: string
+  /** Epoch ms when the current turn started running; absent while idle. */
+  readonly runningSince?: number
+  /** Whether the context row should show a live elapsed clock. */
+  readonly statusElapsed?: boolean
 }
 
 /** Human-readable whole-session figures derived from registered projections. */

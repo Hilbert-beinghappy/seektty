@@ -804,6 +804,7 @@ const ENGLISH_PATTERNS: readonly {
   { pattern: /^目标：(.+)$/su, replace: value => `Goal: ${value}` },
   { pattern: /^阻塞原因：(.+)$/su, replace: value => `Blocked by: ${value}` },
   { pattern: /^(\d+-\d+\/\d+) 行 · ↑↓ 滚动 · PgUp\/PgDn 翻页 · Home\/End · Enter\/q 关闭 · Esc 返回$/u, replace: value => `${value} lines · ↑↓ scroll · PgUp/PgDn page · Home/End · Enter/q close · Esc back` },
+  { pattern: /^生成中 · (.+) · Ctrl\+C 停止$/u, replace: value => `Generating · ${value} · Ctrl+C to stop` },
 ]
 
 function requestedEnvironmentLocale(env: NodeJS.ProcessEnv): LocaleId {
