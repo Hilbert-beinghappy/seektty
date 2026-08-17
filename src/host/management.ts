@@ -162,6 +162,40 @@ function settingsDocument(descriptor: SettingsDescriptor): TuiSettingsDocument {
   }
 }
 
+/**
+ * Cache a full Settings describe() so one() and namespaced reads do not reserialize
+ * every namespace on the Host event loop.
+ * @param load - redacted descriptors from Harness Settings.
+ */
+export function createSettingsDescribeCache(
+  load: () => readonly TuiSettingsDocument[],
+): {
+  describe(namespace?: string): readonly TuiSettingsDocument[]
+  one(namespace: string): TuiSettingsDocument
+  invalidate(): void
+} {
+  let cached: readonly TuiSettingsDocument[] | undefined
+  const all = (): readonly TuiSettingsDocument[] => {
+    cached ??= load()
+    return cached
+  }
+  const one = (namespace: string): TuiSettingsDocument => {
+    const document = all().find(row => row.namespace === namespace)
+    if (document === undefined) throw new Error(`设置命名空间 ${JSON.stringify(namespace)} 已卸载`)
+    return document
+  }
+  return {
+    describe(namespace?: string): readonly TuiSettingsDocument[] {
+      if (namespace === undefined) return all()
+      return [one(namespace)]
+    },
+    one,
+    invalidate(): void {
+      cached = undefined
+    },
+  }
+}
+
 function redactInstallerOutput(value: string): string {
   let redacted = value
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1***@')
@@ -245,15 +279,11 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     ...(providers === undefined ? {} : { providers }),
   })
 
-  const describe = (): readonly TuiSettingsDocument[] =>
-    settings.describe({ redactSecrets: true }).map(settingsDocument)
-  const one = (namespace: string): TuiSettingsDocument => {
-    const document = describe().find(row => row.namespace === namespace)
-    if (document === undefined) throw new Error(`设置命名空间 ${JSON.stringify(namespace)} 已卸载`)
-    return document
-  }
+  const documents = createSettingsDescribeCache(
+    () => settings.describe({ redactSecrets: true }).map(settingsDocument),
+  )
   const sourceSnapshot = (): TuiMarketplaceSources => {
-    const document = one(MARKETPLACE_NAMESPACE)
+    const document = documents.one(MARKETPLACE_NAMESPACE)
     const value = document.value as MarketplaceSettings
     const stored = value.sources.map(source => validateCatalogSource({
       id: source.id,
@@ -316,10 +346,11 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
       },
     },
     settings: {
-      describe: () => Promise.resolve(describe()),
+      describe: namespace => Promise.resolve(documents.describe(namespace)),
       mutate: async (namespace, ops, expectedRevision) => {
         await mutateSettings(settings, namespace, ops, expectedRevision)
-        return one(namespace)
+        documents.invalidate()
+        return documents.one(namespace)
       },
       credentialInfo: ref => credentials.describe(credentialRef(ref)),
       setCredential: async (ref, value) => {
@@ -371,6 +402,7 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
         const conflict = catalog.find(source => reserved.has(source.id))
         if (conflict !== undefined) throw new Error(`Catalog Source ${conflict.id} 与内置或 Provider Source 冲突`)
         await mutateSettings(settings, MARKETPLACE_NAMESPACE, [{ op: 'set', path: ['sources'], value: catalog }], expectedRevision)
+        documents.invalidate()
         return sourceSnapshot()
       },
       search: async (query, signal) => {

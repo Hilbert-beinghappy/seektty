@@ -305,7 +305,7 @@ export interface TuiManagementBridge {
     download(sessionId: string, includeDescendants: boolean, signal?: AbortSignal): Promise<TuiSessionExport>
   }
   readonly settings: {
-    describe(): Promise<readonly TuiSettingsDocument[]>
+    describe(namespace?: string): Promise<readonly TuiSettingsDocument[]>
     mutate(namespace: string, ops: readonly TuiSettingsPathOp[], expectedRevision: number): Promise<TuiSettingsDocument>
     credentialInfo(ref: string): Promise<TuiCredentialInfo>
     setCredential(ref: string, value: string): Promise<TuiCredentialInfo>

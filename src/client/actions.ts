@@ -435,8 +435,7 @@ export class TuiActions {
   private async settingsConflict(error: TuiSettingsConflictError): Promise<void> {
     let actual = error.actual
     try {
-      const document = (await this.capabilities.managementBridge().settings.describe())
-        .find(candidate => candidate.namespace === error.namespace)
+      const document = (await this.capabilities.managementBridge().settings.describe(error.namespace))[0]
       if (document !== undefined) actual = document.revision
     } catch (refreshError) {
       this.host.notice(`设置冲突后重新读取失败：${capabilityError(refreshError)}`, 'error')
@@ -1058,7 +1057,7 @@ export class TuiActions {
     suppliedDocument?: TuiSettingsDocument,
   ): Promise<void> {
     const settings = this.capabilities.managementBridge().settings
-    const document = suppliedDocument ?? localeSettings(await settings.describe())
+    const document = suppliedDocument ?? localeSettings(await settings.describe(LOCALE_SETTINGS_NAMESPACE))
     const requested = args.toLowerCase()
     const aliases = new Map<string, TuiLanguageSelection>([
       ['auto', 'auto'],
@@ -1164,7 +1163,7 @@ export class TuiActions {
 
   private async themeCenter(): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const activeCodeTheme = resolveCodeTheme(appearance)
     const choices: OverlayChoice[] = [
@@ -1211,7 +1210,7 @@ export class TuiActions {
 
   private async activateTheme(target: TuiThemeId): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const resolved = resolveTheme(appearance, target)
     if (target === appearance.theme && appearance.codeTheme === 'auto') {
@@ -1228,7 +1227,7 @@ export class TuiActions {
       await this.activateTheme(value)
       return
     }
-    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe())
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const requested = value.startsWith('custom:') ? value.slice('custom:'.length) : value
     const folded = requested.toLowerCase()
@@ -1240,7 +1239,7 @@ export class TuiActions {
 
   private async themeCode(value: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     let target: TuiCodeThemeId | undefined
     if (value !== '') {
@@ -1324,7 +1323,7 @@ export class TuiActions {
 
   private async themePalette(requestedName: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const enteredName = requestedName === '' ? await this.promptThemeName() : requestedName
     if (enteredName === undefined) return
@@ -1345,7 +1344,7 @@ export class TuiActions {
 
   private async themeImport(args: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const [first = '', ...rest] = commandArguments(args)
     const looksLikePath = /^(?:[./~]|file:)/u.test(first) || /\.jsonc?$/iu.test(first)
@@ -1371,7 +1370,7 @@ export class TuiActions {
   }
 
   private async themeExport(args: string): Promise<void> {
-    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe())
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const [first = '', ...rest] = commandArguments(args)
     const looksLikePath = /^(?:[./~]|file:)/u.test(first) || /\.jsonc?$/iu.test(first)
@@ -1417,7 +1416,7 @@ export class TuiActions {
 
   private async themeEdit(requested: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     let source: ResolvedTuiTheme | undefined
     if (requested !== '') {
@@ -1594,7 +1593,7 @@ export class TuiActions {
 
   private async themeDelete(requested: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe())
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     if (appearance.customThemes.length === 0) throw new Error('没有可删除的自定义主题')
     let theme = requested === '' ? undefined : appearance.customThemes.find(candidate =>
@@ -1865,7 +1864,7 @@ export class TuiActions {
 
   private async keymap(args: string): Promise<void> {
     const settings = this.capabilities.managementBridge().settings
-    const document = behaviorSettings(await settings.describe())
+    const document = behaviorSettings(await settings.describe(TUI_BEHAVIOR_SETTINGS_NAMESPACE))
     const current = behaviorFromSettings(document)
     applyKeyBindingOverrides(current.keyBindings)
     const { first, rest } = argumentPair(args)
@@ -1971,7 +1970,7 @@ export class TuiActions {
     initialChoiceId?: string,
   ): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const initialDocument = (await bridge.describe()).find(candidate => candidate.namespace === namespace)
+    const initialDocument = (await bridge.describe(namespace))[0]
     if (initialDocument === undefined) throw new Error(`Settings 命名空间 ${JSON.stringify(namespace)} 不存在`)
     let document: TuiSettingsDocument = initialDocument
     let fields = settingsFields(document)
@@ -2001,7 +2000,7 @@ export class TuiActions {
         const field = fields.find(candidate => JSON.stringify(candidate.path) === selected.id)
         if (field !== undefined) await this.editSetting(navigation, document, field)
       }
-      const refreshed = (await bridge.describe()).find(candidate => candidate.namespace === namespace)
+      const refreshed = (await bridge.describe(namespace))[0]
       if (refreshed === undefined) {
         this.host.notice(`Settings 命名空间 ${namespace} 已不可用`, 'warning')
         navigation.back()
