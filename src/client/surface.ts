@@ -617,6 +617,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setNotice('已返回输入区', 'info')
         return { consume: true }
       }
+      if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
+        const action = transcript.activateFocused()
+        if (action?.kind === 'example') {
+          focusEditor()
+          void sendPrompt(action.text)
+          return { consume: true }
+        }
+      }
       if (matchesBinding('cyclePermission', data)) {
         void actions.cyclePermission()
         return { consume: true }

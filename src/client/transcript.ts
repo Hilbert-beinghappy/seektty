@@ -32,6 +32,10 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
+import {
+  EMPTY_SESSION_EXAMPLES,
+  emptyExampleText,
+} from './empty-examples.ts'
 import { translateUiText, ui } from './locale.ts'
 import {
   findLineMatches,
@@ -98,6 +102,14 @@ type TranscriptRow = ({
   readonly pulse?: 'thinking' | 'marker'
   /** Unix epoch ms used to render an in-flight duration beside this row. */
   readonly liveDurationSince?: number
+  /** Empty-session starter prompt that Enter can submit while browsing. */
+  readonly exampleId?: string
+}
+
+/** Result of Enter on the focused transcript row. */
+export type TranscriptFocusAction = {
+  readonly kind: 'example'
+  readonly text: string
 }
 
 function thinkingRow(): TranscriptRow {
@@ -1068,6 +1080,7 @@ export class Transcript implements Component, Focusable {
   private pulseTimer: ReturnType<typeof setInterval> | undefined
   private lastFullLines: readonly string[] = []
   private search: { query: string; composing: boolean; matchIndex: number } | undefined
+  private exampleCursor = 0
   focused = false
 
   /**
@@ -1183,11 +1196,18 @@ export class Transcript implements Component, Focusable {
       rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0))))
     }
     this.emptyState = rows.length === 0
-    if (this.emptyState) rows.push({
-      format: 'plain',
-      text: `${color.brand('deepseek')}\n${color.muted(ui('探索未至之境', 'Explore beyond the known'))}\n${color.muted(ui('直接描述你想完成的事', 'Describe what you want to accomplish'))}`,
-    })
+    if (this.emptyState) rows.push(...this.emptySessionRows())
     this.replace(rows)
+  }
+
+  /**
+   * Submit the focused empty-session example when the transcript has browse focus.
+   * @returns the prompt to send, or undefined when Enter has no local action.
+   */
+  activateFocused(): TranscriptFocusAction | undefined {
+    if (!this.emptyState || this.snapshot === undefined) return undefined
+    const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
+    return example === undefined ? undefined : { kind: 'example', text: emptyExampleText(example) }
   }
 
   /**
@@ -1306,7 +1326,7 @@ export class Transcript implements Component, Focusable {
       ])
     }
     const maxOffset = Math.max(0, lines.length - rows)
-    this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
+    this.scrollOffset = this.emptyState ? maxOffset : Math.min(this.scrollOffset, maxOffset)
     const end = lines.length - this.scrollOffset
     const start = Math.max(0, end - rows)
     if (this.scrollOffset === 0 && start > 0) {
@@ -1346,6 +1366,18 @@ export class Transcript implements Component, Focusable {
       this.search = { query: '', composing: true, matchIndex: 0 }
       this.requestRender()
       return
+    }
+    if (this.emptyState && this.snapshot !== undefined) {
+      if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
+        const delta = matchesKey(data, Key.up) ? -1 : 1
+        const next = this.exampleCursor + delta
+        if (next >= 0 && next < EMPTY_SESSION_EXAMPLES.length) {
+          this.exampleCursor = next
+          this.replace(this.emptySessionRows())
+          this.requestRender()
+        }
+        return
+      }
     }
     this.turnCursor = undefined
     const rows = Math.max(1, Math.floor(this.viewportRows()))
@@ -1517,6 +1549,26 @@ export class Transcript implements Component, Focusable {
     this.scrollOffset = Math.max(0, this.renderedLineCount - (anchor + rows))
     this.requestRender()
     return true
+  }
+
+  private emptySessionRows(): TranscriptRow[] {
+    this.exampleCursor = Math.max(0, Math.min(this.exampleCursor, EMPTY_SESSION_EXAMPLES.length - 1))
+    return [
+      {
+        format: 'plain',
+        text: `${color.brand('deepseek')}\n${color.muted(ui('探索未至之境', 'Explore beyond the known'))}\n${color.muted(ui('直接描述你想完成的事', 'Describe what you want to accomplish'))}`,
+      },
+      {
+        format: 'plain',
+        text: color.muted(ui('试试这些，Tab 后回车发送：', 'Try one of these; Tab then Enter to send:')),
+        gapBefore: true,
+      },
+      ...EMPTY_SESSION_EXAMPLES.map((example, index) => ({
+        format: 'plain' as const,
+        text: `${index === this.exampleCursor ? color.accent('› ') : '  '}${emptyExampleText(example)}`,
+        exampleId: example.id,
+      })),
+    ]
   }
 
   private replace(rows: readonly TranscriptRow[]): void {
