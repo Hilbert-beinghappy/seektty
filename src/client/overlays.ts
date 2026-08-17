@@ -17,6 +17,7 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import { translateUiText } from './locale.ts'
+import { formatBusyFooter, lastOutputLines } from './busy-status.ts'
 import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
 
 /** One row in a searchable terminal selector. */
@@ -58,6 +59,14 @@ export interface DetailOverlayRequest {
   readonly options?: OverlayOptions
 }
 
+/** Live progress for a long host operation that must keep an overlay visible. */
+export interface ProgressOverlayRequest<T> {
+  readonly title: string
+  readonly detail?: string
+  readonly options?: OverlayOptions
+  work(report: (chunk: string) => void): Promise<T>
+}
+
 /** Shared prompt surface implemented by both standalone and navigated overlays. */
 export interface OverlayPrompts {
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined>
@@ -66,6 +75,7 @@ export interface OverlayPrompts {
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined>
   detail(request: DetailOverlayRequest): Promise<void>
   confirm(title: string, detail: string, confirmLabel?: string): Promise<boolean>
+  progress<T>(request: ProgressOverlayRequest<T>): Promise<T>
 }
 
 /** One logical overlay session whose page stack owns all back navigation. */
@@ -103,6 +113,9 @@ interface NavigationEntry {
   component: DisposableComponent
   readonly dismiss: () => void
   busy: boolean
+  busyStarted?: number
+  busyNotice?: string
+  busyOutput?: string
   active: boolean
 }
 
@@ -486,12 +499,61 @@ class ScrollableDetailOverlay implements Component {
   }
 }
 
+/** Live output while a host operation holds the overlay. */
+class ProgressOverlay implements Component {
+  focused = false
+  private output = ''
+  private notice: string | undefined
+  private readonly started = Date.now()
+  private timer: ReturnType<typeof setInterval> | undefined
+
+  constructor(
+    private readonly request: Pick<ProgressOverlayRequest<unknown>, 'title' | 'detail'>,
+    private readonly requestRender: () => void,
+  ) {
+    this.timer = setInterval(() => this.requestRender(), 250)
+  }
+
+  append(chunk: string): void {
+    this.output = `${this.output}${chunk}`.slice(-8_192)
+    this.requestRender()
+  }
+
+  setNotice(notice: string): void {
+    this.notice = notice
+    this.requestRender()
+  }
+
+  dispose(): void {
+    if (this.timer === undefined) return
+    clearInterval(this.timer)
+    this.timer = undefined
+  }
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    const elapsed = Date.now() - this.started
+    const body = lastOutputLines(this.output, 12)
+    return modalFrame(this.request.title, [
+      ...(this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, width)),
+      color.accent(formatBusyFooter(elapsed, this.notice)),
+      ...wrapTextWithAnsi(escapeTerminalText(body === '' ? translateUiText('等待输出…') : body), frameContentWidth(width))
+        .map(line => color.muted(line)),
+      color.muted(translateUiText('Esc 提示操作进行中 · 完成后自动关闭')),
+    ], width)
+  }
+
+  handleInput(_data: string): void {}
+}
+
 /** A single mounted modal with a logical page stack and one Escape owner. */
 class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult> {
   focused = false
   private readonly stack: NavigationEntry[] = []
   private closed = false
   private pendingBack: NavigationEntry | undefined
+  private busyPulse: ReturnType<typeof setInterval> | undefined
 
   constructor(
     run: (navigation: OverlayNavigation<TResult>) => void | Promise<void>,
@@ -512,12 +574,22 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   invalidate(): void { this.current()?.component.invalidate() }
 
   render(width: number): string[] {
-    const component = this.current()?.component
+    const entry = this.current()
+    const component = entry?.component
     if (component === undefined) return []
     if ('focused' in component) {
       (component as Component & { focused: boolean }).focused = this.focused
     }
-    return component.render(width)
+    const lines = component.render(width)
+    if (entry?.busy === true && !(component instanceof ProgressOverlay)) {
+      const elapsed = Date.now() - (entry.busyStarted ?? Date.now())
+      lines.push(color.accent(formatBusyFooter(elapsed, entry.busyNotice)))
+      const tail = lastOutputLines(entry.busyOutput ?? '', 3)
+      if (tail !== '') {
+        lines.push(...wrapTextWithAnsi(escapeTerminalText(tail), frameContentWidth(width)).map(line => color.muted(line)))
+      }
+    }
+    return lines
   }
 
   handleInput(data: string): void {
@@ -528,8 +600,12 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     const current = this.current()
     if (current === undefined) return
     if (matchesKey(data, Key.escape)) {
-      if (current.busy) this.pendingBack = current
-      else this.back()
+      if (current.busy) {
+        current.busyNotice = translateUiText('操作进行中')
+        if (current.component instanceof ProgressOverlay) current.component.setNotice(translateUiText('操作进行中'))
+        this.requestRender()
+        this.pendingBack = current
+      } else this.back()
       return
     }
     if (current.busy) return
@@ -605,6 +681,38 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     return selected?.id === 'confirm'
   }
 
+  async progress<T>(request: ProgressOverlayRequest<T>): Promise<T> {
+    if (this.closed) throw new Error('overlay closed')
+    const overlay = new ProgressOverlay(request, () => this.requestRender())
+    return new Promise<T>((resolve, reject) => {
+      const entry: NavigationEntry = {
+        component: overlay,
+        dismiss: () => undefined,
+        busy: true,
+        busyStarted: Date.now(),
+        active: true,
+      }
+      this.stack.push(entry)
+      this.startBusyPulse()
+      this.requestRender()
+      void request.work((chunk) => {
+        overlay.append(chunk)
+        entry.busyOutput = `${entry.busyOutput ?? ''}${chunk}`
+      }).then((value) => {
+        overlay.dispose()
+        if (this.pendingBack === entry) this.pendingBack = undefined
+        this.remove(entry)
+        this.stopBusyPulse()
+        resolve(value)
+      }, (error: unknown) => {
+        overlay.dispose()
+        this.remove(entry)
+        this.stopBusyPulse()
+        reject(error)
+      })
+    })
+  }
+
   back(): void {
     const entry = this.current()
     if (entry === undefined) return
@@ -616,6 +724,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     if (this.closed) return
     this.closed = true
     this.pendingBack = undefined
+    this.stopBusyPulse(true)
     this.dismissAll()
     this.settle(value)
   }
@@ -624,7 +733,20 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     if (this.closed) return
     this.closed = true
     this.pendingBack = undefined
+    this.stopBusyPulse(true)
     this.dismissAll()
+  }
+
+  private startBusyPulse(): void {
+    if (this.busyPulse !== undefined) return
+    this.busyPulse = setInterval(() => this.requestRender(), 250)
+  }
+
+  private stopBusyPulse(force = false): void {
+    if (!force && this.stack.some(entry => entry.busy)) return
+    if (this.busyPulse === undefined) return
+    clearInterval(this.busyPulse)
+    this.busyPulse = undefined
   }
 
   private prompt<T>(create: (submit: (value: T) => void) => DisposableComponent): Promise<T | undefined> {
@@ -648,10 +770,13 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   private dispatch(entry: NavigationEntry, action: () => void | Promise<void>): void {
     if (this.closed || this.current() !== entry || entry.busy) return
     entry.busy = true
+    entry.busyStarted = Date.now()
+    this.startBusyPulse()
     void Promise.resolve().then(action).catch(error => {
       this.fail(error)
     }).finally(() => {
       if (entry.active) entry.busy = false
+      this.stopBusyPulse()
       if (this.pendingBack === entry) {
         this.pendingBack = undefined
         this.back()
@@ -681,16 +806,17 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     this.requestRender()
   }
 
+  private disposeComponent(component: DisposableComponent): void {
+    try { component.dispose?.() } catch { /* page cleanup must not mask the navigation result */ }
+  }
+
   private fail(error: unknown): void {
     if (this.closed) return
     this.closed = true
     this.pendingBack = undefined
+    this.stopBusyPulse(true)
     this.dismissAll()
     this.reject(error)
-  }
-
-  private disposeComponent(component: DisposableComponent): void {
-    try { component.dispose?.() } catch { /* page cleanup must not mask the navigation result */ }
   }
 }
 
@@ -806,6 +932,13 @@ export class OverlayQueue implements OverlayPrompts {
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'
+  }
+
+  progress<T>(request: ProgressOverlayRequest<T>): Promise<T> {
+    return this.navigate<T>(async (navigation) => {
+      const value = await navigation.progress(request)
+      navigation.finish(value)
+    }, request.options ?? { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 }) as Promise<T>
   }
 
   /** Settle every active/queued request before terminal teardown. */

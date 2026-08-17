@@ -22,6 +22,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
+import { redactInstallerOutput } from './installer-output.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
@@ -130,18 +131,6 @@ function settingsDocument(descriptor: SettingsDescriptor): TuiSettingsDocument {
     ...(descriptor.user === undefined ? {} : { user: descriptor.user }),
     secrets: descriptor.secrets ?? [],
   }
-}
-
-function redactInstallerOutput(value: string): string {
-  let redacted = value
-    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1***@')
-    .replace(/(https?:\/\/)[^\s/@]+@/giu, '$1***@')
-    .replace(/((?:_authToken|authorization|password|token)\s*[=:]\s*)[^\s]+/giu, '$1***')
-  for (const [key, secret] of Object.entries(process.env)) {
-    if (!/(?:TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL)/iu.test(key) || secret === undefined || secret.length < 4) continue
-    redacted = redacted.replaceAll(secret, '***')
-  }
-  return redacted
 }
 
 function sessionExportFilename(sessionId: string): string {
@@ -313,13 +302,12 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
         const output = options.onOutput
         const result = await manager.run(args, {
           ...options.signal === undefined ? {} : { signal: options.signal },
+          ...(output === undefined ? {} : {
+            onOutput: (stream, chunk) => { output(stream, redactInstallerOutput(chunk)) },
+          }),
         })
         const stdout = redactInstallerOutput(result.stdout)
         const stderr = redactInstallerOutput(result.stderr)
-        if (output !== undefined) {
-          if (stdout !== '') output('stdout', stdout)
-          if (stderr !== '') output('stderr', stderr)
-        }
         return {
           exitCode: result.exitCode,
           stdout,

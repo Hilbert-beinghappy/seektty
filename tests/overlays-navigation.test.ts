@@ -101,4 +101,30 @@ describe('overlay navigation', () => {
     await expect(session).resolves.toBeUndefined()
     expect(harness.hide).toHaveBeenCalledOnce()
   })
+
+  it('keeps a progress overlay open, streams output, and tells Esc that work is still running', async () => {
+    const harness = overlayHarness()
+    let report: ((chunk: string) => void) | undefined
+    let finish: ((value: string) => void) | undefined
+    const session = harness.overlays.progress({
+      title: '安装插件',
+      work: (next) => new Promise<string>((resolve) => {
+        report = next
+        finish = resolve
+      }),
+    })
+
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('安装插件')
+    })
+    report?.('Downloading seektty\n')
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('Downloading seektty')
+    })
+    harness.component().handleInput(ESCAPE)
+    expect(plain(harness.component().render(80))).toContain('操作进行中')
+    finish?.('ok')
+    await expect(session).resolves.toBe('ok')
+    expect(harness.hide).toHaveBeenCalledOnce()
+  })
 })

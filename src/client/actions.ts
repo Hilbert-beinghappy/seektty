@@ -2209,7 +2209,13 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       '理解风险并安装',
     )
     if (!confirmed) return
-    const result = await this.capabilities.managementBridge().plugins.run(['add', '--save-exact', candidate.spec])
+    const result = await this.host.overlays.progress({
+      title: `安装 ${candidate.name}`,
+      work: report => this.capabilities.managementBridge().plugins.run(
+        ['add', '--save-exact', candidate.spec],
+        { onOutput: (_stream, chunk) => { report(chunk) } },
+      ),
+    })
     await this.pluginOperation(`安装 ${candidate.name}`, result)
   }
 
@@ -2236,7 +2242,13 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       '移除',
     )
     if (!confirmed) return
-    await this.pluginOperation(`移除 ${target}`, await this.capabilities.managementBridge().plugins.run(['remove', target]))
+    await this.pluginOperation(`移除 ${target}`, await this.host.overlays.progress({
+      title: `移除 ${target}`,
+      work: report => this.capabilities.managementBridge().plugins.run(
+        ['remove', target],
+        { onOutput: (_stream, chunk) => { report(chunk) } },
+      ),
+    }))
   }
 
   private async pluginUpdate(name: string): Promise<void> {
@@ -2262,7 +2274,13 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       '更新',
     )
     if (!confirmed) return
-    await this.pluginOperation(target === '' ? '更新全部插件' : `更新 ${target}`, await this.capabilities.managementBridge().plugins.run(args))
+    await this.pluginOperation(target === '' ? '更新全部插件' : `更新 ${target}`, await this.host.overlays.progress({
+      title: target === '' ? '更新全部插件' : `更新 ${target}`,
+      work: report => this.capabilities.managementBridge().plugins.run(
+        args,
+        { onOutput: (_stream, chunk) => { report(chunk) } },
+      ),
+    }))
   }
 
   private async pluginOperation(label: string, result: TuiPluginOperation): Promise<void> {
