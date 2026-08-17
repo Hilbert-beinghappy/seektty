@@ -123,6 +123,7 @@ export interface TuiBehaviorSettings {
   readonly composerHistoryLimit: number
   readonly statusElapsed: boolean
   readonly clipboardFallback: TuiClipboardFallback
+  readonly toolOutputLineLimit: number
 }
 
 /** First-run interaction defaults when no user override has been stored. */
@@ -134,10 +135,14 @@ export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
   composerHistoryLimit: 200,
   statusElapsed: true,
   clipboardFallback: 'auto',
+  toolOutputLineLimit: 200,
 })
 
 /** Upper bound for persisted composer history entries. */
 export const MAX_COMPOSER_HISTORY = 10_000
+
+/** Upper bound for one expanded tool-output block; 0 disables folding. */
+export const MAX_TOOL_OUTPUT_LINE_LIMIT = 10_000
 
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {

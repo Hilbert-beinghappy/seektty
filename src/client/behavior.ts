@@ -3,6 +3,7 @@
 import {
   DEFAULT_TUI_BEHAVIOR,
   MAX_COMPOSER_HISTORY,
+  MAX_TOOL_OUTPUT_LINE_LIMIT,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   type TuiBehaviorSettings,
   type TuiClipboardFallback,
@@ -32,6 +33,13 @@ function historyLimitOf(value: unknown): number {
     return DEFAULT_TUI_BEHAVIOR.composerHistoryLimit
   }
   return Math.min(MAX_COMPOSER_HISTORY, Math.floor(value))
+}
+
+function toolOutputLineLimitOf(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit
+  }
+  return Math.min(MAX_TOOL_OUTPUT_LINE_LIMIT, Math.floor(value))
 }
 
 function clipboardFallbackOf(value: unknown): TuiClipboardFallback {
@@ -77,6 +85,7 @@ export function normalizeBehavior(value: unknown): TuiBehaviorSettings {
     composerHistoryLimit: historyLimitOf(record.composerHistoryLimit),
     statusElapsed: booleanOf(record.statusElapsed, DEFAULT_TUI_BEHAVIOR.statusElapsed),
     clipboardFallback: clipboardFallbackOf(record.clipboardFallback),
+    toolOutputLineLimit: toolOutputLineLimitOf(record.toolOutputLineLimit),
   }
 }
 

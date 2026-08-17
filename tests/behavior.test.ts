@@ -41,6 +41,7 @@ describe('seektty-behavior settings', () => {
       composerHistoryLimit: 0,
       statusElapsed: false,
       clipboardFallback: 'osc52',
+      toolOutputLineLimit: 200,
     })
     expect(normalizeBehavior({
       toolCards: 'mystery',

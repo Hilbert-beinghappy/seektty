@@ -167,7 +167,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
       },
     )
-    transcript.applyPresentationDefaults(initialBehavior.toolCards, initialBehavior.showReasoning)
+    transcript.applyPresentationDefaults(
+      initialBehavior.toolCards,
+      initialBehavior.showReasoning,
+      initialBehavior.toolOutputLineLimit,
+    )
     const syntax = await SyntaxHighlighter.create(initialTheme, () => {
       transcript.refreshPresentation()
       tui.invalidate()

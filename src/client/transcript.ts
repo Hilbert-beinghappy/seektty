@@ -52,6 +52,8 @@ import {
   terminalColorLevel,
 } from './theme.ts'
 import { syntaxLanguageForPath } from './syntax-highlighter.ts'
+import { foldLineBlock } from './tool-output-limit.ts'
+import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 
 const PULSE_FRAME_MS = 160
 
@@ -61,6 +63,7 @@ export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
 interface TranscriptPreferences {
   readonly tools: ToolVisibility
   readonly reasoning: boolean
+  readonly toolOutputLineLimit: number
 }
 
 type TranscriptImageAttachment = Extract<AssistantBlock, { kind: 'image' }>['attachment']
@@ -648,6 +651,11 @@ function runningViewDetails(node: RunningToolCall): ToolDetail[] {
   return [toolInvocationDetail(node.name, node.argsRaw)]
 }
 
+function foldDetail(detail: ToolDetail, limit: number): ToolDetail {
+  const folded = foldLineBlock(detail.text, limit)
+  return folded.omitted === 0 ? detail : { ...detail, text: folded.text }
+}
+
 function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
   if (detail.kind === 'plain') return { format: 'plain', text: detail.text }
   if (detail.kind === 'markdown') return { format: 'markdown', text: detail.text }
@@ -671,7 +679,7 @@ function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences,
       : settledInvocationDetails(block)
     return [
       { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}` },
-      ...details.map(detail => detailRow(detail, depth)),
+      ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
   }
@@ -683,7 +691,7 @@ function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences,
       pulse: 'marker',
       liveDurationSince: block.time,
     },
-    ...details.map(detail => detailRow(detail, depth)),
+    ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
     ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
   ]
 }
@@ -1069,6 +1077,7 @@ export class Transcript implements Component, Focusable {
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
+  private toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit
   private emptyState = true
   private hasMore = false
   private loadingOlder = false
@@ -1119,9 +1128,14 @@ export class Transcript implements Component, Focusable {
    * @param tools - default tool-card shape.
    * @param reasoning - whether reasoning blocks are visible at session open.
    */
-  applyPresentationDefaults(tools: ToolVisibility, reasoning: boolean): void {
+  applyPresentationDefaults(
+    tools: ToolVisibility,
+    reasoning: boolean,
+    toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit,
+  ): void {
     this.toolVisibility = tools
     this.reasoningVisible = reasoning
+    this.toolOutputLineLimit = toolOutputLineLimit
   }
 
   /** Follow new transcript output after the user submits from a historical viewport. */
@@ -1177,6 +1191,7 @@ export class Transcript implements Component, Focusable {
     const preferences: TranscriptPreferences = {
       tools: this.toolVisibility,
       reasoning: this.reasoningVisible,
+      toolOutputLineLimit: this.toolOutputLineLimit,
     }
     const visibleNodes = snapshot.chat.order.flatMap((key) => {
       const node = snapshot.chat.nodes.get(key)

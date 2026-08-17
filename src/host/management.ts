@@ -19,6 +19,7 @@ import {
   MAX_COMPOSER_HISTORY,
   MAX_CUSTOM_THEMES,
   MAX_TEXTMATE_RULES,
+  MAX_TOOL_OUTPUT_LINE_LIMIT,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
@@ -129,6 +130,9 @@ const BehaviorSettingsSchema = z.object({
   clipboardFallback: z.union(['auto', 'osc52', 'off'])
     .default(DEFAULT_TUI_BEHAVIOR.clipboardFallback)
     .description('OSC 52 失败后的剪贴板回退命令；auto 按平台探测。'),
+  toolOutputLineLimit: z.natural().max(MAX_TOOL_OUTPUT_LINE_LIMIT)
+    .default(DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit)
+    .description('展开态工具输出单块行数上限；0 表示不折叠。'),
 })
 
 interface StoredCatalogSource {
