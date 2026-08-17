@@ -371,13 +371,33 @@ export class PluginMarketplace {
     const cacheKey = `search:${text}:${enabled.map(source => source.id).join(',')}`
     const cached = this.searchCache.get(cacheKey)
     if (cached !== undefined) return cached
-    const rows = await Promise.all(enabled.map((source) => {
-      if (source.kind === 'npm') return this.searchNpm(text, source, signal)
-      if (source.kind === 'catalog') return this.searchCatalog(text, source, signal)
-      return this.searchProvider(text, source, sources, signal)
+    const settled = await Promise.allSettled(enabled.map(async (source) => {
+      if (source.kind === 'npm') return await this.searchNpm(text, source, signal)
+      if (source.kind === 'catalog') return await this.searchCatalog(text, source, signal)
+      return await this.searchProvider(text, source, sources, signal)
     }))
     const deduped = new Map<string, TuiMarketplaceCandidate>()
-    for (const candidate of rows.flat()) deduped.set(`${candidate.sourceId}:${candidate.spec}`, candidate)
+    for (const [index, result] of settled.entries()) {
+      const source = enabled[index]
+      if (source === undefined) continue
+      if (result.status === 'fulfilled') {
+        for (const candidate of result.value) deduped.set(`${candidate.sourceId}:${candidate.spec}`, candidate)
+        continue
+      }
+      const message = messageOf(result.reason)
+      deduped.set(`${source.id}:source-error`, {
+        id: `${source.id}:source-error`,
+        name: source.label,
+        sourceId: source.id,
+        source: sourceType(source.url),
+        spec: source.url,
+        bundle: false,
+        patchValid: false,
+        scripts: [],
+        immutable: false,
+        diagnostics: [`来源失败：${message}`],
+      })
+    }
     const result = [...deduped.values()]
     this.searchCache.set(cacheKey, result)
     return result

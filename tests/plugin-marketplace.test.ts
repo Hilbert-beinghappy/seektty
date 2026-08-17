@@ -167,6 +167,30 @@ describe('plugin marketplace search (task 5.3)', () => {
         })
       })) as typeof fetch,
     })
-    await expect(marketplace.search('demo', [source])).rejects.toThrow()
+    const rows = await marketplace.search('demo', [source])
+    expect(rows[0]?.diagnostics.join(' ')).toMatch(/aborted|timeout/iu)
+  })
+
+  it('keeps successful sources when another catalog source fails', async () => {
+    const catalog: TuiMarketplaceSource = {
+      id: 'bad-catalog',
+      kind: 'catalog',
+      label: 'Broken catalog',
+      url: 'https://example.invalid/catalog.json',
+      enabled: true,
+      builtIn: false,
+    }
+    const marketplace = new PluginMarketplace({
+      cwd: root,
+      resolveCredential: () => Promise.resolve(undefined),
+      fetch: (async (input) => {
+        const url = String(input)
+        if (url.includes('/-/v1/search')) return jsonResponse(searchBody())
+        throw new Error('catalog down')
+      }) as typeof fetch,
+    })
+    const rows = await marketplace.search('demo', [source, catalog])
+    expect(rows.some(row => row.name === 'demo-plugin')).toBe(true)
+    expect(rows.some(row => row.sourceId === 'bad-catalog' && row.diagnostics.some(item => item.includes('catalog down')))).toBe(true)
   })
 })
