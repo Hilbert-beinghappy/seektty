@@ -9,6 +9,7 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection'
 import type { TuiManagementBridge, TuiSurfaceOutcome } from '@deepseek-ai/dsh-tui-protocol'
 import { startTui } from '../client/index.ts'
 import { translateUiText } from '../client/locale.ts'
+import { isActiveFiber } from './fiber-state.ts'
 import { createTuiManagementBridge } from './management.ts'
 import { TUI_STARTUP_SERVICE, type TuiStartupValues } from './startup.ts'
 
@@ -34,8 +35,7 @@ export interface TuiSurfaceHandle {
 }
 
 function isActive(ctx: Context): boolean {
-  // FiberState is a declaration-only const enum in Cordis 4.0.1; ACTIVE is 2.
-  return ctx.fiber.state === 2
+  return isActiveFiber(ctx.fiber.state, chunk => internals.stderr.write(chunk))
 }
 
 /** Replaceable process seams used by lifecycle tests. */
