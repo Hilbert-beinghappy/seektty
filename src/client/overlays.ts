@@ -2,6 +2,7 @@
 
 import {
   CURSOR_MARKER,
+  Editor,
   fuzzyFilter,
   Input,
   Key,
@@ -62,6 +63,7 @@ export interface DetailOverlayRequest {
 export interface OverlayPrompts {
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined>
   input(request: InputOverlayRequest): Promise<string | undefined>
+  multilineInput(request: InputOverlayRequest): Promise<string | undefined>
   secretInput(request: InputOverlayRequest): Promise<string | undefined>
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined>
   detail(request: DetailOverlayRequest): Promise<void>
@@ -304,6 +306,49 @@ class TextInputOverlay implements Component {
   }
 }
 
+/** Multiline editor overlay: Enter inserts a newline, Ctrl+Enter submits. */
+class MultilineEditorOverlay implements Component {
+  focused = false
+  private readonly editor: Editor
+
+  constructor(
+    tui: TUI,
+    private readonly request: InputOverlayRequest,
+    private readonly submit: (value: string) => void,
+  ) {
+    this.editor = new Editor(tui, editorTheme, { paddingX: 0, autocompleteMaxVisible: 3 })
+    this.editor.disableSubmit = true
+    this.editor.setText(escapeTerminalText(request.initialValue ?? ''))
+  }
+
+  invalidate(): void { this.editor.invalidate() }
+
+  render(width: number): string[] {
+    const safeWidth = frameContentWidth(width)
+    this.editor.focused = this.focused
+    const body = this.editor.render(Math.max(8, safeWidth)).slice(0, 12)
+    return modalFrame(this.request.title, [
+      ...(this.request.detail === undefined
+        ? []
+        : wrappedDetail(this.request.detail, safeWidth)),
+      ...body,
+      color.muted(translateUiText('Enter 换行 · Ctrl+Enter 提交 · Esc 返回/关闭')),
+    ], width)
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.ctrl(Key.enter)) || data === '\n') {
+      this.submit(escapeTerminalText(this.editor.getExpandedText()))
+      return
+    }
+    if (matchesKey(data, Key.enter) || data === '\r') {
+      this.editor.insertTextAtCursor('\n')
+      return
+    }
+    this.editor.handleInput(data)
+  }
+}
+
 /** Write-only secret input: the underlying value is never returned by render(). */
 class SecretInputOverlay implements Component {
   focused = false
@@ -494,6 +539,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   private pendingBack: NavigationEntry | undefined
 
   constructor(
+    private readonly tui: TUI,
     run: (navigation: OverlayNavigation<TResult>) => void | Promise<void>,
     private readonly settle: (value: TResult | undefined) => void,
     private readonly reject: (error: unknown) => void,
@@ -576,6 +622,10 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   input(request: InputOverlayRequest): Promise<string | undefined> {
     return this.prompt(submit => new TextInputOverlay(request, submit))
+  }
+
+  multilineInput(request: InputOverlayRequest): Promise<string | undefined> {
+    return this.prompt(submit => new MultilineEditorOverlay(this.tui, request, submit))
   }
 
   secretInput(request: InputOverlayRequest): Promise<string | undefined> {
@@ -720,7 +770,7 @@ export class OverlayQueue implements OverlayPrompts {
     options?: OverlayOptions,
   ): Promise<TResult | undefined> {
     return this.enqueue(
-      (settle, reject) => new NavigationOverlay(run, settle, reject, () => {
+      (settle, reject) => new NavigationOverlay(this.tui, run, settle, reject, () => {
         this.tui.requestRender()
       }),
       options,
@@ -747,6 +797,18 @@ export class OverlayQueue implements OverlayPrompts {
   input(request: InputOverlayRequest): Promise<string | undefined> {
     return this.navigate<string>(async (navigation) => {
       const value = await navigation.input(request)
+      navigation.finish(value)
+    }, request.options)
+  }
+
+  /**
+   * Open a multiline editor: Enter inserts a newline, Ctrl+Enter submits.
+   * @param request - title, optional detail, and initial value.
+   * @returns submitted text, or undefined after cancellation.
+   */
+  multilineInput(request: InputOverlayRequest): Promise<string | undefined> {
+    return this.navigate<string>(async (navigation) => {
+      const value = await navigation.multilineInput(request)
       navigation.finish(value)
     }, request.options)
   }

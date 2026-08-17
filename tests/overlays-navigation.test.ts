@@ -23,6 +23,7 @@ function overlayHarness(): {
       return { hide } as unknown as OverlayHandle
     }),
     requestRender: vi.fn(),
+    terminal: { rows: 24, cols: 80 },
   } as unknown as TUI
   return {
     overlays: new OverlayQueue(tui),
@@ -124,5 +125,21 @@ describe('overlay navigation', () => {
     expect(harness.hide).not.toHaveBeenCalled()
     harness.component().handleInput(ESCAPE)
     await expect(session).resolves.toBeUndefined()
+  })
+
+  it('submits multiline overlay text with Ctrl+Enter and keeps Enter as a newline', async () => {
+    const harness = overlayHarness()
+    const submitted = harness.overlays.multilineInput({
+      title: 'edit queued',
+      initialValue: 'hello',
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('edit queued')
+    })
+    harness.component().handleInput(ENTER)
+    harness.component().handleInput('x')
+    expect(plain(harness.component().render(80))).toContain('Ctrl+Enter')
+    harness.component().handleInput('\n')
+    await expect(submitted).resolves.toBe('hello\nx')
   })
 })

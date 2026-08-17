@@ -1642,7 +1642,7 @@ export class TuiActions {
     if (action.id === 'steer') await this.capabilities.updateQueue(row.id, { kind: 'steer' })
     if (action.id === 'remove') await this.capabilities.updateQueue(row.id, { kind: 'remove' })
     if (action.id === 'edit' && row.text !== null) {
-      const text = await nav.input({ title: '编辑排队消息', initialValue: row.text })
+      const text = await nav.multilineInput({ title: '编辑排队消息', initialValue: row.text })
       if (text !== undefined) await this.capabilities.updateQueue(row.id, { kind: 'edit', content: [{ type: 'text', text }] })
     }
     if (action.id === 'up' || action.id === 'down') {
@@ -3324,7 +3324,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
         return
       }
       if (picked.id === '__custom__') {
-        const custom = await this.host.overlays.input({
+        const custom = await this.host.overlays.multilineInput({
           title: question.question,
           ...(question.detail === undefined ? {} : { detail: question.detail }),
           options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
