@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { setUiLocale } from '../src/client/locale.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from '../src/client/relative-time.ts'
+
+afterEach(() => { setUiLocale('zh') })
 
 describe('session relative time', () => {
   it('formats compact relative clocks and sorts by updatedAt descending', () => {
