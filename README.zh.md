@@ -39,7 +39,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 | 能力 | 当前可用操作 |
 | --- | --- |
 | 对话与运行 | 流式回复、Markdown/GFM、不显示围栏的主题语法高亮代码色块、链接、表格、推理显示切换、工具卡片折叠/展开/隐藏、模型重试、上下文压缩、最大输出与错误状态、Ctrl+C 停止当前轮次 |
-| 会话 | 新建、恢复、列表、全文搜索、重命名、Fork、归档、复制最后一条回复、导出当前会话或连同子 Agent 会话及附件一起导出 ZIP |
+| 会话 | 新建、恢复、列表、全文搜索、重命名、Fork、归档、复制最后一条回复、导出 ZIP，或 `/export md` 导出 Markdown |
 | 工作区 | 从当前目录启动，添加、选择、重命名、移除注册、调整工作区顺序和工作区内会话顺序；移除注册不会删除目录、文件或会话日志 |
 | Agent 模式 | 支持 Standard、Code/PTC、Minimal、Cordis/Create 四种基线模式，并动态显示插件注册的新 Agent Preset；活跃会话切换模式时在同一工作区创建新会话 |
 | 模型与 Provider | 动态读取 Provider、模型和模型支持的推理强度，显示当前实际路由，切换当前会话模型，并报告目录、凭证和路由错误 |
@@ -95,7 +95,7 @@ dsh --profile tui
 
 | 分类 | 命令 |
 | --- | --- |
-| 会话 | `/new`、`/resume`、`/sessions`、`/rename`、`/fork`、`/archive`、`/export`、`/copy` |
+| 会话 | `/new`、`/resume`、`/sessions`、`/rename`、`/fork`、`/archive`、`/export`、`/export md`、`/copy` |
 | 工作环境 | `/workspace`、`/profile` |
 | Agent | `/mode`、`/model`、`/permission`、`/plan`、`/goal`、`/compact` |
 | 运行交互 | `/queue`、`/steer`、`/attach`、`/attachments`、`/pending` |

@@ -39,7 +39,7 @@ The current release covers these capabilities:
 | Area | Available operations |
 | --- | --- |
 | Conversation and runs | Streaming responses, Markdown/GFM, fence-free theme-aware syntax-highlighted code blocks, links, tables, reasoning visibility, collapsed/expanded/hidden tool cards, model retries, compaction, output-limit and error states, and Ctrl+C cancellation |
-| Sessions | Create, resume, list, full-text search, rename, fork, archive, copy the last answer, and export the current session or its complete subagent tree and attachments as ZIP |
+| Sessions | Create, resume, list, full-text search, rename, fork, archive, copy the last answer, export ZIP, or `/export md` Markdown |
 | Workspaces | Start from the current directory; add, select, rename, unregister, reorder, and reorder sessions within a workspace; unregistering never deletes files or session logs |
 | Agent modes | Standard, Code/PTC, Minimal, and Cordis/Create baseline modes plus dynamically registered Agent Presets; switching an active conversation creates a new session in the same workspace |
 | Models and Providers | Dynamic Provider, model, and supported reasoning-effort discovery; current route display; per-session switching; catalog, credential, and routing diagnostics |
@@ -95,7 +95,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 | Category | Commands |
 | --- | --- |
-| Sessions | `/new`, `/resume`, `/sessions`, `/rename`, `/fork`, `/archive`, `/export`, `/copy` |
+| Sessions | `/new`, `/resume`, `/sessions`, `/rename`, `/fork`, `/archive`, `/export`, `/export md`, `/copy` |
 | Work environment | `/workspace`, `/profile` |
 | Agent | `/mode`, `/model`, `/permission`, `/plan`, `/goal`, `/compact` |
 | Runtime interaction | `/queue`, `/steer`, `/attach`, `/attachments`, `/pending` |

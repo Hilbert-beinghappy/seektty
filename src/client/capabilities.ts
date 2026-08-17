@@ -41,6 +41,7 @@ import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
 import { copyTargets } from './copy-content.ts'
+import { conversationMarkdown } from './conversation-markdown.ts'
 import { ui } from './locale.ts'
 
 /** A command shown by the terminal's merged slash directory. */
@@ -215,7 +216,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'rename', description: '重命名当前会话', argumentHint: '<标题>', source: 'TUI', behavior: 'local' },
   { name: 'fork', description: '从当前会话创建分支', source: 'TUI', behavior: 'local' },
   { name: 'archive', description: '归档当前会话', source: 'TUI', behavior: 'local' },
-  { name: 'export', description: '导出当前会话', argumentHint: '[路径]', source: 'TUI', behavior: 'local' },
+  { name: 'export', description: '导出当前会话', argumentHint: '[md] [路径]', source: 'TUI', behavior: 'local' },
   { name: 'copy', description: '复制最后一条回复', argumentHint: '[pick|code]', source: 'TUI', behavior: 'local' },
   { name: 'workspace', description: '管理工作区', argumentHint: '[子命令|路径]', source: 'TUI', behavior: 'local' },
   { name: 'profile', description: '管理 Profile', argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
@@ -339,6 +340,27 @@ async function saveExport(path: string, stream: ReadableStream<Uint8Array>): Pro
     await file.close().catch(() => undefined)
     if (!complete) await unlink(path).catch(() => undefined)
   }
+}
+
+async function saveTextExport(path: string, text: string): Promise<number> {
+  await mkdir(dirname(path), { recursive: true })
+  const file = await open(path, 'wx')
+  let complete = false
+  try {
+    const bytes = Buffer.byteLength(text, 'utf8')
+    await file.write(Buffer.from(text, 'utf8'))
+    await file.sync()
+    complete = true
+    return bytes
+  } finally {
+    await file.close().catch(() => undefined)
+    if (!complete) await unlink(path).catch(() => undefined)
+  }
+}
+
+function markdownExportName(title: string): string {
+  const slug = title.replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/gu, '').slice(0, 80)
+  return `${slug === '' ? 'session' : slug}.md`
 }
 
 function isPermissionSelect(value: unknown): value is PermissionSelectValue {
@@ -1364,6 +1386,22 @@ export class HarnessTuiCapabilities {
     const path = resolve(active.workspacePath, requestedPath ?? payload.suggestedFilename)
     const bytes = await saveExport(path, payload.stream)
     return { path, bytes, mediaType: payload.mediaType, includeDescendants }
+  }
+
+  /**
+   * Write a client-rendered Markdown transcript beside the workspace.
+   * @param requestedPath - absolute or Workspace-relative destination.
+   * @returns saved path, byte count, and Markdown media type.
+   */
+  async exportMarkdown(requestedPath?: string): Promise<TuiExportResult> {
+    const active = this.requireActive()
+    const markdown = conversationMarkdown(
+      active.summary.displayTitle,
+      active.session.getSnapshot().nodes,
+    )
+    const path = resolve(active.workspacePath, requestedPath ?? markdownExportName(active.summary.displayTitle))
+    const bytes = await saveTextExport(path, markdown)
+    return { path, bytes, mediaType: 'text/markdown', includeDescendants: false }
   }
 
   /**

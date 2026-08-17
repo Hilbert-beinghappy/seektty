@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { lastFencedCode } from './copy-content.ts'
+import { formatByteSize } from './byte-size.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
@@ -558,6 +559,11 @@ export class TuiActions {
   }
 
   private async exportSession(args: string): Promise<void> {
+    const parsed = commandParts(args)
+    if (parsed.command === 'md') {
+      await this.exportMarkdown(parsed.rest)
+      return
+    }
     const scope = await this.host.overlays.select({
       title: '导出会话',
       detail: '将原始会话记录和附件保存为 ZIP 文件',
@@ -580,7 +586,26 @@ export class TuiActions {
       requested.trim() === '' ? undefined : requested.trim(),
       scope.id === 'descendants',
     )
-    this.host.notice(`已保存会话 ZIP（${String(result.bytes)} 字节）到 ${result.path}`, 'success')
+    this.host.notice(ui(
+      `已保存会话 ZIP（${formatByteSize(result.bytes)}）到 ${result.path}`,
+      `Saved session ZIP (${formatByteSize(result.bytes)}) to ${result.path}`,
+    ), 'success')
+  }
+
+  private async exportMarkdown(requested: string): Promise<void> {
+    const path = requested === ''
+      ? await this.host.overlays.input({
+        title: ui('保存会话 Markdown', 'Save session Markdown'),
+        detail: ui('留空则保存到工作区根目录；已有文件不会被覆盖', 'Leave empty to save at the workspace root; existing files are not overwritten'),
+        placeholder: ui('可选：相对工作区或绝对路径', 'Optional: workspace-relative or absolute path'),
+      })
+      : requested
+    if (path === undefined) return
+    const result = await this.capabilities.exportMarkdown(path.trim() === '' ? undefined : path.trim())
+    this.host.notice(ui(
+      `已保存会话 Markdown（${formatByteSize(result.bytes)}）到 ${result.path}`,
+      `Saved session Markdown (${formatByteSize(result.bytes)}) to ${result.path}`,
+    ), 'success')
   }
 
   private async copy(args: string): Promise<void> {
