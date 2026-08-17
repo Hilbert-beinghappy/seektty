@@ -72,6 +72,7 @@ export interface OverlayPrompts {
 
 /** One logical overlay session whose page stack owns all back navigation. */
 export interface OverlayNavigation<TResult = void> extends OverlayPrompts {
+  readonly signal: AbortSignal
   selectPage(
     request: SelectOverlayRequest,
     onSelect: (choice: OverlayChoice) => void | Promise<void>,
@@ -534,9 +535,11 @@ class ScrollableDetailOverlay implements Component {
 /** A single mounted modal with a logical page stack and one Escape owner. */
 class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult> {
   focused = false
+  readonly signal: AbortSignal
   private readonly stack: NavigationEntry[] = []
   private closed = false
   private pendingBack: NavigationEntry | undefined
+  private readonly controller = new AbortController()
 
   constructor(
     private readonly tui: TUI,
@@ -545,10 +548,14 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     private readonly reject: (error: unknown) => void,
     private readonly requestRender: () => void,
   ) {
+    this.signal = this.controller.signal
     try {
       void Promise.resolve(run(this)).then(
         () => { this.finish() },
-        error => { this.fail(error) },
+        error => {
+          if (this.signal.aborted) this.finish()
+          else this.fail(error)
+        },
       )
     } catch (error) {
       queueMicrotask(() => { this.fail(error) })
@@ -574,6 +581,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     const current = this.current()
     if (current === undefined) return
     if (matchesKey(data, Key.escape)) {
+      this.abort()
       if (current.busy) this.pendingBack = current
       else this.back()
       return
@@ -664,6 +672,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   finish(value?: TResult): void {
     if (this.closed) return
+    this.abort()
     this.closed = true
     this.pendingBack = undefined
     this.dismissAll()
@@ -672,6 +681,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   dispose(): void {
     if (this.closed) return
+    this.abort()
     this.closed = true
     this.pendingBack = undefined
     this.dismissAll()
@@ -699,6 +709,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     if (this.closed || this.current() !== entry || entry.busy) return
     entry.busy = true
     void Promise.resolve().then(action).catch(error => {
+      if (this.signal.aborted) return
       this.fail(error)
     }).finally(() => {
       if (entry.active) entry.busy = false
@@ -733,10 +744,19 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   private fail(error: unknown): void {
     if (this.closed) return
+    if (this.signal.aborted) {
+      this.finish()
+      return
+    }
+    this.abort()
     this.closed = true
     this.pendingBack = undefined
     this.dismissAll()
     this.reject(error)
+  }
+
+  private abort(): void {
+    if (!this.controller.signal.aborted) this.controller.abort()
   }
 
   private disposeComponent(component: DisposableComponent): void {
@@ -787,6 +807,34 @@ export class OverlayQueue implements OverlayPrompts {
       const selected = await navigation.select(request)
       navigation.finish(selected)
     }, request.options)
+  }
+
+  /**
+   * Keep a modal open while work runs, aborting it on Escape.
+   * @param title - overlay title shown while busy.
+   * @param work - body that observes the session signal.
+   * @returns the work result, or undefined after cancel.
+   */
+  runBusy<T>(title: string, work: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> {
+    return this.navigate(async (navigation) => {
+      const page = navigation.selectPage({
+        title,
+        detail: '按 Esc 取消',
+        searchable: false,
+        choices: [{
+          id: 'busy',
+          label: '进行中…',
+          disabledReason: '按 Esc 取消',
+        }],
+      }, () => undefined)
+      try {
+        navigation.finish(await work(navigation.signal))
+      } catch (error) {
+        if (navigation.signal.aborted) return
+        throw error
+      }
+      await page
+    })
   }
 
   /**

@@ -142,4 +142,42 @@ describe('overlay navigation', () => {
     harness.component().handleInput('\n')
     await expect(submitted).resolves.toBe('hello\nx')
   })
+
+  it('aborts the navigation signal when Escape closes a busy session', async () => {
+    const harness = overlayHarness()
+    let signal: AbortSignal | undefined
+    const session = harness.overlays.navigate(async (navigation) => {
+      signal = navigation.signal
+      await navigation.selectPage({
+        title: 'busy work',
+        choices: [{ id: 'go', label: 'start' }],
+      }, async () => {
+        await new Promise<void>((resolve, reject) => {
+          navigation.signal.addEventListener('abort', () => { reject(new Error('aborted')) }, { once: true })
+        })
+      })
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('busy work')
+    })
+    harness.component().handleInput(ENTER)
+    await vi.waitFor(() => {
+      expect(signal?.aborted).toBe(false)
+    })
+    harness.component().handleInput(ESCAPE)
+    await expect(session).resolves.toBeUndefined()
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('returns undefined from runBusy when Escape aborts the work', async () => {
+    const harness = overlayHarness()
+    const pending = harness.overlays.runBusy('searching', signal => new Promise<string>((_resolve, reject) => {
+      signal.addEventListener('abort', () => { reject(new Error('aborted')) }, { once: true })
+    }))
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('searching')
+    })
+    harness.component().handleInput(ESCAPE)
+    await expect(pending).resolves.toBeUndefined()
+  })
 })

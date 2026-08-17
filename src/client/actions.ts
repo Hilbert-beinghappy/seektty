@@ -640,10 +640,15 @@ export class TuiActions {
       })
       : args
     if (requested === undefined) return
-    const result = await this.capabilities.exportSession(
-      requested.trim() === '' ? undefined : requested.trim(),
-      scope.id === 'descendants',
+    const result = await this.host.overlays.runBusy(
+      '导出会话',
+      signal => this.capabilities.exportSession(
+        requested.trim() === '' ? undefined : requested.trim(),
+        scope.id === 'descendants',
+        signal,
+      ),
     )
+    if (result === undefined) return
     this.host.notice(ui(
       `已保存会话 ZIP（${formatByteSize(result.bytes)}）到 ${result.path}`,
       `Saved session ZIP (${formatByteSize(result.bytes)}) to ${result.path}`,
@@ -2457,7 +2462,11 @@ Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map
       if (entered === undefined || entered.trim() === '') return
       text = entered.trim()
     }
-    const candidates = await this.capabilities.managementBridge().plugins.search(text)
+    const candidates = await this.host.overlays.runBusy(
+      `插件搜索 · ${text}`,
+      signal => this.capabilities.managementBridge().plugins.search(text, signal),
+    )
+    if (candidates === undefined) return
     if (candidates.length === 0) {
       this.host.notice(`未找到与 ${JSON.stringify(text)} 匹配的插件`, 'info')
       return
@@ -2485,7 +2494,11 @@ Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map
       await this.installedPlugin(installed)
       return
     }
-    const candidate = await this.capabilities.managementBridge().plugins.inspect(spec)
+    const candidate = await this.host.overlays.runBusy(
+      `检查 ${spec}`,
+      signal => this.capabilities.managementBridge().plugins.inspect(spec, signal),
+    )
+    if (candidate === undefined) return
     await this.marketplaceCandidate(candidate)
   }
 
@@ -2543,7 +2556,11 @@ Warning: structural validation is not a security, trust, or quality review.`,
       if (entered === undefined || entered.trim() === '') return
       value = entered.trim()
     }
-    const candidate = await this.capabilities.managementBridge().plugins.inspect(value)
+    const candidate = await this.host.overlays.runBusy(
+      `检查 ${value}`,
+      signal => this.capabilities.managementBridge().plugins.inspect(value, signal),
+    )
+    if (candidate === undefined) return
     if (candidate.source !== 'git' && (!candidate.bundle || !candidate.patchValid)) {
       throw new Error(`已拒绝安装：${candidate.diagnostics.join('；') || '未通过 dsh.bundle.patch 验证'}`)
     }
@@ -2567,7 +2584,11 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       '理解风险并安装',
     )
     if (!confirmed) return
-    const result = await this.capabilities.managementBridge().plugins.run(['add', '--save-exact', candidate.spec])
+    const result = await this.host.overlays.runBusy(
+      `安装 ${candidate.name}`,
+      signal => this.capabilities.managementBridge().plugins.run(['add', '--save-exact', candidate.spec], { signal }),
+    )
+    if (result === undefined) return
     await this.pluginOperation(`安装 ${candidate.name}`, result)
   }
 
@@ -2594,7 +2615,12 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       '移除',
     )
     if (!confirmed) return
-    await this.pluginOperation(`移除 ${target}`, await this.capabilities.managementBridge().plugins.run(['remove', target]))
+    const result = await this.host.overlays.runBusy(
+      `移除 ${target}`,
+      signal => this.capabilities.managementBridge().plugins.run(['remove', target], { signal }),
+    )
+    if (result === undefined) return
+    await this.pluginOperation(`移除 ${target}`, result)
   }
 
   private async pluginUpdate(name: string): Promise<void> {
@@ -2620,7 +2646,12 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       '更新',
     )
     if (!confirmed) return
-    await this.pluginOperation(target === '' ? '更新全部插件' : `更新 ${target}`, await this.capabilities.managementBridge().plugins.run(args))
+    const result = await this.host.overlays.runBusy(
+      target === '' ? '更新全部插件' : `更新 ${target}`,
+      signal => this.capabilities.managementBridge().plugins.run(args, { signal }),
+    )
+    if (result === undefined) return
+    await this.pluginOperation(target === '' ? '更新全部插件' : `更新 ${target}`, result)
   }
 
   private async pluginOperation(label: string, result: TuiPluginOperation): Promise<void> {

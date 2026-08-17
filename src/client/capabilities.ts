@@ -1386,11 +1386,13 @@ export class HarnessTuiCapabilities {
   async exportSession(
     requestedPath?: string,
     includeDescendants = false,
+    signal?: AbortSignal,
   ): Promise<TuiExportResult> {
     const active = this.requireActive()
     const payload = await this.managementBridge().sessionExport.download(
       active.sessionId,
       includeDescendants,
+      signal,
     )
     const path = resolve(active.workspacePath, requestedPath ?? payload.suggestedFilename)
     const bytes = await saveExport(path, payload.stream)
