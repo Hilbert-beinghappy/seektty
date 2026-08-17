@@ -23,6 +23,12 @@ import {
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import {
+  composerHistoryPath,
+  loadComposerHistory,
+  rememberComposerHistory,
+  saveComposerHistory,
+} from './composer-history.ts'
+import {
   localeFromSettings,
   setUiLocale,
   translateUiText,
@@ -127,6 +133,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
+    const historyPath = composerHistoryPath(profile)
+    const historyLimit = initialBehavior.composerHistoryLimit
+    let composerHistory = loadComposerHistory(historyPath, historyLimit)
+    for (const entry of [...composerHistory].reverse()) editor.addToHistory(entry)
     let transcriptFocused = false
     const transcript = new Transcript(
       // The default full transcript becomes normal terminal scrollback, which keeps
@@ -463,7 +473,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const text = raw.trim()
       if (text === '' && capabilities.draftAttachments().length === 0) return
       transcript.followLatest()
-      if (text !== '') editor.addToHistory(text)
+      if (text !== '') {
+        editor.addToHistory(text)
+        composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
+        if (historyLimit > 0) {
+          try { saveComposerHistory(historyPath, composerHistory) } catch { /* send must not wait on disk */ }
+        }
+      }
       editor.setText('')
       if (text.startsWith('/')) void dispatchCommand(text)
       else void sendPrompt(text)
@@ -507,6 +523,34 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (matchesKey(data, Key.ctrl('p'))) {
         void actions.commandPalette()
+        return { consume: true }
+      }
+      if (matchesKey(data, Key.ctrl('r'))) {
+        if (historyLimit <= 0) {
+          setNotice('输入历史已关闭', 'info')
+          return { consume: true }
+        }
+        if (composerHistory.length === 0) {
+          setNotice('没有可搜索的输入历史', 'info')
+          return { consume: true }
+        }
+        void overlays.select({
+          title: '输入历史',
+          detail: '选择一条历史输入填入编辑器',
+          searchable: true,
+          choices: composerHistory.map((entry, index) => ({
+            id: String(index),
+            label: entry.replace(/\s+/gu, ' ').slice(0, 80) || '(空)',
+          })),
+          options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+        }).then((selected) => {
+          if (selected === undefined || stopping !== undefined) return
+          const entry = composerHistory[Number(selected.id)]
+          if (entry === undefined) return
+          editor.setText(escapeTerminalText(entry))
+          focusEditor()
+          renderWhileOpen()
+        })
         return { consume: true }
       }
       // Legacy terminals encode both Enter and Ctrl+M as CR. Only an extended
