@@ -4,6 +4,7 @@ import {
   defaultPluginSpec,
   dshCompatibilityError,
   isVersionRequest,
+  launcherCopy,
   versionMessage,
 } from '../src/dsh-compat.ts'
 
@@ -18,6 +19,8 @@ describe('dsh version and compatibility', () => {
       version: '1.0.0',
       compatibility: { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' },
     }, true)).toContain('Requires dsh >= 0.1.0-rc.6')
+    expect(launcherCopy('--profile 需要一个 Profile 名称', '--profile requires a Profile name', true))
+      .toBe('--profile requires a Profile name')
   })
 
   it('rejects dsh older than the declared minimum', () => {

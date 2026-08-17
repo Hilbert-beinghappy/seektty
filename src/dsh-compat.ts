@@ -131,3 +131,13 @@ export function launcherPrefersEnglish(env: NodeJS.ProcessEnv): boolean {
   const locale = env.LC_ALL || env.LC_MESSAGES || env.LANG || ''
   return /^en([_.]|$)/iu.test(locale)
 }
+
+/**
+ * Launcher-safe bilingual copy. Must not import locale.ts.
+ * @param zh - Chinese text.
+ * @param en - English text.
+ * @param english - POSIX-derived language choice.
+ */
+export function launcherCopy(zh: string, en: string, english: boolean): string {
+  return english ? en : zh
+}

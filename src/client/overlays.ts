@@ -17,7 +17,7 @@ import {
   type SelectItem,
   type TUI,
 } from '@mariozechner/pi-tui'
-import { translateUiText } from './locale.ts'
+import { translateUiText, ui } from './locale.ts'
 import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
 import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
 
@@ -42,12 +42,12 @@ export function dangerConfirmChoices(confirmLabel: string): {
   const confirm: OverlayChoice = {
     id: 'confirm',
     label: confirmLabel,
-    description: '我已理解上述影响',
+    description: ui('我已理解上述影响', 'I understand the impact'),
   }
   const cancel: OverlayChoice = {
     id: 'cancel',
-    label: '取消',
-    description: '保持当前状态',
+    label: ui('取消', 'Cancel'),
+    description: ui('保持当前状态', 'Keep current state'),
   }
   return {
     choices: dangerConfirmDefault === 'cancel' ? [cancel, confirm] : [confirm, cancel],
@@ -248,11 +248,14 @@ class SearchSelectOverlay implements Component {
     }
     if (this.request.searchable !== false) {
       this.input.focused = this.focused
-      lines.push(`${color.muted(translateUiText('搜索 '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
+      lines.push(`${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
     }
     lines.push(...this.list.render(safeWidth))
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
-    lines.push(color.muted(translateUiText(this.request.footer ?? '↑↓ 选择 · Enter 确认 · Esc 返回/关闭')))
+    lines.push(color.muted(translateUiText(this.request.footer ?? ui(
+      '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      '↑↓ Select · Enter confirm · Esc back/close',
+    ))))
     return modalFrame(this.request.title, lines, width)
   }
 
@@ -333,7 +336,7 @@ class TextInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       this.input.render(safeWidth)[0] ?? color.muted(translateUiText(this.request.placeholder ?? '')),
-      color.muted(translateUiText('Enter 确认 · Esc 返回/关闭')),
+      color.muted(ui('Enter 确认 · Esc 返回/关闭', 'Enter confirm · Esc back/close')),
     ], width)
   }
 
@@ -368,7 +371,7 @@ class MultilineEditorOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       ...body,
-      color.muted(translateUiText('Enter 换行 · Ctrl+Enter 提交 · Esc 返回/关闭')),
+      color.muted(ui('Enter 换行 · Ctrl+Enter 提交 · Esc 返回/关闭', 'Enter newline · Ctrl+Enter submit · Esc back/close')),
     ], width)
   }
 
@@ -404,14 +407,17 @@ class SecretInputOverlay implements Component {
     const length = Array.from(this.input.getValue()).length
     const cursor = this.focused ? CURSOR_MARKER : ''
     const masked = length === 0
-      ? `${cursor}${color.muted(translateUiText(this.request.placeholder ?? '输入新 Secret'))}`
+      ? `${cursor}${color.muted(translateUiText(this.request.placeholder ?? '') || ui('输入新 Secret', 'Enter a new secret'))}`
       : `${'•'.repeat(Math.min(length, 32))}${cursor}▌`
     return modalFrame(this.request.title, [
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       truncateToWidth(masked, safeWidth, '…'),
-      color.muted(translateUiText('输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭')),
+      color.muted(ui(
+        '输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭',
+        'Input is never displayed or logged · Enter save · Esc back/close',
+      )),
     ], width)
   }
 
@@ -462,9 +468,12 @@ class MultiSelectOverlay implements Component {
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
-      `${color.muted(translateUiText('搜索 '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
+      `${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
       ...this.list.render(safeWidth),
-      color.muted(translateUiText(this.request.footer ?? '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭')),
+      color.muted(translateUiText(this.request.footer ?? ui(
+        '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭',
+        '↑↓ Select · Space toggle · Enter submit · Esc back/close',
+      ))),
     ], width)
   }
 
@@ -539,16 +548,22 @@ class ScrollableDetailOverlay implements Component {
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
     const content = escapeTerminalText(this.request.content)
-    const lines = wrapTextWithAnsi(content === '' ? translateUiText('(无详情)') : content, safeWidth)
+    const lines = wrapTextWithAnsi(content === '' ? ui('(无详情)', '(No details)') : content, safeWidth)
       .map(line => color.muted(line))
     this.lineCount = lines.length
     const maxOffset = Math.max(0, this.lineCount - this.viewportRows)
     this.offset = Math.min(this.offset, maxOffset)
     const end = Math.min(this.lineCount, this.offset + this.viewportRows)
-    const position = `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} 行`
+    const position = ui(
+      `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} 行`,
+      `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} lines`,
+    )
     return modalFrame(this.request.title, [
       ...lines.slice(this.offset, end),
-      color.muted(translateUiText(this.request.footer ?? `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`)),
+      color.muted(translateUiText(this.request.footer ?? ui(
+        `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`,
+        `${position} · ↑↓ scroll · PgUp/PgDn page · Home/End · Enter/q close · Esc back`,
+      ))),
     ], width)
   }
 
@@ -651,7 +666,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   ): void {
     if (this.closed) return
     const entry = this.current()
-    if (entry === undefined) throw new Error('没有可替换的 overlay 页面')
+    if (entry === undefined) throw new Error(ui('没有可替换的 overlay 页面', 'No overlay page to replace'))
     this.disposeComponent(entry.component)
     entry.component = new SearchSelectOverlay(request, choice => {
       this.dispatch(entry, () => onSelect(choice))
@@ -683,7 +698,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     await this.prompt<void>(submit => new ScrollableDetailOverlay(request, () => { submit() }))
   }
 
-  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+  async confirm(title: string, detail: string, confirmLabel = ui('确认', 'Confirm')): Promise<boolean> {
     const { choices, initialChoiceId } = dangerConfirmChoices(confirmLabel)
     const selected = await this.select({
       title,
@@ -691,7 +706,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       searchable: false,
       choices,
       initialChoiceId,
-      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', '↑↓ Select · Enter confirm · Esc back/close'),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'
@@ -853,12 +868,12 @@ export class OverlayQueue implements OverlayPrompts {
     return this.navigate(async (navigation) => {
       const page = navigation.selectPage({
         title,
-        detail: '按 Esc 取消',
+        detail: ui('按 Esc 取消', 'Press Esc to cancel'),
         searchable: false,
         choices: [{
           id: 'busy',
-          label: '进行中…',
-          disabledReason: '按 Esc 取消',
+          label: ui('进行中…', 'In progress…'),
+          disabledReason: ui('按 Esc 取消', 'Press Esc to cancel'),
         }],
       }, () => undefined)
       try {
@@ -937,7 +952,7 @@ export class OverlayQueue implements OverlayPrompts {
    * @param confirmLabel - affirmative action label.
    * @returns true only when the affirmative action was selected.
    */
-  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+  async confirm(title: string, detail: string, confirmLabel = ui('确认', 'Confirm')): Promise<boolean> {
     const { choices, initialChoiceId } = dangerConfirmChoices(confirmLabel)
     const selected = await this.select({
       title,
@@ -945,7 +960,7 @@ export class OverlayQueue implements OverlayPrompts {
       searchable: false,
       choices,
       initialChoiceId,
-      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', '↑↓ Select · Enter confirm · Esc back/close'),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'

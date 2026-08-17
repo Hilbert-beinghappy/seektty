@@ -13,6 +13,7 @@ import {
   PACKAGE_VERSION,
   defaultPluginSpec,
   isVersionRequest,
+  launcherCopy,
   launcherPrefersEnglish,
   versionMessage,
 } from './dsh-compat.ts'
@@ -32,14 +33,26 @@ export function launcherArgs(args: readonly string[]): { profile: string; inner:
     const argument = args[index]
     if (argument === '--profile') {
       const value = args[index + 1]
-      if (value === undefined || value.trim() === '') throw new Error('--profile 需要一个 Profile 名称')
+      if (value === undefined || value.trim() === '') {
+        throw new Error(launcherCopy(
+          '--profile 需要一个 Profile 名称',
+          '--profile requires a Profile name',
+          launcherPrefersEnglish(process.env),
+        ))
+      }
       profile = value
       index += 1
       continue
     }
     if (argument?.startsWith('--profile=') === true) {
       const value = argument.slice('--profile='.length)
-      if (value === '') throw new Error('--profile 需要一个 Profile 名称')
+      if (value === '') {
+        throw new Error(launcherCopy(
+          '--profile 需要一个 Profile 名称',
+          '--profile requires a Profile name',
+          launcherPrefersEnglish(process.env),
+        ))
+      }
       profile = value
       continue
     }
@@ -65,7 +78,13 @@ export function installed(profile: string): boolean {
 export function run(command: string, args: readonly string[]): number {
   const result = spawnSync(command, [...args], { stdio: 'inherit' })
   if (result.error !== undefined) throw result.error
-  if (result.signal !== null) throw new Error(`${command} 被信号 ${result.signal} 终止`)
+  if (result.signal !== null) {
+    throw new Error(launcherCopy(
+      `${command} 被信号 ${result.signal} 终止`,
+      `${command} was terminated by signal ${result.signal}`,
+      launcherPrefersEnglish(process.env),
+    ))
+  }
   return result.status ?? 1
 }
 

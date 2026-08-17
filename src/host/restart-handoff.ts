@@ -19,17 +19,17 @@ function degradedNotice(): string {
 }
 
 function parseRestartHandoff(value: unknown): TuiRestartHandoff {
-  if (typeof value !== 'object' || value === null) throw new Error('TUI 重启交接不是对象')
+  if (typeof value !== 'object' || value === null) throw new Error(ui('TUI 重启交接不是对象', 'TUI restart handoff is not an object'))
   const row = value as Record<string, unknown>
   if (typeof row.profile !== 'string' || typeof row.cwd !== 'string'
     || !Array.isArray(row.attachmentPaths)
     || !row.attachmentPaths.every(path => typeof path === 'string')) {
-    throw new Error('TUI 重启交接缺少 Profile、工作区或附件路径')
+    throw new Error(ui('TUI 重启交接缺少 Profile、工作区或附件路径', 'TUI restart handoff is missing the Profile, workspace, or attachment paths'))
   }
-  if (row.attachmentPaths.length > 32) throw new Error('TUI 重启交接附件数量超过限制')
-  if (row.resume !== undefined && typeof row.resume !== 'string') throw new Error('TUI 重启交接会话 id 无效')
-  if (row.draft !== undefined && typeof row.draft !== 'string') throw new Error('TUI 重启交接草稿无效')
-  if (row.notice !== undefined && typeof row.notice !== 'string') throw new Error('TUI 重启交接提示无效')
+  if (row.attachmentPaths.length > 32) throw new Error(ui('TUI 重启交接附件数量超过限制', 'TUI restart handoff exceeds the attachment limit'))
+  if (row.resume !== undefined && typeof row.resume !== 'string') throw new Error(ui('TUI 重启交接会话 id 无效', 'TUI restart handoff has an invalid session ID'))
+  if (row.draft !== undefined && typeof row.draft !== 'string') throw new Error(ui('TUI 重启交接草稿无效', 'TUI restart handoff has an invalid draft'))
+  if (row.notice !== undefined && typeof row.notice !== 'string') throw new Error(ui('TUI 重启交接提示无效', 'TUI restart handoff has an invalid notice'))
   return {
     profile: row.profile,
     cwd: resolve(row.cwd),
