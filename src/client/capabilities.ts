@@ -194,6 +194,60 @@ const HOST_COMMAND_ARGUMENT_HINTS = new Map<string, string>([
   ['feedback', '[内容]'],
 ])
 
+export interface MergedCommandCatalog {
+  readonly catalog: readonly TuiCommandCandidate[]
+  readonly shadows: readonly string[]
+  readonly diagnostics: readonly string[]
+}
+
+/**
+ * Merge TUI builtins with Host commands and Skills, shadowing colliding Host names.
+ * @param hostCommands - Host-registered slash commands for the current Session.
+ * @param skills - user-invocable Skills from the same Session.
+ * @returns the surviving catalog plus Host shadow diagnostics.
+ */
+export function mergeCommandCatalog(
+  hostCommands: readonly HostCommandDescriptor[],
+  skills: readonly Pick<SkillEntry, 'name' | 'description'>[],
+): MergedCommandCatalog {
+  const local = new Map(TUI_COMMANDS.map(command => [command.name, command]))
+  const catalog = [...TUI_COMMANDS]
+  const names = new Set(TUI_COMMANDS.map(command => command.name))
+  const shadows: string[] = []
+  for (const command of hostCommands) {
+    if (local.has(command.name)) {
+      shadows.push(command.name)
+      continue
+    }
+    names.add(command.name)
+    catalog.push({
+      name: command.name,
+      description: HOST_COMMAND_FUNCTIONS.get(command.name)
+        ?? shortFunctionDescription(command.description, '执行命令'),
+      ...(command.input === undefined
+        ? {}
+        : { argumentHint: HOST_COMMAND_ARGUMENT_HINTS.get(command.name) ?? command.input.hint }),
+      source: HOST_COMMAND_DECORATORS.has(command.name) ? 'Host + TUI' : 'Host',
+      behavior: HOST_COMMAND_DECORATORS.has(command.name) ? 'local' : 'host',
+    })
+  }
+  for (const skill of skills) {
+    if (names.has(skill.name)) continue
+    names.add(skill.name)
+    catalog.push({
+      name: skill.name,
+      description: shortFunctionDescription(skill.description, '按名称执行对应能力'),
+      source: 'Skill',
+      behavior: 'skill',
+    })
+  }
+  return {
+    catalog,
+    shadows,
+    diagnostics: shadows.map(name => `命令 /${name} 被 TUI 内置命令遮蔽`),
+  }
+}
+
 function shortFunctionDescription(description: string, fallback: string): string {
   const normalized = description.replace(/\s+/gu, ' ').trim()
   if (!/\p{Script=Han}/u.test(normalized)) return fallback
@@ -390,6 +444,7 @@ function workspaceFor(
  */
 export class HarnessTuiCapabilities {
   private readonly commandCatalogs = new Map<SessionId, Promise<readonly TuiCommandCandidate[]>>()
+  private readonly commandShadows: string[] = []
   private readonly modelCatalogs = new Map<SessionId, SessionModels>()
   private readonly modelLoads = new Map<SessionId, Promise<SessionModels>>()
   private readonly attachments: TuiDraftAttachment[] = []
@@ -560,6 +615,14 @@ export class HarnessTuiCapabilities {
   invalidateCommandCatalog(): void {
     const id = this.active()?.sessionId
     if (id !== undefined) this.commandCatalogs.delete(id)
+  }
+
+  /**
+   * Host commands skipped because they collide with TUI builtins.
+   * @returns doctor-ready shadow records for the last successful catalog merge.
+   */
+  commandDiagnostics(): readonly string[] {
+    return this.commandShadows.map(name => `命令 /${name} 被 TUI 内置命令遮蔽`)
   }
 
   /**
@@ -1447,40 +1510,12 @@ export class HarnessTuiCapabilities {
     if (skillResponse !== undefined && !skillResponse.result.ok) {
       throw new Error(`读取 Skill 失败：${skillResponse.result.error.message}`)
     }
-    const local = new Map(TUI_COMMANDS.map(command => [command.name, command]))
-    const merged = [...TUI_COMMANDS]
-    const names = new Set(TUI_COMMANDS.map(command => command.name))
-    for (const command of hostResult.value as readonly HostCommandDescriptor[]) {
-      const localCommand = local.get(command.name)
-      if (localCommand !== undefined) {
-        throw new Error(`命令冲突：TUI 与 Host 都注册了 /${command.name}`)
-      }
-      names.add(command.name)
-      merged.push({
-        name: command.name,
-        description: HOST_COMMAND_FUNCTIONS.get(command.name)
-          ?? shortFunctionDescription(command.description, '执行命令'),
-        ...(command.input === undefined
-          ? {}
-          : { argumentHint: HOST_COMMAND_ARGUMENT_HINTS.get(command.name) ?? command.input.hint }),
-        source: HOST_COMMAND_DECORATORS.has(command.name) ? 'Host + TUI' : 'Host',
-        behavior: HOST_COMMAND_DECORATORS.has(command.name) ? 'local' : 'host',
-      })
-    }
     const skills: readonly SkillEntry[] = skillResponse?.result.ok === true
       ? skillResponse.result.value.skills
       : []
-    for (const skill of skills) {
-      if (names.has(skill.name)) continue
-      names.add(skill.name)
-      merged.push({
-        name: skill.name,
-        description: shortFunctionDescription(skill.description, '按名称执行对应能力'),
-        source: 'Skill',
-        behavior: 'skill',
-      })
-    }
-    return merged
+    const merged = mergeCommandCatalog(hostResult.value as readonly HostCommandDescriptor[], skills)
+    this.commandShadows.splice(0, this.commandShadows.length, ...merged.shadows)
+    return merged.catalog
   }
 }
 

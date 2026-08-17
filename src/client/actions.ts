@@ -2494,9 +2494,18 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       this.capabilities.managementBridge().plugins.doctor(),
       this.capabilities.headerFacts(true),
       this.capabilities.pluginInventory(),
+      this.capabilities.commandCatalog().catch(() => undefined),
     ])
+    const commandDiagnostics = this.capabilities.commandDiagnostics()
     const errors = report.diagnostics.filter(item => item.level === 'error').length
     const warnings = report.diagnostics.filter(item => item.level === 'warning').length
+      + commandDiagnostics.length
+    const commandShadows = commandDiagnostics.map((message, index) => ({
+      id: `command:${index}`,
+      label: `! ${translateUiText(message)}`,
+      description: 'warning',
+      message,
+    }))
     const failedInstances = inventory.filter(item => item.fiberPhase === 'failed')
     const enabledInstances = inventory.filter(item => item.enabled).length
     const selected = await this.host.overlays.select({
@@ -2511,6 +2520,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
           label: `Runtime · ${status.running ? '运行中' : '空闲'}`,
           description: `${status.workspace} · ${status.model} · ${status.permission}`,
         },
+        ...commandShadows.map(({ id, label, description }) => ({ id, label, description })),
         ...report.diagnostics.map((item, index) => ({
           id: `plugin:${index}`,
           label: `${item.level === 'error' ? '✕' : item.level === 'warning' ? '!' : '✓'} ${translateUiText(item.message)}`,
@@ -2557,6 +2567,17 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
             `Status: ${status.running ? 'running' : 'idle'}`,
           ].join('\n'),
         ),
+        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+      return
+    }
+    if (selected.id.startsWith('command:')) {
+      const index = Number(selected.id.slice('command:'.length))
+      const shadow = Number.isInteger(index) ? commandShadows[index] : undefined
+      if (shadow === undefined) return
+      await this.host.overlays.detail({
+        title: '诊断详情 · 警告',
+        content: translateUiText(shadow.message),
         options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
       })
       return
