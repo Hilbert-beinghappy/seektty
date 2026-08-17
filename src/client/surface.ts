@@ -28,6 +28,7 @@ import {
   ui,
 } from './locale.ts'
 import { OverlayQueue } from './overlays.ts'
+import { attachFatalGuards, fatalLogHint } from './process-guards.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
@@ -112,6 +113,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   const client = await internals.startClient(options)
   let stopConstructedTui = (): void => undefined
   let disposeConstructedSyntax = (): void => undefined
+  let detachFatalGuards = (): void => undefined
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
     setTheme(initialTheme)
@@ -278,6 +280,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
+      detachFatalGuards()
+      detachFatalGuards = () => undefined
       if (stopping !== undefined) return stopping
       stopping = (async () => {
         const failures: unknown[] = []
@@ -574,6 +578,19 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     })
 
     terminal.setTitle('DeepSeek Harness')
+    detachFatalGuards = attachFatalGuards({
+      cleanup: () => close({ kind: 'exit', code: 1 }),
+      writeError: (message) => {
+        process.stderr.write(`${escapeTerminalText(message)}\n`)
+      },
+      exit: (code) => { process.exit(code) },
+      logHint: fatalLogHint(),
+      restoreStdin: () => {
+        if (process.stdin.isTTY === true && typeof process.stdin.setRawMode === 'function') {
+          process.stdin.setRawMode(false)
+        }
+      },
+    })
     tui.start()
     refreshHeader(true)
     refresh()
@@ -596,6 +613,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
+    detachFatalGuards()
     setCodeHighlighter(undefined)
     try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }
     try { stopConstructedTui() } catch { /* preserve the setup failure */ }
