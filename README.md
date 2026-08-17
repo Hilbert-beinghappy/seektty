@@ -53,7 +53,7 @@ The current release covers these capabilities:
 | Background jobs and workflows | Job type, status, start/end times, duration, and detail views; workflow phases, members, results, and failure states in the transcript |
 | Statistics and trajectory | Per-turn steps, LLM/tool time, first-token latency, throughput, cache hit, input/output tokens, model requests, running calls, and structured trajectory inspection |
 | Profiles | List, create, copy, switch, and diagnose terminal compatibility; controlled restart restores the workspace, session, unsent draft, and attachments |
-| Settings and credentials | Enumerate every Settings namespace in the active Profile; dedicated default-model, permission, Agent-mode, and marketplace-source controls; Schema fallback for all other fields; write-only secrets |
+| Settings and credentials | First-run API-key setup when no usable Provider exists; enumerate every Settings namespace in the active Profile; dedicated default-model, permission, Agent-mode, and marketplace-source controls; Schema fallback for all other fields; write-only secrets |
 | Plugins and marketplace | `/plugin` center, installed list, search, details, install, remove, update, Bundle ordering, source management, and diagnostics; npm, Git, tarball, and local-path specs |
 | Skills and MCP | Dynamic user-invocable Skill discovery and native command insertion; MCP tools, instances, settings, load state, and separate process/remote-service risk information |
 | Feedback | Session feedback plus positive/negative Assistant-message ratings, optional notes, and feedback removal |
@@ -88,6 +88,22 @@ The native dsh entry remains available:
 dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.0
 dsh --profile tui
 ```
+
+## First-run API key setup
+
+When the active Profile has no usable model Provider, and the official DeepSeek Provider exposes a missing writable credential reference, SeekTTY opens a centered write-only prompt before the first interface frame. An existing environment credential, a credential already stored by Harness, or another active Provider that uses ambient or keyless authentication skips the prompt.
+
+### Dark first-run prompt
+
+![SeekTTY dark first-run API key prompt](assets/seektty-onboarding-dark.png)
+
+### Light first-run prompt
+
+![SeekTTY light first-run API key prompt](assets/seektty-onboarding-light.png)
+
+Paste only the API key. Input is masked, and Enter passes the normalized value directly to Harness `credentials.set`; SeekTTY does not read it back, write a credential file, or place it in settings, logs, screenshots, or Session data. Saving does not send a paid validation request—the first real model request reports any authentication failure through the normal Harness Provider error path.
+
+Escape defers setup without blocking `/settings`, `/plugin`, or other local surfaces. Sending a normal prompt, a Skill command, or a prompt with attachments opens the same setup again. An initial `deepseek "task"`, submitted text, and draft attachments remain intact; after a successful save the pending prompt continues automatically, while another deferral restores it to the composer. If Provider inspection is unavailable, the official adapter is absent, or the credential layer is read-only, SeekTTY avoids an unusable form and points to `/settings` and `/doctor` while preserving Harness behavior.
 
 ## Slash commands
 
@@ -210,13 +226,14 @@ The interface selection, independent code selection, and named definitions live 
 - Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.6`.
 - `/doctor`: 95 Harness plugins running, 0 errors, 0 warnings.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
+- First-run Provider readiness, masked API-key setup, deferral and draft restoration, Harness credential persistence, and restart without another prompt under an isolated `DSH_HOME`.
 - Real dark, light, and palette-generated PTY rendering, independent live interface/code switching, 80/120/160-column layouts, and persistence after restarting the same Profile.
 - Chinese/English locale resolution, revision-protected shared preference writes, live terminal switching, and preservation of unknown external content.
 - Native removal clears the dependency, Bundle, and config entries; re-add boots again.
 - A fresh global install exposes bare `deepseek`, which provisions and boots the `tui` Profile.
 - Installation, startup, keyboard navigation, and terminal interaction are supported on macOS, Linux, and Windows.
 
-A real multi-turn live-provider session was verified with a valid DeepSeek credential injected only into the test process: `v4-flash` returned `DSH_THEME_LIVE_OK` and `DSH_MULTI_TURN_OK` with rendered TypeScript and JSON highlighted blocks. The credential was not written to a Profile, settings file, log, or the repository.
+A real first-run session was verified with a valid DeepSeek credential pasted into the masked overlay under an isolated `DSH_HOME`: `v4-flash` returned `REALCHECK_58597`, then used that answer in the next turn to return `REALCHECK_58598`. Restarting the same Profile did not reopen setup, the Harness credential file was mode `0600`, and the credential never appeared in terminal output, screenshots, or the repository. The isolated credential store was removed after verification.
 
 Reusable stock-dsh contract check:
 

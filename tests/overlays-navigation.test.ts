@@ -35,6 +35,24 @@ function overlayHarness(): {
 }
 
 describe('overlay navigation', () => {
+  it('renders a custom write-only footer without exposing pasted secret text', async () => {
+    const harness = overlayHarness()
+    const secret = harness.overlays.secretInput({
+      title: 'Add an API key to get started',
+      placeholder: 'Paste your API key',
+      footer: 'Enter save and continue · Esc configure later',
+    })
+
+    harness.component().handleInput('sk-never-render-this')
+    const rendered = plain(harness.component().render(80))
+    expect(rendered).toContain('Enter save and continue · Esc configure later')
+    expect(rendered).toContain('••••')
+    expect(rendered).not.toContain('sk-never-render-this')
+
+    harness.component().handleInput(ESCAPE)
+    await expect(secret).resolves.toBeUndefined()
+  })
+
   it('uses one physical overlay while Escape returns through the logical page stack', async () => {
     const harness = overlayHarness()
     const session = harness.overlays.navigate(async (navigation) => {
