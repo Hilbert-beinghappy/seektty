@@ -33,12 +33,19 @@ import {
   setUiLocale,
   translateUiText,
   ui,
+  uiLocale,
 } from './locale.ts'
 import { OverlayQueue } from './overlays.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { formatElapsed } from './elapsed.ts'
+import {
+  desktopNotifyBody,
+  desktopNotifySequence,
+  nextDesktopNotify,
+  type DesktopNotifySnapshot,
+} from './desktop-notify.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -185,6 +192,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let headerGeneration = 0
     let runningSince: number | undefined
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
+    let notifySnapshot: DesktopNotifySnapshot = { running: false, pending: [] }
+    let notifyPrimed = false
 
     const focusEditor = (): void => {
       transcriptFocused = false
@@ -236,9 +245,23 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       if (snapshot === undefined) {
+        notifySnapshot = { running: false, pending: [] }
+        notifyPrimed = false
         status.setDetail(color.warning(translateUiText('未打开会话')))
         return
       }
+      const currentNotify: DesktopNotifySnapshot = {
+        running: snapshot.running,
+        pending: snapshot.pending.map(wait => ({ key: wait.key, kind: wait.kind })),
+      }
+      if (initialBehavior.desktopNotifications) {
+        const kind = nextDesktopNotify(notifySnapshot, currentNotify, notifyPrimed)
+        if (kind !== undefined) {
+          terminal.write(desktopNotifySequence(desktopNotifyBody(kind, uiLocale())))
+        }
+      }
+      notifySnapshot = currentNotify
+      notifyPrimed = true
       const pendingCount = snapshot.pending.length
       const generating = initialBehavior.statusElapsed && runningSince !== undefined
         ? `生成中 · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C 停止`
