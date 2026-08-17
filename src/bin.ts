@@ -7,10 +7,18 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
+import {
+  DSH_COMPATIBILITY,
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
+  defaultPluginSpec,
+  isVersionRequest,
+  launcherPrefersEnglish,
+  versionMessage,
+} from './dsh-compat.ts'
 
-const PACKAGE_NAME = 'seektty'
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
-const DEFAULT_SPEC = 'github:Hilbert-beinghappy/seektty'
+const DEFAULT_SPEC = defaultPluginSpec(PACKAGE_VERSION)
 
 interface ProfileManifest {
   readonly dependencies?: Readonly<Record<string, string>>
@@ -61,7 +69,16 @@ export function launch(
   args: readonly string[],
   environment: NodeJS.ProcessEnv = process.env,
   execute: (command: string, args: readonly string[]) => number = run,
+  write: (chunk: string) => void = chunk => { process.stdout.write(chunk) },
 ): number {
+  if (isVersionRequest(args)) {
+    write(versionMessage({
+      name: PACKAGE_NAME,
+      version: PACKAGE_VERSION,
+      compatibility: DSH_COMPATIBILITY,
+    }, launcherPrefersEnglish(environment)))
+    return 0
+  }
   const { profile, inner } = launcherArgs(args)
   const dsh = environment.DSH_BIN?.trim() || 'dsh'
   if (hasDependency(profile, LEGACY_PACKAGE_NAME)) {

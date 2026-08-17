@@ -80,6 +80,7 @@ deepseek --cwd ../project
 deepseek --resume
 deepseek --resume <sessionId>
 deepseek --profile team-tui
+deepseek --version
 ```
 
 The native dsh entry remains available:

@@ -5,6 +5,7 @@ import * as gatewayPlugin from '@deepseek-ai/dsh-api-gateway/node-client'
 import * as remotesPlugin from '@deepseek-ai/dsh-api-remotes/node-client'
 import {
   createConnectionHandle,
+  type ConnectionHandle,
 } from '@deepseek-ai/dsh-client-connection/node-client'
 import * as runtimePlugin from '@deepseek-ai/dsh-client-runtime/node-client'
 import type {
@@ -23,6 +24,11 @@ import * as registryPlugin from '@deepseek-ai/dsh-typert-registry/node-client'
 import type { TuiStartOptions } from './index.ts'
 import { HarnessTuiCapabilities } from './capabilities.ts'
 import type { TuiClientContext } from './context.ts'
+import {
+  DSH_COMPATIBILITY,
+  dshCompatibilityError,
+  launcherPrefersEnglish,
+} from '../dsh-compat.ts'
 
 const STARTUP_TIMEOUT_MS = 20_000
 
@@ -151,6 +157,18 @@ export async function startTuiClient(
     await ctx.plugin(gatewayPlugin).await()
     await ctx.plugin(remotesPlugin).await()
     await ctx.plugin(runtimePlugin, { initialSelection: false }).await()
+    const connection = (ctx as unknown as { readonly connection: ConnectionHandle }).connection
+    const description = await waitForSnapshot(
+      connection.hostDescription,
+      snapshot => snapshot !== undefined,
+      '读取 Harness 版本',
+    )
+    const mismatch = dshCompatibilityError(
+      description?.version,
+      DSH_COMPATIBILITY,
+      launcherPrefersEnglish(process.env),
+    )
+    if (mismatch !== undefined) throw new Error(mismatch)
     registerConversationNodes(ctx)
     registerGoalProjection(ctx)
     registerWorkflowRunProjection(ctx)

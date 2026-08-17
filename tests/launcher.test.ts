@@ -105,7 +105,7 @@ describe('launcher provisioning', () => {
     expect(launch([], { DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
     expect(calls.map(call => call.args)).toEqual([
       ['plugin', '--profile', 'tui', 'remove', 'deepseek-tui'],
-      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty'],
+      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty#v1.0.0'],
       ['--profile', 'tui'],
     ])
   })
@@ -123,5 +123,14 @@ describe('launcher provisioning', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]?.slice(0, 4)).toEqual(['plugin', '--profile', 'tui', 'add'])
     expect(calls[0]?.[4]).toBe('/legacy-plugin.tgz')
+  })
+
+  it('prints version and skips spawning dsh', () => {
+    const execute = vi.fn(() => 1)
+    const chunks: string[] = []
+    expect(launch(['--version'], { LANG: 'en_US.UTF-8' }, execute, chunk => { chunks.push(chunk) })).toBe(0)
+    expect(execute).not.toHaveBeenCalled()
+    expect(chunks.join('')).toContain('seektty 1.0.0')
+    expect(chunks.join('')).toContain('Requires dsh >= 0.1.0-rc.6')
   })
 })

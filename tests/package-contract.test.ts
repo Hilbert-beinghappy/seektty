@@ -4,6 +4,7 @@ import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { load } from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import { PluginMarketplace } from '../src/host/plugin-marketplace.ts'
+import { DSH_COMPATIBILITY, PACKAGE_VERSION } from '../src/dsh-compat.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as Record<string, unknown>
@@ -15,6 +16,8 @@ describe('out-of-tree Bundle contract', () => {
       compatibility: { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' },
     })
     expect(manifest.bin).toEqual({ deepseek: './lib/bin.js' })
+    expect(PACKAGE_VERSION).toBe(manifest.version)
+    expect(DSH_COMPATIBILITY).toEqual((manifest.dsh as { compatibility: unknown }).compatibility)
   })
 
   it('ships only for the supported terminal platforms', () => {

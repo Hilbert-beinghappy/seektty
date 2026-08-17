@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest'
+import {
+  compareDshVersion,
+  defaultPluginSpec,
+  dshCompatibilityError,
+  isVersionRequest,
+  versionMessage,
+} from '../src/dsh-compat.ts'
+
+describe('dsh version and compatibility', () => {
+  it('pins the default plugin spec to the package tag and prints --version without spawning', () => {
+    expect(defaultPluginSpec('1.0.0')).toBe('github:Hilbert-beinghappy/seektty#v1.0.0')
+    expect(isVersionRequest(['--cwd', '.', '--version'])).toBe(true)
+    expect(isVersionRequest(['-V'])).toBe(true)
+    expect(isVersionRequest(['--cwd', '.'])).toBe(false)
+    expect(versionMessage({
+      name: 'seektty',
+      version: '1.0.0',
+      compatibility: { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' },
+    }, true)).toContain('Requires dsh >= 0.1.0-rc.6')
+  })
+
+  it('rejects dsh older than the declared minimum', () => {
+    expect(compareDshVersion('0.1.0-rc.5', '0.1.0-rc.6')).toBeLessThan(0)
+    expect(dshCompatibilityError('0.1.0-rc.5', { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' }, false))
+      .toContain('0.1.0-rc.5')
+    expect(dshCompatibilityError('0.1.0-rc.6', { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' }, false))
+      .toBeUndefined()
+  })
+})

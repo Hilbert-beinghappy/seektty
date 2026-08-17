@@ -80,6 +80,7 @@ deepseek --cwd ../project
 deepseek --resume
 deepseek --resume <sessionId>
 deepseek --profile team-tui
+deepseek --version
 ```
 
 也可以只使用 dsh 的原生入口：
