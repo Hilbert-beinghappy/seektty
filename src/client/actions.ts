@@ -53,6 +53,8 @@ import {
   type TuiSettingsField,
 } from './settings.ts'
 import type { Transcript } from './transcript.ts'
+import { toolApprovalPreview } from './transcript.ts'
+import { composeApprovalDetail } from './approval-preview.ts'
 import {
   appearanceFromSettings,
   appearanceSettings,
@@ -3058,19 +3060,43 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
   }
 
   private async approval(wait: PendingWait<'approval'>): Promise<void> {
-    const selected = await this.host.overlays.select({
-      title: `工具审批 · ${wait.payload.toolName}`,
-      detail: wait.payload.reason ?? `调用 ${wait.payload.callId ?? wait.payload.approvalId}`,
-      searchable: false,
-      choices: [
-        { id: 'allow', label: '仅本次允许', description: '只允许这一次工具调用' },
-        { id: 'reject', label: '拒绝', description: '本次工具调用不会执行' },
-      ],
-      footer: 'Enter 确认 · Esc 安全拒绝',
-      options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
+    const snapshot = this.capabilities.active()?.session.getSnapshot()
+    const call = snapshot?.runningCalls?.find(candidate => candidate.callId === wait.payload.callId)
+    const composed = composeApprovalDetail({
+      ...(wait.payload.reason === undefined ? {} : { reason: wait.payload.reason }),
+      ...(wait.payload.callId === undefined ? {} : { callId: String(wait.payload.callId) }),
+      approvalId: String(wait.payload.approvalId),
+      preview: toolApprovalPreview(call),
     })
-    this.host.transcript.followLatest()
-    await this.capabilities.answerApproval(wait, selected?.id === 'allow' ? 'allowed-once' : 'rejected')
+    while (true) {
+      const selected = await this.host.overlays.select({
+        title: `工具审批 · ${wait.payload.toolName}`,
+        detail: composed.detail,
+        searchable: false,
+        choices: [
+          { id: 'allow', label: '仅本次允许', description: '只允许这一次工具调用' },
+          { id: 'reject', label: '拒绝', description: '本次工具调用不会执行' },
+          ...(composed.full === undefined ? [] : [{
+            id: 'inspect',
+            label: ui('查看完整参数', 'View full arguments'),
+            description: ui('打开只读子页，不批准也不拒绝', 'Open a read-only page; does not approve or reject'),
+          }]),
+        ],
+        footer: 'Enter 确认 · Esc 安全拒绝',
+        options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
+      })
+      if (selected?.id === 'inspect' && composed.full !== undefined) {
+        await this.host.overlays.detail({
+          title: ui(`完整参数 · ${wait.payload.toolName}`, `Full arguments · ${wait.payload.toolName}`),
+          content: composed.full,
+          options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+        })
+        continue
+      }
+      this.host.transcript.followLatest()
+      await this.capabilities.answerApproval(wait, selected?.id === 'allow' ? 'allowed-once' : 'rejected')
+      return
+    }
   }
 
   private async question(wait: PendingWait<'question'>): Promise<void> {

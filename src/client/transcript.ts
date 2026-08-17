@@ -627,6 +627,12 @@ function runningViewDetails(node: RunningToolCall): ToolDetail[] {
   return [toolInvocationDetail(node.name, node.argsRaw)]
 }
 
+/** Flatten the same tool preview the transcript uses so approval overlays are not blind. */
+export function toolApprovalPreview(call: RunningToolCall | undefined): string {
+  if (call === undefined) return ''
+  return runningViewDetails(call).map(detail => detail.text).filter(text => text !== '').join('\n')
+}
+
 function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
   if (detail.kind === 'plain') return { format: 'plain', text: detail.text }
   if (detail.kind === 'markdown') return { format: 'markdown', text: detail.text }

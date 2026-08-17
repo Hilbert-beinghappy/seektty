@@ -75,4 +75,45 @@ describe('pending interaction continuation', () => {
       answers: [{ id: 'which_pkg', selected: ['visualtex-src 根目录 (Recommended)'] }],
     })
   })
+
+  it('shows the pending shell command inside the approval overlay', async () => {
+    const approval = {
+      key: 'approval:shell',
+      kind: 'approval',
+      sessionId: 'session' as SessionId,
+      payload: {
+        toolName: 'shell',
+        callId: 'call-shell',
+        approvalId: 'appr-1',
+        reason: '需要执行命令',
+      },
+    } as unknown as PendingWait<'approval'>
+    const snapshot = {
+      pending: [approval],
+      runningCalls: [{
+        callId: 'call-shell',
+        name: 'shell',
+        argsRaw: '{"command":"ls"}',
+        callView: { card: 'terminal', title: 'ls -la src' },
+      }],
+    } as unknown as ConversationSnapshot
+    const followLatest = vi.fn()
+    const answerApproval = vi.fn(async () => undefined)
+    const select = vi.fn(async (request: { detail?: string }) => {
+      expect(request.detail).toContain('$ ls -la src')
+      return { id: 'reject', label: '拒绝' }
+    })
+    const active = {
+      session: { getSnapshot: () => snapshot },
+    } as unknown as TuiActiveSession
+    const capabilities = {
+      active: () => active,
+      answerApproval,
+    } as unknown as HarnessTuiCapabilities
+    const actions = new TuiActions(capabilities, host({ select }, { followLatest }))
+
+    actions.syncPending(snapshot)
+    await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
+  })
 })
