@@ -231,6 +231,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'attachments', description: '管理待发送图片', source: 'TUI', behavior: 'local' },
   { name: 'pending', description: '处理待审批或待回答事项', source: 'TUI', behavior: 'local' },
   { name: 'settings', description: '打开设置', argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },
+  { name: 'keymap', description: '自定义快捷键', argumentHint: '[binding [chord|reset]]', source: 'TUI', behavior: 'local' },
   { name: 'plugin', description: '打开插件中心', argumentHint: '[子命令]', source: 'TUI', behavior: 'local' },
   { name: 'plugins', description: '打开插件中心', argumentHint: '[子命令]', source: 'TUI', behavior: 'local' },
   { name: 'doctor', description: '检查运行环境', source: 'TUI', behavior: 'local' },

@@ -124,6 +124,7 @@ export interface TuiBehaviorSettings {
   readonly statusElapsed: boolean
   readonly clipboardFallback: TuiClipboardFallback
   readonly toolOutputLineLimit: number
+  readonly keyBindings: Readonly<Record<string, string>>
 }
 
 /** First-run interaction defaults when no user override has been stored. */
@@ -136,6 +137,7 @@ export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
   statusElapsed: true,
   clipboardFallback: 'auto',
   toolOutputLineLimit: 200,
+  keyBindings: Object.freeze({}),
 })
 
 /** Upper bound for persisted composer history entries. */

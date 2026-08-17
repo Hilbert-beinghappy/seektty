@@ -42,7 +42,11 @@ describe('seektty-behavior settings', () => {
       statusElapsed: false,
       clipboardFallback: 'osc52',
       toolOutputLineLimit: 200,
+      keyBindings: {},
     })
+    expect(normalizeBehavior({
+      keyBindings: { commandPalette: 'Ctrl+K', submit: 'ctrl+n', mystery: 'ctrl+f' },
+    }).keyBindings).toEqual({ commandPalette: 'ctrl+k' })
     expect(normalizeBehavior({
       toolCards: 'mystery',
       composerHistoryLimit: 99_999,

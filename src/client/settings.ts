@@ -216,6 +216,7 @@ const FIELD_LABELS: Readonly<Record<string, readonly [zh: string, en: string]>> 
   statusElapsed: ['状态栏实时耗时', 'Live status elapsed time'],
   clipboardFallback: ['剪贴板回退', 'Clipboard fallback'],
   toolOutputLineLimit: ['工具输出行数上限', 'Tool output line limit'],
+  keyBindings: ['快捷键覆盖', 'Key binding overrides'],
 }
 
 /**

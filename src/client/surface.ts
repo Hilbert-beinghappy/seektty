@@ -52,7 +52,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
-import { matchesBinding } from './keymap.ts'
+import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -137,6 +137,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
     const initialBehavior = behaviorFromSettings(behaviorSettings(settingsDocuments))
+    applyKeyBindingOverrides(initialBehavior.keyBindings)
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
@@ -427,6 +428,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         refresh()
         tui.invalidate()
         tui.requestRender(true)
+      },
+      applyBehavior: (behavior) => {
+        applyKeyBindingOverrides(behavior.keyBindings)
       },
       setEditor: (text) => {
         editor.setText(escapeTerminalText(text))

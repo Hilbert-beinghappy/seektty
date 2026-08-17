@@ -133,6 +133,8 @@ const BehaviorSettingsSchema = z.object({
   toolOutputLineLimit: z.natural().max(MAX_TOOL_OUTPUT_LINE_LIMIT)
     .default(DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit)
     .description('展开态工具输出单块行数上限；0 表示不折叠。'),
+  keyBindings: z.dict(z.string()).default({})
+    .description('覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。'),
 })
 
 interface StoredCatalogSource {

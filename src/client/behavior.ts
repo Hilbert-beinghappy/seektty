@@ -10,6 +10,7 @@ import {
   type TuiSettingsDocument,
   type TuiToolCardDisplay,
 } from '@deepseek-ai/dsh-tui-protocol'
+import { sanitizeKeyBindings } from './keymap.ts'
 
 const TOOL_CARDS = new Set<TuiToolCardDisplay>(['collapsed', 'expanded', 'hidden'])
 const CLIPBOARD_FALLBACK = new Set<TuiClipboardFallback>(['auto', 'osc52', 'off'])
@@ -86,6 +87,7 @@ export function normalizeBehavior(value: unknown): TuiBehaviorSettings {
     statusElapsed: booleanOf(record.statusElapsed, DEFAULT_TUI_BEHAVIOR.statusElapsed),
     clipboardFallback: clipboardFallbackOf(record.clipboardFallback),
     toolOutputLineLimit: toolOutputLineLimitOf(record.toolOutputLineLimit),
+    keyBindings: sanitizeKeyBindings(record.keyBindings),
   }
 }
 

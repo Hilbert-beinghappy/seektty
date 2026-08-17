@@ -15,16 +15,26 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/node-client'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
   type TuiAppearanceSettings,
+  type TuiBehaviorSettings,
   type TuiCodeThemeId,
   type TuiCustomTheme,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
+import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { formatByteSize } from './byte-size.ts'
 import { helpSectionChoices, helpSectionText, type HelpSectionId } from './help.ts'
+import {
+  applyKeyBindingOverrides,
+  bindingConflict,
+  bindingKeysLabel,
+  normalizeChord,
+  SURFACE_KEYMAP,
+} from './keymap.ts'
 import { pluginFailureDetail } from './error-advice.ts'
 import { SessionToolAllowlist } from './session-tool-allowlist.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
@@ -103,6 +113,7 @@ export interface TuiActionHost {
   refreshHeader(): void
   applyTheme(theme: ResolvedTuiTheme): void
   applyLocale(locale: LocaleId): void
+  applyBehavior?(behavior: TuiBehaviorSettings): void
   setEditor(text: string): void
   copy(text: string): void
   close(code: number): void
@@ -391,6 +402,7 @@ export class TuiActions {
         case 'attach': await this.attach(args); break
         case 'attachments': await this.attachments(); break
         case 'settings': await this.settings(args); break
+        case 'keymap': await this.keymap(args); break
         case 'plugin':
         case 'plugins': await this.plugin(args); break
         case 'doctor': await this.doctor(); break
@@ -1802,6 +1814,108 @@ export class TuiActions {
     }, { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 })
   }
 
+  private async keymap(args: string): Promise<void> {
+    const settings = this.capabilities.managementBridge().settings
+    const document = behaviorSettings(await settings.describe())
+    const current = behaviorFromSettings(document)
+    applyKeyBindingOverrides(current.keyBindings)
+    const { first, rest } = argumentPair(args)
+    if (first === '') {
+      await this.keymapOverlay(document, current)
+      return
+    }
+    await this.keymapAssign(document, current, first, rest)
+  }
+
+  private async keymapOverlay(
+    document: TuiSettingsDocument,
+    current: TuiBehaviorSettings,
+  ): Promise<void> {
+    const selected = await this.host.overlays.select({
+      title: ui('快捷键', 'Key bindings'),
+      detail: ui(
+        '选择一项以改绑或恢复默认。Enter、换行和对话查找不可改。',
+        'Choose a shortcut to rebind or restore. Enter, newline, and transcript search stay fixed.',
+      ),
+      choices: SURFACE_KEYMAP.filter(binding => binding.configurable !== false).map(binding => ({
+        id: binding.id,
+        label: ui(binding.zh, binding.en),
+        description: bindingKeysLabel(binding.id),
+      })),
+    })
+    if (selected === undefined) return
+    const target = SURFACE_KEYMAP.find(binding => binding.id === selected.id)
+    const action = await this.host.overlays.select({
+      title: ui(target?.zh ?? selected.id, target?.en ?? selected.id),
+      detail: ui(
+        `当前：${bindingKeysLabel(selected.id)}。输入 Ctrl+K 或 Cmd+, 这类组合。`,
+        `Current: ${bindingKeysLabel(selected.id)}. Type a chord such as Ctrl+K or Cmd+,.`,
+      ),
+      choices: [
+        { id: 'set', label: ui('设置新组合…', 'Set a new chord…') },
+        { id: 'reset', label: ui('恢复默认', 'Restore default') },
+      ],
+    })
+    if (action === undefined) return
+    if (action.id === 'reset') {
+      await this.keymapAssign(document, current, selected.id, 'reset')
+      return
+    }
+    const typed = await this.host.overlays.input({
+      title: ui('新组合键', 'New chord'),
+      placeholder: 'Ctrl+K',
+    })
+    if (typed === undefined || typed.trim() === '') return
+    await this.keymapAssign(document, current, selected.id, typed)
+  }
+
+  private async keymapAssign(
+    document: TuiSettingsDocument,
+    current: TuiBehaviorSettings,
+    id: string,
+    rest: string,
+  ): Promise<void> {
+    const binding = SURFACE_KEYMAP.find(candidate => candidate.id === id)
+    if (binding === undefined || binding.configurable === false) {
+      throw new Error(ui(
+        `未知或不可配置的键位 ${id}。用法：/keymap [binding [chord|reset]]`,
+        `Unknown or non-configurable binding ${id}. Usage: /keymap [binding [chord|reset]]`,
+      ))
+    }
+    if (rest === '') {
+      throw new Error(ui(
+        '用法：/keymap [binding [chord|reset]]',
+        'Usage: /keymap [binding [chord|reset]]',
+      ))
+    }
+    const next: Record<string, string> = { ...current.keyBindings }
+    if (rest.toLowerCase() === 'reset' || rest.toLowerCase() === 'default') {
+      delete next[id]
+    } else {
+      const chord = normalizeChord(rest)
+      if (chord === undefined) {
+        throw new Error(ui(
+          `无法解析组合键 ${rest}`,
+          `Cannot parse chord ${rest}`,
+        ))
+      }
+      const conflict = bindingConflict(id, chord)
+      if (conflict !== undefined) {
+        throw new Error(ui(
+          `与 ${conflict} 冲突`,
+          `Conflicts with ${conflict}`,
+        ))
+      }
+      next[id] = chord
+    }
+    const updated = await this.capabilities.managementBridge().settings.mutate(
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['keyBindings'], value: next }],
+      document.revision,
+    )
+    await this.settingsChanged(updated, ui(`键位 ${id}`, `Key binding ${id}`))
+  }
+
   private async settingsNamespace(
     navigation: OverlayNavigation<void>,
     namespace: string,
@@ -2164,6 +2278,9 @@ export class TuiActions {
     if (document.applies === 'live') {
       if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) {
         this.host.applyTheme(themeFromAppearance(document))
+      }
+      if (document.namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
+        this.host.applyBehavior?.(behaviorFromSettings(document))
       }
       if (document.namespace === LOCALE_SETTINGS_NAMESPACE) {
         this.host.applyLocale(localeFromSettings([document]))
