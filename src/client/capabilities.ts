@@ -39,9 +39,9 @@ import type {
 import type { TrajectorySnapshot } from '@deepseek-ai/dsh-client-ui-trajectory/projection'
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
-import { producedForClosing } from './compat/deliverables-rc6.ts'
 import { copyTargets } from './copy-content.ts'
 import { conversationMarkdown } from './conversation-markdown.ts'
+import { flattenProducedFiles, groupProducedFiles } from './produced-files.ts'
 import { ui } from './locale.ts'
 
 /** A command shown by the terminal's merged slash directory. */
@@ -235,7 +235,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'doctor', description: '检查运行环境', source: 'TUI', behavior: 'local' },
   { name: 'restart', description: '重启并恢复当前会话', source: 'TUI', behavior: 'local' },
   { name: 'tools', description: '查看工具', argumentHint: '[display]', source: 'TUI', behavior: 'local' },
-  { name: 'files', description: '查看本轮生成文件', source: 'TUI', behavior: 'local' },
+  { name: 'files', description: '查看本会话生成文件', source: 'TUI', behavior: 'local' },
   { name: 'jobs', description: '查看后台任务', source: 'TUI', behavior: 'local' },
   { name: 'subagents', description: '查看子 Agent', source: 'TUI', behavior: 'local' },
   { name: 'trajectory', description: '查看执行轨迹', source: 'TUI', behavior: 'local' },
@@ -301,13 +301,6 @@ function latestModelRoute(snapshot: ConversationSnapshot): string | undefined {
   if (provider === undefined || model === undefined) return undefined
   const effort = message.requestConfig?.reasoningEffort
   return `${provider}/${model}${effort === undefined ? '' : ` · ${effort}`}`
-}
-
-function isAssistantMessage(value: unknown): value is AssistantMessageNode {
-  return typeof value === 'object' && value !== null
-    && 'kind' in value && value.kind === 'assistant'
-    && 'seq' in value && typeof value.seq === 'number'
-    && 'blocks' in value && Array.isArray(value.blocks)
 }
 
 async function saveExport(path: string, stream: ReadableStream<Uint8Array>): Promise<number> {
@@ -1137,19 +1130,33 @@ export class HarnessTuiCapabilities {
   }
 
   /**
-   * Read the newest closing turn's produced paths from shared Deliverables data.
+   * Read produced paths from every visible turn, grouped oldest-first.
+   * @returns first-seen Workspace-relative paths per turn.
+   */
+  producedFileGroups(): ReturnType<typeof groupProducedFiles> {
+    const snapshot = this.requireActive().session.getSnapshot()
+    return groupProducedFiles(snapshot.chat.order, key => snapshot.chat.nodes.get(key))
+  }
+
+  /**
+   * Read produced paths from every visible turn, de-duplicated oldest-first.
    * @returns first-seen Workspace-relative paths, or an empty list when absent.
    */
   producedFiles(): readonly string[] {
-    const snapshot = this.requireActive().session.getSnapshot()
-    for (const key of snapshot.chat.order.toReversed()) {
-      const node = snapshot.chat.nodes.get(key)
-      if (node === undefined || node.visibility !== 'visible' || node.location.kind === 'session'
-        || node.location.kind === 'unresolved' || !isAssistantMessage(node.data)) continue
-      const paths = producedForClosing(node.location.turn.data.get('deliverables'), node.data.seq)
-      if (paths.length > 0) return paths
-    }
-    return []
+    return flattenProducedFiles(this.producedFileGroups())
+  }
+
+  /**
+   * Read one produced file for in-TUI inspection.
+   * @param path - Workspace-relative or absolute file path.
+   * @returns UTF-8 text when the file looks like text.
+   */
+  async readProducedFile(path: string): Promise<string> {
+    const absolute = this.producedFilePath(path)
+    const bytes = await readFile(absolute)
+    if (bytes.includes(0)) throw new Error(ui('该文件不是可在 TUI 内查看的文本', 'This file is not text that can be viewed in the TUI'))
+    if (bytes.byteLength > 200_000) throw new Error(ui('文件超过 200 KB，请用外部程序打开', 'File exceeds 200 KB; open it with an external program'))
+    return bytes.toString('utf8')
   }
 
   /**

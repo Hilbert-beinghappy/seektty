@@ -2791,27 +2791,39 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
   }
 
   private async files(): Promise<void> {
-    const paths = this.capabilities.producedFiles()
-    if (paths.length === 0) {
-      this.host.notice('最近一轮没有生成文件', 'info')
+    const groups = this.capabilities.producedFileGroups()
+    if (groups.length === 0) {
+      this.host.notice(ui('本会话没有生成文件', 'This session has not produced any files'), 'info')
       return
     }
     const selected = await this.host.overlays.select({
-      title: '产出文件',
-      detail: '查看、复制或打开最近一轮生成的文件',
-      choices: paths.map(path => ({ id: path, label: path })),
+      title: ui('产出文件', 'Produced files'),
+      detail: ui('查看、复制或打开本会话生成的文件', 'View, copy, or open files produced in this session'),
+      choices: groups.flatMap(group => group.paths.map(path => ({
+        id: path,
+        label: path,
+        description: ui(`第 ${String(group.turn)} 轮`, `Turn ${String(group.turn)}`),
+      }))),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     if (selected === undefined) return
     const action = await this.host.overlays.select({
       title: selected.label,
       choices: [
-        { id: 'copy', label: '复制绝对路径' },
-        { id: 'open', label: '用外部程序打开', description: '使用编辑器或系统默认程序' },
+        { id: 'view', label: ui('在 TUI 内查看', 'View in TUI'), description: ui('用只读详情页打开文本文件', 'Open a text file in a read-only detail page') },
+        { id: 'copy', label: ui('复制绝对路径', 'Copy absolute path') },
+        { id: 'open', label: ui('用外部程序打开', 'Open with an external program'), description: ui('使用编辑器或系统默认程序', 'Use the editor or the system default program') },
       ],
       searchable: false,
     })
-    if (action?.id === 'copy') {
+    if (action?.id === 'view') {
+      const content = await this.capabilities.readProducedFile(selected.id)
+      await this.host.overlays.detail({
+        title: selected.label,
+        content,
+        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+    } else if (action?.id === 'copy') {
       this.host.copy(this.capabilities.producedFilePath(selected.id))
       this.host.notice('已复制产出文件路径', 'success')
     } else if (action?.id === 'open') {
