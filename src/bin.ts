@@ -16,6 +16,7 @@ import {
   launcherPrefersEnglish,
   versionMessage,
 } from './dsh-compat.ts'
+import { measureStartupSync } from './startup-trace.ts'
 
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
 const DEFAULT_SPEC = defaultPluginSpec(PACKAGE_VERSION)
@@ -47,15 +48,18 @@ export function launcherArgs(args: readonly string[]): { profile: string; inner:
   return { profile, inner }
 }
 
-function hasDependency(profile: string, name: string): boolean {
+function profileManifest(profile: string): ProfileManifest | undefined {
   const manifestPath = join(resolveProfileDir(profile), 'package.json')
-  if (!existsSync(manifestPath)) return false
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ProfileManifest
-  return manifest.dependencies?.[name] !== undefined
+  if (!existsSync(manifestPath)) return undefined
+  return JSON.parse(readFileSync(manifestPath, 'utf8')) as ProfileManifest
+}
+
+function hasDependency(manifest: ProfileManifest | undefined, name: string): boolean {
+  return manifest?.dependencies?.[name] !== undefined
 }
 
 export function installed(profile: string): boolean {
-  return hasDependency(profile, PACKAGE_NAME)
+  return hasDependency(profileManifest(profile), PACKAGE_NAME)
 }
 
 export function run(command: string, args: readonly string[]): number {
@@ -81,13 +85,21 @@ export function launch(
   }
   const { profile, inner } = launcherArgs(args)
   const dsh = environment.DSH_BIN?.trim() || 'dsh'
-  if (hasDependency(profile, LEGACY_PACKAGE_NAME)) {
+  const stderr = (chunk: string): void => { process.stderr.write(chunk) }
+  let manifest = measureStartupSync('launcher-manifest', () => profileManifest(profile), environment, stderr)
+  if (hasDependency(manifest, LEGACY_PACKAGE_NAME)) {
     const status = execute(dsh, ['plugin', '--profile', profile, 'remove', LEGACY_PACKAGE_NAME])
     if (status !== 0) return status
+    manifest = measureStartupSync('launcher-manifest', () => profileManifest(profile), environment, stderr)
   }
-  if (!installed(profile)) {
+  if (!hasDependency(manifest, PACKAGE_NAME)) {
     const spec = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || DEFAULT_SPEC
-    const status = execute(dsh, ['plugin', '--profile', profile, 'add', spec])
+    const status = measureStartupSync(
+      'plugin-add',
+      () => execute(dsh, ['plugin', '--profile', profile, 'add', spec]),
+      environment,
+      stderr,
+    )
     if (status !== 0) return status
   }
   return execute(dsh, ['--profile', profile, ...inner])

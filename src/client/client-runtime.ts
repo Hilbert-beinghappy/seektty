@@ -29,6 +29,7 @@ import {
   dshCompatibilityError,
   launcherPrefersEnglish,
 } from '../dsh-compat.ts'
+import { measureStartup } from '../startup-trace.ts'
 
 const STARTUP_TIMEOUT_MS = 20_000
 
@@ -153,10 +154,14 @@ export async function startTuiClient(
   const ctx = new Context()
   try {
     ctx.provide('connection', createConnectionHandle({ api: options.api, rpc: options.rpc, isLoopback: true }))
-    await ctx.plugin(registryPlugin).await()
-    await ctx.plugin(gatewayPlugin).await()
-    await ctx.plugin(remotesPlugin).await()
-    await ctx.plugin(runtimePlugin, { initialSelection: false }).await()
+    await measureStartup('plugins', async () => {
+      await Promise.all([
+        ctx.plugin(registryPlugin).await(),
+        ctx.plugin(gatewayPlugin).await(),
+        ctx.plugin(remotesPlugin).await(),
+      ])
+      await ctx.plugin(runtimePlugin, { initialSelection: false }).await()
+    })
     const connection = (ctx as unknown as { readonly connection: ConnectionHandle }).connection
     const description = await waitForSnapshot(
       connection.hostDescription,

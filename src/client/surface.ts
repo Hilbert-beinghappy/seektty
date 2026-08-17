@@ -53,6 +53,7 @@ import {
 } from './desktop-notify.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
+import { measureStartup } from '../startup-trace.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -128,10 +129,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       'An interactive TTY is required; use dsh --profile headless for non-interactive tasks',
     ))
   }
-  const settingsDocuments = await options.management.settings.describe()
-  setUiLocale(localeFromSettings(settingsDocuments))
   const terminal = internals.createTerminal()
-  const client = await internals.startClient(options)
+  const [settingsDocuments, client] = await measureStartup('settings+client', () => Promise.all([
+    options.management.settings.describe(),
+    internals.startClient(options),
+  ]))
+  setUiLocale(localeFromSettings(settingsDocuments))
   let stopConstructedTui = (): void => undefined
   let disposeConstructedSyntax = (): void => undefined
   try {
@@ -173,13 +176,32 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       initialBehavior.showReasoning,
       initialBehavior.toolOutputLineLimit,
     )
-    const syntax = await SyntaxHighlighter.create(initialTheme, () => {
+    let syntax: SyntaxHighlighter | undefined
+    disposeConstructedSyntax = () => { syntax?.dispose() }
+    void SyntaxHighlighter.create(initialTheme, () => {
       transcript.refreshPresentation()
       tui.invalidate()
       tui.requestRender(true)
+    }).then(created => {
+      if (stopping !== undefined) {
+        created.dispose()
+        return
+      }
+      syntax = created
+      disposeConstructedSyntax = () => { created.dispose() }
+      setCodeHighlighter((code, lang) => created.highlight(code, lang))
+      if (stopping !== undefined) {
+        created.dispose()
+        syntax = undefined
+        setCodeHighlighter(undefined)
+        return
+      }
+      transcript.refreshPresentation()
+      tui.invalidate()
+      tui.requestRender(true)
+    }).catch(() => {
+      /* first frame already shown; highlighting stays off */
     })
-    disposeConstructedSyntax = () => { syntax.dispose() }
-    setCodeHighlighter((code, lang) => syntax.highlight(code, lang))
     const status = new StatusBar()
     const canvas = new Box(0, 0, background.canvas)
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
@@ -380,7 +402,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         overlays.dispose()
         transcript.dispose()
         setCodeHighlighter(undefined)
-        try { syntax.dispose() } catch (error) { failures.push(error) }
+        try { syntax?.dispose() } catch (error) { failures.push(error) }
         try { unsubscribeActive() } catch (error) { failures.push(error) }
         try {
           await terminal.drainInput(250, 30)
@@ -416,7 +438,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
         setTheme(theme)
-        syntax.setTheme(theme)
+        syntax?.setTheme(theme)
         transcript.refreshPresentation()
         tui.invalidate()
         tui.requestRender(true)

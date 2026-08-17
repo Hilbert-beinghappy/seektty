@@ -10,11 +10,11 @@ import {
 } from '@shikijs/core'
 import {
   createJavaScriptRegexEngine,
-  defaultJavaScriptRegexConstructor,
 } from '@shikijs/engine-javascript'
 import type { TuiSyntaxThemeColors } from '@deepseek-ai/dsh-tui-protocol'
 import { normalizeThemeColor, type ResolvedTuiTheme } from './theme-config.ts'
 import { styleTerminalText, terminalColorLevel } from './theme.ts'
+import { measureStartup } from '../startup-trace.ts'
 
 type LanguageLoader = () => Promise<{ readonly default: LanguageRegistration[] }>
 
@@ -235,28 +235,27 @@ export class SyntaxHighlighter {
    * @returns ready syntax renderer.
    */
   static async create(theme: ResolvedTuiTheme, invalidate: () => void): Promise<SyntaxHighlighter> {
-    const highlighter = await createHighlighterCore({
-      engine: createJavaScriptRegexEngine({
-        forgiving: true,
-        regexConstructor: pattern => defaultJavaScriptRegexConstructor(pattern, {
-          lazyCompileLength: Number.POSITIVE_INFINITY,
+    return measureStartup('shiki', async () => {
+      const highlighter = await createHighlighterCore({
+        engine: createJavaScriptRegexEngine({
+          forgiving: true,
         }),
-      }),
-      langs: COMMON_LANGUAGES.map(language => LANGUAGE_LOADERS[language] as LanguageInput),
-      themes: [],
-      warnings: false,
-    })
-    const service = new SyntaxHighlighter(highlighter, theme, invalidate)
-    for (const language of COMMON_LANGUAGES) service.loaded.add(language)
-    service.setTheme(theme)
-    for (const sample of COMMON_WARMUPS) {
-      highlighter.codeToTokens(sample.code, {
-        lang: sample.language,
-        theme: service.themeName,
-        tokenizeTimeLimit: 0,
+        langs: COMMON_LANGUAGES.map(language => LANGUAGE_LOADERS[language] as LanguageInput),
+        themes: [],
+        warnings: false,
       })
-    }
-    return service
+      const service = new SyntaxHighlighter(highlighter, theme, invalidate)
+      for (const language of COMMON_LANGUAGES) service.loaded.add(language)
+      service.setTheme(theme)
+      for (const sample of COMMON_WARMUPS) {
+        highlighter.codeToTokens(sample.code, {
+          lang: sample.language,
+          theme: service.themeName,
+          tokenizeTimeLimit: 0,
+        })
+      }
+      return service
+    })
   }
 
   /**
