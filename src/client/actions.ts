@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { lastFencedCode } from './copy-content.ts'
+import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
 import type {
   TuiMarketplaceCandidate,
@@ -1536,39 +1537,66 @@ export class TuiActions {
   }
 
   private async queue(): Promise<void> {
-    const snapshot = this.capabilities.active()?.session.getSnapshot()
-    const rows = snapshot?.queue ?? []
-    if (rows.length === 0) {
-      this.host.notice('当前队列为空', 'info')
-      return
-    }
+    await this.host.overlays.navigate(async (nav) => {
+      let onList = true
+      const onSelect = async (selected: OverlayChoice): Promise<void> => {
+        if (selected.id === '__empty__') return
+        onList = false
+        try {
+          await this.queueChoice(nav, selected.id)
+        } finally {
+          onList = true
+        }
+      }
+      const paint = (): void => {
+        if (!onList) return
+        nav.replaceSelectPage(this.queueListRequest(), onSelect)
+      }
+      const timer = setInterval(paint, 1_000)
+      timer.unref()
+      try {
+        await nav.selectPage(this.queueListRequest(), onSelect)
+      } finally {
+        clearInterval(timer)
+      }
+    })
+  }
+
+  private queueListRequest(): SelectOverlayRequest {
+    const rows = this.capabilities.active()?.session.getSnapshot().queue ?? []
     const queued = rows.filter(row => row.placement === 'queued')
-    const selected = await this.host.overlays.select({
+    return {
       title: '输入队列',
-      detail: '查看、编辑或提前处理排队消息',
-      choices: [
-        ...(queued.length > 1
-          ? [{ id: '__all_steer__', label: '整队引导', description: `按当前顺序处理 ${queued.length} 条排队消息` }]
-          : []),
-        ...rows.map(row => ({
-          id: row.id,
-          label: row.preview === '' ? '(空消息)' : row.preview,
-          description: queuePlacementLabel(row.placement),
-          ...(row.placement === 'queued' ? {} : { disabledReason: '当前状态不接受队列修改' }),
-        })),
-      ],
+      detail: '查看、编辑或提前处理排队消息 · 打开期间自动刷新',
+      choices: rows.length === 0
+        ? [{ id: '__empty__', label: '当前队列为空', disabledReason: '等待新的排队消息，或 Esc 关闭' }]
+        : [
+          ...(queued.length > 1
+            ? [{ id: '__all_steer__', label: '整队引导', description: `按当前顺序处理 ${queued.length} 条排队消息` }]
+            : []),
+          ...rows.map(row => ({
+            id: row.id,
+            label: row.preview === '' ? '(空消息)' : row.preview,
+            description: queuePlacementLabel(row.placement),
+            ...(row.placement === 'queued' ? {} : { disabledReason: '当前状态不接受队列修改' }),
+          })),
+        ],
       searchable: rows.length > 8,
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id === '__all_steer__') {
+    }
+  }
+
+  private async queueChoice(nav: OverlayNavigation, id: string): Promise<void> {
+    const rows = this.capabilities.active()?.session.getSnapshot().queue ?? []
+    const queued = rows.filter(row => row.placement === 'queued')
+    if (id === '__all_steer__') {
       for (const row of queued) await this.capabilities.updateQueue(row.id, { kind: 'steer' })
       this.host.notice('已请求整队引导', 'success')
       return
     }
-    const row = rows.find(candidate => candidate.id === selected.id)
+    const row = rows.find(candidate => candidate.id === id)
     if (row === undefined || row.placement !== 'queued') return
-    const action = await this.host.overlays.select({
+    const action = await nav.select({
       title: '队列操作',
       choices: [
         { id: 'steer', label: '转为引导', description: '并入当前轮次' },
@@ -1581,7 +1609,7 @@ export class TuiActions {
     if (action.id === 'steer') await this.capabilities.updateQueue(row.id, { kind: 'steer' })
     if (action.id === 'remove') await this.capabilities.updateQueue(row.id, { kind: 'remove' })
     if (action.id === 'edit' && row.text !== null) {
-      const text = await this.host.overlays.input({ title: '编辑排队消息', initialValue: row.text })
+      const text = await nav.input({ title: '编辑排队消息', initialValue: row.text })
       if (text !== undefined) await this.capabilities.updateQueue(row.id, { kind: 'edit', content: [{ type: 'text', text }] })
     }
     this.host.notice('队列操作已提交', 'success')
@@ -2719,54 +2747,108 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
   }
 
   private async jobs(): Promise<void> {
+    await this.host.overlays.navigate(async (nav) => {
+      let onList = true
+      let currentId: string | undefined
+      const onSelect = async (selected: OverlayChoice): Promise<void> => {
+        if (selected.id === '__empty__') return
+        onList = false
+        currentId = selected.id
+        try {
+          await this.inspectJob(nav, selected.id)
+        } finally {
+          onList = true
+        }
+      }
+      const paint = (): void => {
+        if (!onList) return
+        nav.replaceSelectPage(this.jobListRequest(currentId), onSelect)
+      }
+      const timer = setInterval(paint, 1_000)
+      timer.unref()
+      try {
+        await nav.selectPage(this.jobListRequest(currentId), onSelect)
+      } finally {
+        clearInterval(timer)
+      }
+    })
+  }
+
+  private jobListRequest(initialChoiceId?: string): SelectOverlayRequest {
     const jobs = this.capabilities.jobs()
-    if (jobs.length === 0) {
-      this.host.notice('当前会话没有后台任务', 'info')
-      return
-    }
     const now = Date.now()
-    const selected = await this.host.overlays.select({
+    return {
       title: '后台任务',
-      detail: '查看当前会话的后台任务',
-      choices: jobs.map(job => ({
-        id: job.id,
-        label: `${jobStatusLabel(job.status)} · ${job.kind} · ${job.label}`,
-        description: `${jobDetailLabel(job.detail) ?? '无详情'} · ${elapsedLabel(Math.max(0, (job.finishedAt ?? now) - job.startedAt))}`,
-      })),
+      detail: '查看或停止当前会话的后台任务 · 打开期间自动刷新',
+      choices: jobs.length === 0
+        ? [{ id: '__empty__', label: '当前会话没有后台任务', disabledReason: '等待任务出现，或 Esc 关闭' }]
+        : jobs.map(job => ({
+          id: job.id,
+          label: `${jobStatusLabel(job.status)} · ${job.kind} · ${job.label}`,
+          description: `${jobDetailLabel(job.detail) ?? '无详情'} · ${elapsedLabel(jobElapsedMs(job, now))}`,
+        })),
+      ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
       searchable: jobs.length > 8,
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
-    })
-    if (selected === undefined) return
-    const job = jobs.find(candidate => candidate.id === selected.id)
+    }
+  }
+
+  private async inspectJob(nav: OverlayNavigation, id: string): Promise<void> {
+    const job = this.capabilities.jobs().find(candidate => candidate.id === id)
     if (job === undefined) return
-    const finishedAt = job.finishedAt
-    const duration = Math.max(0, (finishedAt ?? Date.now()) - job.startedAt)
-    await this.host.overlays.detail({
+    const action = await nav.select({
       title: `后台任务 · ${job.label}`,
-      content: ui(
-        [
-          `状态：${jobStatusLabel(job.status)}`,
-          `类型：${job.kind}`,
-          `任务 ID：${job.id}`,
-          `开始：${new Date(job.startedAt).toISOString()}`,
-          `结束：${finishedAt === undefined ? '仍在运行' : new Date(finishedAt).toISOString()}`,
-          `耗时：${elapsedLabel(duration)}`,
-          '',
-          `详情：${jobDetailLabel(job.detail) ?? '没有任务详情。'}`,
-        ].join('\n'),
-        [
-          `Status: ${jobStatusLabel(job.status)}`,
-          `Type: ${job.kind}`,
-          `Job ID: ${job.id}`,
-          `Started: ${new Date(job.startedAt).toISOString()}`,
-          `Ended: ${finishedAt === undefined ? 'still running' : new Date(finishedAt).toISOString()}`,
-          `Duration: ${elapsedLabel(duration)}`,
-          '',
-          `Details: ${jobDetailLabel(job.detail) ?? 'No job details.'}`,
-        ].join('\n'),
-      ),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      searchable: false,
+      choices: [
+        { id: 'detail', label: '查看详情', description: '状态、耗时和任务详情' },
+        {
+          id: 'stop',
+          label: '停止任务',
+          description: '向 Host 发送取消请求',
+          ...(isStoppableJob(job.status) ? {} : { disabledReason: '任务已结束' }),
+        },
+      ],
     })
+    if (action?.id === 'detail') {
+      const finishedAt = job.finishedAt
+      const duration = jobElapsedMs(job, Date.now())
+      await nav.detail({
+        title: `后台任务 · ${job.label}`,
+        content: ui(
+          [
+            `状态：${jobStatusLabel(job.status)}`,
+            `类型：${job.kind}`,
+            `任务 ID：${job.id}`,
+            `开始：${new Date(job.startedAt).toISOString()}`,
+            `结束：${finishedAt === undefined ? '仍在运行' : new Date(finishedAt).toISOString()}`,
+            `耗时：${elapsedLabel(duration)}`,
+            '',
+            `详情：${jobDetailLabel(job.detail) ?? '没有任务详情。'}`,
+          ].join('\n'),
+          [
+            `Status: ${jobStatusLabel(job.status)}`,
+            `Type: ${job.kind}`,
+            `Job ID: ${job.id}`,
+            `Started: ${new Date(job.startedAt).toISOString()}`,
+            `Ended: ${finishedAt === undefined ? 'still running' : new Date(finishedAt).toISOString()}`,
+            `Duration: ${elapsedLabel(duration)}`,
+            '',
+            `Details: ${jobDetailLabel(job.detail) ?? 'No job details.'}`,
+          ].join('\n'),
+        ),
+        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+      return
+    }
+    if (action?.id !== 'stop') return
+    const confirmed = await nav.confirm(
+      ui(`停止 ${job.label}？`, `Stop ${job.label}?`),
+      '向 Host 发送取消请求；已经结束的任务不会再跑。',
+      '停止任务',
+    )
+    if (!confirmed) return
+    const result = await this.capabilities.managementBridge().jobs.kill(job.id)
+    this.host.notice(jobKillNotice(result), result === 'requested' ? 'success' : 'info')
   }
 
   private async subagents(): Promise<void> {
@@ -2774,16 +2856,26 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
     if (parent === undefined) throw new Error('当前没有打开的父会话')
     this.capabilities.setSubagentCatalogOpen(parent.sessionId, true)
     try {
-      let refresh = true
-      while (true) {
-        const rows = await this.capabilities.subagents(refresh)
-        refresh = false
-        const selected = await this.host.overlays.select({
+      await this.host.overlays.navigate(async (nav) => {
+        let onList = true
+        let rows = await this.capabilities.subagents(true)
+        const onSelect = async (selected: OverlayChoice): Promise<void> => {
+          const row = rows.find(candidate => `child:${candidate.entry.id}` === selected.id)
+          if (row?.address === undefined) return
+          onList = false
+          this.capabilities.openSubagent(row.address)
+          this.host.notice(
+            `已打开子 Agent ${row.entry.id}${row.address.mode === 'continuable' ? '；可直接输入继续，运行时 Ctrl+C 停止' : '；该会话只读'}`,
+            'success',
+          )
+          nav.finish()
+        }
+        const request = (): SelectOverlayRequest => ({
           title: '子 Agent',
-          detail: '查看或继续当前会话创建的子 Agent；运行时可用 Ctrl+C 停止',
-          choices: [
-            { id: '__refresh__', label: '刷新目录', description: '重新读取当前父会话的直接子节点' },
-            ...rows.map(row => row.entry.kind === 'diagnostic'
+          detail: '查看或继续当前会话创建的子 Agent；打开期间自动刷新，运行时可用 Ctrl+C 停止',
+          choices: rows.length === 0
+            ? [{ id: '__empty__', label: '当前没有子 Agent', disabledReason: '等待子 Agent 出现，或 Esc 关闭' }]
+            : rows.map(row => row.entry.kind === 'diagnostic'
               ? {
                 id: `diagnostic:${row.entry.id}`,
                 label: `${row.entry.id} · ${row.entry.reason}`,
@@ -2799,23 +2891,26 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
                   row.durationMs === undefined ? undefined : `${Math.round(row.durationMs / 100) / 10}s`,
                 ].filter(value => value !== undefined).join(' · '),
               }),
-          ],
           options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
         })
-        if (selected === undefined) return
-        if (selected.id === '__refresh__') {
-          refresh = true
-          continue
+        let inflight = false
+        const timer = setInterval(() => {
+          if (!onList || inflight) return
+          inflight = true
+          void this.capabilities.subagents(true).then((next) => {
+            rows = [...next]
+            if (onList) nav.replaceSelectPage(request(), onSelect)
+          }).finally(() => {
+            inflight = false
+          })
+        }, 1_000)
+        timer.unref()
+        try {
+          await nav.selectPage(request(), onSelect)
+        } finally {
+          clearInterval(timer)
         }
-        const row = rows.find(candidate => `child:${candidate.entry.id}` === selected.id)
-        if (row?.address === undefined) return
-        this.capabilities.openSubagent(row.address)
-        this.host.notice(
-          `已打开子 Agent ${row.entry.id}${row.address.mode === 'continuable' ? '；可直接输入继续，运行时 Ctrl+C 停止' : '；该会话只读'}`,
-          'success',
-        )
-        return
-      }
+      })
     } finally {
       this.capabilities.setSubagentCatalogOpen(parent.sessionId, false)
     }

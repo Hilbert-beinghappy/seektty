@@ -318,6 +318,9 @@ export interface TuiManagementBridge {
     search(query: string, signal?: AbortSignal): Promise<readonly TuiMarketplaceCandidate[]>
     inspect(spec: string, signal?: AbortSignal): Promise<TuiMarketplaceCandidate>
   }
+  readonly jobs: {
+    kill(id: string): Promise<'requested' | 'already-finished'>
+  }
 }
 
 /** Context references handed to a controlled child-process restart. */

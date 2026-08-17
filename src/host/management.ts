@@ -25,6 +25,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
+import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
@@ -374,6 +375,9 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
         const sources = sourceSnapshot().sources
         return marketplace.inspect(spec, sources, signal)
       },
+    },
+    jobs: {
+      kill: id => Promise.resolve(killHostJob(ctx.get('jobs') as HostJobRegistry | undefined, id)),
     },
   }
 }

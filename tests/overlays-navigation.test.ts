@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
-import { OverlayQueue } from '../src/client/overlays.ts'
+import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
 
 const ESCAPE = '\u001B'
 const ENTER = '\r'
@@ -100,5 +100,29 @@ describe('overlay navigation', () => {
 
     await expect(session).resolves.toBeUndefined()
     expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
+  it('replaces the current select page without closing the overlay', async () => {
+    const harness = overlayHarness()
+    let navigation: OverlayNavigation | undefined
+    const session = harness.overlays.navigate(async (nav) => {
+      navigation = nav
+      await nav.selectPage({
+        title: 'jobs snapshot',
+        choices: [{ id: 'old', label: 'stale job' }],
+      }, () => undefined)
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('stale job')
+    })
+    navigation?.replaceSelectPage({
+      title: 'jobs snapshot',
+      choices: [{ id: 'new', label: 'fresh job' }],
+    }, () => undefined)
+    expect(plain(harness.component().render(80))).toContain('fresh job')
+    expect(plain(harness.component().render(80))).not.toContain('stale job')
+    expect(harness.hide).not.toHaveBeenCalled()
+    harness.component().handleInput(ESCAPE)
+    await expect(session).resolves.toBeUndefined()
   })
 })
