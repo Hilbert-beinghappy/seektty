@@ -637,7 +637,7 @@ describe('conversation viewport', () => {
     vi.stubEnv('COLORTERM', 'truecolor')
     const highlighter = vi.fn((code: string, _language?: string) => code.split('\n'))
     setCodeHighlighter(highlighter)
-    const transcript = new Transcript(() => 24)
+    const transcript = new Transcript(() => 40)
     transcript.cycleToolVisibility()
     transcript.update(snapshot([
       tool(

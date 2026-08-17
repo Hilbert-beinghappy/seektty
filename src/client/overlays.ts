@@ -19,6 +19,41 @@ import {
 } from '@mariozechner/pi-tui'
 import { translateUiText } from './locale.ts'
 import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
+import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
+
+let dangerConfirmDefault: TuiDangerConfirmDefault = 'cancel'
+
+/**
+ * Apply the Settings-owned default focus for dangerous confirmations.
+ * @param value - cancel keeps Enter from executing the action.
+ */
+export function setDangerConfirmDefault(value: TuiDangerConfirmDefault): void {
+  dangerConfirmDefault = value
+}
+
+/**
+ * Ordered confirm choices with the configured default already selected.
+ * @param confirmLabel - affirmative action label.
+ */
+export function dangerConfirmChoices(confirmLabel: string): {
+  readonly choices: readonly OverlayChoice[]
+  readonly initialChoiceId: TuiDangerConfirmDefault
+} {
+  const confirm: OverlayChoice = {
+    id: 'confirm',
+    label: confirmLabel,
+    description: '我已理解上述影响',
+  }
+  const cancel: OverlayChoice = {
+    id: 'cancel',
+    label: '取消',
+    description: '保持当前状态',
+  }
+  return {
+    choices: dangerConfirmDefault === 'cancel' ? [cancel, confirm] : [confirm, cancel],
+    initialChoiceId: dangerConfirmDefault,
+  }
+}
 
 /** One row in a searchable terminal selector. */
 export interface OverlayChoice {
@@ -649,14 +684,13 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   }
 
   async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+    const { choices, initialChoiceId } = dangerConfirmChoices(confirmLabel)
     const selected = await this.select({
       title,
       detail,
       searchable: false,
-      choices: [
-        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
-        { id: 'cancel', label: '取消', description: '保持当前状态' },
-      ],
+      choices,
+      initialChoiceId,
       footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
@@ -904,14 +938,13 @@ export class OverlayQueue implements OverlayPrompts {
    * @returns true only when the affirmative action was selected.
    */
   async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+    const { choices, initialChoiceId } = dangerConfirmChoices(confirmLabel)
     const selected = await this.select({
       title,
       detail,
       searchable: false,
-      choices: [
-        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
-        { id: 'cancel', label: '取消', description: '保持当前状态' },
-      ],
+      choices,
+      initialChoiceId,
       footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })

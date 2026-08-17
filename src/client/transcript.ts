@@ -53,6 +53,7 @@ import {
 } from './theme.ts'
 import { syntaxLanguageForPath } from './syntax-highlighter.ts'
 import { foldLineBlock } from './tool-output-limit.ts'
+import { unifiedHunks } from './line-diff.ts'
 import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 
 const PULSE_FRAME_MS = 160
@@ -64,6 +65,7 @@ interface TranscriptPreferences {
   readonly tools: ToolVisibility
   readonly reasoning: boolean
   readonly toolOutputLineLimit: number
+  readonly diffContextLines: number
   readonly expandedTools: ReadonlySet<string>
   readonly collapsedTools: ReadonlySet<string>
 }
@@ -391,12 +393,7 @@ function prettyArgs(argsRaw: string): string {
   try { return jsonText(JSON.parse(argsRaw)) } catch { return argsRaw }
 }
 
-function contentLines(text: string): string[] {
-  if (text === '') return []
-  return (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
-}
-
-function diffText(value: unknown): string {
+function diffText(value: unknown, context = DEFAULT_TUI_BEHAVIOR.diffContextLines): string {
   if (!Array.isArray(value) || value.length === 0) return jsonText(value)
   const rows: string[] = []
   const paths = new Set<string>()
@@ -412,15 +409,11 @@ function diffText(value: unknown): string {
     rows.push(`diff -- ${path}`)
     rows.push(oldText === null ? '--- /dev/null' : `--- a/${path}`)
     rows.push(`+++ b/${path}`)
-    if (oldText !== null) {
-      for (const line of contentLines(oldText)) {
-        rows.push(`-${line}`)
-        removed += 1
-      }
-    }
-    for (const line of contentLines(newText)) {
-      rows.push(`+${line}`)
-      added += 1
+    const hunks = unifiedHunks(oldText, newText, context)
+    for (const line of hunks) {
+      if (line.startsWith('+') && !line.startsWith('+++')) added += 1
+      if (line.startsWith('-') && !line.startsWith('---')) removed += 1
+      rows.push(line)
     }
   }
   const visible = rows.length <= 80
@@ -553,14 +546,14 @@ function readInvocationFallback(node: ToolResultNode): ToolDetail | undefined {
   return location === undefined ? undefined : invocationCode('read', { file_path: location.path })
 }
 
-function settledInvocationDetails(node: ToolResultNode): ToolDetail[] {
+function settledInvocationDetails(node: ToolResultNode, context: number): ToolDetail[] {
   const call = node.callView
   const details: ToolDetail[] = []
   if (call?.card === 'terminal') {
     const command = terminalCommandDetail(call)
     if (command !== undefined) details.push(command)
   } else if (call?.card === 'diff') {
-    details.push({ kind: 'code', text: diffText(call.diffs), language: 'diff' })
+    details.push({ kind: 'code', text: diffText(call.diffs, context), language: 'diff' })
   } else if (node.call !== null) {
     details.push(toolInvocationDetail(node.call.name, node.call.argsRaw))
   } else if (call?.card === 'generic' && call.rawInput !== undefined) {
@@ -571,9 +564,9 @@ function settledInvocationDetails(node: ToolResultNode): ToolDetail[] {
   return details
 }
 
-function viewDetails(node: ToolResultNode): ToolDetail[] {
+function viewDetails(node: ToolResultNode, context: number): ToolDetail[] {
   const result = node.resultView
-  const details = settledInvocationDetails(node)
+  const details = settledInvocationDetails(node, context)
   if (result?.card === 'terminal') {
     if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
     if (result.exitCode !== undefined) details.push({
@@ -585,7 +578,7 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
       text: ui(`信号 ${result.signal}`, `Signal ${result.signal}`),
     })
   } else if (result?.card === 'diff') {
-    details.push({ kind: 'code', text: diffText(result.diffs), language: 'diff' })
+    details.push({ kind: 'code', text: diffText(result.diffs, context), language: 'diff' })
   } else if (result?.card === 'generic' && result.content !== undefined) {
     details.push(...contentDetails(result.content))
   } else if (result?.card === 'read') {
@@ -648,13 +641,13 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
   return details.filter(value => value.text !== '')
 }
 
-function runningViewDetails(node: RunningToolCall): ToolDetail[] {
+function runningViewDetails(node: RunningToolCall, context: number): ToolDetail[] {
   const view = node.callView
   if (view?.card === 'terminal') {
     const command = terminalCommandDetail(view)
     return command === undefined ? [] : [command]
   }
-  if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs), language: 'diff' }]
+  if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs, context), language: 'diff' }]
   return [toolInvocationDetail(node.name, node.argsRaw)]
 }
 
@@ -702,7 +695,7 @@ function toolBlockRows(
   if ('kind' in block) {
     const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
     const failed = settledToolFailed(block)
-    const details = expanded ? viewDetails(block) : settledInvocationDetails(block)
+    const details = expanded ? viewDetails(block, preferences.diffContextLines) : settledInvocationDetails(block, preferences.diffContextLines)
     return [
       {
         format: 'plain',
@@ -713,7 +706,7 @@ function toolBlockRows(
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
   }
-  const details = runningViewDetails(block)
+  const details = runningViewDetails(block, preferences.diffContextLines)
   return [
     {
       format: 'plain',
@@ -1109,6 +1102,7 @@ export class Transcript implements Component, Focusable {
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
   private toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit
+  private diffContextLines = DEFAULT_TUI_BEHAVIOR.diffContextLines
   private emptyState = true
   private hasMore = false
   private loadingOlder = false
@@ -1166,10 +1160,12 @@ export class Transcript implements Component, Focusable {
     tools: ToolVisibility,
     reasoning: boolean,
     toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit,
+    diffContextLines = DEFAULT_TUI_BEHAVIOR.diffContextLines,
   ): void {
     this.toolVisibility = tools
     this.reasoningVisible = reasoning
     this.toolOutputLineLimit = toolOutputLineLimit
+    this.diffContextLines = diffContextLines
   }
 
   /** Follow new transcript output after the user submits from a historical viewport. */
@@ -1229,6 +1225,7 @@ export class Transcript implements Component, Focusable {
       tools: this.toolVisibility,
       reasoning: this.reasoningVisible,
       toolOutputLineLimit: this.toolOutputLineLimit,
+      diffContextLines: this.diffContextLines,
       expandedTools: this.expandedTools,
       collapsedTools: this.collapsedTools,
     }
@@ -1634,6 +1631,7 @@ export class Transcript implements Component, Focusable {
       tools: this.toolVisibility,
       reasoning: this.reasoningVisible,
       toolOutputLineLimit: this.toolOutputLineLimit,
+      diffContextLines: this.diffContextLines,
       expandedTools: this.expandedTools,
       collapsedTools: this.collapsedTools,
     }, key)

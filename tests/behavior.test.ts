@@ -42,6 +42,8 @@ describe('seektty-behavior settings', () => {
       statusElapsed: false,
       clipboardFallback: 'osc52',
       toolOutputLineLimit: 200,
+      diffContextLines: 3,
+      dangerConfirmDefault: 'cancel',
       keyBindings: {},
     })
     expect(normalizeBehavior({
@@ -55,6 +57,13 @@ describe('seektty-behavior settings', () => {
       toolCards: 'collapsed',
       composerHistoryLimit: 10_000,
       clipboardFallback: 'auto',
+    })
+    expect(normalizeBehavior({
+      diffContextLines: 1,
+      dangerConfirmDefault: 'confirm',
+    })).toMatchObject({
+      diffContextLines: 1,
+      dangerConfirmDefault: 'confirm',
     })
   })
 

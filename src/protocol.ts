@@ -114,6 +114,9 @@ export type TuiToolCardDisplay = 'collapsed' | 'expanded' | 'hidden'
 /** How `/copy` writes the system clipboard after OSC 52. */
 export type TuiClipboardFallback = 'auto' | 'osc52' | 'off'
 
+/** Which confirm-dialog choice is focused when a dangerous action opens. */
+export type TuiDangerConfirmDefault = 'cancel' | 'confirm'
+
 /** Complete behavior value owned by the SeekTTY Settings namespace. */
 export interface TuiBehaviorSettings {
   readonly toolCards: TuiToolCardDisplay
@@ -124,6 +127,8 @@ export interface TuiBehaviorSettings {
   readonly statusElapsed: boolean
   readonly clipboardFallback: TuiClipboardFallback
   readonly toolOutputLineLimit: number
+  readonly diffContextLines: number
+  readonly dangerConfirmDefault: TuiDangerConfirmDefault
   readonly keyBindings: Readonly<Record<string, string>>
 }
 
@@ -137,6 +142,8 @@ export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
   statusElapsed: true,
   clipboardFallback: 'auto',
   toolOutputLineLimit: 200,
+  diffContextLines: 3,
+  dangerConfirmDefault: 'cancel',
   keyBindings: Object.freeze({}),
 })
 
@@ -145,6 +152,9 @@ export const MAX_COMPOSER_HISTORY = 10_000
 
 /** Upper bound for one expanded tool-output block; 0 disables folding. */
 export const MAX_TOOL_OUTPUT_LINE_LIMIT = 10_000
+
+/** Upper bound for unified-diff context lines around each change. */
+export const MAX_DIFF_CONTEXT_LINES = 100
 
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {

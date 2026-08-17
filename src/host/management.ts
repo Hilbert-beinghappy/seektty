@@ -20,6 +20,7 @@ import {
   MAX_CUSTOM_THEMES,
   MAX_TEXTMATE_RULES,
   MAX_TOOL_OUTPUT_LINE_LIMIT,
+  MAX_DIFF_CONTEXT_LINES,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
@@ -133,6 +134,12 @@ const BehaviorSettingsSchema = z.object({
   toolOutputLineLimit: z.natural().max(MAX_TOOL_OUTPUT_LINE_LIMIT)
     .default(DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit)
     .description('展开态工具输出单块行数上限；0 表示不折叠。'),
+  diffContextLines: z.natural().max(MAX_DIFF_CONTEXT_LINES)
+    .default(DEFAULT_TUI_BEHAVIOR.diffContextLines)
+    .description('Diff 上下文行数。'),
+  dangerConfirmDefault: z.union(['cancel', 'confirm'])
+    .default(DEFAULT_TUI_BEHAVIOR.dangerConfirmDefault)
+    .description('危险确认默认焦点；cancel 表示回车不执行。'),
   keyBindings: z.dict(z.string()).default({})
     .description('覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。'),
 })

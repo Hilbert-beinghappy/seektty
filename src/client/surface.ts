@@ -38,7 +38,7 @@ import {
   ui,
   uiLocale,
 } from './locale.ts'
-import { OverlayQueue } from './overlays.ts'
+import { OverlayQueue, setDangerConfirmDefault } from './overlays.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
@@ -141,6 +141,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
     const initialBehavior = behaviorFromSettings(behaviorSettings(settingsDocuments))
     applyKeyBindingOverrides(initialBehavior.keyBindings)
+    setDangerConfirmDefault(initialBehavior.dangerConfirmDefault)
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
@@ -175,6 +176,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       initialBehavior.toolCards,
       initialBehavior.showReasoning,
       initialBehavior.toolOutputLineLimit,
+      initialBehavior.diffContextLines,
     )
     let syntax: SyntaxHighlighter | undefined
     disposeConstructedSyntax = () => { syntax?.dispose() }
@@ -453,6 +455,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       applyBehavior: (behavior) => {
         applyKeyBindingOverrides(behavior.keyBindings)
+        setDangerConfirmDefault(behavior.dangerConfirmDefault)
+        transcript.applyPresentationDefaults(
+          behavior.toolCards,
+          behavior.showReasoning,
+          behavior.toolOutputLineLimit,
+          behavior.diffContextLines,
+        )
+        transcript.refreshPresentation()
+        tui.invalidate()
+        tui.requestRender(true)
       },
       setEditor: (text) => {
         editor.setText(escapeTerminalText(text))
