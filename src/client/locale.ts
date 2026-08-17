@@ -104,6 +104,7 @@ const ENGLISH_TEXT = new Map<string, string>([
   ['已清空输入草稿', 'Draft cleared'],
   ['已返回输入区', 'Returned to the composer'],
   ['对话浏览 · Tab/Escape 返回输入', 'Transcript navigation · Tab/Escape returns to the composer'],
+  ['已取消查找', 'Search cancelled'],
   ['没有可跳转的用户轮次', 'No user turn to jump to'],
   ['命令面板', 'Command palette'],
   ['选择要使用的功能', 'Choose a command'],
@@ -813,6 +814,9 @@ const ENGLISH_PATTERNS: readonly {
   { pattern: /^阻塞原因：(.+)$/su, replace: value => `Blocked by: ${value}` },
   { pattern: /^(\d+-\d+\/\d+) 行 · ↑↓ 滚动 · PgUp\/PgDn 翻页 · Home\/End · Enter\/q 关闭 · Esc 返回$/u, replace: value => `${value} lines · ↑↓ scroll · PgUp/PgDn page · Home/End · Enter/q close · Esc back` },
   { pattern: /^生成中 · (.+) · Ctrl\+C 停止$/u, replace: value => `Generating · ${value} · Ctrl+C to stop` },
+  { pattern: /^查找 (.+) · (\d+) 处 · Enter 确认 · Esc 取消$/u, replace: (query, count) => `Find ${query} · ${count} match(es) · Enter confirm · Esc cancel` },
+  { pattern: /^查找 (.+) · (\d+)\/(\d+) · n 下一个 · N 上一个 · Esc 取消$/u, replace: (query, current, total) => `Find ${query} · ${current}/${total} · n next · N previous · Esc cancel` },
+  { pattern: /^查找 (.+) · 无匹配 · Esc 取消$/u, replace: query => `Find ${query} · no matches · Esc cancel` },
 ]
 
 function requestedEnvironmentLocale(env: NodeJS.ProcessEnv): LocaleId {

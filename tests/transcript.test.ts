@@ -697,4 +697,25 @@ describe('conversation viewport', () => {
     expect(after).not.toBe(before)
     expect(requestRender).toHaveBeenCalledTimes(2)
   })
+
+  it('searches rendered lines from focus mode and jumps with n/N', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      user('u1', 'alpha unique-token'),
+      assistant('a1', 'beta unique-token gamma'),
+    ]))
+    transcript.render(60)
+    transcript.handleInput('/')
+    for (const character of 'unique-token') transcript.handleInput(character)
+    const composing = stripAnsi(transcript.render(60).join('\n'))
+    expect(composing).toContain('查找 unique-token')
+    transcript.handleInput('\r')
+    transcript.handleInput('n')
+    const jumped = stripAnsi(transcript.render(60).join('\n'))
+    expect(jumped).toMatch(/查找 unique-token · 2\/2/)
+    expect(transcript.cancelSearch()).toBe(true)
+    expect(transcript.cancelSearch()).toBe(false)
+    expect(stripAnsi(transcript.render(60).join('\n'))).not.toContain('查找 unique-token')
+  })
 })

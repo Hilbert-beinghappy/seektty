@@ -34,6 +34,12 @@ import type {
 import { producedForClosing } from './compat/deliverables-rc6.ts'
 import { translateUiText, ui } from './locale.ts'
 import {
+  findLineMatches,
+  highlightQuery,
+  nextMatchIndex,
+  scrollOffsetToReveal,
+} from './transcript-search.ts'
+import {
   background,
   color,
   escapeTerminalText,
@@ -1060,6 +1066,8 @@ export class Transcript implements Component, Focusable {
   private turnCursor: number | undefined
   private pulseFrame = 0
   private pulseTimer: ReturnType<typeof setInterval> | undefined
+  private lastFullLines: readonly string[] = []
+  private search: { query: string; composing: boolean; matchIndex: number } | undefined
   focused = false
 
   /**
@@ -1216,8 +1224,14 @@ export class Transcript implements Component, Focusable {
   render(width: number): string[] {
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
-    const withInset = (values: readonly string[]): string[] => values.map(line =>
-      line === '' ? '' : `${' '.repeat(inset)}${line}`)
+    const totalRows = Math.max(1, Math.floor(this.viewportRows()))
+    const withInset = (values: readonly string[]): string[] => {
+      const body = values.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
+      if (this.search === undefined) return body
+      const label = `${' '.repeat(inset)}${color.accent(this.searchLabel())}`
+      if (!Number.isFinite(totalRows)) return [...body, label]
+      return [...body.slice(0, Math.max(0, totalRows - 1)), label]
+    }
     const olderMarker = (count: number): string => {
       if (this.loadingOlder) return color.muted(ui('↑ 正在加载更早内容…', '↑ Loading older content…'))
       const hint = this.focused ? 'PgUp/Home' : ui('滚轮上翻', 'Scroll up')
@@ -1246,9 +1260,25 @@ export class Transcript implements Component, Focusable {
         lines[index] = `${' '.repeat(Math.max(0, Math.floor((contentWidth - visibleWidth(content)) / 2)))}${content}`
       }
     }
+    this.lastFullLines = [...lines]
     this.renderedLineCount = lines.length
     this.turnAnchors = anchors
-    const rows = Math.max(1, Math.floor(this.viewportRows()))
+    if (this.search !== undefined) {
+      const matches = findLineMatches(lines, this.search.query)
+      if (this.search.matchIndex >= matches.length) this.search.matchIndex = 0
+      const current = matches[this.search.matchIndex]
+      const query = this.search.query
+      if (query.trim() !== '') {
+        for (const [index, line] of lines.entries()) {
+          if (!matches.includes(index)) continue
+          lines[index] = highlightQuery(line, query, matched =>
+            index === current ? `\u001B[7m${matched}\u001B[0m` : color.accent(matched))
+        }
+      }
+    }
+    const rows = this.search !== undefined && Number.isFinite(totalRows)
+      ? Math.max(1, totalRows - 1)
+      : totalRows
     if (!Number.isFinite(rows)) {
       this.scrollOffset = 0
       return withInset(lines)
@@ -1308,6 +1338,15 @@ export class Transcript implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    if (this.search !== undefined) {
+      this.handleSearchInput(data)
+      return
+    }
+    if (data === '/') {
+      this.search = { query: '', composing: true, matchIndex: 0 }
+      this.requestRender()
+      return
+    }
     this.turnCursor = undefined
     const rows = Math.max(1, Math.floor(this.viewportRows()))
     const maxOffset = Math.max(0, this.renderedLineCount - rows)
@@ -1317,6 +1356,121 @@ export class Transcript implements Component, Focusable {
     else if (matchesKey(data, Key.pageDown)) this.scrollBy(-Math.max(1, rows - 1))
     else if (matchesKey(data, Key.home)) this.scrollBy(maxOffset)
     else if (matchesKey(data, Key.end)) this.scrollBy(-this.scrollOffset)
+  }
+
+  /**
+   * Leave incremental search and restore the ordinary transcript chrome.
+   * @returns true when a search session was closed.
+   */
+  cancelSearch(): boolean {
+    if (this.search === undefined) return false
+    this.search = undefined
+    this.requestRender()
+    return true
+  }
+
+  private searchLabel(): string {
+    const query = this.search?.query ?? ''
+    const matches = findLineMatches(this.lastFullLines, query)
+    if (query.trim() === '') return ui('查找：', 'Find:')
+    if (matches.length === 0) {
+      return ui(`查找 ${query} · 无匹配 · Esc 取消`, `Find ${query} · no matches · Esc cancel`)
+    }
+    if (this.search?.composing === true) {
+      return ui(
+        `查找 ${query} · ${String(matches.length)} 处 · Enter 确认 · Esc 取消`,
+        `Find ${query} · ${String(matches.length)} match(es) · Enter confirm · Esc cancel`,
+      )
+    }
+    const current = Math.min((this.search?.matchIndex ?? 0) + 1, matches.length)
+    return ui(
+      `查找 ${query} · ${String(current)}/${String(matches.length)} · n 下一个 · N 上一个 · Esc 取消`,
+      `Find ${query} · ${String(current)}/${String(matches.length)} · n next · N previous · Esc cancel`,
+    )
+  }
+
+  private handleSearchInput(data: string): void {
+    if (matchesKey(data, Key.escape)) {
+      this.cancelSearch()
+      return
+    }
+    if (matchesKey(data, Key.enter) || data === '\r' || data === '\n') {
+      if ((this.search?.query.trim() ?? '') === '') this.cancelSearch()
+      else {
+        this.search = { ...this.search!, composing: false }
+        this.revealCurrentMatch()
+        this.requestRender()
+      }
+      return
+    }
+    if (data === '\x7f' || data === '\b') {
+      const chars = Array.from(this.search?.query ?? '')
+      chars.pop()
+      this.search = { query: chars.join(''), composing: true, matchIndex: 0 }
+      this.revealCurrentMatch()
+      this.requestRender()
+      return
+    }
+    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)
+      || matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)
+      || matchesKey(data, Key.home) || matchesKey(data, Key.end)) {
+      this.turnCursor = undefined
+      const rows = Math.max(1, Math.floor(this.viewportRows()))
+      const maxOffset = Math.max(0, this.renderedLineCount - rows)
+      if (matchesKey(data, Key.up)) this.scrollBy(1)
+      else if (matchesKey(data, Key.down)) this.scrollBy(-1)
+      else if (matchesKey(data, Key.pageUp)) this.scrollBy(Math.max(1, rows - 1))
+      else if (matchesKey(data, Key.pageDown)) this.scrollBy(-Math.max(1, rows - 1))
+      else if (matchesKey(data, Key.home)) this.scrollBy(maxOffset)
+      else this.scrollBy(-this.scrollOffset)
+      return
+    }
+    if (this.search?.composing === false) {
+      if (data === 'n') {
+        this.stepSearch(1)
+        return
+      }
+      if (data === 'N') {
+        this.stepSearch(-1)
+        return
+      }
+      if (data === '/') {
+        this.search = { query: '', composing: true, matchIndex: 0 }
+        this.requestRender()
+        return
+      }
+    }
+    if (data.includes('\u001B') || [...data].some(character => character < ' ')) return
+    this.search = {
+      query: `${this.search?.query ?? ''}${data}`,
+      composing: true,
+      matchIndex: 0,
+    }
+    this.revealCurrentMatch()
+    this.requestRender()
+  }
+
+  private stepSearch(direction: 1 | -1): void {
+    if (this.search === undefined) return
+    const matches = findLineMatches(this.lastFullLines, this.search.query)
+    const current = matches[this.search.matchIndex] ?? -1
+    const next = nextMatchIndex(matches, current, direction)
+    if (next < 0) return
+    this.search = { ...this.search, matchIndex: Math.max(0, matches.indexOf(next)) }
+    this.revealCurrentMatch()
+    this.requestRender()
+  }
+
+  private revealCurrentMatch(): void {
+    if (this.search === undefined) return
+    const matches = findLineMatches(this.lastFullLines, this.search.query)
+    const lineIndex = matches[this.search.matchIndex]
+    if (lineIndex === undefined) return
+    this.scrollOffset = scrollOffsetToReveal(
+      this.lastFullLines.length,
+      this.viewportRows(),
+      lineIndex,
+    )
   }
 
   /**

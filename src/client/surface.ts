@@ -576,12 +576,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       if (matchesKey(data, Key.tab) && (transcriptFocused || editor.getText() === '')) {
+        transcript.cancelSearch()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
         setNotice(transcriptFocused ? '对话浏览 · Tab/Escape 返回输入' : '已返回输入区', 'info')
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
+        if (transcript.cancelSearch()) {
+          setNotice('已取消查找', 'info')
+          return { consume: true }
+        }
         focusEditor()
         setNotice('已返回输入区', 'info')
         return { consume: true }
