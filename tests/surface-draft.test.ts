@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Key, matchesKey, type TUI } from '@mariozechner/pi-tui'
+import { readFileSync } from 'node:fs'
+import type { TUI } from '@mariozechner/pi-tui'
 import { PromptEditor } from '../src/client/chrome.ts'
 import { clearIdleComposerDraft } from '../src/client/composer-draft.ts'
 
@@ -33,12 +34,13 @@ describe('idle Ctrl+C draft recovery', () => {
 
     const notice = clearIdleComposerDraft(composer, clearAttachments)
 
-    expect(notice).toBe('已清空草稿，按 ↑ 可找回')
+    expect(notice).toBe('已清空输入草稿')
     expect(clearAttachments).toHaveBeenCalledOnce()
     expect(composer.getText()).toBe('')
   })
 
-  it('matches the terminal Ctrl+C chord used by the idle composer path', () => {
-    expect(matchesKey('\u0003', Key.ctrl('c'))).toBe(true)
+  it('wires idle Ctrl+C through the draft helper', () => {
+    const surface = readFileSync(new URL('../src/client/surface.ts', import.meta.url), 'utf8')
+    expect(surface).toContain('clearIdleComposerDraft(editor')
   })
 })

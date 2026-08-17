@@ -1,6 +1,7 @@
 /** Idle composer draft recovery used by the Ctrl+C clear path. */
 
 export const IDLE_DRAFT_CLEARED_NOTICE = '已清空草稿，按 ↑ 可找回'
+export const IDLE_ATTACHMENTS_CLEARED_NOTICE = '已清空输入草稿'
 
 interface ComposerDraftEditor {
   getText(): string
@@ -22,5 +23,5 @@ export function clearIdleComposerDraft(
   if (text !== '') editor.addToHistory(text)
   editor.setText('')
   clearAttachments()
-  return IDLE_DRAFT_CLEARED_NOTICE
+  return text !== '' ? IDLE_DRAFT_CLEARED_NOTICE : IDLE_ATTACHMENTS_CLEARED_NOTICE
 }
