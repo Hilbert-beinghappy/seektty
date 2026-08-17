@@ -10,6 +10,7 @@ import {
   launcherArgs,
   run,
 } from '../src/bin.ts'
+import { LAUNCHER_RESTART_EXIT_CODE } from '../src/launcher-restart.ts'
 
 const temporaryHomes: string[] = []
 
@@ -154,8 +155,6 @@ describe('Windows launcher spawn', () => {
     expect(DSH_SPAWN_OPTIONS).toMatchObject({ stdio: 'inherit', windowsHide: true })
     const source = readFileSync(new URL('../src/bin.ts', import.meta.url), 'utf8')
     expect(source).toContain("from 'cross-spawn'")
-    const startup = readFileSync(new URL('../src/host/startup.ts', import.meta.url), 'utf8')
-    expect(startup).toContain('windowsHide: true')
   })
 })
 
@@ -188,5 +187,71 @@ describe('corrupt Profile manifest', () => {
     writeFileSync(manifest, '{')
     expect(() => installed('tui')).toThrow(manifest)
     expect(() => installed('tui')).toThrow(/删除该文件后 deepseek 会重新初始化 Profile/)
+  })
+})
+
+describe('outer-wait launcher restart', () => {
+  it('respawns dsh from the waiting launcher after a restart exit', () => {
+    const home = temporaryHome()
+    writeProfile(home, 'tui', { seektty: '0.1.0' })
+    const calls: string[][] = []
+    const execute = (_command: string, args: readonly string[]): number => {
+      calls.push([...args])
+      if (args[0] === '--profile' && calls.filter(call => call[0] === '--profile').length === 1) {
+        return LAUNCHER_RESTART_EXIT_CODE
+      }
+      return 0
+    }
+
+    expect(launch([], { DSH_BIN: '/stock/dsh' }, execute, {
+      pid: 4242,
+      consumeRestart: () => ({ profile: 'tui', args: ['--cwd', '/workspace'] }),
+    })).toBe(0)
+    expect(calls).toEqual([
+      ['--profile', 'tui'],
+      ['--profile', 'tui', '--cwd', '/workspace'],
+    ])
+  })
+
+  it('re-runs installed() self-heal and falls back when the new Profile cannot boot', () => {
+    const home = temporaryHome()
+    writeProfile(home, 'tui', { seektty: '0.1.0' })
+    const calls: string[][] = []
+    const notices: unknown[] = []
+    const execute = (_command: string, args: readonly string[]): number => {
+      calls.push([...args])
+      if (args[0] === '--profile' && args[1] === 'tui' && calls.length === 1) return LAUNCHER_RESTART_EXIT_CODE
+      if (args[0] === 'plugin' && args[3] === 'add') return 17
+      return 0
+    }
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      expect(launch([], { DSH_BIN: '/stock/dsh' }, execute, {
+        pid: 4242,
+        consumeRestart: () => ({ profile: 'broken', args: ['--cwd', '/workspace'] }),
+        writeFallbackHandoff: (payload) => {
+          notices.push(payload)
+          return '/tmp/deepseek-handoff-fallback.json'
+        },
+      })).toBe(0)
+      expect(calls[0]).toEqual(['--profile', 'tui'])
+      expect(calls[1]?.slice(0, 4)).toEqual(['plugin', '--profile', 'broken', 'add'])
+      expect(calls.at(-1)).toEqual(['--profile', 'tui'])
+      expect(notices).toHaveLength(1)
+      expect(String((notices[0] as { notice: string }).notice)).toMatch(/broken/)
+      expect(String((notices[0] as { notice: string }).notice)).toMatch(/tui/)
+    } finally {
+      stderr.mockRestore()
+    }
+  })
+
+  it('does not treat Ctrl+C as a restart', () => {
+    const home = temporaryHome()
+    writeProfile(home, 'tui', { seektty: '0.1.0' })
+    const execute = (): number => 130
+    expect(launch([], { DSH_BIN: '/stock/dsh' }, execute, {
+      pid: 4242,
+      consumeRestart: () => ({ profile: 'tui', args: [] }),
+    })).toBe(130)
   })
 })

@@ -1,14 +1,14 @@
 /** TUI command-line provider for the `deepseek` product entry. */
 
-import { spawn } from 'node:child_process'
 import { realpathSync, unlinkSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 import { localeFromEnvironment, setUiLocale, ui } from '../client/locale.ts'
-import { APP_HANDOFF_ENV, consumeAppHandoff, writeAppHandoff } from './app-handoff.ts'
+import { consumeAppHandoff, writeAppHandoff } from './app-handoff.ts'
 import { ProfilePluginManager } from './profile-plugin-manager.ts'
+import { LAUNCHER_RESTART_EXIT_CODE, writeLauncherRestart } from '../launcher-restart.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-startup'
@@ -97,34 +97,22 @@ function dshInstallAnchor(): string {
 
 function restartProvider(ctx: Context): AppRestart {
   return async (request) => {
-    const entry = process.argv[1]
-    if (entry === undefined) throw new Error(ui(
-      '无法定位 dsh 启动文件',
-      'Cannot locate the dsh entry file',
-    ))
     const handoffPath = request.handoff === undefined
       ? undefined
       : writeAppHandoff(request.handoff.channel, request.handoff.payload)
-    const child = spawn(process.execPath, [realpathSync(entry), '--profile', request.profile, ...request.args], {
-      stdio: 'inherit',
-      windowsHide: true,
-      env: {
-        ...process.env,
-        ...(handoffPath === undefined ? {} : { [APP_HANDOFF_ENV]: handoffPath }),
-      },
-    })
     try {
-      await new Promise<void>((resolveSpawn, reject) => {
-        child.once('spawn', resolveSpawn)
-        child.once('error', reject)
+      writeLauncherRestart(process.ppid, {
+        profile: request.profile,
+        args: request.args,
+        ...(handoffPath === undefined ? {} : { handoffPath }),
       })
     } catch (error) {
       if (handoffPath !== undefined) {
-        try { unlinkSync(handoffPath) } catch { /* failed spawn retains no usable handoff owner */ }
+        try { unlinkSync(handoffPath) } catch { /* failed ticket retains no usable handoff owner */ }
       }
       throw error
     }
-    ctx.get('appExit')?.(0)
+    ctx.get('appExit')?.(LAUNCHER_RESTART_EXIT_CODE)
   }
 }
 

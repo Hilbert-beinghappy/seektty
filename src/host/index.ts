@@ -85,7 +85,7 @@ async function run(ctx: Context): Promise<void> {
     })
   } catch (error) {
     internals.stderr.write(`deepseek: ${translateUiText(`重启失败：${error instanceof Error ? error.message : String(error)}`)}\n`)
-    process.exitCode = 1
+    exit(1)
   }
 }
 

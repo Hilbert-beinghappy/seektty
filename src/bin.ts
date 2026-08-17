@@ -3,10 +3,16 @@
 /** Product launcher that provisions and boots the native dsh Profile. */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 import crossSpawn from 'cross-spawn'
+import { APP_HANDOFF_ENV, writeAppHandoff } from './host/app-handoff.ts'
+import {
+  consumeLauncherRestart,
+  LAUNCHER_RESTART_EXIT_CODE,
+  type LauncherRestartRequest,
+} from './launcher-restart.ts'
 
 const PACKAGE_NAME = 'seektty'
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
@@ -25,7 +31,7 @@ export const internals: {
   spawnSync: (
     command: string,
     args: readonly string[],
-    options: typeof DSH_SPAWN_OPTIONS,
+    options: typeof DSH_SPAWN_OPTIONS & { env?: NodeJS.ProcessEnv },
   ) => { error?: Error | null; signal: NodeJS.Signals | null; status: number | null }
 } = {
   spawnSync: (command, args, options) => crossSpawn.sync(command, args, options),
@@ -132,8 +138,12 @@ export function installed(profile: string): boolean {
   return hasDependency(profile, PACKAGE_NAME)
 }
 
-export function run(command: string, args: readonly string[]): number {
-  const result = internals.spawnSync(command, [...args], DSH_SPAWN_OPTIONS)
+export function run(
+  command: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const result = internals.spawnSync(command, [...args], { ...DSH_SPAWN_OPTIONS, env })
   if (result.error != null) throw classifySpawnError(command, result.error)
   if (result.signal === 'SIGINT' || result.signal === 'SIGTERM') return 130
   if (result.signal !== null) {
@@ -145,23 +155,117 @@ export function run(command: string, args: readonly string[]): number {
   return result.status ?? 1
 }
 
+function forwardedCwd(inner: readonly string[]): string {
+  for (let index = 0; index < inner.length; index += 1) {
+    const argument = inner[index]
+    if (argument === '--cwd') {
+      const value = inner[index + 1]
+      if (value !== undefined && value.trim() !== '') return resolve(value)
+    }
+    if (argument?.startsWith('--cwd=') === true) {
+      const value = argument.slice('--cwd='.length)
+      if (value !== '') return resolve(value)
+    }
+  }
+  return resolve(process.cwd())
+}
+
+function forwardedResume(inner: readonly string[]): string | undefined {
+  for (let index = 0; index < inner.length; index += 1) {
+    const argument = inner[index]
+    if (argument === '--resume') {
+      const value = inner[index + 1]
+      if (value !== undefined && !value.startsWith('-') && value.trim() !== '') return value
+      return undefined
+    }
+    if (argument?.startsWith('--resume=') === true) {
+      const value = argument.slice('--resume='.length)
+      if (value !== '') return value
+    }
+  }
+  return undefined
+}
+
+/** Test seams for the outer-wait restart loop. */
+export interface LaunchHooks {
+  readonly pid?: number
+  consumeRestart?(pid: number): LauncherRestartRequest | undefined
+  writeFallbackHandoff?(payload: unknown): string
+}
+
 export function launch(
   args: readonly string[],
   environment: NodeJS.ProcessEnv = process.env,
-  execute: (command: string, args: readonly string[]) => number = run,
+  execute: (command: string, args: readonly string[], env?: NodeJS.ProcessEnv) => number = run,
+  hooks: LaunchHooks = {},
 ): number {
-  const { profile, inner } = launcherArgs(args)
+  let { profile, inner } = launcherArgs(args)
   const dsh = environment.DSH_BIN?.trim() || 'dsh'
-  if (hasDependency(profile, LEGACY_PACKAGE_NAME)) {
-    const status = execute(dsh, ['plugin', '--profile', profile, 'remove', LEGACY_PACKAGE_NAME])
-    if (status !== 0) return status
+  const spec = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || DEFAULT_SPEC
+  const pid = hooks.pid ?? process.pid
+  const consumeRestart = hooks.consumeRestart ?? consumeLauncherRestart
+  const writeFallbackHandoff = hooks.writeFallbackHandoff ?? ((payload: unknown) => writeAppHandoff('seektty-v1', payload))
+  consumeLauncherRestart(pid)
+  let previous: { profile: string; inner: string[] } | undefined
+  let fallingBack = false
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...environment }
+
+  const recover = (failedProfile: string, reason: string): boolean => {
+    if (previous === undefined || fallingBack) return false
+    fallingBack = true
+    const notice = launcherText(
+      `无法启动 Profile ${failedProfile}，已回退到 ${previous.profile}：${reason}`,
+      `Could not start Profile ${failedProfile}; fell back to ${previous.profile}: ${reason}`,
+    )
+    process.stderr.write(`deepseek: ${notice}\n`)
+    profile = previous.profile
+    inner = previous.inner
+    const resume = forwardedResume(inner)
+    try {
+      childEnv[APP_HANDOFF_ENV] = writeFallbackHandoff({
+        profile,
+        cwd: forwardedCwd(inner),
+        attachmentPaths: [],
+        notice,
+        ...(resume === undefined ? {} : { resume }),
+      })
+    } catch { /* stderr already carried the reason */ }
+    return true
   }
-  if (!installed(profile)) {
-    const spec = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || DEFAULT_SPEC
-    const status = execute(dsh, ['plugin', '--profile', profile, 'add', spec])
-    if (status !== 0) return status
+
+  while (true) {
+    try {
+      if (hasDependency(profile, LEGACY_PACKAGE_NAME)) {
+        const status = execute(dsh, ['plugin', '--profile', profile, 'remove', LEGACY_PACKAGE_NAME], childEnv)
+        if (status !== 0) {
+          if (recover(profile, `exit ${status}`)) continue
+          return status
+        }
+      }
+      if (!installed(profile)) {
+        const status = execute(dsh, ['plugin', '--profile', profile, 'add', spec], childEnv)
+        if (status !== 0) {
+          if (recover(profile, `exit ${status}`)) continue
+          return status
+        }
+      }
+      const status = execute(dsh, ['--profile', profile, ...inner], childEnv)
+      if (status === 130) return status
+      if (status !== LAUNCHER_RESTART_EXIT_CODE) return status
+      const ticket = consumeRestart(pid)
+      if (ticket === undefined) return status
+      previous = { profile, inner }
+      fallingBack = false
+      profile = ticket.profile
+      inner = [...ticket.args]
+      if (ticket.handoffPath === undefined) delete childEnv[APP_HANDOFF_ENV]
+      else childEnv[APP_HANDOFF_ENV] = ticket.handoffPath
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      if (recover(profile, reason)) continue
+      throw error
+    }
   }
-  return execute(dsh, ['--profile', profile, ...inner])
 }
 
 function directInvocation(): boolean {
