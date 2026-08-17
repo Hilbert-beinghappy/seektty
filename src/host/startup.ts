@@ -9,6 +9,7 @@ import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 import { localeFromEnvironment, setUiLocale, ui } from '../client/locale.ts'
 import { APP_HANDOFF_ENV, consumeAppHandoff, writeAppHandoff } from './app-handoff.ts'
 import { ProfilePluginManager } from './profile-plugin-manager.ts'
+import { readRestartHandoff, reconcileHandoff } from './restart-handoff.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-startup'
@@ -32,15 +33,6 @@ export interface TuiStartupValues {
   readonly draft?: string
   readonly attachmentPaths?: readonly string[]
   readonly startupNotice?: string
-}
-
-interface TuiRestartHandoff {
-  readonly profile: string
-  readonly cwd: string
-  readonly resume?: string
-  readonly draft?: string
-  readonly attachmentPaths: readonly string[]
-  readonly notice?: string
 }
 
 interface TuiOptions {
@@ -172,28 +164,6 @@ Examples:
 `))
 }
 
-function restartHandoff(value: unknown): TuiRestartHandoff | undefined {
-  if (value === undefined) return undefined
-  if (typeof value !== 'object' || value === null) throw new Error('TUI 重启交接不是对象')
-  const row = value as Record<string, unknown>
-  if (typeof row.profile !== 'string' || typeof row.cwd !== 'string'
-    || !Array.isArray(row.attachmentPaths)
-    || !row.attachmentPaths.every(path => typeof path === 'string')) {
-    throw new Error('TUI 重启交接缺少 Profile、工作区或附件路径')
-  }
-  if (row.attachmentPaths.length > 32) throw new Error('TUI 重启交接附件数量超过限制')
-  if (row.resume !== undefined && typeof row.resume !== 'string') throw new Error('TUI 重启交接会话 id 无效')
-  if (row.draft !== undefined && typeof row.draft !== 'string') throw new Error('TUI 重启交接草稿无效')
-  if (row.notice !== undefined && typeof row.notice !== 'string') throw new Error('TUI 重启交接提示无效')
-  return {
-    profile: row.profile,
-    cwd: resolve(row.cwd),
-    ...(typeof row.resume === 'string' ? { resume: row.resume } : {}),
-    ...(typeof row.draft === 'string' ? { draft: row.draft } : {}),
-    attachmentPaths: row.attachmentPaths,
-    ...(typeof row.notice === 'string' ? { notice: row.notice } : {}),
-  }
-}
 
 /**
  * Parse TUI-owned flags and provide immutable launch values.
@@ -211,7 +181,7 @@ export function apply(ctx: Context): void {
     invokingCwd: process.cwd(),
   }))
   ctx.provide('appRestart', restartProvider(ctx))
-  const handoff = restartHandoff(consumeAppHandoff('seektty-v1'))
+  const pendingHandoff = readRestartHandoff(consumeAppHandoff('seektty-v1'))
   const program = tuiCommand()
   program.action(() => {
     const options = program.opts<TuiOptions>()
@@ -222,9 +192,11 @@ export function apply(ctx: Context): void {
         ? options.resume
         : undefined
     const cwd = resolve(options.cwd ?? process.cwd())
-    if (handoff !== undefined && (handoff.profile !== profile || handoff.cwd !== cwd || handoff.resume !== resume)) {
-      throw new Error('TUI 重启交接与 launcher 参数不一致')
-    }
+    const { handoff, startupNotice } = reconcileHandoff(pendingHandoff, {
+      profile,
+      cwd,
+      ...(resume === undefined ? {} : { resume }),
+    })
     ctx.provide(TUI_STARTUP_SERVICE, {
       profile,
       cwd,
@@ -232,7 +204,7 @@ export function apply(ctx: Context): void {
       ...task !== '' && { task },
       ...(handoff?.draft === undefined ? {} : { draft: handoff.draft }),
       ...(handoff === undefined ? {} : { attachmentPaths: handoff.attachmentPaths }),
-      ...(handoff?.notice === undefined ? {} : { startupNotice: handoff.notice }),
+      ...(startupNotice === undefined ? {} : { startupNotice }),
     } satisfies TuiStartupValues)
   })
   parseCmdline(ctx, program)
