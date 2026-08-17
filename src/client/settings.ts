@@ -203,22 +203,22 @@ export function settingsSectionLabel(namespace: string): string {
   return ui('通用设置', 'General settings')
 }
 
-const FIELD_LABELS: Readonly<Record<string, readonly [zh: string, en: string]>> = {
-  defaultPreset: ['默认 Agent 模式', 'Default Agent preset'],
-  default: ['默认权限', 'Default permission'],
-  theme: ['界面主题', 'Interface theme'],
-  codeTheme: ['代码块主题', 'Code theme'],
-  toolCards: ['工具卡片默认形态', 'Default tool-card shape'],
-  showReasoning: ['推理默认显示', 'Show reasoning by default'],
-  desktopNotifications: ['完成/审批桌面通知', 'Desktop notifications'],
-  followTerminalTitle: ['终端标题跟随', 'Follow the terminal title'],
-  composerHistoryLimit: ['输入历史条数', 'Composer history size'],
-  statusElapsed: ['状态栏实时耗时', 'Live status elapsed time'],
-  clipboardFallback: ['剪贴板回退', 'Clipboard fallback'],
-  toolOutputLineLimit: ['工具输出行数上限', 'Tool output line limit'],
-  diffContextLines: ['Diff 上下文行数', 'Diff context lines'],
-  dangerConfirmDefault: ['危险确认默认焦点', 'Danger confirm default focus'],
-  keyBindings: ['快捷键覆盖', 'Key binding overrides'],
+const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: string }>> = {
+  defaultPreset: { zh: '默认 Agent 模式', en: 'Default Agent preset' },
+  default: { zh: '默认权限', en: 'Default permission' },
+  theme: { zh: '界面主题', en: 'Interface theme' },
+  codeTheme: { zh: '代码块主题', en: 'Code theme' },
+  toolCards: { zh: '工具卡片默认形态', en: 'Default tool-card shape' },
+  showReasoning: { zh: '推理默认显示', en: 'Show reasoning by default' },
+  desktopNotifications: { zh: '完成/审批桌面通知', en: 'Desktop notifications' },
+  followTerminalTitle: { zh: '终端标题跟随', en: 'Follow the terminal title' },
+  composerHistoryLimit: { zh: '输入历史条数', en: 'Composer history size' },
+  statusElapsed: { zh: '状态栏实时耗时', en: 'Live status elapsed time' },
+  clipboardFallback: { zh: '剪贴板回退', en: 'Clipboard fallback' },
+  toolOutputLineLimit: { zh: '工具输出行数上限', en: 'Tool output line limit' },
+  diffContextLines: { zh: 'Diff 上下文行数', en: 'Diff context lines' },
+  dangerConfirmDefault: { zh: '危险确认默认焦点', en: 'Danger confirm default focus' },
+  keyBindings: { zh: '快捷键覆盖', en: 'Key binding overrides' },
 }
 
 /**
@@ -230,7 +230,7 @@ export function settingsFieldLabel(namespace: string, path: readonly string[]): 
   if (path.length === 0) return namespace
   const dotted = path.join('.')
   const named = FIELD_LABELS[`${namespace}.${dotted}`] ?? FIELD_LABELS[dotted]
-  return named === undefined ? dotted : ui(named[0], named[1])
+  return named === undefined ? dotted : ui(named.zh, named.en)
 }
 
 /** One flattened Settings field with its owning namespace. */

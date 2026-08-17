@@ -30,6 +30,7 @@ import {
   launcherPrefersEnglish,
 } from '../dsh-compat.ts'
 import { measureStartup } from '../startup-trace.ts'
+import { ui } from './locale.ts'
 
 const STARTUP_TIMEOUT_MS = 20_000
 
@@ -77,7 +78,10 @@ export function waitForSnapshot<T>(
       if (settled) return
       settled = true
       unsubscribe()
-      reject(new Error(`${label}超时。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek`))
+      reject(new Error(ui(
+        `${label}超时。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek`,
+        `${label} timed out. Next: confirm dsh is on PATH or DSH_BIN, check the Profile, then run deepseek again`,
+      )))
     }, STARTUP_TIMEOUT_MS)
     const registeredUnsubscribe = source.subscribe(() => {
       const snapshot = source.getSnapshot()
@@ -109,11 +113,19 @@ export function selectResumeSession(
         summary !== undefined && !archived.has(summary.id))
       .sort((left, right) => right.updatedAt - left.updatedAt)[0]?.id
     : resume as SessionId
-  if (sessionId === undefined) throw new Error('没有可恢复的会话')
+  if (sessionId === undefined) throw new Error(ui('没有可恢复的会话', 'No session is available to resume'))
   const summary = list.byId[sessionId]
-  if (summary === undefined) throw new Error(`找不到会话 ${JSON.stringify(resume)}`)
+  if (summary === undefined) {
+    throw new Error(ui(
+      `找不到会话 ${JSON.stringify(resume)}`,
+      `Session ${JSON.stringify(resume)} was not found`,
+    ))
+  }
   if (archived.has(sessionId)) {
-    throw new Error(`会话 ${JSON.stringify(resume)} 已归档；当前 Harness 不支持恢复归档会话`)
+    throw new Error(ui(
+      `会话 ${JSON.stringify(resume)} 已归档；当前 Harness 不支持恢复归档会话`,
+      `Session ${JSON.stringify(resume)} is archived; this Harness cannot resume archived sessions`,
+    ))
   }
   return summary
 }
@@ -125,7 +137,7 @@ async function targetSession(ctx: TuiClientContext, options: TuiStartOptions): P
   const workspaceState = await waitForSnapshot(
     ctx.workspaces.list,
     snapshot => snapshot.baselinesReady,
-    '读取工作区与会话',
+    ui('读取工作区与会话', 'Reading workspace and sessions'),
   )
   if (options.resume !== undefined) {
     const summary = selectResumeSession(
@@ -166,7 +178,7 @@ export async function startTuiClient(
     const description = await waitForSnapshot(
       connection.hostDescription,
       snapshot => snapshot !== undefined,
-      '读取 Harness 版本',
+      ui('读取 Harness 版本', 'Reading the Harness version'),
     )
     const mismatch = dshCompatibilityError(
       description?.version,
@@ -183,14 +195,22 @@ export async function startTuiClient(
     const clientCtx = ctx as unknown as TuiClientContext
     const target = await targetSession(clientCtx, options)
     const binding = clientCtx.sessions.binding(target.sessionId)
-    if (binding === undefined) throw new Error(`会话 ${target.sessionId} 未进入 Harness Runtime`)
+    if (binding === undefined) {
+      throw new Error(ui(
+        `会话 ${target.sessionId} 未进入 Harness Runtime`,
+        `Session ${target.sessionId} did not enter the Harness Runtime`,
+      ))
+    }
     const snapshot = await waitForSnapshot(
       binding.session,
       candidate => candidate.openState === 'open' || candidate.openState === 'error',
-      '打开会话',
+      ui('打开会话', 'Opening the session'),
     )
     if (snapshot.openState === 'error') {
-      throw new Error(`打开会话失败：${snapshot.openError?.message ?? '未知错误'}`)
+      throw new Error(ui(
+        `打开会话失败：${snapshot.openError?.message ?? ui('未知错误', 'unknown error')}`,
+        `Failed to open the session: ${snapshot.openError?.message ?? ui('未知错误', 'unknown error')}`,
+      ))
     }
     return {
       ctx: clientCtx,
