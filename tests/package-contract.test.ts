@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, globSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { load } from 'js-yaml'
@@ -70,5 +71,30 @@ describe('out-of-tree Bundle contract', () => {
     expect(candidate.diagnostics).toEqual([
       '安装包声明脚本：build、typecheck、test、test:stock、check',
     ])
+  })
+
+  it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')
+    expect(workflow).toContain('pnpm run check')
+    expect(workflow).toContain('git diff --exit-code lib/')
+  })
+
+  it('tracks every packaged path so GitHub ref installs cannot omit files', () => {
+    const tracked = new Set(
+      execFileSync('git', ['ls-files', '-z'], { cwd: root }).toString().split('\0').filter(Boolean),
+    )
+    const patterns = [
+      ...(manifest.files as string[]),
+      ...Object.values(manifest.bin as Record<string, string>),
+    ]
+    for (const pattern of patterns) {
+      const matches = pattern.includes('*')
+        ? globSync(pattern, { cwd: root })
+        : existsSync(resolve(root, pattern)) ? [pattern] : []
+      expect(matches, pattern).not.toEqual([])
+      for (const file of matches) {
+        expect(tracked.has(file.replaceAll('\\', '/').replace(/^\.\//u, '')), file).toBe(true)
+      }
+    }
   })
 })
