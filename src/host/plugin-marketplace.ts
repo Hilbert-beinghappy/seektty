@@ -3,7 +3,8 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { gunzipSync } from 'node:zlib'
+import { promisify } from 'node:util'
+import { gunzip as gunzipCallback } from 'node:zlib'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { load } from 'js-yaml'
 import type {
@@ -13,6 +14,7 @@ import type {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiMarketplaceProviderRegistry } from './marketplace-provider.ts'
 
+const gunzip = promisify(gunzipCallback)
 const MAX_INDEX_BYTES = 2 * 1024 * 1024
 const MAX_TARBALL_BYTES = 16 * 1024 * 1024
 const MAX_INFLATED_BYTES = 64 * 1024 * 1024
@@ -20,6 +22,8 @@ const MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 const MAX_PATCH_BYTES = 2 * 1024 * 1024
 const MAX_TAR_ENTRIES = 8_192
 const MAX_SEARCH_RESULTS = 12
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000
+const TARBALL_PENDING = '尚未下载 tarball；选中后才会校验 Bundle patch'
 const SENSITIVE_QUERY_KEY = new RegExp(
   String.raw`(?:^|[-_])(?:access[-_]?token|api[-_]?key|auth|authorization|credential|password|secret|signature|token)(?:$|[-_])`,
   'i',
@@ -53,6 +57,7 @@ interface MarketplaceOptions {
   readonly resolveCredential: (ref: string) => Promise<string | undefined>
   readonly fetch?: typeof fetch
   readonly providers?: Pick<TuiMarketplaceProviderRegistry, 'search'>
+  readonly timeoutMs?: number
 }
 
 function sourceType(spec: string): TuiPluginEntry['source'] {
@@ -66,10 +71,15 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function requestInit(headers: Record<string, string>, signal: AbortSignal | undefined): RequestInit {
+function requestInit(
+  headers: Record<string, string>,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+): RequestInit {
+  const timeout = AbortSignal.timeout(timeoutMs)
   return {
     headers,
-    ...(signal === undefined ? {} : { signal }),
+    signal: signal === undefined ? timeout : AbortSignal.any([timeout, signal]),
   }
 }
 
@@ -178,10 +188,10 @@ function paxPath(body: string): string | undefined {
   return found
 }
 
-function tarEntries(compressed: Uint8Array): ReadonlyMap<string, Uint8Array> {
+async function tarEntries(compressed: Uint8Array): Promise<ReadonlyMap<string, Uint8Array>> {
   const gzip = compressed[0] === 0x1f && compressed[1] === 0x8b
   const bytes = gzip
-    ? gunzipSync(compressed, { maxOutputLength: MAX_INFLATED_BYTES })
+    ? await gunzip(compressed, { maxOutputLength: MAX_INFLATED_BYTES })
     : compressed
   if (bytes.byteLength > MAX_INFLATED_BYTES) throw new Error('tarball 解压后超过限制')
   const entries = new Map<string, Uint8Array>()
@@ -258,8 +268,11 @@ function packageCandidate(
   }
 }
 
-function manifestFromTarball(bytes: Uint8Array, facts: Parameters<typeof packageCandidate>[2]): TuiMarketplaceCandidate {
-  const entries = tarEntries(bytes)
+async function manifestFromTarball(
+  bytes: Uint8Array,
+  facts: Parameters<typeof packageCandidate>[2],
+): Promise<TuiMarketplaceCandidate> {
+  const entries = await tarEntries(bytes)
   const manifestBytes = entries.get('package/package.json') ?? entries.get('package.json')
   if (manifestBytes === undefined) throw new Error('tarball 不含 package.json')
   const parsed = parseJson(manifestBytes, 'package.json')
@@ -273,6 +286,34 @@ function manifestFromTarball(bytes: Uint8Array, facts: Parameters<typeof package
     ? undefined
     : entries.get(`package/${normalized}`) ?? entries.get(normalized)
   return packageCandidate(manifest, patchBytes, facts)
+}
+
+function pendingSearchCandidate(facts: {
+  readonly id: string
+  readonly name: string
+  readonly sourceId: string
+  readonly source: TuiPluginEntry['source']
+  readonly spec: string
+  readonly version?: string
+  readonly description?: string
+  readonly publisher?: string
+  readonly immutable: boolean
+}): TuiMarketplaceCandidate {
+  return {
+    id: facts.id,
+    name: facts.name,
+    ...(facts.version === undefined ? {} : { version: facts.version }),
+    ...(facts.description === undefined ? {} : { description: facts.description }),
+    ...(facts.publisher === undefined ? {} : { publisher: facts.publisher }),
+    sourceId: facts.sourceId,
+    source: facts.source,
+    spec: facts.spec,
+    bundle: false,
+    patchValid: false,
+    scripts: [],
+    immutable: facts.immutable,
+    diagnostics: [TARBALL_PENDING],
+  }
 }
 
 function parseNpmSpec(spec: string): { name: string; version?: string } {
@@ -293,26 +334,15 @@ function publisherOf(manifest: PackageManifest): string | undefined {
   return manifest._npmUser?.name ?? manifest.maintainers?.find(row => row.name !== undefined)?.name
 }
 
-async function mapLimited<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = []
-  let cursor = 0
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const index = cursor++
-      if (index >= items.length) return
-      results[index] = await work(items[index] as T)
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return results
-}
-
 /** Marketplace discovery service. It validates package bytes but never installs or executes them. */
 export class PluginMarketplace {
   private readonly cwd: string
   private readonly resolveCredential: MarketplaceOptions['resolveCredential']
   private readonly fetcher: typeof fetch
   private readonly providers: MarketplaceOptions['providers']
+  private readonly timeoutMs: number
+  private readonly searchCache = new Map<string, readonly TuiMarketplaceCandidate[]>()
+  private readonly inspectCache = new Map<string, TuiMarketplaceCandidate>()
 
   /** @param options - workspace base, Host credential resolver, and replaceable fetch seam. */
   constructor(options: MarketplaceOptions) {
@@ -320,6 +350,7 @@ export class PluginMarketplace {
     this.resolveCredential = options.resolveCredential
     this.fetcher = options.fetch ?? fetch
     this.providers = options.providers
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
   }
 
   /**
@@ -337,6 +368,9 @@ export class PluginMarketplace {
     const text = query.trim()
     if (text === '') throw new Error('插件搜索词不能为空')
     const enabled = sources.filter(source => source.enabled)
+    const cacheKey = `search:${text}:${enabled.map(source => source.id).join(',')}`
+    const cached = this.searchCache.get(cacheKey)
+    if (cached !== undefined) return cached
     const rows = await Promise.all(enabled.map((source) => {
       if (source.kind === 'npm') return this.searchNpm(text, source, signal)
       if (source.kind === 'catalog') return this.searchCatalog(text, source, signal)
@@ -344,7 +378,9 @@ export class PluginMarketplace {
     }))
     const deduped = new Map<string, TuiMarketplaceCandidate>()
     for (const candidate of rows.flat()) deduped.set(`${candidate.sourceId}:${candidate.spec}`, candidate)
-    return [...deduped.values()]
+    const result = [...deduped.values()]
+    this.searchCache.set(cacheKey, result)
+    return result
   }
 
   /**
@@ -361,6 +397,18 @@ export class PluginMarketplace {
   ): Promise<TuiMarketplaceCandidate> {
     const value = spec.trim()
     if (value === '') throw new Error('插件 spec 不能为空')
+    const cached = this.inspectCache.get(value)
+    if (cached !== undefined) return cached
+    const candidate = await this.inspectUncached(value, sources, signal)
+    this.inspectCache.set(value, candidate)
+    return candidate
+  }
+
+  private async inspectUncached(
+    value: string,
+    sources: readonly TuiMarketplaceSource[],
+    signal?: AbortSignal,
+  ): Promise<TuiMarketplaceCandidate> {
     assertCredentialFreeUrl(value, '插件 spec')
     const type = sourceType(value)
     if (type === 'git') {
@@ -384,7 +432,7 @@ export class PluginMarketplace {
     if (type === 'local') return this.inspectLocal(value)
     if (type === 'tarball') {
       if (/^https?:/i.test(value)) {
-        const response = await this.fetcher(value, requestInit({}, signal))
+        const response = await this.fetcher(value, requestInit({}, this.timeoutMs, signal))
         return manifestFromTarball(await readBounded(response, MAX_TARBALL_BYTES, '插件 tarball'), {
           id: `direct:${value}`, sourceId: 'direct', source: 'tarball', spec: value, immutable: false,
         })
@@ -414,39 +462,33 @@ export class PluginMarketplace {
     const url = new URL('-/v1/search', source.url.endsWith('/') ? source.url : `${source.url}/`)
     url.searchParams.set('text', `${query} keywords:dsh`)
     url.searchParams.set('size', String(MAX_SEARCH_RESULTS))
-    const response = await this.fetcher(url, requestInit(await this.headers(source, url), signal))
+    const response = await this.fetcher(url, requestInit(await this.headers(source, url), this.timeoutMs, signal))
     const body = parseJson(await readBounded(response, MAX_INDEX_BYTES, `npm Source ${source.label}`), 'npm 搜索响应')
     const objects = typeof body === 'object' && body !== null && Array.isArray((body as { objects?: unknown }).objects)
       ? (body as { objects: unknown[] }).objects
       : []
-    const specs = objects.flatMap((row) => {
+    return objects.flatMap((row): TuiMarketplaceCandidate[] => {
       if (typeof row !== 'object' || row === null) return []
       const pkg = (row as { package?: unknown }).package
       if (typeof pkg !== 'object' || pkg === null) return []
       const name = (pkg as { name?: unknown }).name
+      if (typeof name !== 'string') return []
       const version = (pkg as { version?: unknown }).version
-      return typeof name === 'string'
-        ? [`${name}${typeof version === 'string' ? `@${version}` : ''}`]
-        : []
+      const description = (pkg as { description?: unknown }).description
+      const publisher = (pkg as { publisher?: { username?: string } }).publisher?.username
+      const spec = `${name}${typeof version === 'string' ? `@${version}` : ''}`
+      return [pendingSearchCandidate({
+        id: `${source.id}:${spec}`,
+        name,
+        ...(typeof version === 'string' ? { version } : {}),
+        ...(typeof description === 'string' ? { description } : {}),
+        ...(typeof publisher === 'string' ? { publisher } : {}),
+        sourceId: source.id,
+        source: 'npm',
+        spec,
+        immutable: typeof version === 'string',
+      })]
     }).slice(0, MAX_SEARCH_RESULTS)
-    return mapLimited(specs, 4, async (spec) => {
-      try {
-        return await this.inspectNpm(spec, source, signal)
-      } catch (error) {
-        return {
-          id: `${source.id}:${spec}`,
-          name: parseNpmSpec(spec).name,
-          sourceId: source.id,
-          source: 'npm' as const,
-          spec,
-          bundle: false,
-          patchValid: false,
-          scripts: [],
-          immutable: spec.includes('@'),
-          diagnostics: [`验证失败：${messageOf(error)}`],
-        }
-      }
-    })
   }
 
   private async inspectNpm(
@@ -457,7 +499,7 @@ export class PluginMarketplace {
     const parsed = parseNpmSpec(spec)
     const registry = source.url.endsWith('/') ? source.url : `${source.url}/`
     const metadataUrl = new URL(encodeURIComponent(parsed.name), registry)
-    const response = await this.fetcher(metadataUrl, requestInit(await this.headers(source, metadataUrl), signal))
+    const response = await this.fetcher(metadataUrl, requestInit(await this.headers(source, metadataUrl), this.timeoutMs, signal))
     const metadata = parseJson(await readBounded(response, MAX_INDEX_BYTES, `npm 包 ${parsed.name}`), 'npm 包元数据')
     if (typeof metadata !== 'object' || metadata === null) throw new Error('npm 元数据不是对象')
     const record = metadata as { versions?: Record<string, PackageManifest>; 'dist-tags'?: Record<string, string> }
@@ -469,10 +511,10 @@ export class PluginMarketplace {
     if (typeof tarball !== 'string') throw new Error(`${parsed.name}@${version} 缺少 dist.tarball`)
     const tarballUrl = new URL(tarball)
     if (!['http:', 'https:'].includes(tarballUrl.protocol)) throw new Error('npm dist.tarball 必须使用 HTTP(S)')
-    const tarResponse = await this.fetcher(tarballUrl, requestInit(await this.headers(source, tarballUrl), signal))
+    const tarResponse = await this.fetcher(tarballUrl, requestInit(await this.headers(source, tarballUrl), this.timeoutMs, signal))
     const exactSpec = `${parsed.name}@${version}`
     const publisher = publisherOf(manifest)
-    const candidate = manifestFromTarball(await readBounded(tarResponse, MAX_TARBALL_BYTES, `${exactSpec} tarball`), {
+    const candidate = await manifestFromTarball(await readBounded(tarResponse, MAX_TARBALL_BYTES, `${exactSpec} tarball`), {
       id: `${source.id}:${exactSpec}`,
       sourceId: source.id,
       source: 'npm',
@@ -491,7 +533,7 @@ export class PluginMarketplace {
     }
   }
 
-  private inspectLocal(spec: string): TuiMarketplaceCandidate {
+  private async inspectLocal(spec: string): Promise<TuiMarketplaceCandidate> {
     const fileUrl = spec.startsWith('file://')
     const prefix = /^(?:file:|link:)/.exec(spec)?.[0] ?? ''
     const raw = prefix === '' ? spec : spec.slice(prefix.length)
@@ -500,7 +542,7 @@ export class PluginMarketplace {
     const stat = statSync(path)
     if (stat.isFile()) {
       const finalSpec = fileUrl ? spec : prefix === '' ? path : `${prefix}${path}`
-      return manifestFromTarball(readLocalBounded(path, MAX_TARBALL_BYTES, '本地插件 tarball'), {
+      return await manifestFromTarball(readLocalBounded(path, MAX_TARBALL_BYTES, '本地插件 tarball'), {
         id: `local:${path}`, sourceId: 'local', source: 'tarball', spec: finalSpec, immutable: false,
       })
     }
@@ -537,7 +579,7 @@ export class PluginMarketplace {
     const localPath = source.url.startsWith('file:') ? fileURLToPath(source.url) : resolve(this.cwd, source.url)
     const bytes = /^https?:/i.test(source.url)
       ? await readBounded(
-        await this.fetcher(source.url, requestInit(await this.headers(source, source.url), signal)),
+        await this.fetcher(source.url, requestInit(await this.headers(source, source.url), this.timeoutMs, signal)),
         MAX_INDEX_BYTES,
         `Catalog ${source.label}`,
       )
@@ -562,77 +604,35 @@ export class PluginMarketplace {
         ...(candidate.publisher === undefined ? {} : { publisher: candidate.publisher }),
       }]
     }).slice(0, MAX_SEARCH_RESULTS)
-    return mapLimited(candidates, 4, async (entry) => {
-      const spec = entry.spec
-      try {
-        const candidate = await this.inspect(spec, [source, {
-          id: 'npm', kind: 'npm', label: 'npm Registry', url: 'https://registry.npmjs.org/', enabled: true, builtIn: true,
-        }], signal)
-        return {
-          ...candidate,
-          id: `${source.id}:${candidate.spec}`,
-          sourceId: source.id,
-          ...(candidate.description === undefined && entry.description !== undefined ? { description: entry.description } : {}),
-          ...(candidate.publisher === undefined && entry.publisher !== undefined ? { publisher: entry.publisher } : {}),
-        }
-      } catch (error) {
-        return {
-          id: `${source.id}:${spec}`,
-          name: entry.name,
-          ...(entry.description === undefined ? {} : { description: entry.description }),
-          ...(entry.publisher === undefined ? {} : { publisher: entry.publisher }),
-          sourceId: source.id,
-          source: sourceType(spec),
-          spec,
-          bundle: false,
-          patchValid: false,
-          scripts: [],
-          immutable: false,
-          diagnostics: [`验证失败：${messageOf(error)}`],
-        }
-      }
-    })
+    return candidates.map(entry => pendingSearchCandidate({
+      id: `${source.id}:${entry.spec}`,
+      name: entry.name,
+      sourceId: source.id,
+      source: sourceType(entry.spec),
+      spec: entry.spec,
+      ...(entry.description === undefined ? {} : { description: entry.description }),
+      ...(entry.publisher === undefined ? {} : { publisher: entry.publisher }),
+      immutable: false,
+    }))
   }
 
   private async searchProvider(
     query: string,
     source: TuiMarketplaceSource,
-    sources: readonly TuiMarketplaceSource[],
+    _sources: readonly TuiMarketplaceSource[],
     signal?: AbortSignal,
   ): Promise<readonly TuiMarketplaceCandidate[]> {
     if (this.providers === undefined) throw new Error(`Source Provider ${JSON.stringify(source.kind)} 未装配`)
     const discoveries = await this.providers.search(query, source, signal)
-    return mapLimited(discoveries, 4, async (entry) => {
-      try {
-        const candidate = await this.inspect(entry.spec, sources, signal)
-        return {
-          ...candidate,
-          id: `${source.id}:${candidate.spec}`,
-          sourceId: source.id,
-          ...(entry.name === undefined ? {} : { name: entry.name }),
-          ...(candidate.description === undefined && entry.description !== undefined
-            ? { description: entry.description }
-            : {}),
-          ...(candidate.publisher === undefined && entry.publisher !== undefined
-            ? { publisher: entry.publisher }
-            : {}),
-        }
-      } catch (error) {
-        return {
-          id: `${source.id}:${entry.spec}`,
-          name: entry.name ?? entry.spec,
-          ...(entry.description === undefined ? {} : { description: entry.description }),
-          ...(entry.publisher === undefined ? {} : { publisher: entry.publisher }),
-          sourceId: source.id,
-          source: sourceType(entry.spec),
-          spec: entry.spec,
-          bundle: false,
-          patchValid: false,
-          scripts: [],
-          immutable: false,
-          diagnostics: [`Provider 候选验证失败：${messageOf(error)}`],
-        }
-      }
-    })
+    return discoveries.map(entry => pendingSearchCandidate({
+      id: `${source.id}:${entry.spec}`,
+      name: entry.name ?? entry.spec,
+      sourceId: source.id,
+      source: sourceType(entry.spec),
+      spec: entry.spec,
+      ...(entry.description === undefined ? {} : { description: entry.description }),
+      ...(entry.publisher === undefined ? {} : { publisher: entry.publisher }),
+      immutable: false,
+    }))
   }
 }
