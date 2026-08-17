@@ -46,6 +46,7 @@ import {
   nextDesktopNotify,
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
+import { sessionTerminalTitle } from './terminal-title.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -225,6 +226,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       renderWhileOpen()
     }
 
+    const applyTerminalTitle = (): void => {
+      const snapshot = active?.session.getSnapshot()
+      terminal.setTitle(sessionTerminalTitle({
+        follow: initialBehavior.followTerminalTitle,
+        sessionTitle: active?.summary.displayTitle ?? '',
+        running: snapshot?.running === true,
+        pendingApproval: snapshot?.pending.some(wait => wait.kind === 'approval') === true,
+      }))
+    }
+
     const updateStatus = (): void => {
       if (stopping !== undefined) return
       const snapshot = active?.session.getSnapshot()
@@ -248,6 +259,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         notifySnapshot = { running: false, pending: [] }
         notifyPrimed = false
         status.setDetail(color.warning(translateUiText('未打开会话')))
+        applyTerminalTitle()
         return
       }
       const currentNotify: DesktopNotifySnapshot = {
@@ -295,6 +307,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           .join(' · ') || undefined
         : noticeText(notice.message, notice.tone)
       status.setDetail(secondary)
+      applyTerminalTitle()
     }
 
     const refreshHeader = (forceModel = false): void => {
@@ -673,7 +686,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return { consume: true }
     })
 
-    terminal.setTitle('DeepSeek Harness')
+    applyTerminalTitle()
     tui.start()
     refreshHeader(true)
     refresh()
