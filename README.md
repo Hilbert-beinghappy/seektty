@@ -46,7 +46,7 @@ The current release covers these capabilities:
 | Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, and allow or reject one tool call at a time |
 | Input queue and steering | Queue prompts while the Agent runs, inspect/edit/remove entries, steer one entry or the entire queue into the active turn, and send `/steer` directly |
 | Human interaction | Single choice, multi-select, custom answers, skip, cancel, and plan review; submitting an interaction returns to the latest output while the blocked turn resumes, with `/pending` recovery when retrying is needed |
-| Image attachments | Add PNG, JPEG, GIF, or WebP by path or paste; enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
+| Image attachments | Add PNG, JPEG, GIF, or WebP by path or by pasting a file path or clipboard bitmap (`pngpaste` / `wl-paste` / `xclip` / PowerShell); enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
 | Plan, Goal, Todo, and compaction | Native `/plan`, `/goal`, and `/compact` commands with plan review, goal state, Todo counts, and compaction records in the transcript |
 | Tools and produced files | `◆ action · duration` headers with live elapsed time and connected invocation code, dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted Shell/JSON/Diff views, safe native terminal ANSI, generic fallback cards, produced-file listing, path copy, and confirmed external open |
 | Subagents | Inspect direct children, activity, tree state, token use, and duration; open continuable or read-only sessions and stop an active child turn |

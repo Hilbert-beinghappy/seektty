@@ -1,5 +1,8 @@
 /** Interactive pi-tui lifecycle over the authoritative Harness Client Runtime. */
 
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   Box,
   Key,
@@ -41,6 +44,7 @@ import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } f
 import { Transcript } from './transcript.ts'
 import { formatElapsed } from './elapsed.ts'
 import { writeClipboard } from './clipboard.ts'
+import { captureClipboardImage } from './clipboard-image.ts'
 import {
   desktopNotifyBody,
   desktopNotifySequence,
@@ -554,22 +558,37 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       else void sendPrompt(text)
     }
 
+    const attachPastedImage = (path: string, fallbackText: string): { consume: true } => {
+      void capabilities.addAttachment(path).then((attachment) => {
+        const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
+        setNotice(ui(
+          `已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+          `Attached ${attachment.name} from paste · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+        ), 'success')
+      }, (error: unknown) => {
+        if (fallbackText !== '') editor.insertTextAtCursor(escapeTerminalText(fallbackText))
+        setNotice(ui(
+          `粘贴图片未加入：${capabilityError(error)}${fallbackText === '' ? '' : '；路径已保留为文本'}`,
+          `Pasted image was not attached: ${capabilityError(error)}${fallbackText === '' ? '' : '; the path was kept as text'}`,
+        ), 'warning')
+      })
+      return { consume: true }
+    }
+
     tui.addInputListener((data) => {
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
-        void capabilities.addAttachment(attachmentPath).then((attachment) => {
-          const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
-          setNotice(`已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`, 'success')
-        }, (error: unknown) => {
-          editor.insertTextAtCursor(escapeTerminalText(BRACKETED_PASTE.exec(data)?.[1] ?? attachmentPath))
-          setNotice(`粘贴图片未加入：${capabilityError(error)}；路径已保留为文本`, 'warning')
-        })
-        return { consume: true }
+        return attachPastedImage(attachmentPath, BRACKETED_PASTE.exec(data)?.[1] ?? attachmentPath)
       }
       const paste = BRACKETED_PASTE.exec(data)
       if (!transcriptFocused && paste !== null) {
         const content = paste[1] ?? ''
+        if (content.trim() === '') {
+          const dest = join(tmpdir(), `seektty-paste-${randomUUID()}.png`)
+          const captured = captureClipboardImage({ platform: process.platform, dest })
+          if (captured !== undefined) return attachPastedImage(captured, '')
+        }
         const safeContent = escapeTerminalText(content)
         if (safeContent !== content) {
           return { data: `\u001B[200~${safeContent}\u001B[201~` }
