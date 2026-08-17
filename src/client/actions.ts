@@ -2759,7 +2759,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
         ...snapshot.sources.map(source => ({
           id: `source:${source.id}`,
           label: `${source.enabled ? '● ' : '○ '}${source.label}`,
-          description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ' · 内置' : ''}`,
+          description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ' · 内置' : ''}${source.diagnostic === undefined ? '' : ` · ${source.diagnostic}`}`,
         })),
         { id: '__add__', label: '添加插件目录…' },
       ],
