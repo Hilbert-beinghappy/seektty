@@ -628,6 +628,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           void sendPrompt(action.text)
           return { consume: true }
         }
+        if (action?.kind === 'tool') {
+          refresh()
+          return { consume: true }
+        }
       }
       if (matchesBinding('cyclePermission', data)) {
         void actions.cyclePermission()

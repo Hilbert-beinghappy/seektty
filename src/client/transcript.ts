@@ -64,6 +64,8 @@ interface TranscriptPreferences {
   readonly tools: ToolVisibility
   readonly reasoning: boolean
   readonly toolOutputLineLimit: number
+  readonly expandedTools: ReadonlySet<string>
+  readonly collapsedTools: ReadonlySet<string>
 }
 
 type TranscriptImageAttachment = Extract<AssistantBlock, { kind: 'image' }>['attachment']
@@ -107,12 +109,17 @@ type TranscriptRow = ({
   readonly liveDurationSince?: number
   /** Empty-session starter prompt that Enter can submit while browsing. */
   readonly exampleId?: string
+  /** Tool-card identity for per-card expand in focus mode. */
+  readonly toolKey?: string
 }
 
 /** Result of Enter on the focused transcript row. */
 export type TranscriptFocusAction = {
   readonly kind: 'example'
   readonly text: string
+} | {
+  readonly kind: 'tool'
+  readonly key: string
 }
 
 function thinkingRow(): TranscriptRow {
@@ -669,16 +676,39 @@ function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
   }
 }
 
-function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): TranscriptRow[] {
+function toolCardExpanded(preferences: TranscriptPreferences, key: string | undefined): boolean {
+  if (preferences.tools === 'hidden') return false
+  if (key !== undefined) {
+    if (preferences.expandedTools.has(key)) return true
+    if (preferences.collapsedTools.has(key)) return false
+  }
+  return preferences.tools === 'expanded'
+}
+
+function callKey(block: ToolCallBlock, fallback?: string): string | undefined {
+  if ('callId' in block && typeof block.callId === 'string' && block.callId !== '') return block.callId
+  return fallback
+}
+
+function toolBlockRows(
+  block: ToolCallBlock,
+  preferences: TranscriptPreferences,
+  depth: number,
+  cardKey?: string,
+): TranscriptRow[] {
   const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
+  const key = callKey(block, cardKey)
+  const expanded = toolCardExpanded(preferences, key)
   if ('kind' in block) {
     const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
     const failed = settledToolFailed(block)
-    const details = preferences.tools === 'expanded'
-      ? viewDetails(block)
-      : settledInvocationDetails(block)
+    const details = expanded ? viewDetails(block) : settledInvocationDetails(block)
     return [
-      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}` },
+      {
+        format: 'plain',
+        text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}`,
+        ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
+      },
       ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
@@ -690,6 +720,7 @@ function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences,
       text: `${prefix}${color.accent(toolTitle(block))}`,
       pulse: 'marker',
       liveDurationSince: block.time,
+      ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
     },
     ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
     ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
@@ -1021,7 +1052,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   if (node.kind === 'tool-call') {
     if (preferences.tools === 'hidden') return []
     const data = toolChatData(node.data)
-    return data === undefined ? [] : grouped(toolBlockRows(data.root, preferences, 0))
+    return data === undefined ? [] : grouped(toolBlockRows(data.root, preferences, 0, node.key))
   }
   if (node.kind === 'manual-compaction') return manualCompactionRows(node.data, preferences)
   if (node.kind === 'model-retry') return retryRows(node.data, preferences)
@@ -1090,6 +1121,9 @@ export class Transcript implements Component, Focusable {
   private lastFullLines: readonly string[] = []
   private search: { query: string; composing: boolean; matchIndex: number } | undefined
   private exampleCursor = 0
+  private toolCursor = 0
+  private readonly expandedTools = new Set<string>()
+  private readonly collapsedTools = new Set<string>()
   focused = false
 
   /**
@@ -1184,6 +1218,9 @@ export class Transcript implements Component, Focusable {
       this.pendingImages.clear()
       this.imageComponents.clear()
       this.sessionId = sessionId
+      this.expandedTools.clear()
+      this.collapsedTools.clear()
+      this.toolCursor = 0
     }
     this.imageLoader = imageLoader
     this.hasMore = snapshot.hasMore
@@ -1192,6 +1229,8 @@ export class Transcript implements Component, Focusable {
       tools: this.toolVisibility,
       reasoning: this.reasoningVisible,
       toolOutputLineLimit: this.toolOutputLineLimit,
+      expandedTools: this.expandedTools,
+      collapsedTools: this.collapsedTools,
     }
     const visibleNodes = snapshot.chat.order.flatMap((key) => {
       const node = snapshot.chat.nodes.get(key)
@@ -1208,11 +1247,13 @@ export class Transcript implements Component, Focusable {
       ]))
     }
     if (preferences.tools !== 'hidden' && !visibleNodes.some(node => node.kind === 'tool-call')) {
-      rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0))))
+      rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0, call.callId))))
     }
     this.emptyState = rows.length === 0
     if (this.emptyState) rows.push(...this.emptySessionRows())
     this.replace(rows)
+    const keys = this.toolKeys()
+    if (this.toolCursor >= keys.length) this.toolCursor = Math.max(0, keys.length - 1)
   }
 
   /**
@@ -1220,9 +1261,15 @@ export class Transcript implements Component, Focusable {
    * @returns the prompt to send, or undefined when Enter has no local action.
    */
   activateFocused(): TranscriptFocusAction | undefined {
-    if (!this.emptyState || this.snapshot === undefined) return undefined
-    const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
-    return example === undefined ? undefined : { kind: 'example', text: emptyExampleText(example) }
+    if (this.emptyState && this.snapshot !== undefined) {
+      const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
+      return example === undefined ? undefined : { kind: 'example', text: emptyExampleText(example) }
+    }
+    const key = this.toolKeys()[this.toolCursor]
+    if (key === undefined || this.snapshot === undefined) return undefined
+    this.toggleToolCard(key)
+    this.update(this.snapshot, this.imageLoader)
+    return { kind: 'tool', key }
   }
 
   /**
@@ -1389,6 +1436,18 @@ export class Transcript implements Component, Focusable {
         if (next >= 0 && next < EMPTY_SESSION_EXAMPLES.length) {
           this.exampleCursor = next
           this.replace(this.emptySessionRows())
+          this.requestRender()
+        }
+        return
+      }
+    }
+    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
+      const keys = this.toolKeys()
+      if (keys.length > 0) {
+        const delta = matchesKey(data, Key.up) ? -1 : 1
+        const next = this.toolCursor + delta
+        if (next >= 0 && next < keys.length) {
+          this.toolCursor = next
           this.requestRender()
         }
         return
@@ -1564,6 +1623,27 @@ export class Transcript implements Component, Focusable {
     this.scrollOffset = Math.max(0, this.renderedLineCount - (anchor + rows))
     this.requestRender()
     return true
+  }
+
+  private toolKeys(): readonly string[] {
+    return [...new Set(this.rows.flatMap(row => row.toolKey === undefined ? [] : [row.toolKey]))]
+  }
+
+  private toggleToolCard(key: string): void {
+    const expanded = toolCardExpanded({
+      tools: this.toolVisibility,
+      reasoning: this.reasoningVisible,
+      toolOutputLineLimit: this.toolOutputLineLimit,
+      expandedTools: this.expandedTools,
+      collapsedTools: this.collapsedTools,
+    }, key)
+    if (expanded) {
+      this.expandedTools.delete(key)
+      if (this.toolVisibility === 'expanded') this.collapsedTools.add(key)
+    } else {
+      this.collapsedTools.delete(key)
+      this.expandedTools.add(key)
+    }
   }
 
   private emptySessionRows(): TranscriptRow[] {
