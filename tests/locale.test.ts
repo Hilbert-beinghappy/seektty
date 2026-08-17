@@ -97,6 +97,8 @@ describe('terminal locale preference', () => {
     expect(ui('设置', 'Settings')).toBe('Settings')
     expect(translateUiText('命令面板')).toBe('Command palette')
     expect(translateUiText('队列 3')).toBe('Queue 3')
+    expect(translateUiText('插件 · 立即生效')).toBe('插件 · applies immediately')
+    expect(translateUiText('已回答 2/3 · 当前第 3 题')).toBe('Answered 2/3 · currently question 3')
     expect(translateUiText('provider-authored 中文说明')).toBe('provider-authored 中文说明')
   })
 

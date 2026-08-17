@@ -167,4 +167,20 @@ describe('pending interaction continuation', () => {
       ],
     })
   })
+
+  it('cancels the whole batch when Escape is confirmed', async () => {
+    const wait = questionBatch(2)
+    const select = vi.fn(async (request: { title: string }) => {
+      if (request.title.includes('1/2')) return { id: 'option:选项1', label: '选项1' }
+      if (request.title.includes('2/2')) return undefined
+      return { id: 'cancel', label: '取消全部' }
+    })
+    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, { select })
+
+    actions.syncPending({ pending: [wait] } as unknown as ConversationSnapshot)
+    await vi.waitFor(() => { expect(cancelQuestion).toHaveBeenCalledOnce() })
+
+    expect(cancelQuestion).toHaveBeenCalledWith(wait)
+    expect(answerQuestion).not.toHaveBeenCalled()
+  })
 })

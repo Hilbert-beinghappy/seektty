@@ -676,6 +676,7 @@ const ENGLISH_PATTERNS: readonly {
   readonly pattern: RegExp
   readonly replace: (...groups: string[]) => string
 }[] = [
+  { pattern: /^(.+) · 立即生效$/u, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · applies immediately` },
   { pattern: /^已回答 (\d+)\/(\d+) · 当前第 (\d+) 题$/u, replace: (answered, total, current) => `Answered ${answered}/${total} · currently question ${current}` },
   { pattern: /^(.+) · 需重启$/u, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · restart required` },
   { pattern: /^设置 · (.+)$/u, replace: value => `Settings · ${value}` },
