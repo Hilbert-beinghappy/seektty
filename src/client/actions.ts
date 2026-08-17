@@ -3075,9 +3075,13 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
 
   private async question(wait: PendingWait<'question'>): Promise<void> {
     const answers: QuestionResponsePayload['answer']['answers'] = []
-    for (const [index, question] of wait.payload.questions.entries()) {
+    const questions = wait.payload.questions
+    let index = 0
+    while (index < questions.length) {
+      const question = questions[index]
+      if (question === undefined) break
       const planReview = question.intent?.kind === 'plan-review' ? question.intent : undefined
-      const title = `${planReview === undefined ? question.header ?? '问题' : '计划审查'} · ${index + 1}/${wait.payload.questions.length}`
+      const title = `${planReview === undefined ? question.header ?? '问题' : '计划审查'} · ${index + 1}/${questions.length}`
       const presentation = (option: NonNullable<typeof question.options>[number]): {
         readonly label: string
         readonly description?: string
@@ -3086,6 +3090,9 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
         return option.label === planReview.approve
           ? { label: '批准计划', description: '按此计划继续' }
           : { label: '继续规划', description: '返回并修改计划' }
+      }
+      const escapeAction = async (): Promise<'cancel' | 'skip' | 'continue'> => {
+        return this.confirmQuestionEscape(index, questions.length, answers.length)
       }
       if (question.multiSelect === true) {
         const picked = await this.host.overlays.multiSelect({
@@ -3102,11 +3109,20 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
           options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
         })
         if (picked === undefined) {
-          this.host.transcript.followLatest()
-          await this.capabilities.cancelQuestion(wait)
-          return
+          const decision = await escapeAction()
+          if (decision === 'cancel') {
+            this.host.transcript.followLatest()
+            await this.capabilities.cancelQuestion(wait)
+            return
+          }
+          if (decision === 'skip') {
+            answers.push({ id: question.id, selected: [] })
+            index += 1
+          }
+          continue
         }
         answers.push({ id: question.id, selected: picked.map(option => option.id) })
+        index += 1
         continue
       }
       const choices: OverlayChoice[] = [
@@ -3133,9 +3149,17 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
         options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
       })
       if (picked === undefined) {
-        this.host.transcript.followLatest()
-        await this.capabilities.cancelQuestion(wait)
-        return
+        const decision = await escapeAction()
+        if (decision === 'cancel') {
+          this.host.transcript.followLatest()
+          await this.capabilities.cancelQuestion(wait)
+          return
+        }
+        if (decision === 'skip') {
+          answers.push({ id: question.id, selected: [] })
+          index += 1
+        }
+        continue
       }
       if (picked.id === '__custom__') {
         const custom = await this.host.overlays.input({
@@ -3144,9 +3168,17 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
           options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
         })
         if (custom === undefined) {
-          this.host.transcript.followLatest()
-          await this.capabilities.cancelQuestion(wait)
-          return
+          const decision = await escapeAction()
+          if (decision === 'cancel') {
+            this.host.transcript.followLatest()
+            await this.capabilities.cancelQuestion(wait)
+            return
+          }
+          if (decision === 'skip') {
+            answers.push({ id: question.id, selected: [] })
+            index += 1
+          }
+          continue
         }
         answers.push({ id: question.id, selected: [], custom })
       } else if (picked.id === '__skip__') {
@@ -3154,9 +3186,32 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       } else {
         answers.push({ id: question.id, selected: [picked.id.slice('option:'.length)] })
       }
+      index += 1
     }
     this.host.transcript.followLatest()
     await this.capabilities.answerQuestion(wait, { answers })
+  }
+
+  private async confirmQuestionEscape(
+    index: number,
+    total: number,
+    answered: number,
+  ): Promise<'cancel' | 'skip' | 'continue'> {
+    const selected = await this.host.overlays.select({
+      title: '取消这批问题？',
+      detail: `已回答 ${String(answered)}/${String(total)} · 当前第 ${String(index + 1)} 题`,
+      searchable: false,
+      choices: [
+        { id: 'continue', label: '继续作答', description: '回到当前问题' },
+        { id: 'skip', label: '仅跳过本题', description: '提交空选择并进入下一题' },
+        { id: 'cancel', label: '取消全部', description: '已答内容作废' },
+      ],
+      footer: 'Enter 确认 · Esc 继续作答',
+      options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
+    })
+    if (selected?.id === 'skip') return 'skip'
+    if (selected?.id === 'cancel') return 'cancel'
+    return 'continue'
   }
 }
 
