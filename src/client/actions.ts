@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { lastFencedCode } from './copy-content.ts'
+import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
 import type {
   TuiMarketplaceCandidate,
   TuiMarketplaceSource,
@@ -492,7 +493,7 @@ export class TuiActions {
 
   private async sessions(query: string): Promise<void> {
     const current = this.capabilities.active()?.sessionId
-    const rows = this.capabilities.listSessions()
+    const rows = sortSessionsByUpdatedAt(this.capabilities.listSessions())
     if (rows.length === 0) throw new Error('没有可恢复的会话')
     const hits = query === ''
       ? undefined
@@ -501,7 +502,7 @@ export class TuiActions {
       ? rows.map(row => ({
         id: row.id,
         label: `${row.id === current ? '● ' : ''}${row.displayTitle}`,
-        description: `${row.cwd ?? '无工作区'} · ${row.running ? '运行中' : row.pendingInteraction ?? '空闲'}`,
+        description: `${row.cwd ?? '无工作区'} · ${relativeTime(row.updatedAt)} · ${row.running ? '运行中' : row.pendingInteraction ?? '空闲'}`,
       }))
       : hits.items.map((hit) => {
         const row = rows.find(candidate => candidate.id === hit.sessionId)
