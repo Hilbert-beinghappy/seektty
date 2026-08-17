@@ -25,6 +25,7 @@ import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type
 import { lastFencedCode } from './copy-content.ts'
 import { formatByteSize } from './byte-size.ts'
 import { helpSectionChoices, helpSectionText, type HelpSectionId } from './help.ts'
+import { pluginFailureDetail } from './error-advice.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
@@ -2429,7 +2430,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
 
   private async pluginOperation(label: string, result: TuiPluginOperation): Promise<void> {
     if (result.exitCode !== 0) {
-      const detail = result.stderr.trim() || result.stdout.trim() || '无 pnpm 输出'
+      const detail = pluginFailureDetail(result)
       throw new Error(`${label} 失败（exit ${result.exitCode}）：${detail.slice(-1200)}`)
     }
     const warnings = result.warnings.length === 0 ? '' : `；${result.warnings.join('；')}`

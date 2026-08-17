@@ -42,6 +42,7 @@ import type { TuiClientContext } from './context.ts'
 import { copyTargets } from './copy-content.ts'
 import { conversationMarkdown } from './conversation-markdown.ts'
 import { flattenProducedFiles, groupProducedFiles } from './produced-files.ts'
+import { explainFailure } from './error-advice.ts'
 import { ui } from './locale.ts'
 
 /** A command shown by the terminal's merged slash directory. */
@@ -1553,5 +1554,5 @@ export class HarnessTuiCapabilities {
  * @returns a safe user-facing failure message.
  */
 export function capabilityError(error: unknown): string {
-  return messageOf(error)
+  return explainFailure(messageOf(error))
 }

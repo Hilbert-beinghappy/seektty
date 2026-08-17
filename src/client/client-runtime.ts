@@ -70,7 +70,7 @@ export function waitForSnapshot<T>(
       if (settled) return
       settled = true
       unsubscribe()
-      reject(new Error(`${label}超时，请运行 /doctor 检查 Harness 状态`))
+      reject(new Error(`${label}超时。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek`))
     }, STARTUP_TIMEOUT_MS)
     const registeredUnsubscribe = source.subscribe(() => {
       const snapshot = source.getSnapshot()
