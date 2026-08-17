@@ -72,7 +72,7 @@ pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
-On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
+`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.6`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
 
 ```sh
 deepseek "check this project"

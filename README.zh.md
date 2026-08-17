@@ -72,7 +72,7 @@ pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
-`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
+`deepseek` 需要 PATH 上的 DeepSeek Harness（`dsh`），或用 `DSH_BIN` 指向可执行文件（`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.6`）。`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
 
 ```sh
 deepseek "检查这个项目"

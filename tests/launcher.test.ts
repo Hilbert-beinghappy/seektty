@@ -1,8 +1,15 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installed, launch, launcherArgs, DSH_SPAWN_OPTIONS } from '../src/bin.ts'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  DSH_SPAWN_OPTIONS,
+  installed,
+  internals,
+  launch,
+  launcherArgs,
+  run,
+} from '../src/bin.ts'
 
 const temporaryHomes: string[] = []
 
@@ -23,7 +30,17 @@ function writeProfile(home: string, profile: string, dependencies: Record<string
   }))
 }
 
+const defaultSpawnSync = internals.spawnSync
+
+beforeEach(() => {
+  vi.stubEnv('LANG', 'zh_CN.UTF-8')
+  vi.stubEnv('LC_ALL', '')
+  vi.stubEnv('LC_MESSAGES', '')
+  vi.stubEnv('LANGUAGE', '')
+})
+
 afterEach(() => {
+  internals.spawnSync = defaultSpawnSync
   vi.unstubAllEnvs()
   for (const home of temporaryHomes.splice(0)) rmSync(home, { recursive: true, force: true })
 })
@@ -50,6 +67,12 @@ describe('launcher arguments', () => {
   it('rejects an empty Profile name', () => {
     expect(() => launcherArgs(['--profile'])).toThrow('--profile 需要一个 Profile 名称')
     expect(() => launcherArgs(['--profile='])).toThrow('--profile 需要一个 Profile 名称')
+  })
+
+  it('rejects an empty Profile name in English when the terminal locale is English', () => {
+    vi.stubEnv('LANG', 'en_US.UTF-8')
+    vi.stubEnv('LC_ALL', 'en_US.UTF-8')
+    expect(() => launcherArgs(['--profile'])).toThrow('--profile requires a Profile name')
   })
 })
 
@@ -133,5 +156,37 @@ describe('Windows launcher spawn', () => {
     expect(source).toContain("from 'cross-spawn'")
     const startup = readFileSync(new URL('../src/host/startup.ts', import.meta.url), 'utf8')
     expect(startup).toContain('windowsHide: true')
+  })
+})
+
+describe('launcher run()', () => {
+  it('returns the child exit status from a real spawn', () => {
+    expect(run(process.execPath, ['-e', 'process.exit(0)'])).toBe(0)
+    expect(run(process.execPath, ['-e', 'process.exit(9)'])).toBe(9)
+  })
+
+  it('explains a missing dsh binary with install and DSH_BIN guidance', () => {
+    expect(() => run('seektty-missing-dsh-not-on-path', [])).toThrow(/未安装或不在 PATH/)
+    expect(() => run('seektty-missing-dsh-not-on-path', [])).toThrow(/DSH_BIN/)
+    expect(() => run('seektty-missing-dsh-not-on-path', [])).toThrow(/@deepseek-ai\/dsh/)
+  })
+
+  it('returns 130 silently when dsh is interrupted by SIGINT or SIGTERM', () => {
+    internals.spawnSync = () => ({ signal: 'SIGINT', status: null })
+    expect(run('dsh', [])).toBe(130)
+    internals.spawnSync = () => ({ signal: 'SIGTERM', status: null })
+    expect(run('dsh', [])).toBe(130)
+  })
+})
+
+describe('corrupt Profile manifest', () => {
+  it('names the file and how to recover', () => {
+    const home = temporaryHome()
+    const dir = join(home, 'profiles', 'tui')
+    mkdirSync(dir, { recursive: true })
+    const manifest = join(dir, 'package.json')
+    writeFileSync(manifest, '{')
+    expect(() => installed('tui')).toThrow(manifest)
+    expect(() => installed('tui')).toThrow(/删除该文件后 deepseek 会重新初始化 Profile/)
   })
 })
