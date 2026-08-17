@@ -37,6 +37,7 @@ import {
 } from './keymap.ts'
 import { pluginFailureDetail } from './error-advice.ts'
 import { SessionToolAllowlist } from './session-tool-allowlist.ts'
+import { trajectoryRequestDetail } from './trajectory-detail.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
@@ -3283,7 +3284,7 @@ ${source.credentialRef === undefined ? '无 Credential Ref' : `Credential Ref：
       : trajectory.runningCalls.find(call => `call:${call.callId}` === selected.id)
     await this.host.overlays.detail({
       title: selected.label,
-      content: detailText(value),
+      content: selected.id.startsWith('request:') ? trajectoryRequestDetail(value) : detailText(value),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
   }
