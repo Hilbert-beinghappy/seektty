@@ -21,6 +21,7 @@ import {
   transcriptViewportRows,
 } from './chrome.ts'
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
+import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import {
   localeFromSettings,
   setUiLocale,
@@ -114,6 +115,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   let disposeConstructedSyntax = (): void => undefined
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
+    const initialBehavior = behaviorFromSettings(behaviorSettings(settingsDocuments))
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
@@ -140,6 +142,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
       },
     )
+    transcript.applyPresentationDefaults(initialBehavior.toolCards, initialBehavior.showReasoning)
     const syntax = await SyntaxHighlighter.create(initialTheme, () => {
       transcript.refreshPresentation()
       tui.invalidate()

@@ -7,7 +7,10 @@ import {
   type SchemaNode,
 } from '@deepseek-ai/dsh-client-schema-form'
 import { LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
-import { TUI_APPEARANCE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-tui-protocol'
+import {
+  TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+} from '@deepseek-ai/dsh-tui-protocol'
 import { ui, uiLocale } from './locale.ts'
 import type { TuiSettingsDocument } from './management.ts'
 
@@ -195,6 +198,7 @@ export function settingsSectionLabel(namespace: string): string {
   if (namespace === 'agent-presets') return ui('默认 Agent Preset', 'Default Agent Preset')
   if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return ui('模型与 Provider', 'Models and Providers')
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return ui('SeekTTY 主题', 'SeekTTY themes')
+  if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) return ui('SeekTTY 行为', 'SeekTTY behavior')
   if (namespace === 'tui-plugin-marketplace') return ui('插件市场来源', 'Plugin marketplace sources')
   return ui('通用设置', 'General settings')
 }

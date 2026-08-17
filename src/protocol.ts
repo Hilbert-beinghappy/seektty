@@ -105,6 +105,40 @@ export const MAX_CUSTOM_THEMES = 32
 /** Maximum imported TextMate rules stored in one custom theme. */
 export const MAX_TEXTMATE_RULES = 4_096
 
+/** Harness Settings namespace that persists SeekTTY interaction defaults. */
+export const TUI_BEHAVIOR_SETTINGS_NAMESPACE = 'seektty-behavior'
+
+/** Startup presentation for tool cards in the transcript. */
+export type TuiToolCardDisplay = 'collapsed' | 'expanded' | 'hidden'
+
+/** How `/copy` writes the system clipboard after OSC 52. */
+export type TuiClipboardFallback = 'auto' | 'osc52' | 'off'
+
+/** Complete behavior value owned by the SeekTTY Settings namespace. */
+export interface TuiBehaviorSettings {
+  readonly toolCards: TuiToolCardDisplay
+  readonly showReasoning: boolean
+  readonly desktopNotifications: boolean
+  readonly followTerminalTitle: boolean
+  readonly composerHistoryLimit: number
+  readonly statusElapsed: boolean
+  readonly clipboardFallback: TuiClipboardFallback
+}
+
+/** First-run interaction defaults when no user override has been stored. */
+export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
+  toolCards: 'collapsed',
+  showReasoning: false,
+  desktopNotifications: true,
+  followTerminalTitle: true,
+  composerHistoryLimit: 200,
+  statusElapsed: true,
+  clipboardFallback: 'auto',
+})
+
+/** Upper bound for persisted composer history entries. */
+export const MAX_COMPOSER_HISTORY = 10_000
+
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {
   readonly namespace: string

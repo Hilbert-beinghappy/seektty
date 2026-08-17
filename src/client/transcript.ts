@@ -1093,6 +1093,16 @@ export class Transcript implements Component, Focusable {
     return this.reasoningVisible
   }
 
+  /**
+   * Restore the Settings-owned startup presentation without mutating the Harness log.
+   * @param tools - default tool-card shape.
+   * @param reasoning - whether reasoning blocks are visible at session open.
+   */
+  applyPresentationDefaults(tools: ToolVisibility, reasoning: boolean): void {
+    this.toolVisibility = tools
+    this.reasoningVisible = reasoning
+  }
+
   /** Follow new transcript output after the user submits from a historical viewport. */
   followLatest(): void {
     this.turnCursor = undefined

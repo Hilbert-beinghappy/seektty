@@ -13,11 +13,14 @@ import type {
   TuiSettingsDocument,
 } from '@deepseek-ai/dsh-tui-protocol'
 import {
+  DEFAULT_TUI_BEHAVIOR,
   DEFAULT_TUI_CODE_THEME,
   DEFAULT_TUI_THEME,
+  MAX_COMPOSER_HISTORY,
   MAX_CUSTOM_THEMES,
   MAX_TEXTMATE_RULES,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
@@ -25,6 +28,7 @@ import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
+const BEHAVIOR_NAMESPACE = settingsNamespace(TUI_BEHAVIOR_SETTINGS_NAMESPACE)
 const TUI_BUNDLE = 'seektty'
 const NON_TUI_SURFACE_BUNDLES = ['@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'] as const
 const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
@@ -105,6 +109,25 @@ const AppearanceSettingsSchema = z.object({
     .description('代码块独立主题；auto 跟随当前界面主题。'),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
     .description('SeekTTY 命名自定义主题。'),
+})
+const BehaviorSettingsSchema = z.object({
+  toolCards: z.union(['collapsed', 'expanded', 'hidden'])
+    .default(DEFAULT_TUI_BEHAVIOR.toolCards)
+    .description('工具卡片默认形态；启动时应用到当前会话。'),
+  showReasoning: z.boolean().default(DEFAULT_TUI_BEHAVIOR.showReasoning)
+    .description('推理内容默认是否显示。'),
+  desktopNotifications: z.boolean().default(DEFAULT_TUI_BEHAVIOR.desktopNotifications)
+    .description('回合完成或待审批时发送终端桌面通知。'),
+  followTerminalTitle: z.boolean().default(DEFAULT_TUI_BEHAVIOR.followTerminalTitle)
+    .description('终端标题跟随当前会话运行状态。'),
+  composerHistoryLimit: z.natural().max(MAX_COMPOSER_HISTORY)
+    .default(DEFAULT_TUI_BEHAVIOR.composerHistoryLimit)
+    .description('输入历史持久化条数；0 表示关闭。'),
+  statusElapsed: z.boolean().default(DEFAULT_TUI_BEHAVIOR.statusElapsed)
+    .description('状态栏显示当前回合实时耗时。'),
+  clipboardFallback: z.union(['auto', 'osc52', 'off'])
+    .default(DEFAULT_TUI_BEHAVIOR.clipboardFallback)
+    .description('OSC 52 失败后的剪贴板回退命令；auto 按平台探测。'),
 })
 
 interface StoredCatalogSource {
@@ -208,6 +231,7 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
   }
   settings.register(MARKETPLACE_NAMESPACE, MarketplaceSettingsSchema, { applies: 'live' })
   settings.register(APPEARANCE_NAMESPACE, AppearanceSettingsSchema, { applies: 'live' })
+  settings.register(BEHAVIOR_NAMESPACE, BehaviorSettingsSchema, { applies: 'live' })
   const marketplace = new PluginMarketplace({
     cwd,
     resolveCredential: async ref => (await credentials.resolve(credentialRef(ref)))?.value,
