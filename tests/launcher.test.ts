@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installed, launch, launcherArgs } from '../src/bin.ts'
+import { installed, launch, launcherArgs, DSH_SPAWN_OPTIONS } from '../src/bin.ts'
 
 const temporaryHomes: string[] = []
 
@@ -123,5 +123,15 @@ describe('launcher provisioning', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]?.slice(0, 4)).toEqual(['plugin', '--profile', 'tui', 'add'])
     expect(calls[0]?.[4]).toBe('/legacy-plugin.tgz')
+  })
+})
+
+describe('Windows launcher spawn', () => {
+  it('hides the console window and uses the PATHEXT-aware sync spawn', () => {
+    expect(DSH_SPAWN_OPTIONS).toMatchObject({ stdio: 'inherit', windowsHide: true })
+    const source = readFileSync(new URL('../src/bin.ts', import.meta.url), 'utf8')
+    expect(source).toContain("from 'cross-spawn'")
+    const startup = readFileSync(new URL('../src/host/startup.ts', import.meta.url), 'utf8')
+    expect(startup).toContain('windowsHide: true')
   })
 })

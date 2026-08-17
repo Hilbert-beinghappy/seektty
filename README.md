@@ -65,7 +65,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 
 ## Install the bare command
 
-The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows.
+The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved; there is no `install.sh` path.
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0

@@ -107,6 +107,7 @@ function restartProvider(ctx: Context): AppRestart {
       : writeAppHandoff(request.handoff.channel, request.handoff.payload)
     const child = spawn(process.execPath, [realpathSync(entry), '--profile', request.profile, ...request.args], {
       stdio: 'inherit',
+      windowsHide: true,
       env: {
         ...process.env,
         ...(handoffPath === undefined ? {} : { [APP_HANDOFF_ENV]: handoffPath }),

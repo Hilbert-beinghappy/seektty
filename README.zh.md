@@ -65,7 +65,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 
 ## 安装并使用裸命令
 
-仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。
+仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim；没有 `install.sh` 这条路径。
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0

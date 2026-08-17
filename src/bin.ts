@@ -3,10 +3,10 @@
 /** Product launcher that provisions and boots the native dsh Profile. */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
+import crossSpawn from 'cross-spawn'
 
 const PACKAGE_NAME = 'seektty'
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
@@ -50,8 +50,11 @@ export function installed(profile: string): boolean {
   return hasDependency(profile, PACKAGE_NAME)
 }
 
+/** Spawn options that resolve PATHEXT shims on Windows and hide extra consoles. */
+export const DSH_SPAWN_OPTIONS = { stdio: 'inherit' as const, windowsHide: true }
+
 export function run(command: string, args: readonly string[]): number {
-  const result = spawnSync(command, [...args], { stdio: 'inherit' })
+  const result = crossSpawn.sync(command, [...args], DSH_SPAWN_OPTIONS)
   if (result.error !== undefined) throw result.error
   if (result.signal !== null) throw new Error(`${command} 被信号 ${result.signal} 终止`)
   return result.status ?? 1
