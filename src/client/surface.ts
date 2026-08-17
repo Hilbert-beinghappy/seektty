@@ -40,6 +40,7 @@ import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { formatElapsed } from './elapsed.ts'
+import { writeClipboard } from './clipboard.ts'
 import {
   desktopNotifyBody,
   desktopNotifySequence,
@@ -418,9 +419,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
       },
       copy: (text) => {
-        const bytes = Buffer.from(text, 'utf8')
-        if (bytes.byteLength > 100_000) throw new Error('回复超过终端剪贴板 100000 字节安全上限；请使用 /export')
-        terminal.write(`\u001B]52;c;${bytes.toString('base64')}\u0007`)
+        writeClipboard(text, {
+          fallback: initialBehavior.clipboardFallback,
+          platform: process.platform,
+          writeOsc52: sequence => { terminal.write(sequence) },
+        })
       },
       close: (code) => { void close({ kind: 'exit', code }) },
       restart: (profile, restartNotice) => {

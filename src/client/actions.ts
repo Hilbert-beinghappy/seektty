@@ -21,14 +21,8 @@ import {
   type TuiCustomTheme,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
-import {
-  capabilityError,
-  HarnessTuiCapabilities,
-  type TuiCommandCandidate,
-  type TuiModelOption,
-  type TuiPermissionOption,
-  type TuiToolOption,
-} from './capabilities.ts'
+import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
+import { lastFencedCode } from './copy-content.ts'
 import type {
   TuiMarketplaceCandidate,
   TuiMarketplaceSource,
@@ -374,7 +368,7 @@ export class TuiActions {
         case 'fork': await this.fork(); break
         case 'archive': await this.archive(); break
         case 'export': await this.exportSession(args); break
-        case 'copy': this.copyLastResponse(); break
+        case 'copy': await this.copy(args); break
         case 'workspace': await this.workspace(args); break
         case 'profile': await this.profile(args); break
         case 'mode': await this.mode(); break
@@ -586,11 +580,51 @@ export class TuiActions {
     this.host.notice(`已保存会话 ZIP（${String(result.bytes)} 字节）到 ${result.path}`, 'success')
   }
 
+  private async copy(args: string): Promise<void> {
+    const parsed = commandParts(args)
+    if (parsed.command === 'pick') {
+      await this.copyPick()
+      return
+    }
+    if (parsed.command === 'code') {
+      this.copyCode()
+      return
+    }
+    if (parsed.command !== '') throw new Error('用法：/copy [pick|code]')
+    this.copyLastResponse()
+  }
+
   private copyLastResponse(): void {
     const text = this.capabilities.lastAssistantText()
     if (text === undefined) throw new Error('当前会话没有可复制的 DeepSeek 文本回复')
     this.host.copy(text)
     this.host.notice(`已复制最后一条回复（${text.length} 个字符）`, 'success')
+  }
+
+  private copyCode(): void {
+    const text = this.capabilities.lastAssistantText()
+    if (text === undefined) throw new Error('当前会话没有可复制的 DeepSeek 文本回复')
+    const code = lastFencedCode(text)
+    if (code === undefined) throw new Error('最后一条回复没有可复制的代码块')
+    this.host.copy(code)
+    this.host.notice(`已复制最后一段代码（${code.length} 个字符）`, 'success')
+  }
+
+  private async copyPick(): Promise<void> {
+    const rows = this.capabilities.assistantCopyTargets()
+    if (rows.length === 0) throw new Error('当前会话没有可复制的 DeepSeek 文本回复')
+    const selected = await this.host.overlays.select({
+      title: '复制回复',
+      detail: '选择一条助手回复复制到剪贴板',
+      choices: rows.map(row => ({ id: row.id, label: row.preview })),
+      searchable: rows.length > 8,
+      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
+    if (selected === undefined) return
+    const row = rows.find(candidate => candidate.id === selected.id)
+    if (row === undefined) return
+    this.host.copy(row.text)
+    this.host.notice(`已复制所选回复（${row.text.length} 个字符）`, 'success')
   }
 
   private async workspace(args: string): Promise<void> {

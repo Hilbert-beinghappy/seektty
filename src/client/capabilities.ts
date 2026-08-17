@@ -40,6 +40,7 @@ import type { TrajectorySnapshot } from '@deepseek-ai/dsh-client-ui-trajectory/p
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
+import { copyTargets } from './copy-content.ts'
 import { ui } from './locale.ts'
 
 /** A command shown by the terminal's merged slash directory. */
@@ -215,7 +216,7 @@ export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
   { name: 'fork', description: '从当前会话创建分支', source: 'TUI', behavior: 'local' },
   { name: 'archive', description: '归档当前会话', source: 'TUI', behavior: 'local' },
   { name: 'export', description: '导出当前会话', argumentHint: '[路径]', source: 'TUI', behavior: 'local' },
-  { name: 'copy', description: '复制最后一条回复', source: 'TUI', behavior: 'local' },
+  { name: 'copy', description: '复制最后一条回复', argumentHint: '[pick|code]', source: 'TUI', behavior: 'local' },
   { name: 'workspace', description: '管理工作区', argumentHint: '[子命令|路径]', source: 'TUI', behavior: 'local' },
   { name: 'profile', description: '管理 Profile', argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
   { name: 'mode', description: '切换模式', source: 'TUI', behavior: 'local' },
@@ -1330,6 +1331,19 @@ export class HarnessTuiCapabilities {
     if (node?.kind !== 'assistant') return undefined
     const text = assistantText(node)
     return text === '' ? undefined : text
+  }
+
+  /**
+   * Read every loaded Assistant reply as copy-picker rows, newest first.
+   * @returns visible assistant texts with stable ids.
+   */
+  assistantCopyTargets(): readonly { readonly id: string; readonly preview: string; readonly text: string }[] {
+    const entries = this.requireActive().session.getSnapshot().nodes.flatMap((node) => {
+      if (node.kind !== 'assistant') return []
+      const text = assistantText(node)
+      return text === '' ? [] : [{ id: String(node.seq), text }]
+    })
+    return copyTargets(entries)
   }
 
   /**
