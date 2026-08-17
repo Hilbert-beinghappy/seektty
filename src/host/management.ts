@@ -230,6 +230,73 @@ function validateCatalogSource(source: TuiMarketplaceSource): StoredCatalogSourc
   }
 }
 
+function degradedCatalogSource(raw: unknown, index: number, diagnostic: string): TuiMarketplaceSource {
+  const record = typeof raw === 'object' && raw !== null ? raw as Partial<StoredCatalogSource> : {}
+  const id = typeof record.id === 'string' && record.id.trim() !== '' ? record.id.trim() : `invalid-${String(index)}`
+  const label = typeof record.label === 'string' && record.label.trim() !== '' ? record.label.trim() : id
+  const url = typeof record.url === 'string' ? record.url : ''
+  return {
+    id,
+    kind: 'catalog',
+    label: `${label}（无效）`,
+    url,
+    enabled: false,
+    builtIn: false,
+    diagnostic,
+  }
+}
+
+/**
+ * Read stored catalog rows, disabling invalid ones instead of locking the marketplace.
+ * @param stored - Settings-persisted catalog rows.
+ * @param reservedIds - built-in and Provider source ids that must stay unique.
+ */
+export function catalogSourcesFromStored(
+  stored: readonly unknown[],
+  reservedIds: ReadonlySet<string>,
+): readonly TuiMarketplaceSource[] {
+  const seen = new Set(reservedIds)
+  const sources: TuiMarketplaceSource[] = []
+  for (const [index, raw] of stored.entries()) {
+    const record = typeof raw === 'object' && raw !== null ? raw as Partial<StoredCatalogSource> : {}
+    const rawId = typeof record.id === 'string' ? record.id : ''
+    if (rawId !== '' && seen.has(rawId)) {
+      sources.push(degradedCatalogSource(raw, index, `Catalog Source ${rawId} 与内置或 Provider Source 冲突`))
+      continue
+    }
+    try {
+      const storedSource = validateCatalogSource({
+        id: typeof record.id === 'string' ? record.id : '',
+        kind: 'catalog',
+        label: typeof record.label === 'string' ? record.label : '',
+        url: typeof record.url === 'string' ? record.url : '',
+        enabled: record.enabled !== false,
+        ...(typeof record.credentialRef === 'string' && record.credentialRef !== ''
+          ? { credentialRef: record.credentialRef }
+          : {}),
+        builtIn: false,
+      })
+      if (seen.has(storedSource.id)) {
+        sources.push(degradedCatalogSource(raw, index, `Catalog Source ${storedSource.id} 与内置或 Provider Source 冲突`))
+        continue
+      }
+      seen.add(storedSource.id)
+      sources.push({
+        id: storedSource.id,
+        kind: 'catalog',
+        label: storedSource.label,
+        url: storedSource.url,
+        enabled: storedSource.enabled,
+        ...(storedSource.credentialRef === '' ? {} : { credentialRef: storedSource.credentialRef }),
+        builtIn: false,
+      })
+    } catch (error) {
+      sources.push(degradedCatalogSource(raw, index, error instanceof Error ? error.message : String(error)))
+    }
+  }
+  return sources
+}
+
 function tuiProfile(summary: TuiProfileSummary): TuiProfileSummary {
   if (!summary.compatible || summary.bundles.includes(TUI_BUNDLE)) return summary
   return {
@@ -285,35 +352,16 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
   const sourceSnapshot = (): TuiMarketplaceSources => {
     const document = documents.one(MARKETPLACE_NAMESPACE)
     const value = document.value as MarketplaceSettings
-    const stored = value.sources.map(source => validateCatalogSource({
-      id: source.id,
-      kind: 'catalog',
-      label: source.label,
-      url: source.url,
-      enabled: source.enabled,
-      ...(source.credentialRef === '' ? {} : { credentialRef: source.credentialRef }),
-      builtIn: false,
-    }))
-    const providerSources = providers?.sources() ?? []
-    const sourceIds = new Set([NPM_SOURCE.id, ...providerSources.map(source => source.id)])
-    for (const source of stored) {
-      if (sourceIds.has(source.id)) throw new Error(`Catalog Source ${source.id} 与内置或 Provider Source 冲突`)
-      sourceIds.add(source.id)
-    }
+    const stored = catalogSourcesFromStored(
+      value.sources,
+      new Set([NPM_SOURCE.id, ...(providers?.sources() ?? []).map(source => source.id)]),
+    )
     return {
       revision: document.revision,
       sources: [
         NPM_SOURCE,
-        ...providerSources,
-        ...stored.map(source => ({
-          id: source.id,
-          kind: 'catalog' as const,
-          label: source.label,
-          url: source.url,
-          enabled: source.enabled,
-          ...(source.credentialRef === '' ? {} : { credentialRef: source.credentialRef }),
-          builtIn: false,
-        })),
+        ...(providers?.sources() ?? []),
+        ...stored,
       ],
     }
   }

@@ -260,6 +260,8 @@ export interface TuiMarketplaceSource {
   readonly enabled: boolean
   readonly credentialRef?: string
   readonly builtIn: boolean
+  /** Present when a stored catalog row failed validation and was kept disabled. */
+  readonly diagnostic?: string
 }
 
 /** Marketplace source list with the native Settings revision that produced it. */
