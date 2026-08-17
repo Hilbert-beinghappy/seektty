@@ -154,6 +154,13 @@ interface InstalledManifest extends ProfileManifest {
   scripts?: Record<string, string>
 }
 
+interface InstalledFacts {
+  readonly packageDir?: string
+  readonly manifest?: InstalledManifest
+  readonly patchValid: boolean
+  readonly diagnostic?: string
+}
+
 function inferSource(spec: string): ProfilePluginSource {
   if (/^(?:git\+|github:|gitlab:|bitbucket:)|\.git(?:#|$)/i.test(spec)) return 'git'
   if (/^(?:https?:).*\.(?:tgz|tar\.gz)(?:[?#].*)?$/i.test(spec) || /\.(?:tgz|tar\.gz)$/i.test(spec)) return 'tarball'
@@ -251,6 +258,8 @@ export class ProfilePluginManager {
   private readonly installAnchor: string
   private readonly invokingCwd: string
   private readonly home: string | undefined
+  private snapshotCache: { stamp: string; snapshot: ProfilePluginSnapshot } | undefined
+  private readonly installedFactsCache = new Map<string, InstalledFacts>()
 
   /** @param options - target Profile, installation resolution anchor, and invoking directory. */
   constructor(options: ProfilePluginManagerOptions) {
@@ -277,18 +286,23 @@ export class ProfilePluginManager {
    */
   snapshot(): ProfilePluginSnapshot {
     this.ensureProfile()
+    const stamp = this.profileStamp()
+    if (this.snapshotCache?.stamp === stamp) return this.snapshotCache.snapshot
+    this.installedFactsCache.clear()
     const manifest = readProfileManifest(NAME, this.dir)
     const dependencies = { ...manifest.dependencies }
     const bundles = [...manifest.dsh?.profile?.bundles ?? []]
     const plugins = Object.entries(dependencies).map(([packageName, spec]) =>
       this.inspectInstalled(packageName, spec, bundles))
-    return Object.freeze({
+    const snapshot = Object.freeze({
       profile: this.profile,
       dir: this.dir,
       dependencies: Object.freeze(dependencies),
       bundles: Object.freeze(bundles),
       plugins: Object.freeze(plugins),
     })
+    this.snapshotCache = { stamp, snapshot }
+    return snapshot
   }
 
   /**
@@ -347,6 +361,7 @@ export class ProfilePluginManager {
       if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return 127
       throw error
     })
+    this.forgetInstalled()
     const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
     const snapshot = this.snapshot()
     const changed = initialized || !sameSnapshotState(beforeSnapshot, snapshot)
@@ -386,6 +401,7 @@ export class ProfilePluginManager {
       ? result.status ?? 1
       : (spawnError as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1
     if (spawnError !== undefined && (spawnError as NodeJS.ErrnoException).code !== 'ENOENT') throw spawnError
+    this.forgetInstalled()
     const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
     const snapshot = this.snapshot()
     const changed = initialized || !sameSnapshotState(beforeSnapshot, snapshot)
@@ -421,6 +437,7 @@ export class ProfilePluginManager {
       profile: { ...manifest.dsh?.profile, bundles: [...orderedBundles] },
     }
     writeProfileManifest(this.dir, manifest)
+    this.forgetInstalled()
     return this.snapshot()
   }
 
@@ -445,14 +462,17 @@ export class ProfilePluginManager {
       }
     }
     for (const bundle of snapshot.bundles) {
-      try {
-        const dir = resolveBundleDir(NAME, bundle, this.installAnchor, this.dir)
-        const manifest = readInstalledManifest(dir)
-        const patch = manifest.dsh?.bundle?.patch
-        if (patch === undefined) diagnostics.push({ level: 'error', message: `${bundle} 未声明 dsh.bundle.patch` })
-        else if (!validPatch(dir, patch)) diagnostics.push({ level: 'error', message: `${bundle} 的 Bundle patch 缺失或格式无效` })
-      } catch (error) {
-        diagnostics.push({ level: 'error', message: error instanceof Error ? error.message : String(error) })
+      const facts = this.installedFacts(bundle)
+      const patch = facts.manifest?.dsh?.bundle?.patch
+      if (facts.manifest === undefined) {
+        diagnostics.push({
+          level: 'error',
+          message: facts.diagnostic ?? `${bundle} 无法读取已安装清单`,
+        })
+      } else if (patch === undefined) {
+        diagnostics.push({ level: 'error', message: `${bundle} 未声明 dsh.bundle.patch` })
+      } else if (!facts.patchValid) {
+        diagnostics.push({ level: 'error', message: `${bundle} 的 Bundle patch 缺失或格式无效` })
       }
     }
     if (diagnostics.every(item => item.level !== 'error')) {
@@ -549,30 +569,23 @@ export class ProfilePluginManager {
   }
 
   private inspectInstalled(packageName: string, spec: string, bundles: readonly string[]): ProfilePluginEntry {
+    const facts = this.installedFacts(packageName)
     const diagnostics: string[] = []
-    let manifest: InstalledManifest | undefined
-    let packageDir: string | undefined
-    try {
-      packageDir = resolveBundleDir(NAME, packageName, this.installAnchor, this.dir)
-      manifest = readInstalledManifest(packageDir)
-    } catch (error) {
-      diagnostics.push(error instanceof Error ? error.message : String(error))
-    }
-    const patch = manifest?.dsh?.bundle?.patch
-    const patchValid = packageDir !== undefined && patch !== undefined && validPatch(packageDir, patch)
-    if (patch !== undefined && !patchValid) diagnostics.push(`声明的 Bundle patch ${JSON.stringify(patch)} 缺失或格式无效`)
+    if (facts.diagnostic !== undefined) diagnostics.push(facts.diagnostic)
+    const patch = facts.manifest?.dsh?.bundle?.patch
+    if (patch !== undefined && !facts.patchValid) diagnostics.push(`声明的 Bundle patch ${JSON.stringify(patch)} 缺失或格式无效`)
     if (bundles.includes(packageName) && patch === undefined) diagnostics.push('位于 Bundle 顺序中但未声明 dsh.bundle.patch')
     return Object.freeze({
       name: packageName,
       spec: safeDependencySpec(spec),
-      ...(manifest?.version === undefined ? {} : { version: manifest.version }),
-      ...(manifest?.description === undefined ? {} : { description: manifest.description }),
+      ...(facts.manifest?.version === undefined ? {} : { version: facts.manifest.version }),
+      ...(facts.manifest?.description === undefined ? {} : { description: facts.manifest.description }),
       source: inferSource(spec),
       bundle: patch !== undefined,
       active: bundles.includes(packageName),
       ...(patch === undefined ? {} : { patch }),
-      patchValid,
-      scripts: Object.freeze(Object.keys(manifest?.scripts ?? {})),
+      patchValid: facts.patchValid,
+      scripts: Object.freeze(Object.keys(facts.manifest?.scripts ?? {})),
       diagnostics: Object.freeze(diagnostics),
     })
   }
@@ -605,19 +618,47 @@ export class ProfilePluginManager {
     if (changed) {
       after.dsh = { ...after.dsh, profile: { ...after.dsh?.profile, bundles } }
       writeProfileManifest(this.dir, after)
+      this.forgetInstalled()
     }
     return warnings
   }
 
   private exportsPatch(packageName: string): boolean {
+    const facts = this.installedFacts(packageName)
+    return facts.manifest?.dsh?.bundle?.patch !== undefined && facts.patchValid
+  }
+
+  private installedFacts(packageName: string): InstalledFacts {
+    const cached = this.installedFactsCache.get(packageName)
+    if (cached !== undefined) return cached
+    let facts: InstalledFacts
     try {
-      const dir = resolveBundleDir(NAME, packageName, this.installAnchor, this.dir)
-      const manifest = readInstalledManifest(dir)
+      const packageDir = resolveBundleDir(NAME, packageName, this.installAnchor, this.dir)
+      const manifest = readInstalledManifest(packageDir)
       const patch = manifest.dsh?.bundle?.patch
-      return patch !== undefined && validPatch(dir, patch)
-    } catch {
-      return false
+      facts = {
+        packageDir,
+        manifest,
+        patchValid: patch !== undefined && validPatch(packageDir, patch),
+      }
+    } catch (error) {
+      facts = {
+        patchValid: false,
+        diagnostic: error instanceof Error ? error.message : String(error),
+      }
     }
+    this.installedFactsCache.set(packageName, facts)
+    return facts
+  }
+
+  private profileStamp(): string {
+    const path = join(this.dir, 'package.json')
+    return existsSync(path) ? String(statSync(path).mtimeMs) : 'missing'
+  }
+
+  private forgetInstalled(): void {
+    this.snapshotCache = undefined
+    this.installedFactsCache.clear()
   }
 
   private anchorPathSpec(argument: string): string {
