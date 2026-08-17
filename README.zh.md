@@ -118,6 +118,7 @@ dsh --profile tui
 | PgUp / PgDn / Home / End | 浏览 Transcript 时翻页、跳到最早或回到最新内容 |
 | Shift+Tab | 循环当前权限，进入完全访问前确认 |
 | Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |
+| F1 | 打开应用内帮助 |
 | Ctrl+P | 打开完整命令面板 |
 | Ctrl+M | 支持扩展键盘协议时打开模型选择器 |
 | Ctrl+S | 打开会话恢复选择器 |

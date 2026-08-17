@@ -118,6 +118,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
 | Shift+Tab | Cycle the current permission, confirming full access first |
 | Shift+Left / Shift+Right | Jump to the previous or next user turn |
+| F1 | Open in-app help |
 | Ctrl+P | Open the complete command palette |
 | Ctrl+M | Open model selection when the terminal exposes an extended keyboard protocol |
 | Ctrl+S | Open session resume |

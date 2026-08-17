@@ -52,6 +52,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
+import { matchesBinding } from './keymap.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -594,7 +595,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return { data: `\u001B[200~${safeContent}\u001B[201~` }
         }
       }
-      if (matchesKey(data, Key.tab) && (transcriptFocused || editor.getText() === '')) {
+      if (matchesBinding('focusToggle', data) && (transcriptFocused || editor.getText() === '')) {
         transcript.cancelSearch()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
@@ -610,15 +611,19 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setNotice('已返回输入区', 'info')
         return { consume: true }
       }
-      if (matchesKey(data, Key.shift(Key.tab))) {
+      if (matchesBinding('cyclePermission', data)) {
         void actions.cyclePermission()
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('p'))) {
+      if (matchesBinding('help', data)) {
+        void actions.help()
+        return { consume: true }
+      }
+      if (matchesBinding('commandPalette', data)) {
         void actions.commandPalette()
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('r'))) {
+      if (matchesBinding('historySearch', data)) {
         if (historyLimit <= 0) {
           setNotice('输入历史已关闭', 'info')
           return { consume: true }
@@ -648,30 +653,30 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       // Legacy terminals encode both Enter and Ctrl+M as CR. Only an extended
       // keyboard protocol can identify Ctrl+M without stealing every submit.
-      if (data !== '\r' && data !== '\n' && matchesKey(data, Key.ctrl('m'))) {
+      if (matchesBinding('model', data)) {
         void actions.execute('model', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('s'))) {
+      if (matchesBinding('sessions', data)) {
         void actions.execute('sessions', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('o'))) {
+      if (matchesBinding('toolsDisplay', data)) {
         void actions.execute('tools', 'display')
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('t'))) {
+      if (matchesBinding('reasoning', data)) {
         const visible = transcript.toggleReasoning()
         setNotice(`推理内容：${visible ? '显示' : '隐藏'}`, 'info')
         refresh()
         return { consume: true }
       }
-      if (matchesKey(data, Key.shift(Key.left)) || matchesKey(data, Key.shift(Key.right))) {
+      if (matchesBinding('previousTurn', data) || matchesBinding('nextTurn', data)) {
         if (!transcriptFocused) {
           transcriptFocused = true
           tui.setFocus(transcript)
         }
-        const offset = matchesKey(data, Key.shift(Key.left)) ? -1 : 1
+        const offset = matchesBinding('previousTurn', data) ? -1 : 1
         const moved = transcript.navigateTurn(offset)
         setNotice(
           moved ? `已跳到${offset < 0 ? '上一个' : '下一个'}用户轮次` : '没有可跳转的用户轮次',
@@ -679,9 +684,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         )
         return { consume: true }
       }
-      if (matchesKey(data, Key.f2)
-        || matchesKey(data, Key.ctrl(Key.comma))
-        || matchesKey(data, Key.super(Key.comma))) {
+      if (matchesBinding('settings', data)) {
         void actions.execute('settings', '')
         return { consume: true }
       }
@@ -691,7 +694,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
         return { consume: true }
       }
-      if (!matchesKey(data, Key.ctrl('c'))) return undefined
+      if (!matchesBinding('interrupt', data)) return undefined
       const current = capabilities.active()
       if (current !== undefined && current.session.getSnapshot().running) {
         void current.session.cancel()

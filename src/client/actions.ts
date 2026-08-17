@@ -24,6 +24,7 @@ import {
 import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { formatByteSize } from './byte-size.ts'
+import { helpSectionChoices, helpSectionText, type HelpSectionId } from './help.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
@@ -399,7 +400,7 @@ export class TuiActions {
         case 'mcp': await this.mcp(); break
         case 'status': await this.status(); break
         case 'pending': this.retryPending(); break
-        case 'help': await this.commandPalette(); break
+        case 'help': await this.help(); break
         case 'quit':
         case 'exit': this.host.close(0); break
         default: throw new Error(`TUI 未实现 /${name}`)
@@ -458,6 +459,23 @@ export class TuiActions {
     } catch (error) {
       this.host.notice(capabilityError(error), 'error')
     }
+  }
+
+  /** F1 / `/help`: partitioned shortcuts, workflows, and doctor guidance. */
+  async help(): Promise<void> {
+    const selected = await this.host.overlays.select({
+      title: ui('帮助', 'Help'),
+      detail: ui('F1 与 /help 打开此页；Ctrl+P 仍是命令面板', 'F1 and /help open this page; Ctrl+P remains the command palette'),
+      choices: helpSectionChoices(),
+      searchable: false,
+      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
+    if (selected === undefined) return
+    await this.host.overlays.detail({
+      title: selected.label,
+      content: helpSectionText(selected.id as HelpSectionId),
+      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
   }
 
   /** Shift+Tab: use Host order and apply the same risk gate as /permission. */
