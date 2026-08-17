@@ -28,6 +28,7 @@ import {
   ui,
 } from './locale.ts'
 import { OverlayQueue } from './overlays.ts'
+import { clearIdleComposerDraft } from './composer-draft.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
@@ -558,9 +559,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
-        editor.setText('')
-        capabilities.clearAttachments()
-        setNotice('已清空输入草稿', 'info')
+        setNotice(clearIdleComposerDraft(editor, () => { capabilities.clearAttachments() }), 'info')
         return { consume: true }
       }
       const now = Date.now()

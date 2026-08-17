@@ -102,6 +102,7 @@ const ENGLISH_TEXT = new Map<string, string>([
   ['输入消息，/ 打开命令', 'Enter a message; / opens commands'],
   ['再按一次 Ctrl+C 退出', 'Press Ctrl+C again to exit'],
   ['已清空输入草稿', 'Draft cleared'],
+  ['已清空草稿，按 ↑ 可找回', 'Draft cleared; press ↑ to restore'],
   ['已返回输入区', 'Returned to the composer'],
   ['对话浏览 · Tab/Escape 返回输入', 'Transcript navigation · Tab/Escape returns to the composer'],
   ['没有可跳转的用户轮次', 'No user turn to jump to'],
