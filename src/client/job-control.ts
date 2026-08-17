@@ -36,7 +36,9 @@ export function jobElapsedMs(
  * @param id - registry job id.
  */
 export function killHostJob(jobs: HostJobRegistry | undefined, id: string): JobKillResult {
-  if (jobs === undefined) throw new Error('Harness 后台任务服务未装配')
+  if (jobs === undefined) {
+    throw new Error(ui('Harness 后台任务服务未装配', 'Harness background job service is not mounted'))
+  }
   return jobs.kill(id, undefined, 'user stopped the job from SeekTTY')
 }
 

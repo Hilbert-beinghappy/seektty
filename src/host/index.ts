@@ -8,7 +8,7 @@ import { InProcessApiClient, toFetchHandler, type IApiClient } from '@deepseek-a
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection'
 import type { TuiManagementBridge, TuiSurfaceOutcome } from '@deepseek-ai/dsh-tui-protocol'
 import { startTui } from '../client/index.ts'
-import { translateUiText } from '../client/locale.ts'
+import { translateUiText, ui } from '../client/locale.ts'
 import { isActiveFiber } from './fiber-state.ts'
 import { createTuiManagementBridge } from './management.ts'
 import { TUI_STARTUP_SERVICE, type TuiStartupValues } from './startup.ts'
@@ -73,7 +73,9 @@ async function run(ctx: Context): Promise<void> {
     return
   }
   const restart = ctx.get('appRestart')
-  if (restart === undefined) throw new Error('tui-runner: launcher 未提供受控重启能力')
+  if (restart === undefined) {
+    throw new Error(ui('tui-runner: launcher 未提供受控重启能力', 'tui-runner: launcher did not provide controlled restart'))
+  }
   try {
     await restart({
       profile: outcome.request.profile,
@@ -84,7 +86,10 @@ async function run(ctx: Context): Promise<void> {
       handoff: { channel: 'seektty-v1', payload: outcome.request },
     })
   } catch (error) {
-    internals.stderr.write(`deepseek: ${translateUiText(`重启失败：${error instanceof Error ? error.message : String(error)}`)}\n`)
+    internals.stderr.write(`deepseek: ${ui(
+      `重启失败：${error instanceof Error ? error.message : String(error)}`,
+      `Restart failed: ${error instanceof Error ? error.message : String(error)}`,
+    )}\n`)
     process.exitCode = 1
   }
 }

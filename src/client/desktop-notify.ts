@@ -1,5 +1,7 @@
 /** Terminal BEL + OSC 9 notices for turn completion and pending interactions. */
 
+import { ui } from './locale.ts'
+
 export type DesktopNotifyKind = 'turn-complete' | 'approval' | 'question'
 
 export interface DesktopNotifySnapshot {
@@ -47,13 +49,8 @@ export function nextDesktopNotify(
  * @param locale - current terminal locale.
  * @returns a short notification body.
  */
-export function desktopNotifyBody(kind: DesktopNotifyKind, locale: 'zh' | 'en'): string {
-  if (locale === 'en') {
-    if (kind === 'approval') return 'SeekTTY: tool approval needed'
-    if (kind === 'question') return 'SeekTTY: a question is waiting'
-    return 'SeekTTY: turn complete'
-  }
-  if (kind === 'approval') return 'SeekTTY：需要工具审批'
-  if (kind === 'question') return 'SeekTTY：有问题待回答'
-  return 'SeekTTY：回合完成'
+export function desktopNotifyBody(kind: DesktopNotifyKind): string {
+  if (kind === 'approval') return ui('SeekTTY：需要工具审批', 'SeekTTY: tool approval needed')
+  if (kind === 'question') return ui('SeekTTY：有问题待回答', 'SeekTTY: a question is waiting')
+  return ui('SeekTTY：回合完成', 'SeekTTY: turn complete')
 }

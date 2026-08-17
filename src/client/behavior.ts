@@ -13,6 +13,7 @@ import {
   type TuiToolCardDisplay,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { sanitizeKeyBindings } from './keymap.ts'
+import { ui } from './locale.ts'
 
 const TOOL_CARDS = new Set<TuiToolCardDisplay>(['collapsed', 'expanded', 'hidden'])
 const CLIPBOARD_FALLBACK = new Set<TuiClipboardFallback>(['auto', 'osc52', 'off'])
@@ -76,7 +77,10 @@ export function behaviorSettings(
   const document = documents.find(candidate =>
     candidate.namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE)
   if (document === undefined) {
-    throw new Error(`Harness 未注册设置 ${TUI_BEHAVIOR_SETTINGS_NAMESPACE}`)
+    throw new Error(ui(
+      `Harness 未注册设置 ${TUI_BEHAVIOR_SETTINGS_NAMESPACE}`,
+      `Harness did not register settings ${TUI_BEHAVIOR_SETTINGS_NAMESPACE}`,
+    ))
   }
   return document
 }

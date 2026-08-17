@@ -1,6 +1,7 @@
 /** OSC 52 clipboard writes with optional platform-command fallback. */
 
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
+import { ui } from './locale.ts'
 import type { TuiClipboardFallback } from '@deepseek-ai/dsh-tui-protocol'
 
 /** OSC 52 payloads larger than this are refused and must use a process fallback or /export. */
@@ -75,7 +76,10 @@ export function writeClipboard(text: string, options: ClipboardWriteOptions): Cl
   if (osc52Ok) options.writeOsc52(osc52Sequence(text))
   if (options.fallback === 'osc52' || options.fallback === 'off') {
     if (!osc52Ok) {
-      throw new Error(`回复超过终端剪贴板 ${String(OSC52_BYTE_LIMIT)} 字节安全上限；请使用 /export`)
+      throw new Error(ui(
+        `回复超过终端剪贴板 ${String(OSC52_BYTE_LIMIT)} 字节安全上限；请使用 /export`,
+        `The response exceeds the ${String(OSC52_BYTE_LIMIT)}-byte terminal clipboard limit; use /export instead`,
+      ))
     }
     return 'osc52'
   }
@@ -90,5 +94,8 @@ export function writeClipboard(text: string, options: ClipboardWriteOptions): Cl
     }
   }
   if (osc52Ok) return 'osc52'
-  throw new Error(`无法写入系统剪贴板；请使用 /export。OSC 52 上限为 ${String(OSC52_BYTE_LIMIT)} 字节`)
+  throw new Error(ui(
+    `无法写入系统剪贴板；请使用 /export。OSC 52 上限为 ${String(OSC52_BYTE_LIMIT)} 字节`,
+    `Could not write the system clipboard; use /export. The OSC 52 limit is ${String(OSC52_BYTE_LIMIT)} bytes`,
+  ))
 }

@@ -9,6 +9,12 @@ const GATED = [
   'bin.ts',
   'dsh-compat.ts',
   'client/overlays.ts',
+  'client/behavior.ts',
+  'client/clipboard.ts',
+  'client/desktop-notify.ts',
+  'client/job-control.ts',
+  'client/theme.ts',
+  'host/index.ts',
   'host/restart-handoff.ts',
 ]
 

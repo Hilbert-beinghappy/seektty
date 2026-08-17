@@ -36,7 +36,6 @@ import {
   setUiLocale,
   translateUiText,
   ui,
-  uiLocale,
 } from './locale.ts'
 import { OverlayQueue, setDangerConfirmDefault } from './overlays.ts'
 import { SyntaxHighlighter } from './syntax-highlighter.ts'
@@ -306,7 +305,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (initialBehavior.desktopNotifications) {
         const kind = nextDesktopNotify(notifySnapshot, currentNotify, notifyPrimed)
         if (kind !== undefined) {
-          terminal.write(desktopNotifySequence(desktopNotifyBody(kind, uiLocale())))
+          terminal.write(desktopNotifySequence(desktopNotifyBody(kind)))
         }
       }
       notifySnapshot = currentNotify

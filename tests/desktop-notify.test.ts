@@ -4,6 +4,7 @@ import {
   desktopNotifySequence,
   nextDesktopNotify,
 } from '../src/client/desktop-notify.ts'
+import { setUiLocale } from '../src/client/locale.ts'
 
 describe('desktop notifications', () => {
   it('emits BEL plus OSC 9 and strips control characters from the body', () => {
@@ -22,6 +23,8 @@ describe('desktop notifications', () => {
     expect(nextDesktopNotify(running, approval, true)).toBe('approval')
     expect(nextDesktopNotify(idle, question, true)).toBe('question')
     expect(nextDesktopNotify(approval, approval, true)).toBeUndefined()
-    expect(desktopNotifyBody('approval', 'en')).toContain('approval')
+    expect(desktopNotifyBody('approval')).toContain('工具审批')
+    setUiLocale('en')
+    expect(desktopNotifyBody('approval')).toContain('approval')
   })
 })
