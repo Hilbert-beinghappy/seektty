@@ -92,7 +92,7 @@ function fieldOf(
   const description = descriptionOf(node)
   return {
     path,
-    label: path.length === 0 ? document.namespace : path.join('.'),
+    label: settingsFieldLabel(document.namespace, path),
     ...(description === undefined ? {} : { description }),
     schemaType: node.type,
     control: controlOf(node, secret !== undefined),
@@ -201,4 +201,100 @@ export function settingsSectionLabel(namespace: string): string {
   if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) return ui('SeekTTY 行为', 'SeekTTY behavior')
   if (namespace === 'tui-plugin-marketplace') return ui('插件市场来源', 'Plugin marketplace sources')
   return ui('通用设置', 'General settings')
+}
+
+const FIELD_LABELS: Readonly<Record<string, readonly [zh: string, en: string]>> = {
+  defaultPreset: ['默认 Agent 模式', 'Default Agent preset'],
+  default: ['默认权限', 'Default permission'],
+  theme: ['界面主题', 'Interface theme'],
+  codeTheme: ['代码块主题', 'Code theme'],
+  toolCards: ['工具卡片默认形态', 'Default tool-card shape'],
+  showReasoning: ['推理默认显示', 'Show reasoning by default'],
+  desktopNotifications: ['完成/审批桌面通知', 'Desktop notifications'],
+  followTerminalTitle: ['终端标题跟随', 'Follow the terminal title'],
+  composerHistoryLimit: ['输入历史条数', 'Composer history size'],
+  statusElapsed: ['状态栏实时耗时', 'Live status elapsed time'],
+  clipboardFallback: ['剪贴板回退', 'Clipboard fallback'],
+  toolOutputLineLimit: ['工具输出行数上限', 'Tool output line limit'],
+}
+
+/**
+ * Label a known high-frequency field while keeping unknown paths visible.
+ * @param namespace - registered Harness Settings namespace.
+ * @param path - schema path inside that namespace.
+ */
+export function settingsFieldLabel(namespace: string, path: readonly string[]): string {
+  if (path.length === 0) return namespace
+  const dotted = path.join('.')
+  const named = FIELD_LABELS[`${namespace}.${dotted}`] ?? FIELD_LABELS[dotted]
+  return named === undefined ? dotted : ui(named[0], named[1])
+}
+
+/** One flattened Settings field with its owning namespace. */
+export interface IndexedSettingsField {
+  readonly namespace: string
+  readonly section: string
+  readonly field: TuiSettingsField
+}
+
+/**
+ * Flatten every registered Settings document into a cross-namespace field index.
+ * @param documents - redacted Settings descriptors.
+ */
+export function indexSettingsFields(
+  documents: readonly TuiSettingsDocument[],
+): readonly IndexedSettingsField[] {
+  return documents.flatMap(document => settingsFields(document).map(field => ({
+    namespace: document.namespace,
+    section: settingsSectionLabel(document.namespace),
+    field,
+  })))
+}
+
+/** One row in the searchable Settings root list. */
+export interface SettingsRootChoice {
+  readonly id: string
+  readonly label: string
+  readonly description: string
+}
+
+/**
+ * Build the searchable Settings root: namespaces first, then every field.
+ * @param documents - redacted Settings descriptors.
+ */
+export function settingsRootChoices(
+  documents: readonly TuiSettingsDocument[],
+): readonly SettingsRootChoice[] {
+  return [
+    ...documents.map(document => ({
+      id: document.namespace,
+      label: document.namespace,
+      description: `${settingsSectionLabel(document.namespace)} · ${document.applies === 'live' ? ui('立即生效', 'applies immediately') : ui('需重启', 'restart required')}`,
+    })),
+    ...indexSettingsFields(documents).map(item => ({
+      id: `field:${item.namespace}:${JSON.stringify(item.field.path)}`,
+      label: item.field.label,
+      description: `${item.namespace}.${item.field.path.join('.')} · ${item.section}`,
+    })),
+  ]
+}
+
+export function parseSettingsRootChoice(id: string): {
+  readonly namespace: string
+  readonly fieldPath?: readonly string[]
+} | undefined {
+  if (id.startsWith('field:')) {
+    const separator = id.indexOf(':', 'field:'.length)
+    if (separator === -1) return undefined
+    const namespace = id.slice('field:'.length, separator)
+    try {
+      const path = JSON.parse(id.slice(separator + 1)) as unknown
+      if (!Array.isArray(path) || path.some(part => typeof part !== 'string')) return undefined
+      return { namespace, fieldPath: path as readonly string[] }
+    } catch {
+      return undefined
+    }
+  }
+  if (id === '') return undefined
+  return { namespace: id }
 }

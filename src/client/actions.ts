@@ -48,8 +48,10 @@ import type {
 import { OverlayQueue } from './overlays.ts'
 import {
   formatSettingsValue,
+  parseSettingsRootChoice,
   parseSettingsValue,
   settingsFields,
+  settingsRootChoices,
   settingsSectionLabel,
   type TuiSettingsField,
 } from './settings.ts'
@@ -1785,13 +1787,15 @@ export class TuiActions {
       const root = navigation.selectPage({
         title: '设置',
         detail: '搜索并修改全部功能设置',
-        choices: documents.map(candidate => ({
-          id: candidate.namespace,
-          label: candidate.namespace,
-          description: `${settingsSectionLabel(candidate.namespace)} · ${candidate.applies === 'live' ? '立即生效' : '需重启'}`,
-        })),
+        choices: settingsRootChoices(documents),
       }, async (selected) => {
-        await this.settingsNamespace(navigation, selected.id)
+        const parsed = parseSettingsRootChoice(selected.id)
+        if (parsed === undefined) return
+        await this.settingsNamespace(
+          navigation,
+          parsed.namespace,
+          parsed.fieldPath === undefined ? undefined : JSON.stringify(parsed.fieldPath),
+        )
       })
       if (args !== '') await this.settingsNamespace(navigation, args)
       await root
@@ -1801,6 +1805,7 @@ export class TuiActions {
   private async settingsNamespace(
     navigation: OverlayNavigation<void>,
     namespace: string,
+    initialChoiceId?: string,
   ): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const initialDocument = (await bridge.describe()).find(candidate => candidate.namespace === namespace)
@@ -1849,7 +1854,7 @@ export class TuiActions {
       }
       navigation.replaceSelectPage(request(selected.id), handle)
     }
-    await navigation.selectPage(request(), handle)
+    await navigation.selectPage(request(initialChoiceId), handle)
   }
 
   private settingsSpecialChoices(document: TuiSettingsDocument): readonly OverlayChoice[] {

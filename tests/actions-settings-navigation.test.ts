@@ -105,7 +105,7 @@ describe('/settings overlay navigation', () => {
     })
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
-      expect(plain(harness.component().render(90))).toContain('设置 · example')
+      expect(plain(harness.component().render(90))).toContain('修改立即生效')
     })
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
@@ -151,7 +151,7 @@ describe('/settings overlay navigation', () => {
     await vi.waitFor(() => { expect(harness.component()).toBeDefined() })
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
-      expect(plain(harness.component().render(90))).toContain('设置 · example')
+      expect(plain(harness.component().render(90))).toContain('修改立即生效')
     })
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
