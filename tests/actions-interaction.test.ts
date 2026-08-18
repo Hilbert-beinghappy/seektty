@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
 import type {
   ConversationSnapshot,
   PendingWait,
@@ -13,8 +16,13 @@ import type {
   HarnessTuiCapabilities,
   TuiActiveSession,
 } from '../src/client/capabilities.ts'
-import type { OverlayQueue } from '../src/client/overlays.ts'
+import {
+  OverlayQueue,
+  type OverlayNavigation,
+} from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
+
+const ESCAPE = '\u001B'
 
 function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript>): TuiActionHost {
   return {
@@ -30,6 +38,76 @@ function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript>):
     close: vi.fn(),
     restart: vi.fn(),
     requireRestart: vi.fn(),
+  }
+}
+
+function questionOverlays(
+  select: OverlayQueue['select'],
+  extra: Partial<OverlayQueue> = {},
+): Partial<OverlayQueue> {
+  const overlays: Partial<OverlayQueue> = { select, ...extra }
+  overlays.navigate = async (run) => {
+    await run({
+      select: overlays.select!,
+      multiSelect: overlays.multiSelect ?? (async () => undefined),
+      multilineInput: overlays.multilineInput ?? (async () => undefined),
+      input: async () => undefined,
+      secretInput: async () => undefined,
+      detail: async () => undefined,
+      confirm: async () => false,
+      progress: async () => undefined,
+      selectPage: async () => undefined,
+      replaceSelectPage: () => undefined,
+      updateChoices: () => undefined,
+      back: () => undefined,
+      finish: () => undefined,
+      signal: new AbortController().signal,
+    } as OverlayNavigation<never>)
+    return undefined
+  }
+  return overlays
+}
+
+function liveQuestionHarness(wait: PendingWait<'question'>): {
+  readonly hide: ReturnType<typeof vi.fn>
+  readonly answerQuestion: ReturnType<typeof vi.fn>
+  readonly cancelQuestion: ReturnType<typeof vi.fn>
+  component(): Component & { handleInput(data: string): void }
+  plain(): string
+} {
+  let mounted: Component | undefined
+  const hide = vi.fn()
+  const tui = {
+    showOverlay: vi.fn((component: Component) => {
+      mounted = component
+      return { hide } as unknown as OverlayHandle
+    }),
+    requestRender: vi.fn(),
+    terminal: { rows: 24, cols: 80 },
+  } as unknown as TUI
+  const overlays = new OverlayQueue(tui)
+  const snapshot = { pending: [wait] } as unknown as ConversationSnapshot
+  const answerQuestion = vi.fn(async () => undefined)
+  const cancelQuestion = vi.fn(async () => undefined)
+  const capabilities = {
+    active: () => ({ session: { getSnapshot: () => snapshot } }),
+    answerQuestion,
+    cancelQuestion,
+  } as unknown as HarnessTuiCapabilities
+  const actions = new TuiActions(capabilities, host(overlays, { followLatest: vi.fn() }))
+  actions.syncPending(snapshot)
+  return {
+    hide,
+    answerQuestion,
+    cancelQuestion,
+    component: () => {
+      if (mounted === undefined) throw new Error('overlay has not mounted')
+      return mounted as Component & { handleInput(data: string): void }
+    },
+    plain: () => {
+      if (mounted === undefined) throw new Error('overlay has not mounted')
+      return mounted.render(90).join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+    },
   }
 }
 
@@ -104,7 +182,7 @@ describe('pending interaction continuation', () => {
       answerQuestion,
       cancelQuestion: vi.fn(),
     } as unknown as HarnessTuiCapabilities
-    const actions = new TuiActions(capabilities, host({ select }, { followLatest }))
+    const actions = new TuiActions(capabilities, host(questionOverlays(select), { followLatest }))
 
     actions.syncPending(snapshot)
     await vi.waitFor(() => { expect(answerQuestion).toHaveBeenCalledOnce() })
@@ -141,7 +219,7 @@ describe('pending interaction continuation', () => {
       if (thirdShows === 1) return undefined
       return { id: 'option:选项3', label: '选项3' }
     })
-    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, { select })
+    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, questionOverlays(select))
 
     actions.syncPending({ pending: [wait] } as unknown as ConversationSnapshot)
     await vi.waitFor(() => { expect(answerQuestion).toHaveBeenCalledOnce() })
@@ -164,7 +242,7 @@ describe('pending interaction continuation', () => {
       if (request.title.includes('取消')) return { id: 'skip', label: '仅跳过本题' }
       return { id: 'option:选项2', label: '选项2' }
     })
-    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, { select })
+    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, questionOverlays(select))
 
     actions.syncPending({ pending: [wait] } as unknown as ConversationSnapshot)
     await vi.waitFor(() => { expect(answerQuestion).toHaveBeenCalledOnce() })
@@ -226,12 +304,96 @@ describe('pending interaction continuation', () => {
       if (request.title.includes('2/2')) return undefined
       return { id: 'cancel', label: '取消全部' }
     })
-    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, { select })
+    const { actions, answerQuestion, cancelQuestion } = pendingActions(wait, questionOverlays(select))
 
     actions.syncPending({ pending: [wait] } as unknown as ConversationSnapshot)
     await vi.waitFor(() => { expect(cancelQuestion).toHaveBeenCalledOnce() })
 
     expect(cancelQuestion).toHaveBeenCalledWith(wait)
     expect(answerQuestion).not.toHaveBeenCalled()
+  })
+
+  it('asks to cancel a question batch on the same navigator', () => {
+    const source = readFileSync(resolve(import.meta.dirname, '../src/client/actions.ts'), 'utf8')
+    expect(source).toMatch(/private async confirmQuestionEscape\(\s*overlays: OverlayPrompts/)
+    expect(source).toMatch(/const selected = await overlays\.select\(\{/)
+    expect(source).not.toMatch(/this\.host\.overlays\.select\(\{\s*title: ui\('取消这批问题？'/)
+  })
+
+  it('keeps multi-select checks when continuing after Escape', async () => {
+    const wait = {
+      key: 'question:multi',
+      kind: 'question',
+      sessionId: 'session' as SessionId,
+      payload: {
+        questions: [{
+          id: 'q1',
+          header: '问题',
+          question: '选择多项',
+          options: [{ label: 'Alpha' }, { label: 'Bravo' }],
+          multiSelect: true,
+        }],
+      },
+    } as unknown as PendingWait<'question'>
+    const harness = liveQuestionHarness(wait)
+    await vi.waitFor(() => {
+      expect(harness.plain()).toMatch(/Alpha/)
+    })
+    harness.component().handleInput(' ')
+    expect(harness.plain()).toContain('[x]')
+    harness.component().handleInput(ESCAPE)
+    await vi.waitFor(() => {
+      expect(harness.plain()).toMatch(/取消这批问题|Cancel this question batch/)
+    })
+    expect(harness.hide).not.toHaveBeenCalled()
+    harness.component().handleInput(ESCAPE)
+    await vi.waitFor(() => {
+      expect(harness.plain()).toMatch(/Alpha/)
+    })
+    expect(harness.plain()).toContain('[x]')
+    expect(harness.plain()).not.toMatch(/取消这批问题|Cancel this question batch/)
+    expect(harness.hide).not.toHaveBeenCalled()
+    expect(harness.answerQuestion).not.toHaveBeenCalled()
+    expect(harness.cancelQuestion).not.toHaveBeenCalled()
+  })
+
+  it('keeps unsubmitted custom text when continuing after Escape', async () => {
+    const wait = {
+      key: 'question:custom',
+      kind: 'question',
+      sessionId: 'session' as SessionId,
+      payload: {
+        questions: [{
+          id: 'q1',
+          header: '问题',
+          question: '请说明',
+          options: [{ label: '现成选项' }],
+          multiSelect: false,
+        }],
+      },
+    } as unknown as PendingWait<'question'>
+    const harness = liveQuestionHarness(wait)
+    await vi.waitFor(() => {
+      expect(harness.plain()).toMatch(/现成选项/)
+    })
+    harness.component().handleInput('\u001B[B')
+    harness.component().handleInput('\r')
+    await vi.waitFor(() => {
+      expect(harness.plain()).toMatch(/请说明/)
+      expect(harness.plain()).toMatch(/Ctrl\+Enter/)
+    })
+    harness.component().handleInput('draft-answer')
+    expect(harness.plain()).toContain('draft-answer')
+    harness.component().handleInput(ESCAPE)
+    await vi.waitFor(() => {
+      expect(harness.plain()).toMatch(/取消这批问题|Cancel this question batch/)
+    })
+    harness.component().handleInput(ESCAPE)
+    await vi.waitFor(() => {
+      expect(harness.plain()).toContain('draft-answer')
+    })
+    expect(harness.plain()).toMatch(/Ctrl\+Enter/)
+    expect(harness.hide).not.toHaveBeenCalled()
+    expect(harness.answerQuestion).not.toHaveBeenCalled()
   })
 })
