@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
 import { themePreviewFooter } from '../src/client/actions.ts'
@@ -58,16 +60,16 @@ describe('navigation noise', () => {
     expect(returnToComposer).toHaveBeenCalledOnce()
   })
 
-  it('keeps successful Host commands silent and still reports failures', () => {
+  it('keeps successful Host commands silent and still reports unknown names', () => {
     expect(noticeForHostCommand({ ok: true, matched: true }, 'compact')).toBeUndefined()
     expect(noticeForHostCommand({ ok: true, matched: false }, 'compact')).toEqual({
       message: '未识别命令 /compact',
       tone: 'warning',
     })
-    expect(noticeForHostCommand({ ok: false, message: 'boom' }, 'compact')).toEqual({
-      message: '命令失败：boom',
-      tone: 'error',
-    })
+    const surface = readFileSync(resolve(import.meta.dirname, '../src/client/surface.ts'), 'utf8')
+    expect(surface).toContain('noticeAfterFailedHostCommand(current.session, trimmed)')
+    expect(surface).toContain('noticeForHostCommand({ ok: true, matched: outcome.matched }, name)')
+    expect(surface).not.toMatch(/已执行 \/\${name}/u)
   })
 
   it('names Space on multi-select and Esc abort on progress pages', async () => {

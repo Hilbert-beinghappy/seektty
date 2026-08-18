@@ -694,21 +694,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           await sendPrompt(trimmed, 'queue')
           return
         }
-<<<<<<< HEAD
         const outcome = await noticeAfterFailedHostCommand(current.session, trimmed)
-        if (!outcome.ok) setNotice(outcome.message, 'error')
-        else if (!outcome.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
-        else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
-=======
-        const result = await current.session.command(trimmed)
-        const hostNotice = noticeForHostCommand(
-          result.ok
-            ? { ok: true, matched: result.value.matched }
-            : { ok: false, message: result.error.message },
-          name,
-        )
+        if (!outcome.ok) {
+          setNotice(outcome.message, 'error')
+          return
+        }
+        const hostNotice = noticeForHostCommand({ ok: true, matched: outcome.matched }, name)
         if (hostNotice !== undefined) setNotice(hostNotice.message, hostNotice.tone)
->>>>>>> origin/ux/nav-noise
       } catch (error) {
         setNotice(
           noticeAfterDispatchCatch(error, capabilities.active()?.session),
