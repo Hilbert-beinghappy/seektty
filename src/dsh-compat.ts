@@ -94,6 +94,12 @@ export function dshCompatibilityError(
       ? `dsh ${hostVersion} is too old. SeekTTY needs dsh >= ${compatibility.minimum} (tested ${compatibility.tested}).`
       : `dsh ${hostVersion} 过旧。SeekTTY 需要 dsh >= ${compatibility.minimum}（已测试 ${compatibility.tested}）。`
   }
+  const newest = compareDshVersion(hostVersion, compatibility.tested)
+  if (newest !== undefined && newest > 0) {
+    return english
+      ? `dsh ${hostVersion} is newer than the tested range. SeekTTY needs dsh ${compatibility.minimum}–${compatibility.tested} (tested ${compatibility.tested}).`
+      : `dsh ${hostVersion} 新于已测范围。SeekTTY 需要 dsh ${compatibility.minimum}–${compatibility.tested}（已测试 ${compatibility.tested}）。`
+  }
   return undefined
 }
 

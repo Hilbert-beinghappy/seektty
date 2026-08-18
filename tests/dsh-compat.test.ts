@@ -30,4 +30,11 @@ describe('dsh version and compatibility', () => {
     expect(dshCompatibilityError('0.1.0-rc.6', { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' }, false))
       .toBeUndefined()
   })
+
+  it('rejects dsh newer than the tested upper bound', () => {
+    const range = { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' }
+    expect(dshCompatibilityError('0.2.0', range, true)).toContain('0.2.0')
+    expect(dshCompatibilityError('0.2.0', range, true)).toMatch(/tested 0\.1\.0-rc\.6/u)
+    expect(dshCompatibilityError('0.1.0-rc.6', range, true)).toBeUndefined()
+  })
 })
