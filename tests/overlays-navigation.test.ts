@@ -65,6 +65,35 @@ describe('overlay navigation', () => {
     expect(harness.hide).toHaveBeenCalledOnce()
   })
 
+  it('keeps the navigation signal live when Escape only returns from a child page', async () => {
+    const harness = overlayHarness()
+    let signal: AbortSignal | undefined
+    const session = harness.overlays.navigate(async (navigation) => {
+      signal = navigation.signal
+      await navigation.selectPage({
+        title: 'root page',
+        choices: [{ id: 'child', label: 'open child' }],
+      }, async () => {
+        await navigation.selectPage({
+          title: 'child page',
+          choices: [{ id: 'noop', label: 'stay here' }],
+        }, () => undefined)
+      })
+    })
+
+    harness.component().handleInput(ENTER)
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('child page')
+    })
+    harness.component().handleInput(ESCAPE)
+    expect(plain(harness.component().render(80))).toContain('root page')
+    expect(signal?.aborted).toBe(false)
+
+    harness.component().handleInput(ESCAPE)
+    await expect(session).resolves.toBeUndefined()
+    expect(signal?.aborted).toBe(true)
+  })
+
   it('treats Escape as Back even when a searchable page contains a query', async () => {
     const harness = overlayHarness()
     const selected = harness.overlays.select({

@@ -631,8 +631,12 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     const current = this.current()
     if (current === undefined) return
     if (matchesKey(data, Key.escape)) {
-      this.abort()
-      if (current.busy) this.pendingBack = current
+      if (current.busy) {
+        this.abort()
+        this.pendingBack = current
+        return
+      }
+      if (this.stack.length <= 1) this.finish()
       else this.back()
       return
     }
