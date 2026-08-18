@@ -26,7 +26,10 @@ interface ProfileManifest {
   readonly dependencies?: Readonly<Record<string, string>>
 }
 
-export function launcherArgs(args: readonly string[]): { profile: string; inner: string[] } {
+export function launcherArgs(
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): { profile: string; inner: string[] } {
   let profile = 'tui'
   const inner: string[] = []
   for (let index = 0; index < args.length; index += 1) {
@@ -37,7 +40,7 @@ export function launcherArgs(args: readonly string[]): { profile: string; inner:
         throw new Error(launcherCopy(
           '--profile 需要一个 Profile 名称',
           '--profile requires a Profile name',
-          launcherPrefersEnglish(process.env),
+          launcherPrefersEnglish(environment),
         ))
       }
       profile = value
@@ -50,7 +53,7 @@ export function launcherArgs(args: readonly string[]): { profile: string; inner:
         throw new Error(launcherCopy(
           '--profile 需要一个 Profile 名称',
           '--profile requires a Profile name',
-          launcherPrefersEnglish(process.env),
+          launcherPrefersEnglish(environment),
         ))
       }
       profile = value
@@ -102,7 +105,7 @@ export function launch(
     }, launcherPrefersEnglish(environment)))
     return 0
   }
-  const { profile, inner } = launcherArgs(args)
+  const { profile, inner } = launcherArgs(args, environment)
   const dsh = environment.DSH_BIN?.trim() || 'dsh'
   const stderr = (chunk: string): void => { process.stderr.write(chunk) }
   let manifest = measureStartupSync('launcher-manifest', () => profileManifest(profile), environment, stderr)

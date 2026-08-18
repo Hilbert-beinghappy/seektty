@@ -51,6 +51,11 @@ describe('launcher arguments', () => {
     expect(() => launcherArgs(['--profile'])).toThrow('--profile 需要一个 Profile 名称')
     expect(() => launcherArgs(['--profile='])).toThrow('--profile 需要一个 Profile 名称')
   })
+
+  it('uses launch env, not the process environment, for argument errors', () => {
+    expect(() => launcherArgs(['--profile'], { LANG: 'en_US.UTF-8' }))
+      .toThrow('--profile requires a Profile name')
+  })
 })
 
 describe('launcher provisioning', () => {
