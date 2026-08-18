@@ -189,16 +189,16 @@ const FULL_ACCESS_PRESET = 'danger-full-access'
 // These remain Host-owned commands. The terminal adds a confirmation/selector
 // before dispatch, but does not register a second command with the same name.
 const HOST_COMMAND_DECORATORS = new Set(['permission', 'feedback'])
-const HOST_COMMAND_FUNCTIONS = new Map<string, string>([
-  ['permission', '切换权限'],
-  ['feedback', '提交会话反馈'],
-  ['plan', '开启或关闭计划模式'],
-  ['goal', '管理当前目标'],
-  ['compact', '压缩当前会话上下文'],
+const HOST_COMMAND_FUNCTIONS = new Map<string, { readonly zh: string; readonly en: string }>([
+  ['permission', { zh: '切换权限', en: 'Switch permission' }],
+  ['feedback', { zh: '提交会话反馈', en: 'Submit session feedback' }],
+  ['plan', { zh: '开启或关闭计划模式', en: 'Enable or disable plan mode' }],
+  ['goal', { zh: '管理当前目标', en: 'Manage current goal' }],
+  ['compact', { zh: '压缩当前会话上下文', en: 'Compact current session context' }],
 ])
-const HOST_COMMAND_ARGUMENT_HINTS = new Map<string, string>([
-  ['permission', '[权限]'],
-  ['feedback', '[内容]'],
+const HOST_COMMAND_ARGUMENT_HINTS = new Map<string, { readonly zh: string; readonly en: string }>([
+  ['permission', { zh: '[权限]', en: '[permission]' }],
+  ['feedback', { zh: '[内容]', en: '[text]' }],
 ])
 
 function shortFunctionDescription(description: string, fallback: string): string {
@@ -210,44 +210,46 @@ function shortFunctionDescription(description: string, fallback: string): string
 }
 
 /** TUI-owned product commands available in the terminal Surface. */
-export const TUI_COMMANDS: readonly TuiCommandCandidate[] = Object.freeze([
-  { name: 'new', description: '新建会话', source: 'TUI', behavior: 'local' },
-  { name: 'resume', description: '恢复会话', source: 'TUI', behavior: 'local' },
-  { name: 'sessions', description: '查看或搜索会话', argumentHint: '[搜索词]', source: 'TUI', behavior: 'local' },
-  { name: 'rename', description: '重命名当前会话', argumentHint: '<标题>', source: 'TUI', behavior: 'local' },
-  { name: 'fork', description: '从当前会话创建分支', source: 'TUI', behavior: 'local' },
-  { name: 'archive', description: '归档当前会话', source: 'TUI', behavior: 'local' },
-  { name: 'export', description: '导出当前会话', argumentHint: '[md] [路径]', source: 'TUI', behavior: 'local' },
-  { name: 'copy', description: '复制最后一条回复', argumentHint: '[pick|code]', source: 'TUI', behavior: 'local' },
-  { name: 'workspace', description: '管理工作区', argumentHint: '[子命令|路径]', source: 'TUI', behavior: 'local' },
-  { name: 'profile', description: '管理 Profile', argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
-  { name: 'mode', description: '切换模式', source: 'TUI', behavior: 'local' },
-  { name: 'model', description: '切换模型和推理强度', source: 'TUI', behavior: 'local' },
-  { name: 'language', description: '切换界面语言', argumentHint: '[auto|zh|en]', source: 'TUI', behavior: 'local' },
-  { name: 'theme', description: '切换界面或独立代码主题', argumentHint: '[dark|light|code|use|edit|palette|import|export|delete]', source: 'TUI', behavior: 'local' },
-  { name: 'queue', description: '管理排队消息', source: 'TUI', behavior: 'local' },
-  { name: 'steer', description: '发送引导消息', argumentHint: '<消息>', source: 'TUI', behavior: 'local' },
-  { name: 'attach', description: '添加图片', argumentHint: '<图片路径>', source: 'TUI', behavior: 'local' },
-  { name: 'attachments', description: '管理待发送图片', source: 'TUI', behavior: 'local' },
-  { name: 'pending', description: '处理待审批或待回答事项', source: 'TUI', behavior: 'local' },
-  { name: 'settings', description: '打开设置', argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },
-  { name: 'keymap', description: '自定义快捷键', argumentHint: '[binding [chord|reset]]', source: 'TUI', behavior: 'local' },
-  { name: 'plugin', description: '打开插件中心', argumentHint: '[子命令]', source: 'TUI', behavior: 'local' },
-  { name: 'plugins', description: '打开插件中心', argumentHint: '[子命令]', source: 'TUI', behavior: 'local' },
-  { name: 'doctor', description: '检查运行环境', source: 'TUI', behavior: 'local' },
-  { name: 'restart', description: '重启并恢复当前会话', source: 'TUI', behavior: 'local' },
-  { name: 'tools', description: '查看工具', argumentHint: '[display]', source: 'TUI', behavior: 'local' },
-  { name: 'files', description: '查看本会话生成文件', source: 'TUI', behavior: 'local' },
-  { name: 'jobs', description: '查看后台任务', source: 'TUI', behavior: 'local' },
-  { name: 'subagents', description: '查看子 Agent', source: 'TUI', behavior: 'local' },
-  { name: 'trajectory', description: '查看执行轨迹', source: 'TUI', behavior: 'local' },
-  { name: 'skills', description: '查看 Skills', source: 'TUI', behavior: 'local' },
-  { name: 'mcp', description: '查看 MCP', source: 'TUI', behavior: 'local' },
-  { name: 'status', description: '查看状态和统计', source: 'TUI', behavior: 'local' },
-  { name: 'help', description: '查看帮助', source: 'TUI', behavior: 'local' },
-  { name: 'quit', description: '退出', source: 'TUI', behavior: 'local' },
-  { name: 'exit', description: '退出', source: 'TUI', behavior: 'local' },
-])
+export function tuiCommands(): readonly TuiCommandCandidate[] {
+  return Object.freeze([
+    { name: 'new', description: ui('新建会话', 'New session'), source: 'TUI', behavior: 'local' },
+    { name: 'resume', description: ui('恢复会话', 'Resume session'), source: 'TUI', behavior: 'local' },
+    { name: 'sessions', description: ui('查看或搜索会话', 'View or search sessions'), argumentHint: ui('[搜索词]', '[query]'), source: 'TUI', behavior: 'local' },
+    { name: 'rename', description: ui('重命名当前会话', 'Rename current session'), argumentHint: ui('<标题>', '<title>'), source: 'TUI', behavior: 'local' },
+    { name: 'fork', description: ui('从当前会话创建分支', 'Fork current session'), source: 'TUI', behavior: 'local' },
+    { name: 'archive', description: ui('归档当前会话', 'Archive current session'), source: 'TUI', behavior: 'local' },
+    { name: 'export', description: ui('导出当前会话', 'Export current session'), argumentHint: ui('[md] [路径]', '[md] [path]'), source: 'TUI', behavior: 'local' },
+    { name: 'copy', description: ui('复制最后一条回复', 'Copy last response'), argumentHint: '[pick|code]', source: 'TUI', behavior: 'local' },
+    { name: 'workspace', description: ui('管理工作区', 'Manage workspaces'), argumentHint: ui('[子命令|路径]', '[subcommand|path]'), source: 'TUI', behavior: 'local' },
+    { name: 'profile', description: ui('管理 Profile', 'Manage Profiles'), argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
+    { name: 'mode', description: ui('切换模式', 'Switch mode'), source: 'TUI', behavior: 'local' },
+    { name: 'model', description: ui('切换模型和推理强度', 'Switch model and reasoning effort'), source: 'TUI', behavior: 'local' },
+    { name: 'language', description: ui('切换界面语言', 'Switch interface language'), argumentHint: '[auto|zh|en]', source: 'TUI', behavior: 'local' },
+    { name: 'theme', description: ui('切换界面或独立代码主题', 'Switch interface or code theme'), argumentHint: '[dark|light|code|use|edit|palette|import|export|delete]', source: 'TUI', behavior: 'local' },
+    { name: 'queue', description: ui('管理排队消息', 'Manage queued messages'), source: 'TUI', behavior: 'local' },
+    { name: 'steer', description: ui('发送引导消息', 'Send steering message'), argumentHint: ui('<消息>', '<message>'), source: 'TUI', behavior: 'local' },
+    { name: 'attach', description: ui('添加图片', 'Attach image'), argumentHint: ui('<图片路径>', '<image-path>'), source: 'TUI', behavior: 'local' },
+    { name: 'attachments', description: ui('管理待发送图片', 'Manage pending images'), source: 'TUI', behavior: 'local' },
+    { name: 'pending', description: ui('处理待审批或待回答事项', 'Handle pending approvals or questions'), source: 'TUI', behavior: 'local' },
+    { name: 'settings', description: ui('打开设置', 'Open Settings'), argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },
+    { name: 'keymap', description: ui('自定义快捷键', 'Customize shortcuts'), argumentHint: '[binding [chord|reset]]', source: 'TUI', behavior: 'local' },
+    { name: 'plugin', description: ui('打开插件中心', 'Open plugin center'), argumentHint: ui('[子命令]', '[subcommand]'), source: 'TUI', behavior: 'local' },
+    { name: 'plugins', description: ui('打开插件中心', 'Open plugin center'), argumentHint: ui('[子命令]', '[subcommand]'), source: 'TUI', behavior: 'local' },
+    { name: 'doctor', description: ui('检查运行环境', 'Check runtime environment'), source: 'TUI', behavior: 'local' },
+    { name: 'restart', description: ui('重启并恢复当前会话', 'Restart and resume current session'), source: 'TUI', behavior: 'local' },
+    { name: 'tools', description: ui('查看工具', 'View tools'), argumentHint: '[display]', source: 'TUI', behavior: 'local' },
+    { name: 'files', description: ui('查看本会话生成文件', 'View files produced this session'), source: 'TUI', behavior: 'local' },
+    { name: 'jobs', description: ui('查看后台任务', 'View background jobs'), source: 'TUI', behavior: 'local' },
+    { name: 'subagents', description: ui('查看子 Agent', 'View subagents'), source: 'TUI', behavior: 'local' },
+    { name: 'trajectory', description: ui('查看执行轨迹', 'View execution trajectory'), source: 'TUI', behavior: 'local' },
+    { name: 'skills', description: ui('查看 Skills', 'View Skills'), source: 'TUI', behavior: 'local' },
+    { name: 'mcp', description: ui('查看 MCP', 'View MCP'), source: 'TUI', behavior: 'local' },
+    { name: 'status', description: ui('查看状态和统计', 'View status and statistics'), source: 'TUI', behavior: 'local' },
+    { name: 'help', description: ui('查看帮助', 'View help'), source: 'TUI', behavior: 'local' },
+    { name: 'quit', description: ui('退出', 'Exit'), source: 'TUI', behavior: 'local' },
+    { name: 'exit', description: ui('退出', 'Exit'), source: 'TUI', behavior: 'local' },
+  ])
+}
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -283,7 +285,7 @@ function durationText(milliseconds: number): string {
 function assistantText(message: AssistantMessageNode): string {
   return message.blocks.flatMap((block) => {
     if (block.kind === 'text') return [block.text]
-    if (block.kind === 'image') return ['[图片]']
+    if (block.kind === 'image') return [ui('[图片]', '[image]')]
     return []
   }).join('\n').trim()
 }
@@ -321,7 +323,9 @@ async function saveExport(path: string, stream: ReadableStream<Uint8Array>): Pro
       let offset = 0
       while (offset < next.value.byteLength) {
         const result = await file.write(next.value, offset, next.value.byteLength - offset, null)
-        if (result.bytesWritten < 1) throw new Error('写入 Session Export 时没有取得进展')
+        if (result.bytesWritten < 1) {
+          throw new Error(ui('写入 Session Export 时没有取得进展', 'Session Export write made no progress'))
+        }
         offset += result.bytesWritten
         bytes += result.bytesWritten
       }
@@ -448,7 +452,12 @@ export class HarnessTuiCapabilities {
    * @returns Host Settings/Profile/plugin bridge.
    */
   managementBridge(): TuiManagementBridge {
-    if (this.management === undefined) throw new Error('当前 launcher 未提供 Settings/Profile/插件管理能力')
+    if (this.management === undefined) {
+      throw new Error(ui(
+        '当前 launcher 未提供 Settings/Profile/插件管理能力',
+        'The current launcher does not provide Settings, Profile, or plugin management',
+      ))
+    }
     return this.management
   }
 
@@ -540,16 +549,16 @@ export class HarnessTuiCapabilities {
     const context = this.sessionStatistics().context
     const connection = (this.ctx as TuiClientContext & { readonly connection: ConnectionHandle }).connection
     return {
-      hostVersion: connection.hostDescription.getSnapshot()?.version ?? '未知',
+      hostVersion: connection.hostDescription.getSnapshot()?.version ?? ui('未知', 'Unknown'),
       nodeVersion: process.version,
       platform: process.platform,
       architecture: process.arch,
       profile: this.profile,
       workspace: active.workspacePath,
       session: active.summary.displayTitle,
-      mode: active.summary.agentPreset ?? '未声明',
+      mode: active.summary.agentPreset ?? ui('未声明', 'Not declared'),
       model: modelRoute ?? '',
-      permission: permission?.currentValue ?? '未提供',
+      permission: permission?.currentValue ?? ui('未提供', 'Not available'),
       running: active.session.getSnapshot().running,
       ...(context === undefined ? {} : { context }),
     }
@@ -563,7 +572,7 @@ export class HarnessTuiCapabilities {
   commandCatalog(signal?: AbortSignal): Promise<readonly TuiCommandCandidate[]> {
     signal?.throwIfAborted()
     const sessionId = this.active()?.sessionId
-    if (sessionId === undefined) return Promise.resolve(TUI_COMMANDS)
+    if (sessionId === undefined) return Promise.resolve(tuiCommands())
     const existing = this.commandCatalogs.get(sessionId)
     const request = existing ?? this.readCommandCatalog(sessionId)
       .catch((error: unknown) => {
@@ -591,7 +600,9 @@ export class HarnessTuiCapabilities {
   async listModes(): Promise<readonly TuiModeOption[]> {
     const active = this.requireActive()
     const response = await this.api.agentPresets.list({})
-    if (!response.result.ok) throw new Error(`读取模式失败：${response.result.error.message}`)
+    if (!response.result.ok) {
+      throw new Error(ui(`读取模式失败：${response.result.error.message}`, `Failed to load modes: ${response.result.error.message}`))
+    }
     return response.result.value.presets.map(preset => ({
       id: preset.id,
       label: preset.name ?? preset.id,
@@ -621,7 +632,9 @@ export class HarnessTuiCapabilities {
     const source = this.requireActive()
     let target = source
     if (!source.summary.blank) {
-      if (!allowNewSession) throw new Error('活跃会话不能原地切换模式')
+      if (!allowNewSession) {
+        throw new Error(ui('活跃会话不能原地切换模式', 'An active session cannot change mode in place'))
+      }
       let workspaceId = source.workspaceId
       if (workspaceId === undefined) {
         workspaceId = (await this.ctx.workspaces.create({ path: source.workspacePath })).workspaceId
@@ -630,7 +643,10 @@ export class HarnessTuiCapabilities {
       const summary = this.ctx.sessions.list.getSnapshot().byId[sessionId]
       const binding = this.ctx.sessions.binding(sessionId)
       if (summary === undefined || binding === undefined || sessionId === source.sessionId) {
-        throw new Error('Harness 未提供可用于模式切换的同工作区空白会话')
+        throw new Error(ui(
+          'Harness 未提供可用于模式切换的同工作区空白会话',
+          'Harness did not provide a blank same-workspace session for the mode change',
+        ))
       }
       target = {
         sessionId,
@@ -641,7 +657,9 @@ export class HarnessTuiCapabilities {
       }
     }
     const response = await this.api.agentPresets.select({ sessionId: target.sessionId, agentPreset })
-    if (!response.result.ok) throw new Error(`切换模式失败：${response.result.error.message}`)
+    if (!response.result.ok) {
+      throw new Error(ui(`切换模式失败：${response.result.error.message}`, `Failed to change mode: ${response.result.error.message}`))
+    }
     this.ctx.sessions.noteAgentPreset(target.sessionId, response.result.value.agentPreset)
     this.ctx.sessions.open(target.sessionId)
     this.commandCatalogs.delete(target.sessionId)
@@ -658,7 +676,9 @@ export class HarnessTuiCapabilities {
     if (existing !== undefined) return existing
     const generation = this.modelGeneration
     const request = this.api.sessions.models({ sessionId }).then((response) => {
-      if (!response.result.ok) throw new Error(`读取模型失败：${response.result.error.message}`)
+      if (!response.result.ok) {
+        throw new Error(ui(`读取模型失败：${response.result.error.message}`, `Failed to load models: ${response.result.error.message}`))
+      }
       if (generation === this.modelGeneration) this.modelCatalogs.set(sessionId, response.result.value)
       return response.result.value
     }).finally(() => {
@@ -697,7 +717,9 @@ export class HarnessTuiCapabilities {
   async selectModel(selection: ModelSelection): Promise<void> {
     const active = this.requireActive()
     const response = await this.api.sessions.selectModel({ sessionId: active.sessionId, ...selection })
-    if (!response.result.ok) throw new Error(`切换模型失败：${response.result.error.message}`)
+    if (!response.result.ok) {
+      throw new Error(ui(`切换模型失败：${response.result.error.message}`, `Failed to change model: ${response.result.error.message}`))
+    }
     const current = this.modelCatalogs.get(active.sessionId)
     this.invalidateModels()
     if (current !== undefined) {
@@ -713,7 +735,9 @@ export class HarnessTuiCapabilities {
    */
   listPermissions(): readonly TuiPermissionOption[] {
     const value = this.permissionValue(this.requireActive().session)
-    if (value === undefined) throw new Error('当前 Profile 未提供权限投影')
+    if (value === undefined) {
+      throw new Error(ui('当前 Profile 未提供权限投影', 'The current Profile does not provide a permission projection'))
+    }
     return value.options
       .filter(option => option.value !== 'custom')
       .map(option => ({
@@ -731,7 +755,9 @@ export class HarnessTuiCapabilities {
    */
   nextPermission(): TuiPermissionOption {
     const options = this.listPermissions()
-    if (options.length === 0) throw new Error('当前 Profile 没有可切换的权限预设')
+    if (options.length === 0) {
+      throw new Error(ui('当前 Profile 没有可切换的权限预设', 'The current Profile has no switchable permission preset'))
+    }
     const index = options.findIndex(option => option.current)
     return options[(index + 1 + options.length) % options.length] as TuiPermissionOption
   }
@@ -751,8 +777,15 @@ export class HarnessTuiCapabilities {
    */
   async selectPermission(id: string): Promise<void> {
     const result = await this.requireActive().session.command(`/permission ${id}`)
-    if (!result.ok) throw new Error(`切换权限失败：${result.error.message}`)
-    if (!result.value.matched) throw new Error(`Host 未识别权限预设 ${JSON.stringify(id)}`)
+    if (!result.ok) {
+      throw new Error(ui(`切换权限失败：${result.error.message}`, `Failed to change permission: ${result.error.message}`))
+    }
+    if (!result.value.matched) {
+      throw new Error(ui(
+        `Host 未识别权限预设 ${JSON.stringify(id)}`,
+        `The Host did not recognize permission preset ${JSON.stringify(id)}`,
+      ))
+    }
   }
 
   /**
@@ -762,10 +795,14 @@ export class HarnessTuiCapabilities {
    */
   async recordSessionFeedback(text: string): Promise<void> {
     const normalized = text.trim()
-    if (normalized === '') throw new Error('会话反馈不能为空')
+    if (normalized === '') throw new Error(ui('会话反馈不能为空', 'Session feedback cannot be empty'))
     const result = await this.requireActive().session.command(`/feedback ${normalized}`)
-    if (!result.ok) throw new Error(`提交会话反馈失败：${result.error.message}`)
-    if (!result.value.matched) throw new Error('当前 Profile 未提供会话反馈功能')
+    if (!result.ok) {
+      throw new Error(ui(`提交会话反馈失败：${result.error.message}`, `Failed to submit session feedback: ${result.error.message}`))
+    }
+    if (!result.value.matched) {
+      throw new Error(ui('当前 Profile 未提供会话反馈功能', 'The current Profile does not provide session feedback'))
+    }
   }
 
   /**
@@ -792,7 +829,9 @@ export class HarnessTuiCapabilities {
     readonly hasMore: boolean
   }> {
     const result = await this.ctx.sessions.search(query, signal)
-    if (!result.ok) throw new Error(`搜索会话失败：${result.error.message}`)
+    if (!result.ok) {
+      throw new Error(ui(`搜索会话失败：${result.error.message}`, `Failed to search sessions: ${result.error.message}`))
+    }
     return result.value
   }
 
@@ -802,7 +841,7 @@ export class HarnessTuiCapabilities {
    */
   openSession(sessionId: SessionId): void {
     if (this.ctx.sessions.list.getSnapshot().byId[sessionId] === undefined) {
-      throw new Error(`找不到会话 ${sessionId}`)
+      throw new Error(ui(`找不到会话 ${sessionId}`, `Session ${sessionId} was not found`))
     }
     this.ctx.sessions.open(sessionId)
   }
@@ -841,7 +880,9 @@ export class HarnessTuiCapabilities {
    */
   async renameSession(title: string): Promise<string> {
     const result = await this.requireActive().session.rename(title)
-    if (!result.ok) throw new Error(`重命名失败：${result.error.message}`)
+    if (!result.ok) {
+      throw new Error(ui(`重命名失败：${result.error.message}`, `Rename failed: ${result.error.message}`))
+    }
     return result.value.title
   }
 
@@ -935,13 +976,13 @@ export class HarnessTuiCapabilities {
       || (input.startsWith("'") && input.endsWith("'"))) {
       input = input.slice(1, -1)
     }
-    if (input === '') throw new Error('附件路径不能为空')
+    if (input === '') throw new Error(ui('附件路径不能为空', 'Attachment path cannot be empty'))
     let path: string
     if (input.startsWith('file://')) {
       try {
         path = fileURLToPath(input)
       } catch {
-        throw new Error('附件 file URL 无效')
+        throw new Error(ui('附件 file URL 无效', 'Attachment file URL is invalid'))
       }
     } else if (input === '~') {
       path = homedir()
@@ -951,24 +992,41 @@ export class HarnessTuiCapabilities {
       path = resolve(active.workspacePath, input)
     }
     const file = await stat(path)
-    if (!file.isFile()) throw new Error('附件路径不是文件')
+    if (!file.isFile()) throw new Error(ui('附件路径不是文件', 'Attachment path is not a file'))
     const bytes = await readFile(path)
     const mediaType = mediaTypeOf(bytes, path)
-    if (mediaType === undefined) throw new Error('只支持 PNG、JPEG、GIF 或 WebP 图片')
+    if (mediaType === undefined) {
+      throw new Error(ui('只支持 PNG、JPEG、GIF 或 WebP 图片', 'Only PNG, JPEG, GIF, and WebP images are supported'))
+    }
     const data = bytes.toString('base64')
     const dimensions = getImageDimensions(data, mediaType)
     const limitsValue = active.session.projections.faceOf('imageLimits').getSnapshot()
     const limits = isImageLimits(limitsValue) ? limitsValue : undefined
     if (limits !== undefined) {
-      if (!limits.mediaTypes.includes(mediaType)) throw new Error(`当前 Host 不接受 ${mediaType}`)
-      if (bytes.byteLength > limits.maxImageBytes) throw new Error(`图片超过单文件限制 ${limits.maxImageBytes} 字节`)
+      if (!limits.mediaTypes.includes(mediaType)) {
+        throw new Error(ui(`当前 Host 不接受 ${mediaType}`, `The current Host does not accept ${mediaType}`))
+      }
+      if (bytes.byteLength > limits.maxImageBytes) {
+        throw new Error(ui(
+          `图片超过单文件限制 ${limits.maxImageBytes} 字节`,
+          `Image exceeds the per-file limit of ${limits.maxImageBytes} bytes`,
+        ))
+      }
       if (this.attachments.length + 1 > limits.maxImagesPerMessage) {
-        throw new Error(`每条消息最多 ${limits.maxImagesPerMessage} 张图片`)
+        throw new Error(ui(
+          `每条消息最多 ${limits.maxImagesPerMessage} 张图片`,
+          `Each message can include at most ${limits.maxImagesPerMessage} image(s)`,
+        ))
       }
       const total = this.attachments.reduce((sum, item) => sum + item.bytes, 0) + bytes.byteLength
-      if (total > limits.maxMessageImageBytes) throw new Error(`图片总大小超过 ${limits.maxMessageImageBytes} 字节`)
+      if (total > limits.maxMessageImageBytes) {
+        throw new Error(ui(
+          `图片总大小超过 ${limits.maxMessageImageBytes} 字节`,
+          `Total image size exceeds ${limits.maxMessageImageBytes} bytes`,
+        ))
+      }
       if (dimensions !== null && dimensions.widthPx * dimensions.heightPx > limits.maxImagePixels) {
-        throw new Error(`图片像素超过 ${limits.maxImagePixels}`)
+        throw new Error(ui(`图片像素超过 ${limits.maxImagePixels}`, `Image pixels exceed ${limits.maxImagePixels}`))
       }
     }
     const attachment: TuiDraftAttachment = {
@@ -1207,7 +1265,12 @@ export class HarnessTuiCapabilities {
     if (refresh) await this.ctx.sessions.refreshSubagents(active.sessionId)
     const list = this.ctx.sessions.list.getSnapshot()
     const catalog = list.subagentsByParent[active.sessionId]
-    if (catalog?.state === 'error') throw new Error(`读取子 Agent 失败：${catalog.error?.message ?? '未知错误'}`)
+    if (catalog?.state === 'error') {
+      throw new Error(ui(
+        `读取子 Agent 失败：${catalog.error?.message ?? ui('未知错误', 'unknown error')}`,
+        `Failed to load subagents: ${catalog.error?.message ?? ui('未知错误', 'unknown error')}`,
+      ))
+    }
     const now = Date.now()
     return (catalog?.entries ?? []).map((entry) => {
       const summary = list.byId[entry.id]
@@ -1264,7 +1327,9 @@ export class HarnessTuiCapabilities {
    */
   async skills(): Promise<readonly SkillEntry[]> {
     const response = await this.api.skills.list({ sessionId: this.requireActive().sessionId })
-    if (!response.result.ok) throw new Error(`读取 Skill 失败：${response.result.error.message}`)
+    if (!response.result.ok) {
+      throw new Error(ui(`读取 Skill 失败：${response.result.error.message}`, `Failed to load Skills: ${response.result.error.message}`))
+    }
     return response.result.value.skills
   }
 
@@ -1279,7 +1344,9 @@ export class HarnessTuiCapabilities {
     readonly fiberPhase: string | null
   }[]> {
     const carried = await this.ctx.remote.pluginInventory.list()
-    if (!carried.ok) throw new Error(`读取插件运行状态失败：${carried.error.message}`)
+    if (!carried.ok) {
+      throw new Error(ui(`读取插件运行状态失败：${carried.error.message}`, `Failed to load plugin runtime state: ${carried.error.message}`))
+    }
     return carried.value.entries
   }
 
@@ -1290,8 +1357,12 @@ export class HarnessTuiCapabilities {
   async feedbackTargets(): Promise<readonly TuiFeedbackTarget[]> {
     const active = this.requireActive()
     const carried = await this.ctx.remote.messageFeedback.list({ sessionId: active.sessionId })
-    if (!carried.ok) throw new Error(`读取反馈失败：${carried.error.message}`)
-    if (!carried.value.ok) throw new Error(`读取反馈失败：${carried.value.error.code}`)
+    if (!carried.ok) {
+      throw new Error(ui(`读取反馈失败：${carried.error.message}`, `Failed to load feedback: ${carried.error.message}`))
+    }
+    if (!carried.value.ok) {
+      throw new Error(ui(`读取反馈失败：${carried.value.error.code}`, `Failed to load feedback: ${carried.value.error.code}`))
+    }
     const items = carried.value.value.items as readonly MessageFeedbackItem[]
     const feedback = new Map(items.map(item => [item.messageId, item]))
     return active.session.getSnapshot().nodes.flatMap<TuiFeedbackTarget>((node) => {
@@ -1300,7 +1371,7 @@ export class HarnessTuiCapabilities {
       const item = feedback.get(node.messageId)
       const target: TuiFeedbackTarget = {
         message: node,
-        preview: text.replace(/\s+/gu, ' ').slice(0, 160) || '[无文本回复]',
+        preview: text.replace(/\s+/gu, ' ').slice(0, 160) || ui('[无文本回复]', '[no text response]'),
         ...(item === undefined ? {} : { feedback: item }),
       }
       return [target]
@@ -1328,8 +1399,12 @@ export class HarnessTuiCapabilities {
       ...(note === undefined ? {} : { note }),
       ifVersion,
     })
-    if (!carried.ok) throw new Error(`提交反馈失败：${carried.error.message}`)
-    if (!carried.value.ok) throw new Error(`提交反馈失败：${carried.value.error.code}`)
+    if (!carried.ok) {
+      throw new Error(ui(`提交反馈失败：${carried.error.message}`, `Failed to submit feedback: ${carried.error.message}`))
+    }
+    if (!carried.value.ok) {
+      throw new Error(ui(`提交反馈失败：${carried.value.error.code}`, `Failed to submit feedback: ${carried.value.error.code}`))
+    }
     return carried.value.value
   }
 
@@ -1347,8 +1422,12 @@ export class HarnessTuiCapabilities {
       messageId,
       ifVersion,
     })
-    if (!carried.ok) throw new Error(`删除反馈失败：${carried.error.message}`)
-    if (!carried.value.ok) throw new Error(`删除反馈失败：${carried.value.error.code}`)
+    if (!carried.ok) {
+      throw new Error(ui(`删除反馈失败：${carried.error.message}`, `Failed to delete feedback: ${carried.error.message}`))
+    }
+    if (!carried.value.ok) {
+      throw new Error(ui(`删除反馈失败：${carried.value.error.code}`, `Failed to delete feedback: ${carried.value.error.code}`))
+    }
   }
 
   /**
@@ -1425,7 +1504,9 @@ export class HarnessTuiCapabilities {
     action: Parameters<SessionFace['updateQueue']>[1],
   ): Promise<void> {
     const result = await this.requireActive().session.updateQueue(itemId, action)
-    if (!result.ok) throw new Error(`队列操作失败：${result.error.message}`)
+    if (!result.ok) {
+      throw new Error(ui(`队列操作失败：${result.error.message}`, `Queue operation failed: ${result.error.message}`))
+    }
   }
 
   /**
@@ -1438,7 +1519,9 @@ export class HarnessTuiCapabilities {
       ok: true,
       value: { sessionId: wait.sessionId, approvalId: wait.payload.approvalId, outcome },
     })
-    if (!receipt.accepted) throw new Error(`审批响应被拒绝：${receipt.reason}`)
+    if (!receipt.accepted) {
+      throw new Error(ui(`审批响应被拒绝：${receipt.reason}`, `Approval response was rejected: ${receipt.reason}`))
+    }
   }
 
   /**
@@ -1448,7 +1531,9 @@ export class HarnessTuiCapabilities {
    */
   async answerQuestion(wait: PendingWait<'question'>, answer: QuestionResponsePayload['answer']): Promise<void> {
     const receipt = await wait.respond({ ok: true, value: { sessionId: wait.sessionId, answer } })
-    if (!receipt.accepted) throw new Error(`问题响应被拒绝：${receipt.reason}`)
+    if (!receipt.accepted) {
+      throw new Error(ui(`问题响应被拒绝：${receipt.reason}`, `Question response was rejected: ${receipt.reason}`))
+    }
   }
 
   /**
@@ -1460,7 +1545,9 @@ export class HarnessTuiCapabilities {
       ok: false,
       error: { code: 'cancelled', message: 'the user cancelled this question request', details: {} },
     })
-    if (!receipt.accepted) throw new Error(`取消问题被拒绝：${receipt.reason}`)
+    if (!receipt.accepted) {
+      throw new Error(ui(`取消问题被拒绝：${receipt.reason}`, `Question cancellation was rejected: ${receipt.reason}`))
+    }
   }
 
   /**
@@ -1483,7 +1570,7 @@ export class HarnessTuiCapabilities {
 
   private requireActive(): TuiActiveSession {
     const active = this.active()
-    if (active === undefined) throw new Error('当前没有打开的会话')
+    if (active === undefined) throw new Error(ui('当前没有打开的会话', 'No session is open'))
     return active
   }
 
@@ -1510,26 +1597,44 @@ export class HarnessTuiCapabilities {
         ? Promise.resolve(undefined)
         : this.api.skills.list({ sessionId }),
     ])
-    if (!hostResult.ok) throw new Error(`读取 Host 命令失败：${hostResult.error.message}`)
-    if (skillResponse !== undefined && !skillResponse.result.ok) {
-      throw new Error(`读取 Skill 失败：${skillResponse.result.error.message}`)
+    if (!hostResult.ok) {
+      throw new Error(ui(`读取 Host 命令失败：${hostResult.error.message}`, `Failed to load Host commands: ${hostResult.error.message}`))
     }
-    const local = new Map(TUI_COMMANDS.map(command => [command.name, command]))
-    const merged = [...TUI_COMMANDS]
-    const names = new Set(TUI_COMMANDS.map(command => command.name))
+    if (skillResponse !== undefined && !skillResponse.result.ok) {
+      throw new Error(ui(
+        `读取 Skill 失败：${skillResponse.result.error.message}`,
+        `Failed to load Skills: ${skillResponse.result.error.message}`,
+      ))
+    }
+    const commands = tuiCommands()
+    const local = new Map(commands.map(command => [command.name, command]))
+    const merged = [...commands]
+    const names = new Set(commands.map(command => command.name))
     for (const command of hostResult.value as readonly HostCommandDescriptor[]) {
       const localCommand = local.get(command.name)
       if (localCommand !== undefined) {
-        throw new Error(`命令冲突：TUI 与 Host 都注册了 /${command.name}`)
+        throw new Error(ui(
+          `命令冲突：TUI 与 Host 都注册了 /${command.name}`,
+          `Command conflict: both TUI and Host registered /${command.name}`,
+        ))
       }
       names.add(command.name)
       merged.push({
         name: command.name,
-        description: HOST_COMMAND_FUNCTIONS.get(command.name)
-          ?? shortFunctionDescription(command.description, '执行命令'),
+        description: (() => {
+          const named = HOST_COMMAND_FUNCTIONS.get(command.name)
+          return named === undefined
+            ? shortFunctionDescription(command.description, ui('执行命令', 'Run command'))
+            : ui(named.zh, named.en)
+        })(),
         ...(command.input === undefined
           ? {}
-          : { argumentHint: HOST_COMMAND_ARGUMENT_HINTS.get(command.name) ?? command.input.hint }),
+          : {
+            argumentHint: (() => {
+              const named = HOST_COMMAND_ARGUMENT_HINTS.get(command.name)
+              return named === undefined ? command.input.hint : ui(named.zh, named.en)
+            })(),
+          }),
         source: HOST_COMMAND_DECORATORS.has(command.name) ? 'Host + TUI' : 'Host',
         behavior: HOST_COMMAND_DECORATORS.has(command.name) ? 'local' : 'host',
       })
@@ -1542,7 +1647,7 @@ export class HarnessTuiCapabilities {
       names.add(skill.name)
       merged.push({
         name: skill.name,
-        description: shortFunctionDescription(skill.description, '按名称执行对应能力'),
+        description: shortFunctionDescription(skill.description, ui('按名称执行对应能力', 'Invoke the named capability')),
         source: 'Skill',
         behavior: 'skill',
       })

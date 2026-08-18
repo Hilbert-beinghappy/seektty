@@ -34,6 +34,7 @@ const GATED = [
   'client/theme-config.ts',
   'client/theme-import.ts',
   'client/surface.ts',
+  'client/capabilities.ts',
 ]
 
 function walk(directory: string): string[] {
