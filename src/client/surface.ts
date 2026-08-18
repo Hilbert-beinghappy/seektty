@@ -294,7 +294,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (snapshot === undefined) {
         notifySnapshot = { running: false, pending: [] }
         notifyPrimed = false
-        status.setDetail(color.warning(translateUiText('未打开会话')))
+        status.setDetail(color.warning(ui('未打开会话', 'No session open')))
         applyTerminalTitle()
         return
       }
@@ -312,35 +312,44 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       notifyPrimed = true
       const pendingCount = snapshot.pending.length
       const generating = initialBehavior.statusElapsed && runningSince !== undefined
-        ? `生成中 · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C 停止`
-        : '生成中 · Ctrl+C 停止'
+        ? ui(
+          `生成中 · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C 停止`,
+          `Generating · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C to stop`,
+        )
+        : ui('生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop')
       const primary = snapshot.removed
-        ? color.danger(translateUiText('会话已删除'))
+        ? color.danger(ui('会话已删除', 'Session deleted'))
         : snapshot.promptError !== null
-          ? color.danger(translateUiText(`${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`))
+          ? color.danger(ui(
+            `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
+            `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
+          ))
           : pendingCount > 0
-            ? color.warning(translateUiText(`/pending 处理 ${String(pendingCount)} 项交互`))
+            ? color.warning(ui(
+              `/pending 处理 ${String(pendingCount)} 项交互`,
+              `/pending handles ${String(pendingCount)} interaction(s)`,
+            ))
             : snapshot.running
-              ? color.accent(translateUiText(generating))
+              ? color.accent(generating)
               : undefined
       const facts: string[] = []
-      if (snapshot.queue.length > 0) facts.push(translateUiText(`队列 ${String(snapshot.queue.length)}`))
+      if (snapshot.queue.length > 0) facts.push(ui(`队列 ${String(snapshot.queue.length)}`, `Queue ${String(snapshot.queue.length)}`))
       const jobs = active === undefined ? undefined : capabilities.jobs()
       const jobCount = jobs?.filter(job => job.status === 'running' || job.status === 'stopping').length ?? 0
-      if (jobCount > 0) facts.push(translateUiText(`后台 ${String(jobCount)}`))
+      if (jobCount > 0) facts.push(ui(`后台 ${String(jobCount)}`, `Background ${String(jobCount)}`))
       const todos = active?.session.projections.faceOf('todos').getSnapshot()
-      if (Array.isArray(todos) && todos.length > 0) facts.push(translateUiText(`任务 ${String(todos.length)}`))
+      if (Array.isArray(todos) && todos.length > 0) facts.push(ui(`任务 ${String(todos.length)}`, `Tasks ${String(todos.length)}`))
       const plan = active?.session.projections.faceOf('plan').getSnapshot()
       if (typeof plan === 'object' && plan !== null && 'active' in plan && plan.active === true) facts.push('Plan')
       const goal = active?.session.projections.faceOf('goal').getSnapshot()
-      if (goal !== null && goal !== undefined) facts.push(translateUiText('目标'))
+      if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
-      if (attachmentCount > 0) facts.push(translateUiText(`图片 ${String(attachmentCount)}`))
+      if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
       const allowedTools = actions.sessionAllowlistCount()
       if (allowedTools > 0) {
         facts.push(ui(`自动允许 ${String(allowedTools)} 个工具`, `Auto-allow ${String(allowedTools)} tool(s)`))
       }
-      if (restartRequired !== undefined) facts.push(translateUiText('需要重启'))
+      if (restartRequired !== undefined) facts.push(ui('需要重启', 'Restart required'))
       const secondary = notice === undefined
         ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
           .filter((value): value is string => value !== undefined)
@@ -377,7 +386,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         contextBar.setEmpty(profile, options.cwd)
         editor.setEmpty()
         status.setPermission('workspace-write')
-        transcript.empty('当前没有打开的会话；使用 /workspace 或 /new 继续。')
+        transcript.empty(ui(
+          '当前没有打开的会话；使用 /workspace 或 /new 继续。',
+          'No session is open; use /workspace or /new to continue.',
+        ))
         editor.disableSubmit = false
         updateStatus()
         renderWhileOpen()
@@ -495,7 +507,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       requireRestart: (message) => {
         restartRequired = message
-        setNotice(`${message}；可输入 /restart 稍后重启`, 'warning')
+        setNotice(ui(
+          `${message}；可输入 /restart 稍后重启`,
+          `${message}; use /restart later to apply it`,
+        ), 'warning')
       },
     })
 
@@ -505,7 +520,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         active = undefined
         latestSessionId = ''
         headerGeneration += 1
-        transcript.empty('当前没有打开的会话；使用 /workspace 或 /new 继续。')
+        transcript.empty(ui(
+          '当前没有打开的会话；使用 /workspace 或 /new 继续。',
+          'No session is open; use /workspace or /new to continue.',
+        ))
         editor.disableSubmit = false
         contextBar.setEmpty(profile, options.cwd)
         editor.setEmpty()
@@ -529,13 +547,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     })
 
     editor.setAutocompleteProvider(new HarnessAutocompleteProvider(capabilities, (message) => {
-      setNotice(`命令目录：${message}`, 'error')
+      setNotice(ui(`命令目录：${message}`, `Command catalog: ${message}`), 'error')
     }))
 
     const sendPrompt = async (text: string, mode: 'queue' | 'steer' = 'queue'): Promise<boolean> => {
       const current = capabilities.active()
       if (current === undefined) {
-        setNotice('当前没有打开的会话', 'error')
+        setNotice(ui('当前没有打开的会话', 'No session is open'), 'error')
         if (text !== '' && editor.getText() === '') editor.setText(text)
         return false
       }
@@ -543,7 +561,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (content.length === 0) return false
       const result = await current.session.prompt(content, mode)
       if (!result.ok) {
-        setNotice(`${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`, 'error')
+        setNotice(ui(
+          `${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`,
+          `${mode === 'steer' ? 'Steering' : 'Send'} failed: ${result.error.message}`,
+        ), 'error')
         if (text !== '' && editor.getText() === '') editor.setText(text)
         return false
       }
@@ -565,7 +586,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const command = commandOf(catalog, name)
         if (command === undefined) {
           const near = catalog.filter(candidate => candidate.name.includes(name)).slice(0, 3)
-          setNotice(`未知命令 /${name}${near.length === 0 ? '' : `；可能是 ${near.map(item => `/${item.name}`).join('、')}`}`, 'warning')
+          setNotice(ui(
+            `未知命令 /${name}${near.length === 0 ? '' : `；可能是 ${near.map(item => `/${item.name}`).join('、')}`}`,
+            `Unknown command /${name}${near.length === 0 ? '' : `; did you mean ${near.map(item => `/${item.name}`).join(', ')}?`}`,
+          ), 'warning')
           return
         }
         if (command.behavior === 'local') {
@@ -573,15 +597,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return
         }
         const current = capabilities.active()
-        if (current === undefined) throw new Error('当前没有打开的会话')
+        if (current === undefined) throw new Error(ui('当前没有打开的会话', 'No session is open'))
         if (command.behavior === 'skill') {
           await sendPrompt(trimmed, 'queue')
           return
         }
         const result = await current.session.command(trimmed)
-        if (!result.ok) setNotice(`命令失败：${result.error.message}`, 'error')
-        else if (!result.value.matched) setNotice(`未识别命令 /${name}`, 'warning')
-        else setNotice(`已执行 /${name}`, 'success')
+        if (!result.ok) setNotice(ui(`命令失败：${result.error.message}`, `Command failed: ${result.error.message}`), 'error')
+        else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
+        else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
         setNotice(capabilityError(error), 'error')
       }
@@ -646,16 +670,18 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         transcript.cancelSearch()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
-        setNotice(transcriptFocused ? '对话浏览 · Tab/Escape 返回输入' : '已返回输入区', 'info')
+        setNotice(transcriptFocused
+          ? ui('对话浏览 · Tab/Escape 返回输入', 'Transcript navigation · Tab/Escape returns to the composer')
+          : ui('已返回输入区', 'Returned to the composer'), 'info')
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
         if (transcript.cancelSearch()) {
-          setNotice('已取消查找', 'info')
+          setNotice(ui('已取消查找', 'Search cancelled'), 'info')
           return { consume: true }
         }
         focusEditor()
-        setNotice('已返回输入区', 'info')
+        setNotice(ui('已返回输入区', 'Returned to the composer'), 'info')
         return { consume: true }
       }
       if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
@@ -684,20 +710,20 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (matchesBinding('historySearch', data)) {
         if (historyLimit <= 0) {
-          setNotice('输入历史已关闭', 'info')
+          setNotice(ui('输入历史已关闭', 'Composer history is disabled'), 'info')
           return { consume: true }
         }
         if (composerHistory.length === 0) {
-          setNotice('没有可搜索的输入历史', 'info')
+          setNotice(ui('没有可搜索的输入历史', 'No composer history to search'), 'info')
           return { consume: true }
         }
         void overlays.select({
-          title: '输入历史',
-          detail: '选择一条历史输入填入编辑器',
+          title: ui('输入历史', 'Composer history'),
+          detail: ui('选择一条历史输入填入编辑器', 'Choose a previous prompt to restore in the editor'),
           searchable: true,
           choices: composerHistory.map((entry, index) => ({
             id: String(index),
-            label: entry.replace(/\s+/gu, ' ').slice(0, 80) || '(空)',
+            label: entry.replace(/\s+/gu, ' ').slice(0, 80) || ui('(空)', '(empty)'),
           })),
           options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
         }).then((selected) => {
@@ -726,7 +752,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (matchesBinding('reasoning', data)) {
         const visible = transcript.toggleReasoning()
-        setNotice(`推理内容：${visible ? '显示' : '隐藏'}`, 'info')
+        setNotice(visible
+          ? ui('推理内容：显示', 'Reasoning: shown')
+          : ui('推理内容：隐藏', 'Reasoning: hidden'), 'info')
         refresh()
         return { consume: true }
       }
@@ -738,7 +766,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const offset = matchesBinding('previousTurn', data) ? -1 : 1
         const moved = transcript.navigateTurn(offset)
         setNotice(
-          moved ? `已跳到${offset < 0 ? '上一个' : '下一个'}用户轮次` : '没有可跳转的用户轮次',
+          moved
+            ? offset < 0
+              ? ui('已跳到上一个用户轮次', 'Jumped to the previous user turn')
+              : ui('已跳到下一个用户轮次', 'Jumped to the next user turn')
+            : ui('没有可跳转的用户轮次', 'No user turn to jump to'),
           moved ? 'info' : 'warning',
         )
         return { consume: true }
@@ -762,7 +794,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
         editor.setText('')
         capabilities.clearAttachments()
-        setNotice('已清空输入草稿', 'info')
+        setNotice(ui('已清空输入草稿', 'Draft cleared'), 'info')
         return { consume: true }
       }
       const now = Date.now()
@@ -771,7 +803,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       exitArmedUntil = now + 1_500
-      setNotice('再按一次 Ctrl+C 退出', 'warning')
+      setNotice(ui('再按一次 Ctrl+C 退出', 'Press Ctrl+C again to exit'), 'warning')
       return { consume: true }
     })
 
@@ -786,14 +818,23 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         for (const path of options.attachmentPaths ?? []) {
           try { await capabilities.addAttachment(path) } catch (error) { failures.push(`${path}: ${capabilityError(error)}`) }
         }
-        if (failures.length === 0) setNotice(`已恢复 ${options.attachmentPaths?.length ?? 0} 个附件`, 'success')
-        else setNotice(`部分附件未恢复：${failures.join('；')}`, 'warning')
+        if (failures.length === 0) {
+          setNotice(ui(
+            `已恢复 ${options.attachmentPaths?.length ?? 0} 个附件`,
+            `Restored ${options.attachmentPaths?.length ?? 0} attachment(s)`,
+          ), 'success')
+        } else {
+          setNotice(ui(`部分附件未恢复：${failures.join('；')}`, `Some attachments were not restored: ${failures.join('; ')}`), 'warning')
+        }
         refresh()
       })()
     }
     if (options.task !== undefined) {
       void sendPrompt(options.task).catch((error: unknown) => {
-        setNotice(`发送初始任务失败：${capabilityError(error)}`, 'error')
+        setNotice(ui(
+          `发送初始任务失败：${capabilityError(error)}`,
+          `Failed to send the initial task: ${capabilityError(error)}`,
+        ), 'error')
       })
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
