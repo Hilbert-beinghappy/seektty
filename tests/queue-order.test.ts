@@ -19,4 +19,10 @@ describe('queue reorder', () => {
     expect(source.includes('与上一条排队消息对调')).toBe(false)
     expect(source.includes('Swap with the previous queued message')).toBe(false)
   })
+
+  it('returns from queue edit without a success notice when the editor is cancelled', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/client/actions.ts'), 'utf8')
+    expect(source).toMatch(/if \(text === undefined\) return/u)
+    expect(source).toMatch(/await this\.capabilities\.updateQueue\(row\.id, \{ kind: 'edit'/u)
+  })
 })
