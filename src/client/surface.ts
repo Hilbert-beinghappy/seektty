@@ -62,6 +62,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
+import { restartFactAfterNotice, restartRequiredFact, restartRequiredNotice } from './restart-copy.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -405,12 +406,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
-      if (restartRequired !== undefined) facts.push(ui('需要重启 · /restart', 'Restart required · /restart'))
-      const secondary = notice === undefined
-        ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
-          .filter((value): value is string => value !== undefined)
-          .join(' · ') || undefined
-        : noticeText(notice.message, notice.tone)
+      if (restartRequired !== undefined) facts.push(restartRequiredFact())
+      const lastingRestart = restartFactAfterNotice(restartRequired, notice?.tone)
+      const secondary = notice !== undefined && (notice.tone === 'error' || notice.tone === 'warning')
+        ? noticeText(notice.message, notice.tone)
+        : lastingRestart !== undefined
+          ? color.warning(lastingRestart)
+          : notice !== undefined
+            ? noticeText(notice.message, notice.tone)
+            : [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
+              .filter((value): value is string => value !== undefined)
+              .join(' · ') || undefined
       status.setDetail(secondary)
       applyTerminalTitle()
     }
@@ -571,11 +577,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         })
       },
       requireRestart: (label) => {
-        restartRequired = ui('需要重启 · /restart', 'Restart required · /restart')
-        setNotice(ui(
-          `${label}。需要重启 · /restart`,
-          `${label}. Restart required · /restart`,
-        ), 'warning')
+        restartRequired = restartRequiredFact()
+        setNotice(restartRequiredNotice(label), 'warning')
       },
     })
 
