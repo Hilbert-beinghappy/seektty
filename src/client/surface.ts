@@ -15,7 +15,14 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
-import { capabilityError, type TuiActiveSession } from './capabilities.ts'
+import {
+  capabilityError,
+  noticeAfterDispatchCatch,
+  noticeAfterFailedHostCommand,
+  noticeAfterFailedPrompt,
+  noticeAfterPromptError,
+  type TuiActiveSession,
+} from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import {
@@ -400,10 +407,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           ? { error: color.danger(ui('会话已删除', 'Session deleted')) }
           : snapshot.promptError !== null
             ? {
-              error: color.danger(ui(
-                `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
-                `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
-              )),
+              error: color.danger(noticeAfterPromptError({
+                promptError: snapshot.promptError,
+                running: snapshot.running,
+              })),
             }
             : noticeView.error === undefined
               ? {}
@@ -650,12 +657,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
         const content = capabilities.promptContent(text)
         if (content.length === 0) return false
-        const result = await current.session.prompt(content, mode)
-        if (!result.ok) {
-          setNotice(ui(
-            `${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`,
-            `${mode === 'steer' ? 'Steering' : 'Send'} failed: ${result.error.message}`,
-          ), 'error')
+        const failed = await noticeAfterFailedPrompt(current.session, content, mode)
+        if (failed !== undefined) {
+          setNotice(failed, 'error')
           restoreDeferredPrompt(text)
           return false
         }
@@ -694,12 +698,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           await sendPrompt(trimmed, 'queue')
           return
         }
-        const result = await current.session.command(trimmed)
-        if (!result.ok) setNotice(ui(`命令失败：${result.error.message}`, `Command failed: ${result.error.message}`), 'error')
-        else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
+        const outcome = await noticeAfterFailedHostCommand(current.session, trimmed)
+        if (!outcome.ok) setNotice(outcome.message, 'error')
+        else if (!outcome.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
         else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
-        setNotice(capabilityError(error), 'error')
+        setNotice(
+          noticeAfterDispatchCatch(error, capabilities.active()?.session),
+          'error',
+        )
       }
     }
 
