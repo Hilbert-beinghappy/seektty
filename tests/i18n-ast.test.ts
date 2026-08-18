@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
 
 const SRC = join(import.meta.dirname, '../src')
-const HAN = /[\u4e00-\u9fff]/u
+const HAN = /\p{Script=Han}/u
 const GATED = [
   'bin.ts',
   'dsh-compat.ts',
