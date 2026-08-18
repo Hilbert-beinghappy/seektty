@@ -84,6 +84,22 @@ export function sweepStaleAppHandoffs(): void {
  * @param payload - JSON-compatible references and draft metadata.
  * @returns absolute handoff path for {@link APP_HANDOFF_ENV}.
  */
+/**
+ * Build a child process env that never inherits a stale handoff ticket.
+ * Only a path from a successful {@link writeAppHandoff} is published.
+ * @param parentEnv - current process environment.
+ * @param handoffPath - newly written ticket, when restart carries a payload.
+ */
+export function restartChildEnv(
+  parentEnv: NodeJS.Dict<string | undefined>,
+  handoffPath?: string,
+): NodeJS.ProcessEnv {
+  const env = { ...parentEnv }
+  delete env[APP_HANDOFF_ENV]
+  if (handoffPath !== undefined) env[APP_HANDOFF_ENV] = handoffPath
+  return env
+}
+
 export function writeAppHandoff(channel: string, payload: unknown): string {
   if (channel.trim() === '') throw new Error('app handoff channel cannot be blank')
   sweepStaleAppHandoffs()

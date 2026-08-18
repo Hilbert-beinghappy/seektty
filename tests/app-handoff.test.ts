@@ -6,6 +6,7 @@ import {
   APP_HANDOFF_ENV,
   consumeAppHandoff,
   internals,
+  restartChildEnv,
   sweepStaleAppHandoffs,
   writeAppHandoff,
 } from '../src/host/app-handoff.ts'
@@ -51,6 +52,15 @@ describe('app handoff (task 6.6)', () => {
     sweepStaleAppHandoffs()
     process.env[APP_HANDOFF_ENV] = path
     expect(consumeAppHandoff('seektty-v1')).toMatchObject({ kind: 'degraded' })
+  })
+
+  it('drops a stale handoff ticket before publishing a new child env', () => {
+    const published = restartChildEnv({ [APP_HANDOFF_ENV]: '/old.json', PATH: '/bin' }, '/new.json')
+    expect(published[APP_HANDOFF_ENV]).toBe('/new.json')
+    expect(published.PATH).toBe('/bin')
+    const failedWrite = restartChildEnv({ [APP_HANDOFF_ENV]: '/old.json', PATH: '/bin' })
+    expect(failedWrite[APP_HANDOFF_ENV]).toBeUndefined()
+    expect(failedWrite.PATH).toBe('/bin')
   })
 
   it('continues a normal start when the handoff does not match launcher args', () => {

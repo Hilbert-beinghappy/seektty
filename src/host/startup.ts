@@ -7,7 +7,7 @@ import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 import { localeFromEnvironment, setUiLocale, ui } from '../client/locale.ts'
-import { APP_HANDOFF_ENV, consumeAppHandoff, writeAppHandoff } from './app-handoff.ts'
+import { APP_HANDOFF_ENV, consumeAppHandoff, restartChildEnv, writeAppHandoff } from './app-handoff.ts'
 import { ProfilePluginManager } from './profile-plugin-manager.ts'
 import { readRestartHandoff, reconcileHandoff } from './restart-handoff.ts'
 
@@ -94,15 +94,13 @@ function restartProvider(ctx: Context): AppRestart {
       '无法定位 dsh 启动文件',
       'Cannot locate the dsh entry file',
     ))
+    delete process.env[APP_HANDOFF_ENV]
     const handoffPath = request.handoff === undefined
       ? undefined
       : writeAppHandoff(request.handoff.channel, request.handoff.payload)
     const child = spawn(process.execPath, [realpathSync(entry), '--profile', request.profile, ...request.args], {
       stdio: 'inherit',
-      env: {
-        ...process.env,
-        ...(handoffPath === undefined ? {} : { [APP_HANDOFF_ENV]: handoffPath }),
-      },
+      env: restartChildEnv(process.env, handoffPath),
     })
     try {
       await new Promise<void>((resolveSpawn, reject) => {
