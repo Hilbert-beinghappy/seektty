@@ -42,6 +42,7 @@ import {
   highlightQuery,
   nextMatchIndex,
   planLineSearch,
+  scrollOffsetToContain,
   scrollOffsetToReveal,
 } from './transcript-search.ts'
 import {
@@ -1479,10 +1480,23 @@ export class Transcript implements Component, Focusable {
       ])
     }
     const maxOffset = Math.max(0, lines.length - rows)
-    this.scrollOffset = this.emptyState ? maxOffset : Math.min(this.scrollOffset, maxOffset)
+    if (this.emptyState) {
+      const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
+      const needle = example === undefined ? undefined : emptyExampleText(example)
+      const selected = needle === undefined
+        ? -1
+        : lines.findIndex(line => line.includes(needle))
+      this.scrollOffset = scrollOffsetToContain(
+        lines.length,
+        rows,
+        selected === -1 ? 0 : selected,
+      )
+    } else {
+      this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
+    }
     const end = lines.length - this.scrollOffset
     const start = Math.max(0, end - rows)
-    if (this.scrollOffset === 0 && start > 0) {
+    if (!this.emptyState && this.scrollOffset === 0 && start > 0) {
       const alignedStart = this.turnAnchors.find(anchor =>
         anchor >= start && end - anchor <= rows - 1)
       if (alignedStart !== undefined) {
@@ -1495,17 +1509,19 @@ export class Transcript implements Component, Focusable {
       }
     }
     const visible = lines.slice(start, end)
-    if (start > 0 && visible.length > 0) {
-      visible[0] = olderMarker(start)
-    } else if (this.hasMore && visible.length > 0) {
-      visible[0] = olderMarker(0)
-    }
-    if (end < lines.length && visible.length > 0) {
-      const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
-      visible[visible.length - 1] = color.muted(ui(
-        `↓ ${String(lines.length - end)} 行更新内容 · ${hint}`,
-        `↓ ${String(lines.length - end)} newer line(s) · ${hint}`,
-      ))
+    if (!this.emptyState) {
+      if (start > 0 && visible.length > 0) {
+        visible[0] = olderMarker(start)
+      } else if (this.hasMore && visible.length > 0) {
+        visible[0] = olderMarker(0)
+      }
+      if (end < lines.length && visible.length > 0) {
+        const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
+        visible[visible.length - 1] = color.muted(ui(
+          `↓ ${String(lines.length - end)} 行更新内容 · ${hint}`,
+          `↓ ${String(lines.length - end)} newer line(s) · ${hint}`,
+        ))
+      }
     }
     return withInset(visible)
   }

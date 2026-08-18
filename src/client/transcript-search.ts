@@ -96,3 +96,20 @@ export function scrollOffsetToReveal(
   const preferred = lineCount - lineIndex - rows
   return Math.max(0, Math.min(maxOffset, preferred))
 }
+
+/**
+ * Keep `lineIndex` visible while preferring the top of the document.
+ * Compatible with Transcript's bottom-origin scrollOffset.
+ */
+export function scrollOffsetToContain(
+  lineCount: number,
+  viewportRows: number,
+  lineIndex: number,
+): number {
+  const rows = Math.max(1, Math.floor(viewportRows))
+  const maxOffset = Math.max(0, lineCount - rows)
+  const selected = Math.max(0, Math.min(lineIndex, Math.max(0, lineCount - 1)))
+  const minOffset = Math.max(0, lineCount - selected - rows)
+  const preferred = Math.min(maxOffset, Math.max(0, lineCount - selected - 1))
+  return Math.max(minOffset, preferred)
+}

@@ -86,4 +86,17 @@ describe('empty session examples', () => {
     expect(rendered).toContain('Review the current changes and call out risks')
     expect(rendered).not.toContain('审查当前改动并指出风险')
   })
+
+  it('keeps the selected empty-session example inside a short viewport', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 4)
+    transcript.update(snapshot())
+    transcript.focused = true
+    transcript.handleInput('\u001b[B')
+    transcript.handleInput('\u001b[B')
+    const last = emptyExampleText(EMPTY_SESSION_EXAMPLES[2]!)
+    expect(transcript.activateFocused()).toEqual({ kind: 'example', text: last })
+    const visible = stripAnsi(transcript.render(80).join('\n'))
+    expect(visible).toContain(last)
+  })
 })
