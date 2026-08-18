@@ -849,6 +849,7 @@ const ENGLISH_PATTERNS: readonly {
   { pattern: /^查找 (.+) · (\d+) 处 · Enter 确认 · Esc 取消$/u, replace: (query, count) => `Find ${query} · ${count} match(es) · Enter confirm · Esc cancel` },
   { pattern: /^查找 (.+) · (\d+)\/(\d+) · n 下一个 · N 上一个 · Esc 取消$/u, replace: (query, current, total) => `Find ${query} · ${current}/${total} · n next · N previous · Esc cancel` },
   { pattern: /^查找 (.+) · 无匹配 · Esc 取消$/u, replace: query => `Find ${query} · no matches · Esc cancel` },
+  { pattern: /^(.+) · 仍在生成 · Ctrl\+C 重试$/u, replace: value => `${value} · Still generating · Ctrl+C to retry` },
 ]
 
 function requestedEnvironmentLocale(env: NodeJS.ProcessEnv): LocaleId {

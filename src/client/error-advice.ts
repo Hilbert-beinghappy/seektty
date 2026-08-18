@@ -74,3 +74,16 @@ export function explainFailure(message: string): string {
   }
   return message
 }
+
+/**
+ * Keep a still-running turn visible when a send/stop request itself failed.
+ * @param message - already localized failure text.
+ * @param running - current snapshot.running flag.
+ */
+export function withRunningRetry(message: string, running: boolean): string {
+  if (!running) return message
+  return ui(
+    `${message} · 仍在生成 · Ctrl+C 重试`,
+    `${message} · Still generating · Ctrl+C to retry`,
+  )
+}
