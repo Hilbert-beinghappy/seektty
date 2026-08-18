@@ -2,6 +2,7 @@
 
 import {
   CURSOR_MARKER,
+  Editor,
   fuzzyFilter,
   Input,
   Key,
@@ -16,8 +17,44 @@ import {
   type SelectItem,
   type TUI,
 } from '@mariozechner/pi-tui'
-import { translateUiText } from './locale.ts'
+import { translateUiText, ui } from './locale.ts'
+import { formatBusyFooter, lastOutputLines } from './busy-status.ts'
 import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
+import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
+
+let dangerConfirmDefault: TuiDangerConfirmDefault = 'cancel'
+
+/**
+ * Apply the Settings-owned default focus for dangerous confirmations.
+ * @param value - cancel keeps Enter from executing the action.
+ */
+export function setDangerConfirmDefault(value: TuiDangerConfirmDefault): void {
+  dangerConfirmDefault = value
+}
+
+/**
+ * Ordered confirm choices with the configured default already selected.
+ * @param confirmLabel - affirmative action label.
+ */
+export function dangerConfirmChoices(confirmLabel: string): {
+  readonly choices: readonly OverlayChoice[]
+  readonly initialChoiceId: TuiDangerConfirmDefault
+} {
+  const confirm: OverlayChoice = {
+    id: 'confirm',
+    label: confirmLabel,
+    description: ui('我已理解上述影响', 'I understand the impact'),
+  }
+  const cancel: OverlayChoice = {
+    id: 'cancel',
+    label: ui('取消', 'Cancel'),
+    description: ui('保持当前状态', 'Keep current state'),
+  }
+  return {
+    choices: dangerConfirmDefault === 'cancel' ? [cancel, confirm] : [confirm, cancel],
+    initialChoiceId: dangerConfirmDefault,
+  }
+}
 
 /** One row in a searchable terminal selector. */
 export interface OverlayChoice {
@@ -58,18 +95,29 @@ export interface DetailOverlayRequest {
   readonly options?: OverlayOptions
 }
 
+/** Live progress for a long Host operation; Escape aborts the session signal. */
+export interface ProgressOverlayRequest<T> {
+  readonly title: string
+  readonly detail?: string
+  readonly options?: OverlayOptions
+  work(report: (chunk: string) => void, signal: AbortSignal): Promise<T>
+}
+
 /** Shared prompt surface implemented by both standalone and navigated overlays. */
 export interface OverlayPrompts {
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined>
   input(request: InputOverlayRequest): Promise<string | undefined>
+  multilineInput(request: InputOverlayRequest): Promise<string | undefined>
   secretInput(request: InputOverlayRequest): Promise<string | undefined>
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined>
   detail(request: DetailOverlayRequest): Promise<void>
   confirm(title: string, detail: string, confirmLabel?: string): Promise<boolean>
+  progress<T>(request: ProgressOverlayRequest<T>): Promise<T | undefined>
 }
 
 /** One logical overlay session whose page stack owns all back navigation. */
 export interface OverlayNavigation<TResult = void> extends OverlayPrompts {
+  readonly signal: AbortSignal
   selectPage(
     request: SelectOverlayRequest,
     onSelect: (choice: OverlayChoice) => void | Promise<void>,
@@ -78,6 +126,7 @@ export interface OverlayNavigation<TResult = void> extends OverlayPrompts {
     request: SelectOverlayRequest,
     onSelect: (choice: OverlayChoice) => void | Promise<void>,
   ): void
+  updateChoices(choices: readonly OverlayChoice[], notice?: string): void
   back(): void
   finish(value?: TResult): void
 }
@@ -164,6 +213,26 @@ function modalOptions(options: OverlayOptions | undefined): OverlayOptions {
   }
 }
 
+const MULTILINE_VISIBLE_ROWS = 12
+
+/**
+ * Keep the cursor row inside a bounded multiline editor window.
+ * @param lines - rendered editor rows.
+ * @param cursorLine - 0-based cursor row in that array.
+ * @param maxVisible - maximum rows to keep on screen.
+ */
+export function visibleEditorWindow(
+  lines: readonly string[],
+  cursorLine: number,
+  maxVisible = MULTILINE_VISIBLE_ROWS,
+): readonly string[] {
+  if (lines.length <= maxVisible) return lines
+  const cursor = Math.max(0, Math.min(cursorLine, lines.length - 1))
+  const maxStart = lines.length - maxVisible
+  const start = Math.max(0, Math.min(cursor - Math.floor((maxVisible - 1) / 2), maxStart))
+  return lines.slice(start, start + maxVisible)
+}
+
 function wrappedDetail(detail: string, width: number, maxLines = 4): string[] {
   const lines = wrapTextWithAnsi(escapeTerminalText(translateUiText(detail)), Math.max(1, width))
   if (lines.length <= maxLines) return lines.map(line => color.muted(line))
@@ -183,12 +252,25 @@ class SearchSelectOverlay implements Component {
   private notice = ''
 
   constructor(
-    private readonly request: SelectOverlayRequest,
+    private request: SelectOverlayRequest,
     private readonly submit: (value: OverlayChoice) => void,
   ) {
     this.filtered = request.choices
     this.list = this.createList(this.filtered, request.initialChoiceId)
     this.input.onSubmit = () => { this.choose() }
+  }
+
+  /**
+   * Refresh rows without dropping the typed query or the selected stable id.
+   * @param choices - latest rows from Host.
+   * @param notice - optional in-page diagnostic; empty clears a previous one.
+   */
+  updateChoices(choices: readonly OverlayChoice[], notice = ''): void {
+    const selectedId = this.list.getSelectedItem()?.value
+    this.request = { ...this.request, choices }
+    this.filtered = this.filterChoices(this.input.getValue())
+    this.list = this.createList(this.filtered, selectedId)
+    this.notice = notice
   }
 
   invalidate(): void {
@@ -210,11 +292,14 @@ class SearchSelectOverlay implements Component {
     }
     if (this.request.searchable !== false) {
       this.input.focused = this.focused
-      lines.push(`${color.muted(translateUiText('搜索 '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
+      lines.push(`${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
     }
     lines.push(...this.list.render(safeWidth))
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
-    lines.push(color.muted(translateUiText(this.request.footer ?? '↑↓ 选择 · Enter 确认 · Esc 返回/关闭')))
+    lines.push(color.muted(translateUiText(this.request.footer ?? ui(
+      '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      '↑↓ Select · Enter confirm · Esc back/close',
+    ))))
     return modalFrame(this.request.title, lines, width)
   }
 
@@ -249,11 +334,15 @@ class SearchSelectOverlay implements Component {
     return list
   }
 
-  private applyFilter(query: string): void {
-    this.filtered = query === ''
+  private filterChoices(query: string): readonly OverlayChoice[] {
+    return query === ''
       ? this.request.choices
       : fuzzyFilter([...this.request.choices], query, choice =>
         `${choice.label} ${choice.description ?? ''} ${choice.id}`)
+  }
+
+  private applyFilter(query: string): void {
+    this.filtered = this.filterChoices(query)
     this.list = this.createList(this.filtered)
     this.notice = ''
   }
@@ -295,12 +384,60 @@ class TextInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       this.input.render(safeWidth)[0] ?? color.muted(translateUiText(this.request.placeholder ?? '')),
-      color.muted(translateUiText('Enter 确认 · Esc 返回/关闭')),
+      color.muted(ui('Enter 确认 · Esc 返回/关闭', 'Enter confirm · Esc back/close')),
     ], width)
   }
 
   handleInput(data: string): void {
     this.input.handleInput(data)
+  }
+}
+
+/** Multiline editor overlay: Enter inserts a newline, Ctrl+Enter submits. */
+class MultilineEditorOverlay implements Component {
+  focused = false
+  private readonly editor: Editor
+
+  constructor(
+    tui: TUI,
+    private readonly request: InputOverlayRequest,
+    private readonly submit: (value: string) => void,
+  ) {
+    this.editor = new Editor(tui, editorTheme, { paddingX: 0, autocompleteMaxVisible: 3 })
+    this.editor.disableSubmit = true
+    this.editor.setText(escapeTerminalText(request.initialValue ?? ''))
+  }
+
+  invalidate(): void { this.editor.invalidate() }
+
+  render(width: number): string[] {
+    const safeWidth = frameContentWidth(width)
+    this.editor.focused = this.focused
+    const rendered = this.editor.render(Math.max(8, safeWidth))
+    const cursorLine = rendered.findIndex(line => line.includes(CURSOR_MARKER))
+    const body = visibleEditorWindow(
+      rendered,
+      cursorLine === -1 ? this.editor.getCursor().line : cursorLine,
+    )
+    return modalFrame(this.request.title, [
+      ...(this.request.detail === undefined
+        ? []
+        : wrappedDetail(this.request.detail, safeWidth)),
+      ...body,
+      color.muted(ui('Enter 换行 · Ctrl+Enter 提交 · Esc 返回/关闭', 'Enter newline · Ctrl+Enter submit · Esc back/close')),
+    ], width)
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.ctrl(Key.enter))) {
+      this.submit(escapeTerminalText(this.editor.getExpandedText()))
+      return
+    }
+    if (matchesKey(data, Key.enter) || data === '\r' || data === '\n') {
+      this.editor.insertTextAtCursor('\n')
+      return
+    }
+    this.editor.handleInput(data)
   }
 }
 
@@ -323,14 +460,17 @@ class SecretInputOverlay implements Component {
     const length = Array.from(this.input.getValue()).length
     const cursor = this.focused ? CURSOR_MARKER : ''
     const masked = length === 0
-      ? `${cursor}${color.muted(translateUiText(this.request.placeholder ?? '输入新 Secret'))}`
+      ? `${cursor}${color.muted(translateUiText(this.request.placeholder ?? '') || ui('输入新 Secret', 'Enter a new secret'))}`
       : `${'•'.repeat(Math.min(length, 32))}${cursor}▌`
     return modalFrame(this.request.title, [
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       truncateToWidth(masked, safeWidth, '…'),
-      color.muted(translateUiText('输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭')),
+      color.muted(ui(
+        '输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭',
+        'Input is never displayed or logged · Enter save · Esc back/close',
+      )),
     ], width)
   }
 
@@ -381,9 +521,12 @@ class MultiSelectOverlay implements Component {
       ...(this.request.detail === undefined
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
-      `${color.muted(translateUiText('搜索 '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
+      `${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
       ...this.list.render(safeWidth),
-      color.muted(translateUiText(this.request.footer ?? '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭')),
+      color.muted(translateUiText(this.request.footer ?? ui(
+        '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭',
+        '↑↓ Select · Space toggle · Enter submit · Esc back/close',
+      ))),
     ], width)
   }
 
@@ -458,16 +601,22 @@ class ScrollableDetailOverlay implements Component {
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
     const content = escapeTerminalText(this.request.content)
-    const lines = wrapTextWithAnsi(content === '' ? translateUiText('(无详情)') : content, safeWidth)
+    const lines = wrapTextWithAnsi(content === '' ? ui('(无详情)', '(No details)') : content, safeWidth)
       .map(line => color.muted(line))
     this.lineCount = lines.length
     const maxOffset = Math.max(0, this.lineCount - this.viewportRows)
     this.offset = Math.min(this.offset, maxOffset)
     const end = Math.min(this.lineCount, this.offset + this.viewportRows)
-    const position = `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} 行`
+    const position = ui(
+      `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} 行`,
+      `${String(this.offset + 1)}-${String(end)}/${String(this.lineCount)} lines`,
+    )
     return modalFrame(this.request.title, [
       ...lines.slice(this.offset, end),
-      color.muted(translateUiText(this.request.footer ?? `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`)),
+      color.muted(translateUiText(this.request.footer ?? ui(
+        `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`,
+        `${position} · ↑↓ scroll · PgUp/PgDn page · Home/End · Enter/q close · Esc back`,
+      ))),
     ], width)
   }
 
@@ -486,23 +635,73 @@ class ScrollableDetailOverlay implements Component {
   }
 }
 
+/** Live output page while a Host operation holds the overlay; Escape aborts. */
+class ProgressOverlay implements Component {
+  focused = false
+  private output = ''
+  private readonly started = Date.now()
+  private timer: ReturnType<typeof setInterval> | undefined
+
+  constructor(
+    private readonly request: { readonly title: string; readonly detail?: string },
+    private readonly requestRender: () => void,
+  ) {
+    this.timer = setInterval(() => { this.requestRender() }, 250)
+  }
+
+  append(chunk: string): void {
+    this.output = `${this.output}${chunk}`.slice(-8_192)
+    this.requestRender()
+  }
+
+  dispose(): void {
+    if (this.timer === undefined) return
+    clearInterval(this.timer)
+    this.timer = undefined
+  }
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    const body = lastOutputLines(this.output, 12)
+    return modalFrame(this.request.title, [
+      ...(this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, width)),
+      color.accent(formatBusyFooter(Date.now() - this.started)),
+      ...wrapTextWithAnsi(
+        escapeTerminalText(body === '' ? ui('等待输出…', 'Waiting for output…') : body),
+        frameContentWidth(width),
+      ).map(line => color.muted(line)),
+      color.muted(ui('按 Esc 取消并中止操作', 'Press Esc to cancel and abort')),
+    ], width)
+  }
+
+  handleInput(_data: string): void {}
+}
+
 /** A single mounted modal with a logical page stack and one Escape owner. */
 class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult> {
   focused = false
+  readonly signal: AbortSignal
   private readonly stack: NavigationEntry[] = []
   private closed = false
   private pendingBack: NavigationEntry | undefined
+  private readonly controller = new AbortController()
 
   constructor(
+    private readonly tui: TUI,
     run: (navigation: OverlayNavigation<TResult>) => void | Promise<void>,
     private readonly settle: (value: TResult | undefined) => void,
     private readonly reject: (error: unknown) => void,
     private readonly requestRender: () => void,
   ) {
+    this.signal = this.controller.signal
     try {
       void Promise.resolve(run(this)).then(
         () => { this.finish() },
-        error => { this.fail(error) },
+        error => {
+          if (this.signal.aborted) this.finish()
+          else this.fail(error)
+        },
       )
     } catch (error) {
       queueMicrotask(() => { this.fail(error) })
@@ -528,7 +727,12 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     const current = this.current()
     if (current === undefined) return
     if (matchesKey(data, Key.escape)) {
-      if (current.busy) this.pendingBack = current
+      if (current.busy) {
+        this.abort()
+        this.pendingBack = current
+        return
+      }
+      if (this.stack.length <= 1) this.finish()
       else this.back()
       return
     }
@@ -562,11 +766,21 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   ): void {
     if (this.closed) return
     const entry = this.current()
-    if (entry === undefined) throw new Error('没有可替换的 overlay 页面')
+    if (entry === undefined) throw new Error(ui('没有可替换的 overlay 页面', 'No overlay page to replace'))
     this.disposeComponent(entry.component)
     entry.component = new SearchSelectOverlay(request, choice => {
       this.dispatch(entry, () => onSelect(choice))
     })
+    this.requestRender()
+  }
+
+  updateChoices(choices: readonly OverlayChoice[], notice?: string): void {
+    if (this.closed) return
+    const entry = this.current()
+    if (entry === undefined || !(entry.component instanceof SearchSelectOverlay)) {
+      throw new Error(ui('没有可更新的选择页', 'No select page to update'))
+    }
+    entry.component.updateChoices(choices, notice ?? '')
     this.requestRender()
   }
 
@@ -576,6 +790,10 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   input(request: InputOverlayRequest): Promise<string | undefined> {
     return this.prompt(submit => new TextInputOverlay(request, submit))
+  }
+
+  multilineInput(request: InputOverlayRequest): Promise<string | undefined> {
+    return this.prompt(submit => new MultilineEditorOverlay(this.tui, request, submit))
   }
 
   secretInput(request: InputOverlayRequest): Promise<string | undefined> {
@@ -590,19 +808,40 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     await this.prompt<void>(submit => new ScrollableDetailOverlay(request, () => { submit() }))
   }
 
-  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+  async confirm(title: string, detail: string, confirmLabel = ui('确认', 'Confirm')): Promise<boolean> {
+    const { choices, initialChoiceId } = dangerConfirmChoices(confirmLabel)
     const selected = await this.select({
       title,
       detail,
       searchable: false,
-      choices: [
-        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
-        { id: 'cancel', label: '取消', description: '保持当前状态' },
-      ],
-      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      choices,
+      initialChoiceId,
+      footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', '↑↓ Select · Enter confirm · Esc back/close'),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'
+  }
+
+  async progress<T>(request: ProgressOverlayRequest<T>): Promise<T | undefined> {
+    if (this.closed) return undefined
+    const overlay = new ProgressOverlay(request, () => { this.requestRender() })
+    const entry: NavigationEntry = {
+      component: overlay,
+      dismiss: () => undefined,
+      busy: true,
+      active: true,
+    }
+    this.stack.push(entry)
+    this.requestRender()
+    try {
+      return await request.work((chunk) => { overlay.append(chunk) }, this.signal)
+    } catch (error) {
+      if (this.signal.aborted) return undefined
+      throw error
+    } finally {
+      entry.busy = false
+      this.remove(entry)
+    }
   }
 
   back(): void {
@@ -614,6 +853,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   finish(value?: TResult): void {
     if (this.closed) return
+    this.abort()
     this.closed = true
     this.pendingBack = undefined
     this.dismissAll()
@@ -622,6 +862,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   dispose(): void {
     if (this.closed) return
+    this.abort()
     this.closed = true
     this.pendingBack = undefined
     this.dismissAll()
@@ -649,6 +890,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     if (this.closed || this.current() !== entry || entry.busy) return
     entry.busy = true
     void Promise.resolve().then(action).catch(error => {
+      if (this.signal.aborted) return
       this.fail(error)
     }).finally(() => {
       if (entry.active) entry.busy = false
@@ -683,10 +925,19 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   private fail(error: unknown): void {
     if (this.closed) return
+    if (this.signal.aborted) {
+      this.finish()
+      return
+    }
+    this.abort()
     this.closed = true
     this.pendingBack = undefined
     this.dismissAll()
     this.reject(error)
+  }
+
+  private abort(): void {
+    if (!this.controller.signal.aborted) this.controller.abort()
   }
 
   private disposeComponent(component: DisposableComponent): void {
@@ -720,7 +971,7 @@ export class OverlayQueue implements OverlayPrompts {
     options?: OverlayOptions,
   ): Promise<TResult | undefined> {
     return this.enqueue(
-      (settle, reject) => new NavigationOverlay(run, settle, reject, () => {
+      (settle, reject) => new NavigationOverlay(this.tui, run, settle, reject, () => {
         this.tui.requestRender()
       }),
       options,
@@ -740,6 +991,45 @@ export class OverlayQueue implements OverlayPrompts {
   }
 
   /**
+   * Keep a modal open while work runs, aborting it on Escape.
+   * @param title - overlay title shown while busy.
+   * @param work - body that observes the session signal.
+   * @returns the work result, or undefined after cancel.
+   */
+  runBusy<T>(title: string, work: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> {
+    return this.navigate(async (navigation) => {
+      const page = navigation.selectPage({
+        title,
+        detail: ui('按 Esc 取消', 'Press Esc to cancel'),
+        searchable: false,
+        choices: [{
+          id: 'busy',
+          label: ui('进行中…', 'In progress…'),
+          disabledReason: ui('按 Esc 取消', 'Press Esc to cancel'),
+        }],
+      }, () => undefined)
+      try {
+        navigation.finish(await work(navigation.signal))
+      } catch (error) {
+        if (navigation.signal.aborted) return
+        throw error
+      }
+      await page
+    })
+  }
+
+  /**
+   * Keep a modal open while work runs, streaming its output and aborting on Escape.
+   * @param request - title, optional detail, and the work body observing (report, signal).
+   * @returns the work result, or undefined after cancel.
+   */
+  progress<T>(request: ProgressOverlayRequest<T>): Promise<T | undefined> {
+    return this.navigate<T>(async (navigation) => {
+      navigation.finish(await navigation.progress(request))
+    }, request.options)
+  }
+
+  /**
    * Open a single-line text input in FIFO order.
    * @param request - input content and presentation options.
    * @returns submitted text, or undefined after cancellation.
@@ -747,6 +1037,18 @@ export class OverlayQueue implements OverlayPrompts {
   input(request: InputOverlayRequest): Promise<string | undefined> {
     return this.navigate<string>(async (navigation) => {
       const value = await navigation.input(request)
+      navigation.finish(value)
+    }, request.options)
+  }
+
+  /**
+   * Open a multiline editor: Enter inserts a newline, Ctrl+Enter submits.
+   * @param request - title, optional detail, and initial value.
+   * @returns submitted text, or undefined after cancellation.
+   */
+  multilineInput(request: InputOverlayRequest): Promise<string | undefined> {
+    return this.navigate<string>(async (navigation) => {
+      const value = await navigation.multilineInput(request)
       navigation.finish(value)
     }, request.options)
   }
@@ -793,16 +1095,15 @@ export class OverlayQueue implements OverlayPrompts {
    * @param confirmLabel - affirmative action label.
    * @returns true only when the affirmative action was selected.
    */
-  async confirm(title: string, detail: string, confirmLabel = '确认'): Promise<boolean> {
+  async confirm(title: string, detail: string, confirmLabel = ui('确认', 'Confirm')): Promise<boolean> {
+    const { choices, initialChoiceId } = dangerConfirmChoices(confirmLabel)
     const selected = await this.select({
       title,
       detail,
       searchable: false,
-      choices: [
-        { id: 'confirm', label: confirmLabel, description: '我已理解上述影响' },
-        { id: 'cancel', label: '取消', description: '保持当前状态' },
-      ],
-      footer: '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
+      choices,
+      initialChoiceId,
+      footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', '↑↓ Select · Enter confirm · Esc back/close'),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'

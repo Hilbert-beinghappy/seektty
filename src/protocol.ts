@@ -105,6 +105,60 @@ export const MAX_CUSTOM_THEMES = 32
 /** Maximum imported TextMate rules stored in one custom theme. */
 export const MAX_TEXTMATE_RULES = 4_096
 
+/** Harness Settings namespace that persists SeekTTY interaction defaults. */
+export const TUI_BEHAVIOR_SETTINGS_NAMESPACE = 'seektty-behavior'
+
+/** Harness Settings namespace that persists composer prompt history with revision. */
+export const TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE = 'seektty-composer-history'
+
+/** Startup presentation for tool cards in the transcript. */
+export type TuiToolCardDisplay = 'collapsed' | 'expanded' | 'hidden'
+
+/** How `/copy` writes the system clipboard after OSC 52. */
+export type TuiClipboardFallback = 'auto' | 'osc52' | 'off'
+
+/** Which confirm-dialog choice is focused when a dangerous action opens. */
+export type TuiDangerConfirmDefault = 'cancel' | 'confirm'
+
+/** Complete behavior value owned by the SeekTTY Settings namespace. */
+export interface TuiBehaviorSettings {
+  readonly toolCards: TuiToolCardDisplay
+  readonly showReasoning: boolean
+  readonly desktopNotifications: boolean
+  readonly followTerminalTitle: boolean
+  readonly composerHistoryLimit: number
+  readonly statusElapsed: boolean
+  readonly clipboardFallback: TuiClipboardFallback
+  readonly toolOutputLineLimit: number
+  readonly diffContextLines: number
+  readonly dangerConfirmDefault: TuiDangerConfirmDefault
+  readonly keyBindings: Readonly<Record<string, string>>
+}
+
+/** First-run interaction defaults when no user override has been stored. */
+export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
+  toolCards: 'collapsed',
+  showReasoning: false,
+  desktopNotifications: true,
+  followTerminalTitle: true,
+  composerHistoryLimit: 200,
+  statusElapsed: true,
+  clipboardFallback: 'auto',
+  toolOutputLineLimit: 200,
+  diffContextLines: 3,
+  dangerConfirmDefault: 'cancel',
+  keyBindings: Object.freeze({}),
+})
+
+/** Upper bound for persisted composer history entries. */
+export const MAX_COMPOSER_HISTORY = 10_000
+
+/** Upper bound for one expanded tool-output block; 0 disables folding. */
+export const MAX_TOOL_OUTPUT_LINE_LIMIT = 10_000
+
+/** Upper bound for unified-diff context lines around each change. */
+export const MAX_DIFF_CONTEXT_LINES = 100
+
 /** One complete, redacted registered Settings namespace. */
 export interface TuiSettingsDocument {
   readonly namespace: string
@@ -137,7 +191,9 @@ export class TuiSettingsConflictError extends Error {
     readonly expected: number,
     readonly actual: number,
   ) {
-    super(`设置 ${JSON.stringify(namespace)} 已在其他界面更新（期望 revision ${String(expected)}，当前 ${String(actual)}）`)
+    super(
+      `TUI_SETTINGS_CONFLICT ${JSON.stringify(namespace)} expected=${String(expected)} actual=${String(actual)}`,
+    )
     this.name = 'TuiSettingsConflictError'
   }
 }
@@ -219,6 +275,13 @@ export interface TuiMarketplaceSource {
   readonly enabled: boolean
   readonly credentialRef?: string
   readonly builtIn: boolean
+  /** Present when a stored catalog row failed validation and was kept disabled. */
+  readonly diagnostic?: string
+  /**
+   * Stable protocol row identity. Stored catalog rows use `stored:<index>` so
+   * duplicate or invalid ids cannot select the wrong Settings row.
+   */
+  readonly rowKey?: string
 }
 
 /** Marketplace source list with the native Settings revision that produced it. */
@@ -258,13 +321,23 @@ export interface TuiSessionExport {
   readonly stream: ReadableStream<Uint8Array>
 }
 
+/** One turn's first-seen produced workspace paths from the Host session index. */
+export interface TuiProducedFileGroup {
+  readonly turn: number
+  readonly paths: readonly string[]
+}
+
 /** Host-owned services intentionally exposed to the terminal management UI. */
 export interface TuiManagementBridge {
   readonly sessionExport: {
     download(sessionId: string, includeDescendants: boolean, signal?: AbortSignal): Promise<TuiSessionExport>
+    markdown(sessionId: string, signal?: AbortSignal): Promise<TuiSessionExport>
+  }
+  readonly sessionFiles: {
+    index(sessionId: string, signal?: AbortSignal): Promise<readonly TuiProducedFileGroup[]>
   }
   readonly settings: {
-    describe(): Promise<readonly TuiSettingsDocument[]>
+    describe(namespace?: string, options?: { bypassCache?: boolean }): Promise<readonly TuiSettingsDocument[]>
     mutate(namespace: string, ops: readonly TuiSettingsPathOp[], expectedRevision: number): Promise<TuiSettingsDocument>
     credentialInfo(ref: string): Promise<TuiCredentialInfo>
     setCredential(ref: string, value: string): Promise<TuiCredentialInfo>
@@ -283,6 +356,9 @@ export interface TuiManagementBridge {
     saveSources(sources: readonly TuiMarketplaceSource[], expectedRevision: number): Promise<TuiMarketplaceSources>
     search(query: string, signal?: AbortSignal): Promise<readonly TuiMarketplaceCandidate[]>
     inspect(spec: string, signal?: AbortSignal): Promise<TuiMarketplaceCandidate>
+  }
+  readonly jobs: {
+    kill(id: string): Promise<'requested' | 'already-finished'>
   }
 }
 
