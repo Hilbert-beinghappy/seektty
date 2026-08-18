@@ -1,11 +1,13 @@
 /** OSC 52 clipboard writes with optional platform-command fallback. */
 
-import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { ui } from './locale.ts'
 import type { TuiClipboardFallback } from '@deepseek-ai/dsh-tui-protocol'
 
 /** OSC 52 payloads larger than this are refused and must use a process fallback or /export. */
 export const OSC52_BYTE_LIMIT = 100_000
+/** Hung pbcopy/xclip/wl-copy/clip.exe must not pin the TUI input thread. */
+export const CLIPBOARD_DEADLINE_MS = 2_000
 
 export type ClipboardMethod = 'osc52' | 'pbcopy' | 'wl-copy' | 'xclip' | 'clip.exe'
 
@@ -22,7 +24,9 @@ export interface ClipboardWriteOptions {
     command: string,
     args: readonly string[],
     input: string,
-  ) => ClipboardSpawnResult
+  ) => ClipboardSpawnResult | Promise<ClipboardSpawnResult>
+  readonly deadlineMs?: number
+  readonly kill?: (command: string) => void
 }
 
 const FALLBACKS: Readonly<Record<NodeJS.Platform, readonly { readonly method: ClipboardMethod; readonly command: string; readonly args: readonly string[] }[]>> = {
@@ -42,16 +46,65 @@ const FALLBACKS: Readonly<Record<NodeJS.Platform, readonly { readonly method: Cl
   netbsd: [],
 }
 
-function defaultSpawn(command: string, args: readonly string[], input: string): ClipboardSpawnResult {
-  const result: SpawnSyncReturns<string> = spawnSync(command, [...args], {
-    input,
-    encoding: 'utf8',
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
+function defaultSpawn(
+  command: string,
+  args: readonly string[],
+  input: string,
+  deadlineMs: number,
+  kill?: (command: string) => void,
+): Promise<ClipboardSpawnResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, [...args], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      windowsHide: true,
+    })
+    let settled = false
+    const finish = (result: ClipboardSpawnResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      kill?.(command)
+      finish({
+        status: null,
+        error: new Error(`clipboard deadline exceeded after ${String(deadlineMs)}ms`),
+      })
+    }, deadlineMs)
+    child.on('error', (error) => { finish({ status: null, error }) })
+    child.on('close', (status) => { finish({ status }) })
+    child.stdin?.end(input)
   })
-  return {
-    status: result.status,
-    ...(result.error === undefined ? {} : { error: result.error }),
+}
+
+async function spawnWithDeadline(
+  command: string,
+  args: readonly string[],
+  input: string,
+  options: ClipboardWriteOptions,
+): Promise<ClipboardSpawnResult> {
+  const deadlineMs = options.deadlineMs ?? CLIPBOARD_DEADLINE_MS
+  if (options.spawn === undefined) {
+    return defaultSpawn(command, args, input, deadlineMs, options.kill)
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.resolve(options.spawn(command, args, input)),
+      new Promise<ClipboardSpawnResult>((resolve) => {
+        timer = setTimeout(() => {
+          options.kill?.(command)
+          resolve({
+            status: null,
+            error: new Error(`clipboard deadline exceeded after ${String(deadlineMs)}ms`),
+          })
+        }, deadlineMs)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -70,7 +123,7 @@ export function osc52Sequence(text: string): string {
  * @param options - fallback policy and I/O seams.
  * @returns which writer succeeded.
  */
-export function writeClipboard(text: string, options: ClipboardWriteOptions): ClipboardMethod {
+export async function writeClipboard(text: string, options: ClipboardWriteOptions): Promise<ClipboardMethod> {
   const bytes = Buffer.byteLength(text, 'utf8')
   const osc52Ok = bytes <= OSC52_BYTE_LIMIT
   if (osc52Ok) options.writeOsc52(osc52Sequence(text))
@@ -86,9 +139,8 @@ export function writeClipboard(text: string, options: ClipboardWriteOptions): Cl
   if (osc52Ok && options.fallback === 'auto') {
     // Still try a process fallback so tmux clients that swallow OSC 52 get a copy.
   }
-  const spawn = options.spawn ?? defaultSpawn
   for (const candidate of FALLBACKS[options.platform] ?? []) {
-    const result = spawn(candidate.command, candidate.args, text)
+    const result = await spawnWithDeadline(candidate.command, candidate.args, text, options)
     if (result.error === undefined && result.status === 0) {
       return osc52Ok ? 'osc52' : candidate.method
     }

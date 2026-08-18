@@ -519,10 +519,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
       },
       copy: (text) => {
-        writeClipboard(text, {
+        void writeClipboard(text, {
           fallback: liveBehavior.get().clipboardFallback,
           platform: process.platform,
           writeOsc52: sequence => { terminal.write(sequence) },
+        }).catch((error: unknown) => {
+          setNotice(ui(
+            `复制失败：${capabilityError(error)}`,
+            `Copy failed: ${capabilityError(error)}`,
+          ), 'warning')
         })
       },
       close: (code) => { void close({ kind: 'exit', code }) },

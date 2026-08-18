@@ -14,32 +14,48 @@ describe('copy content', () => {
 })
 
 describe('clipboard fallback', () => {
-  it('writes OSC 52 for small payloads and falls back to pbcopy when OSC 52 is too large', () => {
+  it('writes OSC 52 for small payloads and falls back to pbcopy when OSC 52 is too large', async () => {
     const writeOsc52 = vi.fn()
     const spawn = vi.fn(() => ({ status: 0 }))
-    expect(writeClipboard('hello', {
+    await expect(writeClipboard('hello', {
       fallback: 'auto',
       platform: 'darwin',
       writeOsc52,
       spawn,
-    })).toBe('osc52')
+    })).resolves.toBe('osc52')
     expect(writeOsc52).toHaveBeenCalledWith(osc52Sequence('hello'))
 
     const large = 'x'.repeat(OSC52_BYTE_LIMIT + 1)
-    expect(writeClipboard(large, {
+    await expect(writeClipboard(large, {
       fallback: 'auto',
       platform: 'darwin',
       writeOsc52,
       spawn,
-    })).toBe('pbcopy')
+    })).resolves.toBe('pbcopy')
     expect(spawn).toHaveBeenCalledWith('pbcopy', [], large)
   })
 
-  it('refuses oversized OSC 52 when process fallback is disabled', () => {
-    expect(() => writeClipboard('x'.repeat(OSC52_BYTE_LIMIT + 1), {
+  it('refuses oversized OSC 52 when process fallback is disabled', async () => {
+    await expect(writeClipboard('x'.repeat(OSC52_BYTE_LIMIT + 1), {
       fallback: 'osc52',
       platform: 'darwin',
       writeOsc52: () => undefined,
-    })).toThrow('/export')
+    })).rejects.toThrow('/export')
+  })
+
+  it('kills a hung clipboard fallback after the deadline and fails closed', async () => {
+    const large = 'x'.repeat(OSC52_BYTE_LIMIT + 1)
+    const killed: string[] = []
+    const started = Date.now()
+    await expect(writeClipboard(large, {
+      fallback: 'auto',
+      platform: 'darwin',
+      writeOsc52: () => undefined,
+      deadlineMs: 40,
+      spawn: () => new Promise(() => undefined),
+      kill: command => { killed.push(command) },
+    })).rejects.toThrow(/deadline|剪贴板|export/i)
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(killed).toEqual(['pbcopy'])
   })
 })
