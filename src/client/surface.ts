@@ -54,6 +54,7 @@ import {
 } from './desktop-notify.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
+import { restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
 import { measureStartup } from '../startup-trace.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
@@ -430,6 +431,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
       if (stopping !== undefined) return stopping
+      restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
       stopping = (async () => {
         const failures: unknown[] = []
         if (elapsedTimer !== undefined) {
@@ -442,7 +444,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         try { syntax?.dispose() } catch (error) { failures.push(error) }
         try { unsubscribeActive() } catch (error) { failures.push(error) }
         try {
-          await terminal.drainInput(250, 30)
+          await withCleanupTimeout(() => terminal.drainInput(250, 30))
         } catch (error) {
           failures.push(error)
         }
@@ -452,7 +454,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           failures.push(error)
         }
         try {
-          await client.ctx.fiber.dispose()
+          await withCleanupTimeout(() => client.ctx.fiber.dispose())
         } catch (error) {
           failures.push(error)
         }
@@ -862,11 +864,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
+    restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
     setCodeHighlighter(undefined)
     try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }
     try { stopConstructedTui() } catch { /* preserve the setup failure */ }
     try {
-      await client.ctx.fiber.dispose()
+      await withCleanupTimeout(() => client.ctx.fiber.dispose())
     } catch { /* preserve the setup failure */ }
     throw error
   }
