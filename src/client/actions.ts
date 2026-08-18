@@ -23,7 +23,7 @@ import {
   type TuiCustomTheme,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
-import { capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
+import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { formatByteSize } from './byte-size.ts'
@@ -3854,5 +3854,9 @@ export function commandOf(
   catalog: readonly TuiCommandCandidate[],
   name: string,
 ): TuiCommandCandidate | undefined {
+  const canonical = canonicalTuiCommandName(name)
+  if (canonical !== name) {
+    return catalog.find(candidate => candidate.name === canonical)
+  }
   return catalog.find(candidate => candidate.name === name)
 }
