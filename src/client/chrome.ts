@@ -227,7 +227,7 @@ export class ContextBar implements Component {
         ? ` ${formatElapsed(Date.now() - facts.runningSince)}`
         : ''
       const runtime = facts.running
-        ? color.accent(`${ui('● 生成中', '● Generating')}${elapsed}`)
+        ? color.accent(`${ui('● 生成中', '● Generating')}${elapsed}${ui(' · Ctrl+C 停止', ' · Ctrl+C to stop')}`)
         : color.muted(ui('就绪', 'Ready'))
       const right = context === undefined ? runtime : `${color.muted(context)} · ${runtime}`
       return [`${prefix}${columns('', right, innerWidth)}`]
