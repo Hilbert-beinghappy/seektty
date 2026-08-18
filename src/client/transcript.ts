@@ -429,24 +429,24 @@ function diffText(value: unknown, context = DEFAULT_TUI_BEHAVIOR.diffContextLine
   return visible.join('\n')
 }
 
-const PRODUCT_TOOL_TITLES: Readonly<Record<string, readonly [zh: string, en: string]>> = {
-  ask_user_question: ['向用户提问', 'Ask user'],
-  create_goal: ['创建目标', 'Create goal'],
-  exit_plan_mode: ['计划审查', 'Plan review'],
-  get_goal: ['查看目标', 'View goal'],
-  job_kill: ['停止后台任务', 'Stop background job'],
-  job_list: ['查看后台任务', 'View background jobs'],
-  job_output: ['读取后台任务', 'Read background job'],
-  subagent: ['子 Agent', 'Subagent'],
-  todo_write: ['更新任务清单', 'Update task list'],
-  update_goal: ['更新目标', 'Update goal'],
-  workflow: ['工作流', 'Workflow'],
+const PRODUCT_TOOL_TITLES: Readonly<Record<string, { readonly zh: string; readonly en: string }>> = {
+  ask_user_question: { zh: '向用户提问', en: 'Ask user' },
+  create_goal: { zh: '创建目标', en: 'Create goal' },
+  exit_plan_mode: { zh: '计划审查', en: 'Plan review' },
+  get_goal: { zh: '查看目标', en: 'View goal' },
+  job_kill: { zh: '停止后台任务', en: 'Stop background job' },
+  job_list: { zh: '查看后台任务', en: 'View background jobs' },
+  job_output: { zh: '读取后台任务', en: 'Read background job' },
+  subagent: { zh: '子 Agent', en: 'Subagent' },
+  todo_write: { zh: '更新任务清单', en: 'Update task list' },
+  update_goal: { zh: '更新目标', en: 'Update goal' },
+  workflow: { zh: '工作流', en: 'Workflow' },
 }
 
 function toolTitle(node: ToolResultNode | RunningToolCall): string {
   const name = 'kind' in node ? node.call?.name : node.name
   const productTitle = name === undefined ? undefined : PRODUCT_TOOL_TITLES[name]
-  if (productTitle !== undefined) return ui(productTitle[0], productTitle[1])
+  if (productTitle !== undefined) return ui(productTitle.zh, productTitle.en)
   const callView = node.callView
   if (callView?.card === 'terminal') {
     const description = callView.description?.trim()
@@ -1119,7 +1119,7 @@ export class Transcript implements Component, Focusable {
   private imageGeneration = 0
   private imageLoader: TranscriptImageLoader | undefined
   private snapshot: ConversationSnapshot | undefined
-  private emptyMessage = '在下方输入消息，或用 /help 查看命令。'
+  private emptyMessage = ui('在下方输入消息，或用 /help 查看命令。', 'Enter a message below, or use /help to view commands.')
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
@@ -1215,7 +1215,7 @@ export class Transcript implements Component, Focusable {
    * Replace the transcript with non-durable empty-selection guidance.
    * @param message - guidance rendered when no Session is active.
    */
-  empty(message = '在下方输入消息，或用 /help 查看命令。'): void {
+  empty(message = ui('在下方输入消息，或用 /help 查看命令。', 'Enter a message below, or use /help to view commands.')): void {
     this.imageGeneration += 1
     this.imageLoader = undefined
     this.snapshot = undefined
