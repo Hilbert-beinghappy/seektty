@@ -386,6 +386,20 @@ export function matchesBinding(id: string, data: string): boolean {
 }
 
 /**
+ * First stage of the Surface input listener: a running turn consumes Ctrl+C
+ * before pi-tui can deliver the chord to an overlay.
+ */
+export function consumeRunningInterrupt(
+  data: string,
+  session: { getSnapshot(): { running: boolean }; cancel(): unknown } | undefined,
+): { consume: true } | undefined {
+  if (!matchesBinding('interrupt', data)) return undefined
+  if (session?.getSnapshot().running !== true) return undefined
+  void session.cancel()
+  return { consume: true }
+}
+
+/**
  * Find another action that already owns this chord.
  * @param id - binding being assigned.
  * @param typed - user-facing or canonical chord.
