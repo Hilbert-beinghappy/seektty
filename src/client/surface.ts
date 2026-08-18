@@ -52,6 +52,7 @@ import {
   nextDesktopNotify,
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
+import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
 import { restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -254,10 +255,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let notice: { message: string; tone: NoticeTone } | undefined
     let restartRequired: string | undefined
     let headerGeneration = 0
-    let runningSince: number | undefined
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
-    let notifySnapshot: DesktopNotifySnapshot = { running: false, pending: [] }
-    let notifyPrimed = false
+    const sessionChrome = createSessionChromeStore()
 
     const focusEditor = (): void => {
       transcriptFocused = false
@@ -291,38 +290,49 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const applyTerminalTitle = (): void => {
       const snapshot = active?.session.getSnapshot()
-      terminal.setTitle(sessionTerminalTitle({
+      const chrome = sessionChrome.of(latestSessionId)
+      const title = sessionTerminalTitle({
         follow: liveBehavior.get().followTerminalTitle,
         sessionTitle: active?.summary.displayTitle ?? '',
         running: snapshot?.running === true,
         pendingApproval: snapshot?.pending.some(wait => wait.kind === 'approval') === true,
-      }))
+      })
+      const next = nextTitleWrite(chrome.lastTitle, title)
+      if (next === undefined) return
+      chrome.lastTitle = next
+      terminal.setTitle(next)
     }
 
     let actions!: TuiActions
 
     const updateStatus = (): void => {
       if (stopping !== undefined) return
+      const chrome = sessionChrome.of(latestSessionId)
       const snapshot = active?.session.getSnapshot()
       if (snapshot?.running === true) {
-        runningSince ??= Date.now()
+        chrome.runningSince ??= Date.now()
         if (elapsedTimer === undefined && liveBehavior.get().statusElapsed) {
           elapsedTimer = setInterval(() => {
             if (stopping !== undefined) return
-            updateStatus()
+            const elapsed = sessionChrome.of(latestSessionId)
+            if (elapsed.runningSince === undefined || !liveBehavior.get().statusElapsed) return
+            status.setDetail(color.accent(ui(
+              `生成中 · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C 停止`,
+              `Generating · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C to stop`,
+            )))
             renderWhileOpen()
           }, 500)
         }
       } else {
-        runningSince = undefined
+        chrome.runningSince = undefined
         if (elapsedTimer !== undefined) {
           clearInterval(elapsedTimer)
           elapsedTimer = undefined
         }
       }
       if (snapshot === undefined) {
-        notifySnapshot = { running: false, pending: [] }
-        notifyPrimed = false
+        chrome.notify = { running: false, pending: [] }
+        chrome.notifyPrimed = false
         status.setDetail(color.warning(ui('未打开会话', 'No session open')))
         applyTerminalTitle()
         return
@@ -332,18 +342,18 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         pending: snapshot.pending.map(wait => ({ key: wait.key, kind: wait.kind })),
       }
       if (liveBehavior.get().desktopNotifications) {
-        const kind = nextDesktopNotify(notifySnapshot, currentNotify, notifyPrimed)
+        const kind = nextDesktopNotify(chrome.notify, currentNotify, chrome.notifyPrimed)
         if (kind !== undefined) {
           terminal.write(desktopNotifySequence(desktopNotifyBody(kind)))
         }
       }
-      notifySnapshot = currentNotify
-      notifyPrimed = true
+      chrome.notify = currentNotify
+      chrome.notifyPrimed = true
       const pendingCount = snapshot.pending.length
-      const generating = liveBehavior.get().statusElapsed && runningSince !== undefined
+      const generating = liveBehavior.get().statusElapsed && chrome.runningSince !== undefined
         ? ui(
-          `生成中 · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C 停止`,
-          `Generating · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C to stop`,
+          `生成中 · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C 停止`,
+          `Generating · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C to stop`,
         )
         : ui('生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop')
       const primary = snapshot.removed
@@ -388,11 +398,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const generation = ++headerGeneration
       void capabilities.headerFacts(forceModel).then((facts) => {
         if (stopping !== undefined || generation !== headerGeneration) return
-        contextBar.setFacts({
-          ...facts,
-          ...(runningSince === undefined ? {} : { runningSince }),
-          statusElapsed: liveBehavior.get().statusElapsed,
-        })
+        const since = sessionChrome.of(latestSessionId).runningSince
+        const header = { ...facts, statusElapsed: liveBehavior.get().statusElapsed }
+        contextBar.setFacts(since === undefined ? header : { ...header, runningSince: since })
         editor.setFacts(facts)
         status.setPermission(facts.permission)
         renderWhileOpen()
