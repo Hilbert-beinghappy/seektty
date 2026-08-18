@@ -1,7 +1,7 @@
 /** Bounded, single-use launcher handoff files for controlled process restart. */
 
 import { randomUUID } from 'node:crypto'
-import { lstatSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -9,7 +9,32 @@ import { basename, dirname, join, resolve } from 'node:path'
 export const APP_HANDOFF_ENV = 'DSH_APP_HANDOFF_FILE'
 /** Maximum serialized handoff bytes; payloads carry references, never file bytes. */
 export const APP_HANDOFF_MAX_BYTES = 256 * 1024
-const PREFIX = 'deepseek-handoff-'
+/** Filename prefix for launcher-owned handoff files in the process temp directory. */
+export const APP_HANDOFF_PREFIX = 'deepseek-handoff-'
+/** Private subdirectory under the process temp directory. */
+export const APP_HANDOFF_DIRNAME = 'seektty-handoff'
+
+function handoffDirectory(): string {
+  const directory = join(internals.tmpdir(), APP_HANDOFF_DIRNAME)
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  return directory
+}
+
+/** Replaceable process seams used by handoff tests. */
+export const internals: {
+  tmpdir(): string
+  now(): number
+  staleMs: number
+} = {
+  tmpdir,
+  now: Date.now,
+  staleMs: 24 * 60 * 60 * 1_000,
+}
+
+export type ConsumeAppHandoffResult =
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'payload'; readonly payload: unknown }
+  | { readonly kind: 'degraded'; readonly reason: string }
 
 interface AppHandoffEnvelope {
   readonly version: 1
@@ -17,9 +42,52 @@ interface AppHandoffEnvelope {
   readonly payload: unknown
 }
 
+function canonical(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
 function allowedPath(path: string): boolean {
-  const absolute = resolve(path)
-  return dirname(absolute) === resolve(tmpdir()) && basename(absolute).startsWith(PREFIX)
+  const absolute = canonical(path)
+  return dirname(absolute) === canonical(handoffDirectory())
+    && basename(absolute).startsWith(APP_HANDOFF_PREFIX)
+}
+
+function degrade(reason: string): ConsumeAppHandoffResult {
+  return { kind: 'degraded', reason }
+}
+
+/**
+ * Remove leftover prefix files older than the stale window.
+ * Called on write and consume so a child crash does not fill tmpdir.
+ */
+export function sweepStaleAppHandoffs(): void {
+  let directory: string
+  try {
+    directory = handoffDirectory()
+  } catch {
+    return
+  }
+  let names: string[]
+  try {
+    names = readdirSync(directory)
+  } catch {
+    return
+  }
+  const cutoff = internals.now() - internals.staleMs
+  for (const name of names) {
+    if (!name.startsWith(APP_HANDOFF_PREFIX)) continue
+    const path = join(directory, name)
+    if (!allowedPath(path)) continue
+    try {
+      const stat = lstatSync(path)
+      if (!stat.isFile() || stat.mtimeMs > cutoff) continue
+      unlinkSync(path)
+    } catch { /* best-effort tmpdir hygiene */ }
+  }
 }
 
 /**
@@ -29,39 +97,61 @@ function allowedPath(path: string): boolean {
  * @param payload - JSON-compatible references and draft metadata.
  * @returns absolute handoff path for {@link APP_HANDOFF_ENV}.
  */
+/**
+ * Build a child process env that never inherits a stale handoff ticket.
+ * Only a path from a successful {@link writeAppHandoff} is published.
+ * @param parentEnv - current process environment.
+ * @param handoffPath - newly written ticket, when restart carries a payload.
+ */
+export function restartChildEnv(
+  parentEnv: NodeJS.Dict<string | undefined>,
+  handoffPath?: string,
+): NodeJS.ProcessEnv {
+  const env = { ...parentEnv }
+  delete env[APP_HANDOFF_ENV]
+  if (handoffPath !== undefined) env[APP_HANDOFF_ENV] = handoffPath
+  return env
+}
+
 export function writeAppHandoff(channel: string, payload: unknown): string {
   if (channel.trim() === '') throw new Error('app handoff channel cannot be blank')
+  sweepStaleAppHandoffs()
   const body = JSON.stringify({ version: 1, channel, payload } satisfies AppHandoffEnvelope)
   if (Buffer.byteLength(body) > APP_HANDOFF_MAX_BYTES) throw new Error('app handoff payload exceeds size limit')
-  const path = join(tmpdir(), `${PREFIX}${randomUUID()}.json`)
+  const path = join(handoffDirectory(), `${APP_HANDOFF_PREFIX}${randomUUID()}.json`)
   writeFileSync(path, body, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
   return path
 }
 
 /**
  * Consume and delete this process's handoff when its channel matches.
- * Invalid paths, permissions, envelopes, or channels fail loud after the
- * environment value is cleared; a missing value means ordinary startup.
+ * Invalid paths, permissions, envelopes, or channels degrade instead of aborting boot.
  * @param channel - expected app protocol identifier.
- * @returns parsed opaque payload, or undefined when no handoff was supplied.
+ * @param env - process environment carrying {@link APP_HANDOFF_ENV}.
  */
-export function consumeAppHandoff(channel: string): unknown {
-  const path = process.env[APP_HANDOFF_ENV]
-  delete process.env.DSH_APP_HANDOFF_FILE
-  if (path === undefined) return undefined
-  if (!allowedPath(path)) throw new Error('app handoff path is outside the launcher temp boundary')
+export function consumeAppHandoff(
+  channel: string,
+  env: NodeJS.Dict<string | undefined> = process.env,
+): ConsumeAppHandoffResult {
+  sweepStaleAppHandoffs()
+  const path = env[APP_HANDOFF_ENV]
+  delete env[APP_HANDOFF_ENV]
+  if (path === undefined) return { kind: 'missing' }
+  if (!allowedPath(path)) return degrade('app handoff path is outside the launcher temp boundary')
   try {
     const stat = lstatSync(path)
-    if (!stat.isFile()) throw new Error('app handoff path is not a regular file')
-    if (stat.size > APP_HANDOFF_MAX_BYTES) throw new Error('app handoff file exceeds size limit')
+    if (!stat.isFile()) return degrade('app handoff path is not a regular file')
+    if (stat.size > APP_HANDOFF_MAX_BYTES) return degrade('app handoff file exceeds size limit')
     if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) {
-      throw new Error('app handoff file permissions are not owner-only')
+      return degrade('app handoff file permissions are not owner-only')
     }
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<AppHandoffEnvelope> | null
     if (parsed === null || parsed.version !== 1 || parsed.channel !== channel || !('payload' in parsed)) {
-      throw new Error(`app handoff does not match channel ${JSON.stringify(channel)}`)
+      return degrade(`app handoff does not match channel ${JSON.stringify(channel)}`)
     }
-    return parsed.payload
+    return { kind: 'payload', payload: parsed.payload }
+  } catch (error) {
+    return degrade(error instanceof Error ? error.message : String(error))
   } finally {
     try { unlinkSync(path) } catch { /* single-use cleanup is best effort after a read failure */ }
   }

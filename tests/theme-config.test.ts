@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { setUiLocale } from '../src/client/locale.ts'
 import {
   BUILT_IN_THEMES,
   editableTheme,
@@ -16,7 +17,17 @@ import {
   themeIdFromName,
 } from '../src/client/theme-config.ts'
 
+afterEach(() => { setUiLocale('zh') })
+
 describe('theme colors and generated palettes', () => {
+  it('localizes built-in theme names at the display site', () => {
+    setUiLocale('en')
+    expect(BUILT_IN_THEMES.dark.name).toBe('DeepSeek dark')
+    expect(BUILT_IN_THEMES.light.name).toBe('DeepSeek light')
+    setUiLocale('zh')
+    expect(BUILT_IN_THEMES.dark.name).toBe('DeepSeek 暗色')
+    expect(BUILT_IN_THEMES.light.name).toBe('DeepSeek 亮色')
+  })
   it('normalizes supported opaque HEX/RGB forms', () => {
     expect(normalizeThemeColor('#abc')).toBe('#AABBCC')
     expect(normalizeThemeColor('rgb(10, 20, 30)')).toBe('#0A141E')

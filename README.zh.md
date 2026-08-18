@@ -39,16 +39,16 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 | 能力 | 当前可用操作 |
 | --- | --- |
 | 对话与运行 | 流式回复、Markdown/GFM、不显示围栏的主题语法高亮代码色块、链接、表格、推理显示切换、工具卡片折叠/展开/隐藏、模型重试、上下文压缩、最大输出与错误状态、Ctrl+C 停止当前轮次 |
-| 会话 | 新建、恢复、列表、全文搜索、重命名、Fork、归档、复制最后一条回复、导出当前会话或连同子 Agent 会话及附件一起导出 ZIP |
+| 会话 | 新建、恢复、列表、全文搜索、重命名、Fork、归档、复制最后一条回复、导出 ZIP，或 `/export md` 导出 Markdown |
 | 工作区 | 从当前目录启动，添加、选择、重命名、移除注册、调整工作区顺序和工作区内会话顺序；移除注册不会删除目录、文件或会话日志 |
 | Agent 模式 | 支持 Standard、Code/PTC、Minimal、Cordis/Create 四种基线模式，并动态显示插件注册的新 Agent Preset；活跃会话切换模式时在同一工作区创建新会话 |
 | 模型与 Provider | 动态读取 Provider、模型和模型支持的推理强度，显示当前实际路由，切换当前会话模型，并报告目录、凭证和路由错误 |
-| 权限与审批 | 查看和切换只读、工作区、完全访问等 Host 权限；Shift+Tab 快速循环；进入高风险权限前确认；工具调用支持仅本次允许或拒绝 |
+| 权限与审批 | 查看和切换只读、工作区、完全访问等 Host 权限；Shift+Tab 快速循环；进入高风险权限前确认；工具调用支持仅本次允许、本会话不再询问或拒绝 |
 | 输入队列与 Steer | Agent 运行时继续排队消息，查看、编辑、删除队列项，将单条或整队消息转为当前轮次引导，并可直接发送 `/steer` |
 | 人机交互 | 处理单选、多选、自定义回答、跳过、取消和计划审查；提交后自动回到最新输出并展示原轮次续答，失败时可通过 `/pending` 重试 |
-| 图片附件 | 通过路径或粘贴加入 PNG、JPEG、GIF、WebP，按 Harness 限制检查数量和大小；终端支持时内联显示，否则显示文件名、尺寸、类型和大小 |
+| 图片附件 | 通过路径、粘贴图片路径或剪贴板位图（pngpaste / wl-paste / xclip / PowerShell）加入 PNG、JPEG、GIF、WebP，按 Harness 限制检查数量和大小；终端支持时内联显示，否则显示文件名、尺寸、类型和大小 |
 | Plan、Goal、Todo 与压缩 | 使用 Harness 原生 `/plan`、`/goal`、`/compact` 命令，显示计划审查、目标状态、Todo 数量和上下文压缩记录 |
-| 工具与产出文件 | `◆ 操作 · 耗时` 标题、运行中同步计时及带连接符的调用代码、动态工具目录、工具参数与安全边界说明、带原文件行号的高亮读取、Shell／JSON／Diff 高亮、安全保留的终端 ANSI、通用降级卡片；查看本轮生成文件、复制绝对路径，并在确认后交给外部程序打开 |
+| 工具与产出文件 | `◆ 操作 · 耗时` 标题、运行中同步计时及带连接符的调用代码、动态工具目录、工具参数与安全边界说明、带原文件行号的高亮读取、Shell／JSON／Diff 高亮、安全保留的终端 ANSI、通用降级卡片；按轮次查看本会话生成文件、在 TUI 内查看、复制绝对路径，并在确认后交给外部程序打开 |
 | 子 Agent | 查看直接子 Agent、运行状态、树结构、Token 和耗时；打开可继续会话或只读会话，并在运行时停止当前子 Agent 轮次 |
 | 后台任务与工作流 | 查看 Jobs 的类型、状态、开始/结束时间、耗时和详情；在 Transcript 中显示工作流阶段、成员、结果和失败状态 |
 | 统计与轨迹 | 每轮显示步骤数、LLM/工具耗时、首 Token、吞吐率、缓存命中和输入/输出 Token；检查模型请求、运行中工具与结构化 Trajectory |
@@ -65,14 +65,14 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 
 ## 安装并使用裸命令
 
-仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。
+仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim。
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
-`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
+`deepseek` 需要 PATH 上的 DeepSeek Harness（`dsh`），或用 `DSH_BIN` 指向可执行文件（`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.6`）。`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
 
 ```sh
 deepseek "检查这个项目"
@@ -80,6 +80,7 @@ deepseek --cwd ../project
 deepseek --resume
 deepseek --resume <sessionId>
 deepseek --profile team-tui
+deepseek --version
 ```
 
 也可以只使用 dsh 的原生入口：
@@ -111,7 +112,7 @@ dsh --profile tui
 
 | 分类 | 命令 |
 | --- | --- |
-| 会话 | `/new`、`/resume`、`/sessions`、`/rename`、`/fork`、`/archive`、`/export`、`/copy` |
+| 会话 | `/new`、`/resume`、`/sessions`、`/rename`、`/fork`、`/archive`、`/export`、`/export md`、`/copy` |
 | 工作环境 | `/workspace`、`/profile` |
 | Agent | `/mode`、`/model`、`/permission`、`/plan`、`/goal`、`/compact` |
 | 运行交互 | `/queue`、`/steer`、`/attach`、`/attachments`、`/pending` |
@@ -134,6 +135,7 @@ dsh --profile tui
 | PgUp / PgDn / Home / End | 浏览 Transcript 时翻页、跳到最早或回到最新内容 |
 | Shift+Tab | 循环当前权限，进入完全访问前确认 |
 | Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |
+| F1 | 打开应用内帮助 |
 | Ctrl+P | 打开完整命令面板 |
 | Ctrl+M | 支持扩展键盘协议时打开模型选择器 |
 | Ctrl+S | 打开会话恢复选择器 |

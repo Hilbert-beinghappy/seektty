@@ -10,6 +10,7 @@ import {
   type TuiSettingsDocument,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
+import { ui } from './locale.ts'
 import {
   normalizeAppearance,
   resolveAppearanceTheme,
@@ -28,7 +29,10 @@ export function appearanceSettings(
   const document = documents.find(candidate =>
     candidate.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE)
   if (document === undefined) {
-    throw new Error(`Harness 未注册设置 ${TUI_APPEARANCE_SETTINGS_NAMESPACE}`)
+    throw new Error(ui(
+      `Harness 未注册设置 ${TUI_APPEARANCE_SETTINGS_NAMESPACE}`,
+      `Harness did not register settings ${TUI_APPEARANCE_SETTINGS_NAMESPACE}`,
+    ))
   }
   return document
 }
@@ -75,7 +79,10 @@ export async function saveTheme(
   )
   const stored = appearanceFromSettings(updated)
   if (stored.theme !== theme || stored.codeTheme !== 'auto') {
-    throw new Error(`Harness 保存了意外主题 ${JSON.stringify(stored.theme)}`)
+    throw new Error(ui(
+      `Harness 保存了意外主题 ${JSON.stringify(stored.theme)}`,
+      `Harness saved an unexpected theme ${JSON.stringify(stored.theme)}`,
+    ))
   }
   return updated
 }
@@ -101,7 +108,10 @@ export async function saveCodeTheme(
   )
   const stored = appearanceFromSettings(updated)
   if (stored.codeTheme !== codeTheme) {
-    throw new Error(`Harness 保存了意外代码主题 ${JSON.stringify(stored.codeTheme)}`)
+    throw new Error(ui(
+      `Harness 保存了意外代码主题 ${JSON.stringify(stored.codeTheme)}`,
+      `Harness saved an unexpected code theme ${JSON.stringify(stored.codeTheme)}`,
+    ))
   }
   return updated
 }
@@ -142,7 +152,10 @@ export async function saveCustomTheme(
   if (stored.theme !== expectedTheme
     || stored.codeTheme !== selected
     || !stored.customThemes.some(candidate => candidate.id === theme.id)) {
-    throw new Error(`Harness 未完整保存自定义主题 ${JSON.stringify(theme.name)}`)
+    throw new Error(ui(
+      `Harness 未完整保存自定义主题 ${JSON.stringify(theme.name)}`,
+      `Harness did not fully save custom theme ${JSON.stringify(theme.name)}`,
+    ))
   }
   return updated
 }
@@ -160,7 +173,12 @@ export async function deleteCustomTheme(
   id: string,
 ): Promise<TuiSettingsDocument> {
   const appearance = appearanceFromSettings(document)
-  if (!appearance.customThemes.some(candidate => candidate.id === id)) throw new Error(`自定义主题 ${JSON.stringify(id)} 不存在`)
+  if (!appearance.customThemes.some(candidate => candidate.id === id)) {
+    throw new Error(ui(
+      `自定义主题 ${JSON.stringify(id)} 不存在`,
+      `Custom theme ${JSON.stringify(id)} does not exist`,
+    ))
+  }
   const customThemes = appearance.customThemes.filter(candidate => candidate.id !== id)
   const selected: TuiThemeId = `custom:${id}`
   const active: TuiThemeId = appearance.theme === selected ? DEFAULT_TUI_THEME : appearance.theme
@@ -178,7 +196,10 @@ export async function deleteCustomTheme(
   if (stored.customThemes.some(candidate => candidate.id === id)
     || stored.theme !== active
     || stored.codeTheme !== activeCode) {
-    throw new Error(`Harness 未完整删除自定义主题 ${JSON.stringify(id)}`)
+    throw new Error(ui(
+      `Harness 未完整删除自定义主题 ${JSON.stringify(id)}`,
+      `Harness did not fully delete custom theme ${JSON.stringify(id)}`,
+    ))
   }
   return updated
 }

@@ -157,6 +157,17 @@ describe('conversation viewport', () => {
     expect(rendered).not.toContain('Command palette')
   })
 
+  it('re-localizes the default empty prompt when the UI language changes', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    setUiLocale('en')
+    const transcript = new Transcript(() => 5)
+    transcript.empty()
+    expect(transcript.render(60).join('\n')).toContain('Enter a message below')
+    setUiLocale('zh')
+    transcript.refreshPresentation()
+    expect(transcript.render(60).join('\n')).toContain('在下方输入消息')
+  })
+
   it('renders every loaded line into the default terminal scrollback', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript()
@@ -637,7 +648,7 @@ describe('conversation viewport', () => {
     vi.stubEnv('COLORTERM', 'truecolor')
     const highlighter = vi.fn((code: string, _language?: string) => code.split('\n'))
     setCodeHighlighter(highlighter)
-    const transcript = new Transcript(() => 24)
+    const transcript = new Transcript(() => 40)
     transcript.cycleToolVisibility()
     transcript.update(snapshot([
       tool(
@@ -696,5 +707,26 @@ describe('conversation viewport', () => {
     expect(stripAnsi(after)).toBe(stripAnsi(before))
     expect(after).not.toBe(before)
     expect(requestRender).toHaveBeenCalledTimes(2)
+  })
+
+  it('searches rendered lines from focus mode and jumps with n/N', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      user('u1', 'alpha unique-token'),
+      assistant('a1', 'beta unique-token gamma'),
+    ]))
+    transcript.render(60)
+    transcript.handleInput('/')
+    for (const character of 'unique-token') transcript.handleInput(character)
+    const composing = stripAnsi(transcript.render(60).join('\n'))
+    expect(composing).toContain('查找 unique-token')
+    transcript.handleInput('\r')
+    transcript.handleInput('n')
+    const jumped = stripAnsi(transcript.render(60).join('\n'))
+    expect(jumped).toMatch(/查找 unique-token · 2\/2/)
+    expect(transcript.cancelSearch()).toBe(true)
+    expect(transcript.cancelSearch()).toBe(false)
+    expect(stripAnsi(transcript.render(60).join('\n'))).not.toContain('查找 unique-token')
   })
 })

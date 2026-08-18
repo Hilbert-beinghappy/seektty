@@ -1,5 +1,6 @@
 /** Interactive pi-tui lifecycle over the authoritative Harness Client Runtime. */
 
+import { chmodSync } from 'node:fs'
 import {
   Box,
   Key,
@@ -8,6 +9,10 @@ import {
   TUI,
   type Terminal,
 } from '@mariozechner/pi-tui'
+import {
+  TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+  TuiSettingsConflictError,
+} from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
@@ -21,22 +26,46 @@ import {
   transcriptViewportRows,
 } from './chrome.ts'
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
+import { behaviorFromSettings, behaviorSettings, createLiveBehavior } from './behavior.ts'
+import { clearIdleComposerDraft } from './composer-draft.ts'
+import {
+  composerHistoryFromDocuments,
+  rememberComposerHistory,
+} from './composer-history.ts'
 import {
   localeFromSettings,
   setUiLocale,
   translateUiText,
   ui,
 } from './locale.ts'
-import { OverlayQueue } from './overlays.ts'
+import { OverlayQueue, setDangerConfirmDefault } from './overlays.ts'
 import {
   dispatchAfterProviderOnboarding,
   inspectProviderReadiness,
   ProviderOnboardingGate,
   type ProviderOnboardingResult,
 } from './provider-onboarding.ts'
-import { SyntaxHighlighter } from './syntax-highlighter.ts'
+import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
+import { formatElapsed } from './elapsed.ts'
+import { writeClipboard } from './clipboard.ts'
+import {
+  captureClipboardImage,
+  cleanupClipboardImageWorkspace,
+  createClipboardImageWorkspace,
+} from './clipboard-image.ts'
+import {
+  desktopNotifyBody,
+  desktopNotifySequence,
+  nextDesktopNotify,
+  type DesktopNotifySnapshot,
+} from './desktop-notify.ts'
+import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
+import { sessionTerminalTitle } from './terminal-title.ts'
+import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
+import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
+import { measureStartup } from '../startup-trace.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -112,17 +141,22 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       'An interactive TTY is required; use dsh --profile headless for non-interactive tasks',
     ))
   }
-  const settingsDocuments = await options.management.settings.describe()
-  setUiLocale(localeFromSettings(settingsDocuments))
   const terminal = internals.createTerminal()
-  const [client, initialProviderReadiness] = await Promise.all([
+  const [settingsDocuments, client, initialProviderReadiness] = await measureStartup('settings+client', () => Promise.all([
+    options.management.settings.describe(),
     internals.startClient(options),
     inspectProviderReadiness(options.api),
-  ])
+  ]))
+  setUiLocale(localeFromSettings(settingsDocuments))
   let stopConstructedTui = (): void => undefined
   let disposeConstructedSyntax = (): void => undefined
+  let detachFatalGuards = (): void => undefined
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
+    let liveTheme = initialTheme
+    const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
+    applyKeyBindingOverrides(liveBehavior.get().keyBindings)
+    setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
@@ -134,6 +168,36 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
+    const historyLimit = liveBehavior.get().composerHistoryLimit
+    let { entries: composerHistory, revision: composerHistoryRevision } =
+      composerHistoryFromDocuments(settingsDocuments, historyLimit)
+    for (const entry of [...composerHistory].reverse()) editor.addToHistory(entry)
+    let historyPersist = Promise.resolve()
+    const persistComposerHistory = (entries: readonly string[]): void => {
+      if (liveBehavior.get().composerHistoryLimit <= 0) return
+      historyPersist = historyPersist.then(async () => {
+        const settings = capabilities.managementBridge().settings
+        const write = (revision: number, next: readonly string[]): Promise<number> => (
+          settings.mutate(
+            TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+            [{ op: 'set', path: ['entries'], value: [...next] }],
+            revision,
+          ).then(saved => saved.revision)
+        )
+        try {
+          composerHistoryRevision = await write(composerHistoryRevision, entries)
+        } catch (error) {
+          if (!(error instanceof TuiSettingsConflictError)) return
+          const latest = composerHistoryFromDocuments(
+            await settings.describe(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE),
+            historyLimit,
+          )
+          const merged = rememberComposerHistory(latest.entries, entries[0] ?? '', historyLimit)
+          composerHistory = merged
+          composerHistoryRevision = await write(latest.revision, merged)
+        }
+      }).catch(() => { /* send must not wait on Settings */ })
+    }
     let transcriptFocused = false
     const transcript = new Transcript(
       // The default full transcript becomes normal terminal scrollback, which keeps
@@ -149,13 +213,40 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
       },
     )
-    const syntax = await SyntaxHighlighter.create(initialTheme, () => {
+    transcript.applyPresentationDefaults(
+      liveBehavior.get().toolCards,
+      liveBehavior.get().showReasoning,
+      liveBehavior.get().toolOutputLineLimit,
+      liveBehavior.get().diffContextLines,
+    )
+    let syntax: SyntaxHighlighter | undefined
+    disposeConstructedSyntax = () => { syntax?.dispose() }
+    void SyntaxHighlighter.create(initialTheme, () => {
       transcript.refreshPresentation()
       tui.invalidate()
       tui.requestRender(true)
+    }).then(created => {
+      if (stopping !== undefined) {
+        created.dispose()
+        return
+      }
+      adoptSyntaxHighlighter(created, liveTheme, (ready) => {
+        syntax = ready
+        disposeConstructedSyntax = () => { ready.dispose() }
+        setCodeHighlighter((code, lang) => ready.highlight(code, lang))
+      })
+      if (stopping !== undefined) {
+        created.dispose()
+        syntax = undefined
+        setCodeHighlighter(undefined)
+        return
+      }
+      transcript.refreshPresentation()
+      tui.invalidate()
+      tui.requestRender(true)
+    }).catch(() => {
+      /* first frame already shown; highlighting stays off */
     })
-    disposeConstructedSyntax = () => { syntax.dispose() }
-    setCodeHighlighter((code, lang) => syntax.highlight(code, lang))
     const status = new StatusBar()
     const canvas = new Box(0, 0, background.canvas)
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
@@ -178,6 +269,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let notice: { message: string; tone: NoticeTone } | undefined
     let restartRequired: string | undefined
     let headerGeneration = 0
+    let elapsedTimer: ReturnType<typeof setInterval> | undefined
+    const sessionChrome = createSessionChromeStore()
 
     const focusEditor = (): void => {
       transcriptFocused = false
@@ -216,50 +309,119 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       initialProviderReadiness,
     )
 
+    const applyTerminalTitle = (): void => {
+      const snapshot = active?.session.getSnapshot()
+      const chrome = sessionChrome.of(latestSessionId)
+      const title = sessionTerminalTitle({
+        follow: liveBehavior.get().followTerminalTitle,
+        sessionTitle: active?.summary.displayTitle ?? '',
+        running: snapshot?.running === true,
+        pendingApproval: snapshot?.pending.some(wait => wait.kind === 'approval') === true,
+      })
+      const next = nextTitleWrite(chrome.lastTitle, title)
+      if (next === undefined) return
+      chrome.lastTitle = next
+      terminal.setTitle(next)
+    }
+
+    let actions!: TuiActions
+
     const updateStatus = (): void => {
       if (stopping !== undefined) return
+      const chrome = sessionChrome.of(latestSessionId)
       const snapshot = active?.session.getSnapshot()
+      if (snapshot?.running === true) {
+        chrome.runningSince ??= Date.now()
+        if (elapsedTimer === undefined && liveBehavior.get().statusElapsed) {
+          elapsedTimer = setInterval(() => {
+            if (stopping !== undefined) return
+            const elapsed = sessionChrome.of(latestSessionId)
+            if (elapsed.runningSince === undefined || !liveBehavior.get().statusElapsed) return
+            status.setDetail(color.accent(ui(
+              `生成中 · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C 停止`,
+              `Generating · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C to stop`,
+            )))
+            renderWhileOpen()
+          }, 500)
+        }
+      } else {
+        chrome.runningSince = undefined
+        if (elapsedTimer !== undefined) {
+          clearInterval(elapsedTimer)
+          elapsedTimer = undefined
+        }
+      }
       if (snapshot === undefined) {
-        status.setDetail(color.warning(translateUiText('未打开会话')))
+        chrome.notify = { running: false, pending: [] }
+        chrome.notifyPrimed = false
+        status.setDetail(color.warning(ui('未打开会话', 'No session open')))
+        applyTerminalTitle()
         return
       }
+      const currentNotify: DesktopNotifySnapshot = {
+        running: snapshot.running,
+        pending: snapshot.pending.map(wait => ({ key: wait.key, kind: wait.kind })),
+      }
+      if (liveBehavior.get().desktopNotifications) {
+        const kind = nextDesktopNotify(chrome.notify, currentNotify, chrome.notifyPrimed)
+        if (kind !== undefined) {
+          terminal.write(desktopNotifySequence(desktopNotifyBody(kind)))
+        }
+      }
+      chrome.notify = currentNotify
+      chrome.notifyPrimed = true
       const pendingCount = snapshot.pending.length
+      const generating = liveBehavior.get().statusElapsed && chrome.runningSince !== undefined
+        ? ui(
+          `生成中 · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C 停止`,
+          `Generating · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C to stop`,
+        )
+        : ui('生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop')
       const primary = snapshot.removed
-        ? color.danger(translateUiText('会话已删除'))
+        ? color.danger(ui('会话已删除', 'Session deleted'))
         : snapshot.promptError !== null
-          ? color.danger(translateUiText(`${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`))
+          ? color.danger(ui(
+            `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
+            `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
+          ))
           : pendingCount > 0
-            ? color.warning(translateUiText(`/pending 处理 ${String(pendingCount)} 项交互`))
+            ? color.warning(ui(
+              `/pending 处理 ${String(pendingCount)} 项交互`,
+              `/pending handles ${String(pendingCount)} interaction(s)`,
+            ))
             : snapshot.running
-              ? color.accent(translateUiText('生成中 · Ctrl+C 停止'))
+              ? color.accent(generating)
               : undefined
       const facts: string[] = []
-      if (snapshot.queue.length > 0) facts.push(translateUiText(`队列 ${String(snapshot.queue.length)}`))
+      if (snapshot.queue.length > 0) facts.push(ui(`队列 ${String(snapshot.queue.length)}`, `Queue ${String(snapshot.queue.length)}`))
       const jobs = active === undefined ? undefined : capabilities.jobs()
       const jobCount = jobs?.filter(job => job.status === 'running' || job.status === 'stopping').length ?? 0
-      if (jobCount > 0) facts.push(translateUiText(`后台 ${String(jobCount)}`))
+      if (jobCount > 0) facts.push(ui(`后台 ${String(jobCount)}`, `Background ${String(jobCount)}`))
       const todos = active?.session.projections.faceOf('todos').getSnapshot()
-      if (Array.isArray(todos) && todos.length > 0) facts.push(translateUiText(`任务 ${String(todos.length)}`))
+      if (Array.isArray(todos) && todos.length > 0) facts.push(ui(`任务 ${String(todos.length)}`, `Tasks ${String(todos.length)}`))
       const plan = active?.session.projections.faceOf('plan').getSnapshot()
       if (typeof plan === 'object' && plan !== null && 'active' in plan && plan.active === true) facts.push('Plan')
       const goal = active?.session.projections.faceOf('goal').getSnapshot()
-      if (goal !== null && goal !== undefined) facts.push(translateUiText('目标'))
+      if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
-      if (attachmentCount > 0) facts.push(translateUiText(`图片 ${String(attachmentCount)}`))
-      if (restartRequired !== undefined) facts.push(translateUiText('需要重启'))
+      if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
+      if (restartRequired !== undefined) facts.push(ui('需要重启', 'Restart required'))
       const secondary = notice === undefined
         ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
           .filter((value): value is string => value !== undefined)
           .join(' · ') || undefined
         : noticeText(notice.message, notice.tone)
       status.setDetail(secondary)
+      applyTerminalTitle()
     }
 
     const refreshHeader = (forceModel = false): void => {
       const generation = ++headerGeneration
       void capabilities.headerFacts(forceModel).then((facts) => {
         if (stopping !== undefined || generation !== headerGeneration) return
-        contextBar.setFacts(facts)
+        const since = sessionChrome.of(latestSessionId).runningSince
+        const header = { ...facts, statusElapsed: liveBehavior.get().statusElapsed }
+        contextBar.setFacts(since === undefined ? header : { ...header, runningSince: since })
         editor.setFacts(facts)
         status.setPermission(facts.permission)
         renderWhileOpen()
@@ -278,7 +440,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         contextBar.setEmpty(profile, options.cwd)
         editor.setEmpty()
         status.setPermission('workspace-write')
-        transcript.empty('当前没有打开的会话；使用 /workspace 或 /new 继续。')
+        transcript.empty(ui(
+          '当前没有打开的会话；使用 /workspace 或 /new 继续。',
+          'No session is open; use /workspace or /new to continue.',
+        ))
         editor.disableSubmit = false
         updateStatus()
         renderWhileOpen()
@@ -294,16 +459,23 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
+      detachFatalGuards()
+      detachFatalGuards = () => undefined
       if (stopping !== undefined) return stopping
+      restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
       stopping = (async () => {
         const failures: unknown[] = []
+        if (elapsedTimer !== undefined) {
+          clearInterval(elapsedTimer)
+          elapsedTimer = undefined
+        }
         overlays.dispose()
         transcript.dispose()
         setCodeHighlighter(undefined)
-        try { syntax.dispose() } catch (error) { failures.push(error) }
+        try { syntax?.dispose() } catch (error) { failures.push(error) }
         try { unsubscribeActive() } catch (error) { failures.push(error) }
         try {
-          await terminal.drainInput(250, 30)
+          await withCleanupTimeout(() => terminal.drainInput(250, 30))
         } catch (error) {
           failures.push(error)
         }
@@ -313,7 +485,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           failures.push(error)
         }
         try {
-          await client.ctx.fiber.dispose()
+          await withCleanupTimeout(() => client.ctx.fiber.dispose())
         } catch (error) {
           failures.push(error)
         }
@@ -328,24 +500,40 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return stopping
     }
 
-    const actions = new TuiActions(capabilities, {
+    actions = new TuiActions(capabilities, {
       overlays,
       transcript,
       notice: setNotice,
       refresh,
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
+        liveTheme = theme
         setTheme(theme)
-        syntax.setTheme(theme)
+        syntax?.setTheme(theme)
         transcript.refreshPresentation()
         tui.invalidate()
         tui.requestRender(true)
       },
       applyLocale: (locale) => {
         setUiLocale(locale)
+        capabilities.invalidateCommandCatalog()
         transcript.refreshPresentation()
         refreshHeader(false)
         refresh()
+        tui.invalidate()
+        tui.requestRender(true)
+      },
+      applyBehavior: (behavior) => {
+        liveBehavior.apply(behavior)
+        applyKeyBindingOverrides(behavior.keyBindings)
+        setDangerConfirmDefault(behavior.dangerConfirmDefault)
+        transcript.applyPresentationDefaults(
+          behavior.toolCards,
+          behavior.showReasoning,
+          behavior.toolOutputLineLimit,
+          behavior.diffContextLines,
+        )
+        transcript.refreshPresentation()
         tui.invalidate()
         tui.requestRender(true)
       },
@@ -355,9 +543,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
       },
       copy: (text) => {
-        const bytes = Buffer.from(text, 'utf8')
-        if (bytes.byteLength > 100_000) throw new Error('回复超过终端剪贴板 100000 字节安全上限；请使用 /export')
-        terminal.write(`\u001B]52;c;${bytes.toString('base64')}\u0007`)
+        void writeClipboard(text, {
+          fallback: liveBehavior.get().clipboardFallback,
+          platform: process.platform,
+          writeOsc52: sequence => { terminal.write(sequence) },
+        }).catch((error: unknown) => {
+          setNotice(ui(
+            `复制失败：${capabilityError(error)}`,
+            `Copy failed: ${capabilityError(error)}`,
+          ), 'warning')
+        })
       },
       close: (code) => { void close({ kind: 'exit', code }) },
       restart: (profile, restartNotice) => {
@@ -377,7 +572,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       requireRestart: (message) => {
         restartRequired = message
-        setNotice(`${message}；可输入 /restart 稍后重启`, 'warning')
+        setNotice(ui(
+          `${message}；可输入 /restart 稍后重启`,
+          `${message}; use /restart later to apply it`,
+        ), 'warning')
       },
     })
 
@@ -387,7 +585,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         active = undefined
         latestSessionId = ''
         headerGeneration += 1
-        transcript.empty('当前没有打开的会话；使用 /workspace 或 /new 继续。')
+        transcript.empty(ui(
+          '当前没有打开的会话；使用 /workspace 或 /new 继续。',
+          'No session is open; use /workspace or /new to continue.',
+        ))
         editor.disableSubmit = false
         contextBar.setEmpty(profile, options.cwd)
         editor.setEmpty()
@@ -411,7 +612,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     })
 
     editor.setAutocompleteProvider(new HarnessAutocompleteProvider(capabilities, (message) => {
-      setNotice(`命令目录：${message}`, 'error')
+      setNotice(ui(`命令目录：${message}`, `Command catalog: ${message}`), 'error')
     }))
 
     const restoreDeferredPrompt = (text: string): void => {
@@ -428,7 +629,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       async () => {
         const current = capabilities.active()
         if (current === undefined) {
-          setNotice('当前没有打开的会话', 'error')
+          setNotice(ui('当前没有打开的会话', 'No session is open'), 'error')
           restoreDeferredPrompt(text)
           return false
         }
@@ -436,7 +637,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (content.length === 0) return false
         const result = await current.session.prompt(content, mode)
         if (!result.ok) {
-          setNotice(`${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`, 'error')
+          setNotice(ui(
+            `${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`,
+            `${mode === 'steer' ? 'Steering' : 'Send'} failed: ${result.error.message}`,
+          ), 'error')
           restoreDeferredPrompt(text)
           return false
         }
@@ -459,7 +663,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const command = commandOf(catalog, name)
         if (command === undefined) {
           const near = catalog.filter(candidate => candidate.name.includes(name)).slice(0, 3)
-          setNotice(`未知命令 /${name}${near.length === 0 ? '' : `；可能是 ${near.map(item => `/${item.name}`).join('、')}`}`, 'warning')
+          setNotice(ui(
+            `未知命令 /${name}${near.length === 0 ? '' : `；可能是 ${near.map(item => `/${item.name}`).join('、')}`}`,
+            `Unknown command /${name}${near.length === 0 ? '' : `; did you mean ${near.map(item => `/${item.name}`).join(', ')}?`}`,
+          ), 'warning')
           return
         }
         if (command.behavior === 'local') {
@@ -467,15 +674,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return
         }
         const current = capabilities.active()
-        if (current === undefined) throw new Error('当前没有打开的会话')
+        if (current === undefined) throw new Error(ui('当前没有打开的会话', 'No session is open'))
         if (command.behavior === 'skill') {
           await sendPrompt(trimmed, 'queue')
           return
         }
         const result = await current.session.command(trimmed)
-        if (!result.ok) setNotice(`命令失败：${result.error.message}`, 'error')
-        else if (!result.value.matched) setNotice(`未识别命令 /${name}`, 'warning')
-        else setNotice(`已执行 /${name}`, 'success')
+        if (!result.ok) setNotice(ui(`命令失败：${result.error.message}`, `Command failed: ${result.error.message}`), 'error')
+        else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
+        else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
         setNotice(capabilityError(error), 'error')
       }
@@ -488,88 +695,184 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const text = raw.trim()
       if (text === '' && capabilities.draftAttachments().length === 0) return
       transcript.followLatest()
-      if (text !== '') editor.addToHistory(text)
+      if (text !== '') {
+        editor.addToHistory(text)
+        composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
+        persistComposerHistory(composerHistory)
+      }
       editor.setText('')
       if (text.startsWith('/')) void dispatchCommand(text)
       else void sendPrompt(text)
+    }
+
+    const attachPastedImage = (path: string, fallbackText: string): { consume: true } => {
+      void capabilities.addAttachment(path).then((attachment) => {
+        const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
+        setNotice(ui(
+          `已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+          `Attached ${attachment.name} from paste · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+        ), 'success')
+      }, (error: unknown) => {
+        if (fallbackText !== '') editor.insertTextAtCursor(escapeTerminalText(fallbackText))
+        setNotice(ui(
+          `粘贴图片未加入：${capabilityError(error)}${fallbackText === '' ? '' : '；路径已保留为文本'}`,
+          `Pasted image was not attached: ${capabilityError(error)}${fallbackText === '' ? '' : '; the path was kept as text'}`,
+        ), 'warning')
+      })
+      return { consume: true }
     }
 
     tui.addInputListener((data) => {
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
-        void capabilities.addAttachment(attachmentPath).then((attachment) => {
-          const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
-          setNotice(`已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`, 'success')
-        }, (error: unknown) => {
-          editor.insertTextAtCursor(escapeTerminalText(BRACKETED_PASTE.exec(data)?.[1] ?? attachmentPath))
-          setNotice(`粘贴图片未加入：${capabilityError(error)}；路径已保留为文本`, 'warning')
-        })
-        return { consume: true }
+        return attachPastedImage(attachmentPath, BRACKETED_PASTE.exec(data)?.[1] ?? attachmentPath)
       }
       const paste = BRACKETED_PASTE.exec(data)
       if (!transcriptFocused && paste !== null) {
         const content = paste[1] ?? ''
+        if (content.trim() === '') {
+          const workspace = createClipboardImageWorkspace()
+          void captureClipboardImage({ platform: process.platform, dest: workspace.dest })
+            .then(async (captured) => {
+              if (captured === undefined) return
+              chmodSync(workspace.dest, 0o600)
+              const attachment = await capabilities.addAttachment(captured)
+              const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
+              setNotice(ui(
+                `已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+                `Attached ${attachment.name} from paste · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+              ), 'success')
+            })
+            .catch((error: unknown) => {
+              setNotice(ui(
+                `粘贴图片未加入：${capabilityError(error)}`,
+                `Pasted image was not attached: ${capabilityError(error)}`,
+              ), 'warning')
+            })
+            .finally(() => { cleanupClipboardImageWorkspace(workspace) })
+          return { consume: true }
+        }
         const safeContent = escapeTerminalText(content)
         if (safeContent !== content) {
           return { data: `\u001B[200~${safeContent}\u001B[201~` }
         }
       }
-      if (matchesKey(data, Key.tab) && (transcriptFocused || editor.getText() === '')) {
+      if (matchesBinding('focusToggle', data) && (transcriptFocused || editor.getText() === '')) {
+        transcript.cancelSearch()
+        transcript.exitToolFocus()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
-        setNotice(transcriptFocused ? '对话浏览 · Tab/Escape 返回输入' : '已返回输入区', 'info')
+        setNotice(transcriptFocused
+          ? ui('对话浏览 · Tab/Escape 返回输入', 'Transcript navigation · Tab/Escape returns to the composer')
+          : ui('已返回输入区', 'Returned to the composer'), 'info')
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
+        if (transcript.cancelSearch()) {
+          setNotice(ui('已取消查找', 'Search cancelled'), 'info')
+          return { consume: true }
+        }
+        if (transcript.exitToolFocus()) {
+          setNotice(ui('已退出工具卡焦点', 'Left tool-card focus'), 'info')
+          return { consume: true }
+        }
         focusEditor()
-        setNotice('已返回输入区', 'info')
+        setNotice(ui('已返回输入区', 'Returned to the composer'), 'info')
         return { consume: true }
       }
-      if (matchesKey(data, Key.shift(Key.tab))) {
+      if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
+        const action = transcript.activateFocused()
+        if (action?.kind === 'example') {
+          focusEditor()
+          void sendPrompt(action.text)
+          return { consume: true }
+        }
+        if (action?.kind === 'tool') {
+          refresh()
+          return { consume: true }
+        }
+      }
+      if (matchesBinding('cyclePermission', data)) {
         void actions.cyclePermission()
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('p'))) {
+      if (matchesBinding('help', data)) {
+        void actions.help()
+        return { consume: true }
+      }
+      if (matchesBinding('commandPalette', data)) {
         void actions.commandPalette()
+        return { consume: true }
+      }
+      if (matchesBinding('historySearch', data)) {
+        if (historyLimit <= 0) {
+          setNotice(ui('输入历史已关闭', 'Composer history is disabled'), 'info')
+          return { consume: true }
+        }
+        if (composerHistory.length === 0) {
+          setNotice(ui('没有可搜索的输入历史', 'No composer history to search'), 'info')
+          return { consume: true }
+        }
+        void overlays.select({
+          title: ui('输入历史', 'Composer history'),
+          detail: ui('选择一条历史输入填入编辑器', 'Choose a previous prompt to restore in the editor'),
+          searchable: true,
+          choices: composerHistory.map((entry, index) => ({
+            id: String(index),
+            label: entry.replace(/\s+/gu, ' ').slice(0, 80) || ui('(空)', '(empty)'),
+          })),
+          options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
+        }).then((selected) => {
+          if (selected === undefined || stopping !== undefined) return
+          const entry = composerHistory[Number(selected.id)]
+          if (entry === undefined) return
+          editor.setText(escapeTerminalText(entry))
+          focusEditor()
+          renderWhileOpen()
+        })
         return { consume: true }
       }
       // Legacy terminals encode both Enter and Ctrl+M as CR. Only an extended
       // keyboard protocol can identify Ctrl+M without stealing every submit.
-      if (data !== '\r' && data !== '\n' && matchesKey(data, Key.ctrl('m'))) {
+      if (matchesBinding('model', data)) {
         void actions.execute('model', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('s'))) {
+      if (matchesBinding('sessions', data)) {
         void actions.execute('sessions', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('o'))) {
+      if (matchesBinding('toolsDisplay', data)) {
         void actions.execute('tools', 'display')
         return { consume: true }
       }
-      if (matchesKey(data, Key.ctrl('t'))) {
+      if (matchesBinding('reasoning', data)) {
         const visible = transcript.toggleReasoning()
-        setNotice(`推理内容：${visible ? '显示' : '隐藏'}`, 'info')
+        setNotice(visible
+          ? ui('推理内容：显示', 'Reasoning: shown')
+          : ui('推理内容：隐藏', 'Reasoning: hidden'), 'info')
         refresh()
         return { consume: true }
       }
-      if (matchesKey(data, Key.shift(Key.left)) || matchesKey(data, Key.shift(Key.right))) {
+      if (matchesBinding('previousTurn', data) || matchesBinding('nextTurn', data)) {
         if (!transcriptFocused) {
           transcriptFocused = true
           tui.setFocus(transcript)
         }
-        const offset = matchesKey(data, Key.shift(Key.left)) ? -1 : 1
+        const offset = matchesBinding('previousTurn', data) ? -1 : 1
         const moved = transcript.navigateTurn(offset)
         setNotice(
-          moved ? `已跳到${offset < 0 ? '上一个' : '下一个'}用户轮次` : '没有可跳转的用户轮次',
+          moved
+            ? offset < 0
+              ? ui('已跳到上一个用户轮次', 'Jumped to the previous user turn')
+              : ui('已跳到下一个用户轮次', 'Jumped to the next user turn')
+            : ui('没有可跳转的用户轮次', 'No user turn to jump to'),
           moved ? 'info' : 'warning',
         )
         return { consume: true }
       }
-      if (matchesKey(data, Key.f2)
-        || matchesKey(data, Key.ctrl(Key.comma))
-        || matchesKey(data, Key.super(Key.comma))) {
+      if (matchesBinding('settings', data)) {
         void actions.execute('settings', '')
         return { consume: true }
       }
@@ -579,16 +882,21 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
         return { consume: true }
       }
-      if (!matchesKey(data, Key.ctrl('c'))) return undefined
+      if (!matchesBinding('interrupt', data)) return undefined
       const current = capabilities.active()
       if (current !== undefined && current.session.getSnapshot().running) {
         void current.session.cancel()
         return { consume: true }
       }
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
-        editor.setText('')
-        capabilities.clearAttachments()
-        setNotice('已清空输入草稿', 'info')
+        setNotice(clearIdleComposerDraft(
+          editor,
+          () => { capabilities.clearAttachments() },
+          (text) => {
+            composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
+            persistComposerHistory(composerHistory)
+          },
+        ), 'info')
         return { consume: true }
       }
       const now = Date.now()
@@ -597,12 +905,26 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       exitArmedUntil = now + 1_500
-      setNotice('再按一次 Ctrl+C 退出', 'warning')
+      setNotice(ui('再按一次 Ctrl+C 退出', 'Press Ctrl+C again to exit'), 'warning')
       return { consume: true }
     })
 
     const startupOnboarding = onboarding.ensure()
-    terminal.setTitle('DeepSeek Harness')
+    applyTerminalTitle()
+    detachFatalGuards = attachFatalGuards({
+      restore: () => { restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal) },
+      cleanup: () => close({ kind: 'exit', code: 1 }),
+      writeError: (message) => { process.stderr.write(`${escapeTerminalText(message)}\n`) },
+      formatError: (error) => {
+        const summary = error instanceof Error ? error.message : String(error)
+        const logHint = fatalLogHint()
+        return [
+          ui(`deepseek: 未捕获异常：${summary}`, `deepseek: uncaught exception: ${summary}`),
+          ui(`日志目录：${logHint}`, `Log directory: ${logHint}`),
+        ].join('\n')
+      },
+      exit: (code) => { process.exit(code) },
+    })
     tui.start()
     refreshHeader(true)
     refresh()
@@ -613,27 +935,41 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         for (const path of options.attachmentPaths ?? []) {
           try { await capabilities.addAttachment(path) } catch (error) { failures.push(`${path}: ${capabilityError(error)}`) }
         }
-        if (failures.length === 0) setNotice(`已恢复 ${options.attachmentPaths?.length ?? 0} 个附件`, 'success')
-        else setNotice(`部分附件未恢复：${failures.join('；')}`, 'warning')
+        if (failures.length === 0) {
+          setNotice(ui(
+            `已恢复 ${options.attachmentPaths?.length ?? 0} 个附件`,
+            `Restored ${options.attachmentPaths?.length ?? 0} attachment(s)`,
+          ), 'success')
+        } else {
+          setNotice(ui(`部分附件未恢复：${failures.join('；')}`, `Some attachments were not restored: ${failures.join('; ')}`), 'warning')
+        }
         refresh()
       })()
       : Promise.resolve()
     if (options.task !== undefined) {
       void attachmentsReady.then(() => sendPrompt(options.task ?? '', 'queue', startupOnboarding)).catch((error: unknown) => {
-        setNotice(`发送初始任务失败：${capabilityError(error)}`, 'error')
+        setNotice(ui(
+          `发送初始任务失败：${capabilityError(error)}`,
+          `Failed to send the initial task: ${capabilityError(error)}`,
+        ), 'error')
       })
     } else {
       void startupOnboarding.catch((error: unknown) => {
-        setNotice(`读取模型配置失败：${capabilityError(error)}`, 'warning')
+        setNotice(ui(
+          `读取模型配置失败：${capabilityError(error)}`,
+          `Failed to read the model configuration: ${capabilityError(error)}`,
+        ), 'warning')
       })
     }
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
+    detachFatalGuards()
+    restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
     setCodeHighlighter(undefined)
     try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }
     try { stopConstructedTui() } catch { /* preserve the setup failure */ }
     try {
-      await client.ctx.fiber.dispose()
+      await withCleanupTimeout(() => client.ctx.fiber.dispose())
     } catch { /* preserve the setup failure */ }
     throw error
   }

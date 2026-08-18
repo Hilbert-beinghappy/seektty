@@ -1,9 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, globSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { load } from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import { PluginMarketplace } from '../src/host/plugin-marketplace.ts'
+import { DSH_COMPATIBILITY, PACKAGE_VERSION } from '../src/dsh-compat.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as Record<string, unknown>
@@ -15,6 +17,8 @@ describe('out-of-tree Bundle contract', () => {
       compatibility: { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' },
     })
     expect(manifest.bin).toEqual({ deepseek: './lib/bin.js' })
+    expect(PACKAGE_VERSION).toBe(manifest.version)
+    expect(DSH_COMPATIBILITY).toEqual((manifest.dsh as { compatibility: unknown }).compatibility)
   })
 
   it('ships only for the supported terminal platforms', () => {
@@ -56,6 +60,31 @@ describe('out-of-tree Bundle contract', () => {
     expect(surface).not.toContain("from './mouse.ts'")
     expect(surface).not.toMatch(/\\u001B\[\?100[0-6]h/u)
     expect(surface).toContain('Number.POSITIVE_INFINITY')
+  })
+
+  it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')
+    expect(workflow).toContain('pnpm run check')
+    expect(workflow).toContain('git diff --exit-code lib/')
+  })
+
+  it('tracks every packaged path so GitHub ref installs cannot omit files', () => {
+    const tracked = new Set(
+      execFileSync('git', ['ls-files', '-z'], { cwd: root }).toString().split('\0').filter(Boolean),
+    )
+    const patterns = [
+      ...(manifest.files as string[]),
+      ...Object.values(manifest.bin as Record<string, string>),
+    ]
+    for (const pattern of patterns) {
+      const matches = pattern.includes('*')
+        ? globSync(pattern, { cwd: root })
+        : existsSync(resolve(root, pattern)) ? [pattern] : []
+      expect(matches, pattern).not.toEqual([])
+      for (const file of matches) {
+        expect(tracked.has(file.replaceAll('\\', '/').replace(/^\.\//u, '')), file).toBe(true)
+      }
+    }
   })
 
   it('is accepted by its own local marketplace preflight', async () => {

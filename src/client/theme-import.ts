@@ -20,6 +20,7 @@ import {
   normalizeThemeColor,
   normalizeThemeColorOn,
 } from './theme-config.ts'
+import { ui } from './locale.ts'
 
 const MAX_THEME_FILE_BYTES = 2 * 1024 * 1024
 const MAX_THEME_TOTAL_BYTES = 8 * 1024 * 1024
@@ -41,7 +42,9 @@ export interface LoadedVsCodeTheme {
 }
 
 function objectRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${label} 必须是对象`)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(ui(`${label} 必须是对象`, `${label} must be an object`))
+  }
   return value as Readonly<Record<string, unknown>>
 }
 
@@ -54,15 +57,23 @@ function parseJsonc(text: string, path: string): Readonly<Record<string, unknown
   const value: unknown = parse(text, errors, { allowTrailingComma: true, disallowComments: false })
   const first = errors[0]
   if (first !== undefined) {
-    throw new Error(`${path} 的 JSONC 无效：${printParseErrorCode(first.error)}（offset ${String(first.offset)}）`)
+    throw new Error(ui(
+      `${path} 的 JSONC 无效：${printParseErrorCode(first.error)}（offset ${String(first.offset)}）`,
+      `${path} has invalid JSONC: ${printParseErrorCode(first.error)} (offset ${String(first.offset)})`,
+    ))
   }
   return objectRecord(value, path)
 }
 
 function sourcePath(input: string): string {
   const trimmed = input.trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/u, '$1$2')
-  if (trimmed === '') throw new Error('VS Code 主题文件路径不能为空')
-  if (/^https?:/iu.test(trimmed)) throw new Error('只支持本地 VS Code 主题文件，不读取远程 URL')
+  if (trimmed === '') throw new Error(ui('VS Code 主题文件路径不能为空', 'VS Code theme path cannot be empty'))
+  if (/^https?:/iu.test(trimmed)) {
+    throw new Error(ui(
+      '只支持本地 VS Code 主题文件，不读取远程 URL',
+      'Only local VS Code theme files are supported; remote URLs are not fetched',
+    ))
+  }
   if (trimmed.startsWith('file:')) return fileURLToPath(trimmed)
   if (trimmed === '~') return homedir()
   if (trimmed.startsWith('~/')) return resolve(homedir(), trimmed.slice(2))
@@ -73,7 +84,9 @@ function mergeTheme(base: LoadedThemeRecord, current: Readonly<Record<string, un
   const colors = optionalRecord(current.colors, `${path}.colors`)
   const semanticTokenColors = optionalRecord(current.semanticTokenColors, `${path}.semanticTokenColors`)
   const rawTokenColors = current.tokenColors ?? []
-  if (!Array.isArray(rawTokenColors)) throw new Error(`${path}.tokenColors 必须是数组`)
+  if (!Array.isArray(rawTokenColors)) {
+    throw new Error(ui(`${path}.tokenColors 必须是数组`, `${path}.tokenColors must be an array`))
+  }
   const name = typeof current.name === 'string' ? current.name : base.name
   const type = typeof current.type === 'string' ? current.type : base.type
   return {
@@ -99,20 +112,38 @@ async function loadThemeRecord(
   const canonical = await realpath(path)
   if (active.includes(canonical)) {
     const chain = [...active, canonical].map(item => basename(item)).join(' → ')
-    throw new Error(`VS Code 主题 include 存在循环：${chain}`)
+    throw new Error(ui(`VS Code 主题 include 存在循环：${chain}`, `VS Code theme include cycle: ${chain}`))
   }
-  if (active.length >= MAX_INCLUDE_DEPTH) throw new Error(`VS Code 主题 include 超过 ${String(MAX_INCLUDE_DEPTH)} 层`)
+  if (active.length >= MAX_INCLUDE_DEPTH) {
+    throw new Error(ui(
+      `VS Code 主题 include 超过 ${String(MAX_INCLUDE_DEPTH)} 层`,
+      `VS Code theme include exceeds ${String(MAX_INCLUDE_DEPTH)} levels`,
+    ))
+  }
   const text = await readFile(canonical, 'utf8')
   const bytes = Buffer.byteLength(text)
-  if (bytes > MAX_THEME_FILE_BYTES) throw new Error(`VS Code 主题文件超过 ${String(MAX_THEME_FILE_BYTES)} 字节`)
+  if (bytes > MAX_THEME_FILE_BYTES) {
+    throw new Error(ui(
+      `VS Code 主题文件超过 ${String(MAX_THEME_FILE_BYTES)} 字节`,
+      `VS Code theme file exceeds ${String(MAX_THEME_FILE_BYTES)} bytes`,
+    ))
+  }
   budget.bytes += bytes
-  if (budget.bytes > MAX_THEME_TOTAL_BYTES) throw new Error(`VS Code 主题 include 总大小超过 ${String(MAX_THEME_TOTAL_BYTES)} 字节`)
+  if (budget.bytes > MAX_THEME_TOTAL_BYTES) {
+    throw new Error(ui(
+      `VS Code 主题 include 总大小超过 ${String(MAX_THEME_TOTAL_BYTES)} 字节`,
+      `VS Code theme include total size exceeds ${String(MAX_THEME_TOTAL_BYTES)} bytes`,
+    ))
+  }
   const current = parseJsonc(text, canonical)
   let base = EMPTY_THEME
   if (current.include !== undefined) {
     const include = typeof current.include === 'string' ? current.include.trim() : ''
     if (include === '' || isAbsolute(include) || /^[a-z][a-z0-9+.-]*:/iu.test(include)) {
-      throw new Error(`${canonical}.include 必须是相对文件路径`)
+      throw new Error(ui(
+        `${canonical}.include 必须是相对文件路径`,
+        `${canonical}.include must be a relative file path`,
+      ))
     }
     const included = await loadThemeRecord(resolve(dirname(canonical), include), [...active, canonical], budget)
     base = included.value
@@ -188,7 +219,10 @@ function fontStyles(value: unknown): readonly TuiTokenFontStyle[] | undefined {
 
 function textMateRules(value: LoadedThemeRecord, background: string): readonly TuiTextMateRule[] {
   if (value.tokenColors.length > MAX_TEXTMATE_RULES) {
-    throw new Error(`VS Code 主题最多导入 ${String(MAX_TEXTMATE_RULES)} 条 TextMate 规则`)
+    throw new Error(ui(
+      `VS Code 主题最多导入 ${String(MAX_TEXTMATE_RULES)} 条 TextMate 规则`,
+      `A VS Code theme can import at most ${String(MAX_TEXTMATE_RULES)} TextMate rules`,
+    ))
   }
   return value.tokenColors.flatMap((entry): TuiTextMateRule[] => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return []

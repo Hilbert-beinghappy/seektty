@@ -9,6 +9,7 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
+import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
 import { color, editorTheme } from './theme.ts'
 
@@ -222,7 +223,12 @@ export class ContextBar implements Component {
     if (this.state.kind === 'facts') {
       const facts = this.state.facts
       const context = facts.context?.split(' · ', 1)[0]
-      const runtime = facts.running ? color.accent(ui('● 生成中', '● Generating')) : color.muted(ui('就绪', 'Ready'))
+      const elapsed = facts.running && facts.statusElapsed !== false && facts.runningSince !== undefined
+        ? ` ${formatElapsed(Date.now() - facts.runningSince)}`
+        : ''
+      const runtime = facts.running
+        ? color.accent(`${ui('● 生成中', '● Generating')}${elapsed}`)
+        : color.muted(ui('就绪', 'Ready'))
       const right = context === undefined ? runtime : `${color.muted(context)} · ${runtime}`
       return [`${prefix}${columns('', right, innerWidth)}`]
     }
