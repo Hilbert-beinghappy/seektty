@@ -31,6 +31,7 @@ import { assertCredentialFreeUrl, PluginMarketplace, redactMarketplaceUrl } from
 import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
 import { markdownFromSessionLog } from '../client/conversation-markdown.ts'
+import { producedFilesFromSessionLog } from '../client/produced-files.ts'
 import { ui } from '../client/locale.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
@@ -534,6 +535,13 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
           contentLength: encoded.byteLength,
           stream: textStream(markdown),
         }
+      },
+    },
+    sessionFiles: {
+      index: async (sessionId, signal) => {
+        const exported = await downloadSessionLog(sessionId, false, signal)
+        const bytes = await bufferStream(exported.stream)
+        return producedFilesFromSessionLog(bytes)
       },
     },
     settings: {

@@ -149,7 +149,11 @@ function zipEntries(bytes: Uint8Array): readonly { readonly name: string; readon
  * @param bytes - authoritative Session-log body.
  * @param fallbackTitle - used when the log does not name the session.
  */
-export function markdownFromSessionLog(bytes: Uint8Array, fallbackTitle: string): string {
+/**
+ * Parse a Host Session-log body as JSON or a ZIP that contains conversation JSON.
+ * @param bytes - authoritative Session-log payload.
+ */
+export function sessionLogSnapshot(bytes: Uint8Array): unknown {
   const direct = parseJsonSnapshot(bytes)
   const snapshot = direct ?? zipEntries(bytes).reduce<unknown | undefined>((found, entry) => {
     if (found !== undefined || !entry.name.endsWith('.json')) return found
@@ -158,6 +162,11 @@ export function markdownFromSessionLog(bytes: Uint8Array, fallbackTitle: string)
   if (snapshot === undefined) {
     throw new Error('Session-log snapshot is not a conversation JSON or ZIP')
   }
+  return snapshot
+}
+
+export function markdownFromSessionLog(bytes: Uint8Array, fallbackTitle: string): string {
+  const snapshot = sessionLogSnapshot(bytes)
   const nodes = asNodes(snapshot)
   if (nodes === undefined) {
     throw new Error('Session-log snapshot does not contain conversation nodes')

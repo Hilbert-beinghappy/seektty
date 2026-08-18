@@ -1,5 +1,6 @@
 /** Aggregate produced workspace paths across every visible conversation turn. */
 
+import { sessionLogSnapshot } from './conversation-markdown.ts'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
 
 export interface ProducedFileGroup {
@@ -68,4 +69,25 @@ export function groupProducedFiles(
  */
 export function flattenProducedFiles(groups: readonly ProducedFileGroup[]): readonly string[] {
   return groups.flatMap(group => group.paths)
+}
+
+/**
+ * Read the Host Session-log produced-file index.
+ * Accepts `{ producedFiles: [{ turn, paths }] }` or conversation nodes with deliverables.
+ * @param bytes - authoritative Session-log body.
+ */
+export function producedFilesFromSessionLog(bytes: Uint8Array): readonly ProducedFileGroup[] {
+  const snapshot = sessionLogSnapshot(bytes)
+  if (typeof snapshot !== 'object' || snapshot === null) return []
+  const record = snapshot as Record<string, unknown>
+  if (Array.isArray(record.producedFiles)) {
+    return record.producedFiles.flatMap((row) => {
+      if (typeof row !== 'object' || row === null) return []
+      const group = row as Record<string, unknown>
+      if (typeof group.turn !== 'number' || !Array.isArray(group.paths)) return []
+      const paths = group.paths.filter((path): path is string => typeof path === 'string')
+      return paths.length === 0 ? [] : [{ turn: group.turn, paths }]
+    })
+  }
+  return []
 }

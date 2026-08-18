@@ -2991,7 +2991,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
   }
 
   private async files(): Promise<void> {
-    const groups = this.capabilities.producedFileGroups()
+    const groups = await this.capabilities.producedFileGroups()
     if (groups.length === 0) {
       this.host.notice(ui('本会话没有生成文件', 'This session has not produced any files'), 'info')
       return

@@ -41,7 +41,7 @@ import { TuiSettingsConflictError } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { copyTargets } from './copy-content.ts'
-import { flattenProducedFiles, groupProducedFiles } from './produced-files.ts'
+import { flattenProducedFiles, type ProducedFileGroup } from './produced-files.ts'
 import { explainFailure } from './error-advice.ts'
 import { ui, uiLocale } from './locale.ts'
 
@@ -1204,17 +1204,17 @@ export class HarnessTuiCapabilities {
    * Read produced paths from every visible turn, grouped oldest-first.
    * @returns first-seen Workspace-relative paths per turn.
    */
-  producedFileGroups(): ReturnType<typeof groupProducedFiles> {
-    const snapshot = this.requireActive().session.getSnapshot()
-    return groupProducedFiles(snapshot.chat.order, key => snapshot.chat.nodes.get(key))
+  async producedFileGroups(): Promise<readonly ProducedFileGroup[]> {
+    const active = this.requireActive()
+    return this.managementBridge().sessionFiles.index(active.sessionId)
   }
 
   /**
    * Read produced paths from every visible turn, de-duplicated oldest-first.
    * @returns first-seen Workspace-relative paths, or an empty list when absent.
    */
-  producedFiles(): readonly string[] {
-    return flattenProducedFiles(this.producedFileGroups())
+  async producedFiles(): Promise<readonly string[]> {
+    return flattenProducedFiles(await this.producedFileGroups())
   }
 
   /**
@@ -1224,9 +1224,10 @@ export class HarnessTuiCapabilities {
    */
   async readProducedFile(path: string): Promise<string> {
     const absolute = this.producedFilePath(path)
+    const file = await stat(absolute)
+    if (file.size > 200_000) throw new Error(ui('文件超过 200 KB，请用外部程序打开', 'File exceeds 200 KB; open it with an external program'))
     const bytes = await readFile(absolute)
     if (bytes.includes(0)) throw new Error(ui('该文件不是可在 TUI 内查看的文本', 'This file is not text that can be viewed in the TUI'))
-    if (bytes.byteLength > 200_000) throw new Error(ui('文件超过 200 KB，请用外部程序打开', 'File exceeds 200 KB; open it with an external program'))
     return bytes.toString('utf8')
   }
 

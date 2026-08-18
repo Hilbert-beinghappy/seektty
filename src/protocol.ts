@@ -321,11 +321,20 @@ export interface TuiSessionExport {
   readonly stream: ReadableStream<Uint8Array>
 }
 
+/** One turn's first-seen produced workspace paths from the Host session index. */
+export interface TuiProducedFileGroup {
+  readonly turn: number
+  readonly paths: readonly string[]
+}
+
 /** Host-owned services intentionally exposed to the terminal management UI. */
 export interface TuiManagementBridge {
   readonly sessionExport: {
     download(sessionId: string, includeDescendants: boolean, signal?: AbortSignal): Promise<TuiSessionExport>
     markdown(sessionId: string, signal?: AbortSignal): Promise<TuiSessionExport>
+  }
+  readonly sessionFiles: {
+    index(sessionId: string, signal?: AbortSignal): Promise<readonly TuiProducedFileGroup[]>
   }
   readonly settings: {
     describe(namespace?: string): Promise<readonly TuiSettingsDocument[]>
