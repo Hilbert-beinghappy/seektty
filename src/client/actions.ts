@@ -3865,12 +3865,16 @@ export function commandOf(
   return catalog.find(candidate => candidate.name === name)
 }
 
+/** Local commands that still need the user to type required arguments. */
+const PALETTE_REQUIRED_ARGUMENT_COMMANDS = new Set(['rename', 'steer', 'attach'])
+
 /**
  * Host, Skill, quit/exit, and required-argument commands stay in the editor.
  * Other TUI-local commands run through `execute()` after a palette choice.
+ * Argument-hint punctuation is display copy and must not decide this.
  */
 export function paletteFillsEditor(command: TuiCommandCandidate): boolean {
   if (command.behavior !== 'local') return true
   if (command.name === 'quit' || command.name === 'exit') return true
-  return command.argumentHint?.includes('<') === true
+  return PALETTE_REQUIRED_ARGUMENT_COMMANDS.has(command.name)
 }
