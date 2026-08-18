@@ -703,11 +703,14 @@ const ENGLISH_TEXT = new Map<string, string>([
   ['TUI 重启交接与 launcher 参数不一致', 'TUI restart handoff does not match the launcher arguments'],
 ])
 
+/** Frozen first catalog rule. New ENGLISH_PATTERNS entries must append after this. */
+export const FIRST_ENGLISH_PATTERN = /^(.+) · 立即生效$/u
+
 const ENGLISH_PATTERNS: readonly {
   readonly pattern: RegExp
   readonly replace: (...groups: string[]) => string
 }[] = [
-  { pattern: /^(.+) · 立即生效$/u, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · applies immediately` },
+  { pattern: FIRST_ENGLISH_PATTERN, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · applies immediately` },
   { pattern: /^(.+) · 需重启$/u, replace: value => `${ENGLISH_TEXT.get(value) ?? value} · restart required` },
   { pattern: /^设置 · (.+)$/u, replace: value => `Settings · ${value}` },
   { pattern: /^设置 (.+) 已更新并立即生效$/u, replace: value => `${value} was updated and is now active` },
