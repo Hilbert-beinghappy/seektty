@@ -63,6 +63,7 @@ import {
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
 import { NoticeBoard, pickStatusLine } from './status-priority.ts'
+import { restartRequiredFact, restartRequiredNotice } from './restart-copy.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
@@ -269,7 +270,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let exitArmedUntil = 0
     let latestSessionId = ''
     const notices = new NoticeBoard()
-    let restartRequired: string | undefined
+    let restartRequired = false
     let headerGeneration = 0
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
     const sessionChrome = createSessionChromeStore()
@@ -413,7 +414,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               ?? ui(`等待 ${String(pendingCount)} 项交互`, `Waiting for ${String(pendingCount)} interaction(s)`)),
           }
           : {}),
-        ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启 · /restart', 'Restart required · /restart')) }),
+        ...(restartRequired ? { restart: color.warning(restartRequiredFact()) } : {}),
         ...(snapshot.running ? { running: color.accent(generating) } : {}),
         ...(noticeView.warning === undefined
           ? {}
@@ -588,11 +589,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         })
       },
       requireRestart: (label) => {
-        restartRequired = ui('需要重启 · /restart', 'Restart required · /restart')
-        setNotice(ui(
-          `${label}。需要重启 · /restart`,
-          `${label}. Restart required · /restart`,
-        ), 'warning')
+        restartRequired = true
+        setNotice(restartRequiredNotice(label), 'warning')
       },
     })
 
