@@ -31,6 +31,8 @@ const GATED = [
   'host/marketplace-provider.ts',
   'host/profile-plugin-manager.ts',
   'host/management.ts',
+  'client/theme-config.ts',
+  'client/theme-import.ts',
 ]
 
 function walk(directory: string): string[] {

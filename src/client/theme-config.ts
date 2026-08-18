@@ -15,6 +15,7 @@ import {
   type TuiThemeUiColors,
   type TuiTokenFontStyle,
 } from '@deepseek-ai/dsh-tui-protocol'
+import { ui } from './locale.ts'
 
 interface Rgb {
   readonly red: number
@@ -70,7 +71,7 @@ const SYNTAX_COLOR_KEYS = [
 
 const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
   id: 'dark',
-  name: 'DeepSeek 暗色',
+  name: ui('DeepSeek 暗色', 'DeepSeek dark'),
   tone: 'dark',
   syntaxTone: 'dark',
   source: 'builtin',
@@ -91,7 +92,7 @@ const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
 
 const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
   id: 'light',
-  name: 'DeepSeek 亮色',
+  name: ui('DeepSeek 亮色', 'DeepSeek light'),
   tone: 'light',
   syntaxTone: 'light',
   source: 'builtin',
@@ -202,7 +203,10 @@ function hexOf(rgb: Rgb): string {
 export function normalizeThemeColor(value: string): string {
   const parsed = parseRgba(value)
   if (parsed === undefined || parsed.alpha !== 1) {
-    throw new Error(`颜色 ${JSON.stringify(value)} 必须是无透明度的 HEX 或 RGB`)
+    throw new Error(ui(
+      `颜色 ${JSON.stringify(value)} 必须是无透明度的 HEX 或 RGB`,
+      `Color ${JSON.stringify(value)} must be opaque HEX or RGB`,
+    ))
   }
   return hexOf(parsed)
 }
@@ -215,7 +219,12 @@ export function normalizeThemeColor(value: string): string {
  */
 export function normalizeThemeColorOn(value: string, background: string): string {
   const parsed = parseRgba(value)
-  if (parsed === undefined) throw new Error(`颜色 ${JSON.stringify(value)} 不是有效的 HEX 或 RGB`)
+  if (parsed === undefined) {
+    throw new Error(ui(
+      `颜色 ${JSON.stringify(value)} 不是有效的 HEX 或 RGB`,
+      `Color ${JSON.stringify(value)} is not valid HEX or RGB`,
+    ))
+  }
   if (parsed.alpha === 1) return hexOf(parsed)
   const base = rgbOf(normalizeThemeColor(background))
   return hexOf({
@@ -227,7 +236,9 @@ export function normalizeThemeColorOn(value: string, background: string): string
 
 function rgbOf(color: string): Rgb {
   const parsed = parseRgba(color)
-  if (parsed === undefined) throw new Error(`颜色 ${JSON.stringify(color)} 无效`)
+  if (parsed === undefined) {
+    throw new Error(ui(`颜色 ${JSON.stringify(color)} 无效`, `Color ${JSON.stringify(color)} is invalid`))
+  }
   return parsed
 }
 
@@ -443,8 +454,15 @@ export function parseThemePalette(input: string): readonly string[] {
   const colors = [...new Set(matches.map(normalizeThemeColor))]
   const residue = matches.reduce((value, match) => value.replace(match, ' '), input)
     .replace(/[\s,;|]+/gu, '')
-  if (residue !== '') throw new Error(`无法识别的配色内容 ${JSON.stringify(residue.slice(0, 40))}`)
-  if (colors.length < 3 || colors.length > 16) throw new Error('配色需要 3–16 个不重复的 HEX/RGB 颜色')
+  if (residue !== '') {
+    throw new Error(ui(
+      `无法识别的配色内容 ${JSON.stringify(residue.slice(0, 40))}`,
+      `Unrecognized palette text ${JSON.stringify(residue.slice(0, 40))}`,
+    ))
+  }
+  if (colors.length < 3 || colors.length > 16) {
+    throw new Error(ui('配色需要 3–16 个不重复的 HEX/RGB 颜色', 'A palette requires 3–16 unique HEX/RGB colors'))
+  }
   return colors
 }
 
@@ -487,13 +505,17 @@ export function themeIdFromName(name: string): string {
 }
 
 function recordOf(value: unknown, label: string): Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${label} 必须是对象`)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(ui(`${label} 必须是对象`, `${label} must be an object`))
+  }
   return value as Readonly<Record<string, unknown>>
 }
 
 function stringOf(record: Readonly<Record<string, unknown>>, key: string, label: string): string {
   const value = record[key]
-  if (typeof value !== 'string') throw new Error(`${label}.${key} 必须是字符串`)
+  if (typeof value !== 'string') {
+    throw new Error(ui(`${label}.${key} 必须是字符串`, `${label}.${key} must be a string`))
+  }
   return value
 }
 
@@ -511,17 +533,23 @@ const TOKEN_FONT_STYLES = new Set<TuiTokenFontStyle>(['bold', 'italic', 'underli
 function textMateRules(value: unknown): readonly TuiTextMateRule[] {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > MAX_TEXTMATE_RULES) {
-    throw new Error(`customThemes[].tokenColors 最多包含 ${String(MAX_TEXTMATE_RULES)} 条规则`)
+    throw new Error(ui(
+      `customThemes[].tokenColors 最多包含 ${String(MAX_TEXTMATE_RULES)} 条规则`,
+      `customThemes[].tokenColors can contain at most ${String(MAX_TEXTMATE_RULES)} rules`,
+    ))
   }
   return value.map((entry, index): TuiTextMateRule => {
     const label = `customThemes[].tokenColors[${String(index)}]`
     const record = recordOf(entry, label)
     if (!Array.isArray(record.scope) || record.scope.length === 0 || record.scope.length > 64) {
-      throw new Error(`${label}.scope 必须包含 1–64 个 TextMate scope`)
+      throw new Error(ui(
+        `${label}.scope 必须包含 1–64 个 TextMate scope`,
+        `${label}.scope must contain 1–64 TextMate scopes`,
+      ))
     }
     const scope = [...new Set(record.scope.map((item) => {
       if (typeof item !== 'string' || item === '' || item.length > 256 || /[\u0000-\u001F\u007F-\u009F]/u.test(item)) {
-        throw new Error(`${label}.scope 包含无效值`)
+        throw new Error(ui(`${label}.scope 包含无效值`, `${label}.scope contains an invalid value`))
       }
       return item
     }))]
@@ -533,16 +561,18 @@ function textMateRules(value: unknown): readonly TuiTextMateRule[] {
       : normalizeThemeColor(stringOf(record, 'background', label))
     let fontStyle: readonly TuiTokenFontStyle[] | undefined
     if (record.fontStyle !== undefined) {
-      if (!Array.isArray(record.fontStyle)) throw new Error(`${label}.fontStyle 必须是数组`)
+      if (!Array.isArray(record.fontStyle)) {
+        throw new Error(ui(`${label}.fontStyle 必须是数组`, `${label}.fontStyle must be an array`))
+      }
       fontStyle = [...new Set(record.fontStyle.map((style) => {
         if (typeof style !== 'string' || !TOKEN_FONT_STYLES.has(style as TuiTokenFontStyle)) {
-          throw new Error(`${label}.fontStyle 包含不支持的样式`)
+          throw new Error(ui(`${label}.fontStyle 包含不支持的样式`, `${label}.fontStyle contains an unsupported style`))
         }
         return style as TuiTokenFontStyle
       }))]
     }
     if (foreground === undefined && background === undefined && fontStyle === undefined) {
-      throw new Error(`${label} 没有颜色或代码字体样式`)
+      throw new Error(ui(`${label} 没有颜色或代码字体样式`, `${label} has no color or code font style`))
     }
     return {
       scope,
@@ -564,12 +594,23 @@ export function normalizeCustomTheme(value: unknown): TuiCustomTheme {
   const name = stringOf(record, 'name', 'customThemes[]').trim()
   const tone = stringOf(record, 'tone', 'customThemes[]')
   const source = stringOf(record, 'source', 'customThemes[]')
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u.test(id)) throw new Error(`自定义主题 id ${JSON.stringify(id)} 无效`)
-  if (name === '' || name.length > 80) throw new Error('自定义主题名称必须为 1–80 个字符')
-  if (/[\u0000-\u001F\u007F-\u009F]/u.test(name)) throw new Error('自定义主题名称不能包含终端控制字符')
-  if (tone !== 'dark' && tone !== 'light') throw new Error(`自定义主题 tone ${JSON.stringify(tone)} 无效`)
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/u.test(id)) {
+    throw new Error(ui(`自定义主题 id ${JSON.stringify(id)} 无效`, `Custom theme id ${JSON.stringify(id)} is invalid`))
+  }
+  if (name === '' || name.length > 80) {
+    throw new Error(ui('自定义主题名称必须为 1–80 个字符', 'Custom theme name must contain 1–80 characters'))
+  }
+  if (/[\u0000-\u001F\u007F-\u009F]/u.test(name)) {
+    throw new Error(ui('自定义主题名称不能包含终端控制字符', 'Custom theme name cannot contain terminal control characters'))
+  }
+  if (tone !== 'dark' && tone !== 'light') {
+    throw new Error(ui(`自定义主题 tone ${JSON.stringify(tone)} 无效`, `Custom theme tone ${JSON.stringify(tone)} is invalid`))
+  }
   if (source !== 'manual' && source !== 'palette' && source !== 'vscode') {
-    throw new Error(`自定义主题 source ${JSON.stringify(source)} 无效`)
+    throw new Error(ui(
+      `自定义主题 source ${JSON.stringify(source)} 无效`,
+      `Custom theme source ${JSON.stringify(source)} is invalid`,
+    ))
   }
   return {
     id,
@@ -591,35 +632,60 @@ export function normalizeAppearance(value: unknown): TuiAppearanceSettings {
   const record = recordOf(value, 'SeekTTY appearance')
   const rawTheme = stringOf(record, 'theme', 'SeekTTY appearance')
   if (!/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u.test(rawTheme)) {
-    throw new Error(`SeekTTY 主题 ${JSON.stringify(rawTheme)} 不受支持`)
+    throw new Error(ui(
+      `SeekTTY 主题 ${JSON.stringify(rawTheme)} 不受支持`,
+      `SeekTTY theme ${JSON.stringify(rawTheme)} is not supported`,
+    ))
   }
   const rawThemes = record.customThemes ?? []
   if (!Array.isArray(rawThemes) || rawThemes.length > MAX_CUSTOM_THEMES) {
-    throw new Error(`SeekTTY 最多保存 ${String(MAX_CUSTOM_THEMES)} 个自定义主题`)
+    throw new Error(ui(
+      `SeekTTY 最多保存 ${String(MAX_CUSTOM_THEMES)} 个自定义主题`,
+      `SeekTTY can store at most ${String(MAX_CUSTOM_THEMES)} custom themes`,
+    ))
   }
   const customThemes = rawThemes.map(normalizeCustomTheme)
   const ids = new Set<string>()
   const names = new Set<string>()
   for (const theme of customThemes) {
     const foldedName = theme.name.toLowerCase()
-    if (ids.has(theme.id)) throw new Error(`自定义主题 id ${JSON.stringify(theme.id)} 重复`)
-    if (names.has(foldedName)) throw new Error(`自定义主题名称 ${JSON.stringify(theme.name)} 重复`)
+    if (ids.has(theme.id)) {
+      throw new Error(ui(
+        `自定义主题 id ${JSON.stringify(theme.id)} 重复`,
+        `Custom theme id ${JSON.stringify(theme.id)} is duplicated`,
+      ))
+    }
+    if (names.has(foldedName)) {
+      throw new Error(ui(
+        `自定义主题名称 ${JSON.stringify(theme.name)} 重复`,
+        `Custom theme name ${JSON.stringify(theme.name)} is duplicated`,
+      ))
+    }
     ids.add(theme.id)
     names.add(foldedName)
   }
   const theme = rawTheme as TuiThemeId
   if (theme.startsWith('custom:') && !ids.has(theme.slice('custom:'.length))) {
-    throw new Error(`当前自定义主题 ${JSON.stringify(theme)} 不存在`)
+    throw new Error(ui(
+      `当前自定义主题 ${JSON.stringify(theme)} 不存在`,
+      `The current custom theme ${JSON.stringify(theme)} does not exist`,
+    ))
   }
   const rawCodeTheme = record.codeTheme === undefined
     ? DEFAULT_TUI_CODE_THEME
     : stringOf(record, 'codeTheme', 'SeekTTY appearance')
   if (!/^(?:auto|dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u.test(rawCodeTheme)) {
-    throw new Error(`SeekTTY 代码主题 ${JSON.stringify(rawCodeTheme)} 不受支持`)
+    throw new Error(ui(
+      `SeekTTY 代码主题 ${JSON.stringify(rawCodeTheme)} 不受支持`,
+      `SeekTTY code theme ${JSON.stringify(rawCodeTheme)} is not supported`,
+    ))
   }
   const codeTheme = rawCodeTheme as TuiCodeThemeId
   if (codeTheme.startsWith('custom:') && !ids.has(codeTheme.slice('custom:'.length))) {
-    throw new Error(`当前自定义代码主题 ${JSON.stringify(codeTheme)} 不存在`)
+    throw new Error(ui(
+      `当前自定义代码主题 ${JSON.stringify(codeTheme)} 不存在`,
+      `The current custom code theme ${JSON.stringify(codeTheme)} does not exist`,
+    ))
   }
   return { theme, codeTheme, customThemes }
 }
@@ -637,7 +703,9 @@ export function resolveTheme(
   if (requested === 'dark' || requested === 'light') return BUILT_IN_THEMES[requested]
   const id = requested.slice('custom:'.length)
   const theme = appearance.customThemes.find(candidate => candidate.id === id)
-  if (theme === undefined) throw new Error(`自定义主题 ${JSON.stringify(id)} 不存在`)
+  if (theme === undefined) {
+    throw new Error(ui(`自定义主题 ${JSON.stringify(id)} 不存在`, `Custom theme ${JSON.stringify(id)} does not exist`))
+  }
   return { ...theme, id: requested, syntaxTone: theme.tone }
 }
 
@@ -691,16 +759,29 @@ export function resolveAppearanceTheme(appearance: TuiAppearanceSettings): Resol
  */
 export function themeContrastWarnings(theme: ResolvedTuiTheme | TuiCustomTheme): readonly string[] {
   const warnings: string[] = []
-  if (themeContrast(theme.colors.text, theme.colors.canvas) < 4.5) warnings.push('正文与画布对比度低于 4.5:1')
-  if (themeContrast(theme.colors.muted, theme.colors.canvas) < 3) warnings.push('弱化文字与画布对比度低于 3:1')
-  if (themeContrast(theme.syntax.foreground, theme.syntax.background) < 4.5) warnings.push('代码正文与代码背景对比度低于 4.5:1')
+  if (themeContrast(theme.colors.text, theme.colors.canvas) < 4.5) {
+    warnings.push(ui('正文与画布对比度低于 4.5:1', 'Text-to-canvas contrast is below 4.5:1'))
+  }
+  if (themeContrast(theme.colors.muted, theme.colors.canvas) < 3) {
+    warnings.push(ui('弱化文字与画布对比度低于 3:1', 'Muted-text-to-canvas contrast is below 3:1'))
+  }
+  if (themeContrast(theme.syntax.foreground, theme.syntax.background) < 4.5) {
+    warnings.push(ui('代码正文与代码背景对比度低于 4.5:1', 'Code-text-to-background contrast is below 4.5:1'))
+  }
   const lowTokens = SYNTAX_COLOR_KEYS
     .filter(key => key !== 'background' && key !== 'foreground')
     .filter(key => themeContrast(theme.syntax[key], theme.syntax.background) < 3)
-  if (lowTokens.length > 0) warnings.push(`代码颜色对比度偏低：${lowTokens.join('、')}`)
+  if (lowTokens.length > 0) {
+    warnings.push(ui(`代码颜色对比度偏低：${lowTokens.join('、')}`, `Low code-color contrast: ${lowTokens.join(', ')}`))
+  }
   const lowImported = theme.tokenColors.filter(rule => rule.foreground !== undefined
     && themeContrast(rule.foreground, rule.background ?? theme.syntax.background) < 3).length
-  if (lowImported > 0) warnings.push(`${String(lowImported)} 条导入的 TextMate 规则对比度低于 3:1`)
+  if (lowImported > 0) {
+    warnings.push(ui(
+      `${String(lowImported)} 条导入的 TextMate 规则对比度低于 3:1`,
+      `${String(lowImported)} imported TextMate rule(s) have contrast below 3:1`,
+    ))
+  }
   return warnings
 }
 
