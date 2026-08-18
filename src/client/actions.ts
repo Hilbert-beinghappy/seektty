@@ -489,7 +489,7 @@ export class TuiActions {
     }
   }
 
-  /** Open the complete merged command palette and place the selection in the editor. */
+  /** Open the merged command palette and run local actions immediately. */
   async commandPalette(): Promise<void> {
     try {
       const catalog = await this.capabilities.commandCatalog()
@@ -506,7 +506,11 @@ export class TuiActions {
       if (choice === undefined) return
       const command = catalog.find(candidate => candidate.name === choice.id)
       if (command === undefined) return
-      this.host.setEditor(`/${command.name}${command.argumentHint !== undefined || command.behavior === 'skill' ? ' ' : ''}`)
+      if (paletteFillsEditor(command)) {
+        this.host.setEditor(`/${command.name}${command.argumentHint !== undefined || command.behavior === 'skill' ? ' ' : ''}`)
+        return
+      }
+      await this.execute(command.name, '')
     } catch (error) {
       this.host.notice(capabilityError(error), 'error')
     }
@@ -3855,4 +3859,14 @@ export function commandOf(
   name: string,
 ): TuiCommandCandidate | undefined {
   return catalog.find(candidate => candidate.name === name)
+}
+
+/**
+ * Host, Skill, quit/exit, and required-argument commands stay in the editor.
+ * Other TUI-local commands run through `execute()` after a palette choice.
+ */
+export function paletteFillsEditor(command: TuiCommandCandidate): boolean {
+  if (command.behavior !== 'local') return true
+  if (command.name === 'quit' || command.name === 'exit') return true
+  return command.argumentHint?.includes('<') === true
 }
