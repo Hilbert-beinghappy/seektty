@@ -44,7 +44,7 @@ import { copyTargets } from './copy-content.ts'
 import { conversationMarkdown } from './conversation-markdown.ts'
 import { flattenProducedFiles, groupProducedFiles } from './produced-files.ts'
 import { explainFailure } from './error-advice.ts'
-import { ui } from './locale.ts'
+import { ui, uiLocale } from './locale.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -202,10 +202,10 @@ const HOST_COMMAND_ARGUMENT_HINTS = new Map<string, { readonly zh: string; reado
   ['feedback', { zh: '[内容]', en: '[text]' }],
 ])
 
-function shortFunctionDescription(description: string, fallback: string): string {
+export function shortFunctionDescription(description: string, fallback: string): string {
   const normalized = description.replace(/\s+/gu, ' ').trim()
-  if (!/\p{Script=Han}/u.test(normalized)) return fallback
-  const firstSentence = normalized.split(/[。；]/u, 1)[0] ?? fallback
+  if (normalized === '') return fallback
+  const firstSentence = normalized.split(/[。；！？\n]/u, 1)[0]?.trim() || fallback
   const characters = Array.from(firstSentence)
   return characters.length <= 48 ? firstSentence : `${characters.slice(0, 48).join('')}…`
 }
@@ -416,7 +416,7 @@ function workspaceFor(
  * through the mounted Harness API, Remote, Session, or Workspace face.
  */
 export class HarnessTuiCapabilities {
-  private readonly commandCatalogs = new Map<SessionId, Promise<readonly TuiCommandCandidate[]>>()
+  private readonly commandCatalogs = new Map<string, Promise<readonly TuiCommandCandidate[]>>()
   private readonly modelCatalogs = new Map<SessionId, SessionModels>()
   private readonly modelLoads = new Map<SessionId, Promise<SessionModels>>()
   private readonly attachments: TuiDraftAttachment[] = []
@@ -437,7 +437,7 @@ export class HarnessTuiCapabilities {
   ) {
     ctx.remote.$on('commands/change', () => { this.commandCatalogs.clear() })
     ctx.remote.$on('agent-preset/selected', (sessionId: SessionId) => {
-      this.commandCatalogs.delete(sessionId)
+      this.dropCommandCatalog(sessionId)
       this.invalidateModels()
     })
     ctx.remote.$on('llm/adapters-updated', () => { this.invalidateModels() })
@@ -574,13 +574,14 @@ export class HarnessTuiCapabilities {
     signal?.throwIfAborted()
     const sessionId = this.active()?.sessionId
     if (sessionId === undefined) return Promise.resolve(tuiCommands())
-    const existing = this.commandCatalogs.get(sessionId)
+    const key = `${sessionId}:${uiLocale()}`
+    const existing = this.commandCatalogs.get(key)
     const request = existing ?? this.readCommandCatalog(sessionId)
       .catch((error: unknown) => {
-        this.commandCatalogs.delete(sessionId)
+        this.commandCatalogs.delete(key)
         throw error
       })
-    if (existing === undefined) this.commandCatalogs.set(sessionId, request)
+    if (existing === undefined) this.commandCatalogs.set(key, request)
     if (signal === undefined) return request
     return request.then((catalog) => {
       signal.throwIfAborted()
@@ -590,8 +591,18 @@ export class HarnessTuiCapabilities {
 
   /** Invalidate the current command/Skill snapshot and repull on next use. */
   invalidateCommandCatalog(): void {
-    const id = this.active()?.sessionId
-    if (id !== undefined) this.commandCatalogs.delete(id)
+    this.dropCommandCatalog(this.active()?.sessionId)
+  }
+
+  private dropCommandCatalog(sessionId?: SessionId): void {
+    if (sessionId === undefined) {
+      this.commandCatalogs.clear()
+      return
+    }
+    const prefix = `${sessionId}:`
+    for (const key of this.commandCatalogs.keys()) {
+      if (key.startsWith(prefix)) this.commandCatalogs.delete(key)
+    }
   }
 
   /**
@@ -663,7 +674,7 @@ export class HarnessTuiCapabilities {
     }
     this.ctx.sessions.noteAgentPreset(target.sessionId, response.result.value.agentPreset)
     this.ctx.sessions.open(target.sessionId)
-    this.commandCatalogs.delete(target.sessionId)
+    this.dropCommandCatalog(target.sessionId)
     return target.sessionId
   }
 
@@ -1613,12 +1624,7 @@ export class HarnessTuiCapabilities {
     const names = new Set(commands.map(command => command.name))
     for (const command of hostResult.value as readonly HostCommandDescriptor[]) {
       const localCommand = local.get(command.name)
-      if (localCommand !== undefined) {
-        throw new Error(ui(
-          `命令冲突：TUI 与 Host 都注册了 /${command.name}`,
-          `Command conflict: both TUI and Host registered /${command.name}`,
-        ))
-      }
+      if (localCommand !== undefined) continue
       names.add(command.name)
       merged.push({
         name: command.name,

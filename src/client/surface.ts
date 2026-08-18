@@ -482,6 +482,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       applyLocale: (locale) => {
         setUiLocale(locale)
+        capabilities.invalidateCommandCatalog()
         transcript.refreshPresentation()
         refreshHeader(false)
         refresh()
