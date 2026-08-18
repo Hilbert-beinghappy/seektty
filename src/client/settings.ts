@@ -6,7 +6,7 @@ import {
   rehydrateSchema,
   type SchemaNode,
 } from '@deepseek-ai/dsh-client-schema-form'
-import { LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
+import { LOCALE_PREFERENCE_FIELD, LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
@@ -258,11 +258,15 @@ export function visibleSettingsDocuments(
  * @param path - schema path inside that namespace.
  */
 export function hasDedicatedSettingsEditor(namespace: string, path: readonly string[]): boolean {
-  if (namespace === LOCALE_SETTINGS_NAMESPACE) return true
-  if (namespace === 'agent-default-model') return true
+  if (namespace === LOCALE_SETTINGS_NAMESPACE) return samePath(path, [LOCALE_PREFERENCE_FIELD])
+  if (namespace === 'agent-default-model') {
+    return samePath(path, ['provider']) || samePath(path, ['model']) || samePath(path, ['reasoningEffort'])
+  }
   if (namespace === 'permission' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
   if (namespace === 'agent-presets' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
-  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (samePath(path, ['theme']) || samePath(path, ['codeTheme']))) {
+  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (
+    samePath(path, ['theme']) || samePath(path, ['codeTheme']) || samePath(path, ['customThemes'])
+  )) {
     return true
   }
   if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE && samePath(path, ['keyBindings'])) return true
