@@ -104,6 +104,9 @@ describe('tool output folding', () => {
     ])
     expect(foldLineBlock(lines.join('\n'), 0).omitted).toBe(0)
     expect(foldLineBlock(lines.join('\n'), 0).text).toBe(lines.join('\n'))
+    expect(foldLineBlock('line-1\n', 1)).toEqual({ text: 'line-1\n', omitted: 0 })
+    expect(foldLineBlock('line-1\nline-2\n', 1).omitted).toBe(1)
+    expect(foldLineBlock('line-1\nline-2\n', 1).text).toContain('还有 1 行')
   })
 
   it('folds expanded shell output using the behavior default of 200 lines', () => {
