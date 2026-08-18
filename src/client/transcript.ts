@@ -1119,7 +1119,7 @@ export class Transcript implements Component, Focusable {
   private imageGeneration = 0
   private imageLoader: TranscriptImageLoader | undefined
   private snapshot: ConversationSnapshot | undefined
-  private emptyMessage = ui('在下方输入消息，或用 /help 查看命令。', 'Enter a message below, or use /help to view commands.')
+  private emptyMessage: string | undefined
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
@@ -1215,7 +1215,7 @@ export class Transcript implements Component, Focusable {
    * Replace the transcript with non-durable empty-selection guidance.
    * @param message - guidance rendered when no Session is active.
    */
-  empty(message = ui('在下方输入消息，或用 /help 查看命令。', 'Enter a message below, or use /help to view commands.')): void {
+  empty(message?: string): void {
     this.imageGeneration += 1
     this.imageLoader = undefined
     this.snapshot = undefined
@@ -1227,7 +1227,13 @@ export class Transcript implements Component, Focusable {
     this.emptyState = true
     this.hasMore = false
     this.loadingOlder = false
-    this.replace([{ format: 'plain', text: color.muted(translateUiText(message)) }])
+    this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
+  }
+
+  private emptyCopy(): string {
+    return this.emptyMessage === undefined
+      ? ui('在下方输入消息，或用 /help 查看命令。', 'Enter a message below, or use /help to view commands.')
+      : translateUiText(this.emptyMessage)
   }
 
   /**
@@ -1353,7 +1359,7 @@ export class Transcript implements Component, Focusable {
     const snapshot = this.snapshot
     this.nodeCache.clear()
     if (snapshot === undefined) {
-      this.replace([{ format: 'plain', text: color.muted(translateUiText(this.emptyMessage)) }])
+      this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
     } else {
       this.update(snapshot, this.imageLoader)
     }

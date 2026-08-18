@@ -157,6 +157,17 @@ describe('conversation viewport', () => {
     expect(rendered).not.toContain('Command palette')
   })
 
+  it('re-localizes the default empty prompt when the UI language changes', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    setUiLocale('en')
+    const transcript = new Transcript(() => 5)
+    transcript.empty()
+    expect(transcript.render(60).join('\n')).toContain('Enter a message below')
+    setUiLocale('zh')
+    transcript.refreshPresentation()
+    expect(transcript.render(60).join('\n')).toContain('在下方输入消息')
+  })
+
   it('renders every loaded line into the default terminal scrollback', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript()
