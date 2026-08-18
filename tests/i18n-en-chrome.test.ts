@@ -132,14 +132,14 @@ describe('i18n English chrome gate (task 7)', () => {
     expect(rendered).toContain('Run the linter on changed files')
     expect(rendered).toContain('Remove demo from tui?')
     expect(rendered).toContain('another surface')
-    expect(rendered).toContain('Startup timed out')
+    expect(rendered).toContain('Confirm dsh is on PATH or DSH_BIN')
     expect(rendered).toContain('Switch permission')
   })
 
   it('re-localizes chrome constructed in zh after switching to en, and the reverse', () => {
     const fromZh = englishChromeFrom('zh')
     expect(fromZh).not.toMatch(HAN)
-    expect(fromZh).toContain('Startup timed out')
+    expect(fromZh).toContain('Confirm dsh is on PATH or DSH_BIN')
     expect(fromZh).toContain('DeepSeek dark')
     expect(fromZh).toContain('The interface theme currently used by SeekTTY')
     expect(fromZh).toContain('Remove demo from tui?')
