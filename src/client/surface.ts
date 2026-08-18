@@ -48,7 +48,6 @@ import {
 import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
-import { formatElapsed } from './elapsed.ts'
 import { writeClipboard } from './clipboard.ts'
 import {
   captureClipboardImage,
@@ -337,10 +336,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             if (stopping !== undefined) return
             const elapsed = sessionChrome.of(latestSessionId)
             if (elapsed.runningSince === undefined || !liveBehavior.get().statusElapsed) return
-            status.setDetail(color.accent(ui(
-              `生成中 · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C 停止`,
-              `Generating · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C to stop`,
-            )))
             renderWhileOpen()
           }, 500)
         }
@@ -371,12 +366,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       chrome.notify = currentNotify
       chrome.notifyPrimed = true
       const pendingCount = snapshot.pending.length
-      const generating = liveBehavior.get().statusElapsed && chrome.runningSince !== undefined
-        ? ui(
-          `生成中 · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C 停止`,
-          `Generating · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C to stop`,
-        )
-        : ui('生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop')
       const primary = snapshot.removed
         ? color.danger(ui('会话已删除', 'Session deleted'))
         : snapshot.promptError !== null
@@ -389,9 +378,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               `/pending 处理 ${String(pendingCount)} 项交互`,
               `/pending handles ${String(pendingCount)} interaction(s)`,
             ))
-            : snapshot.running
-              ? color.accent(generating)
-              : undefined
+            : undefined
       const facts: string[] = []
       if (snapshot.queue.length > 0) facts.push(ui(`队列 ${String(snapshot.queue.length)}`, `Queue ${String(snapshot.queue.length)}`))
       const jobs = active === undefined ? undefined : capabilities.jobs()

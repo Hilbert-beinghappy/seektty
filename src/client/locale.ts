@@ -83,6 +83,7 @@ const ENGLISH_TEXT = new Map<string, string>([
   ['需要重启', 'Restart required'],
   ['正在连接 Harness…', 'Connecting to Harness…'],
   ['● 生成中', '● Generating'],
+  [' · Ctrl+C 停止', ' · Ctrl+C to stop'],
   ['生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop'],
   ['未打开会话', 'No session open'],
   ['会话已删除', 'Session deleted'],
