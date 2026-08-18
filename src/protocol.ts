@@ -108,6 +108,9 @@ export const MAX_TEXTMATE_RULES = 4_096
 /** Harness Settings namespace that persists SeekTTY interaction defaults. */
 export const TUI_BEHAVIOR_SETTINGS_NAMESPACE = 'seektty-behavior'
 
+/** Harness Settings namespace that persists composer prompt history with revision. */
+export const TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE = 'seektty-composer-history'
+
 /** Startup presentation for tool cards in the transcript. */
 export type TuiToolCardDisplay = 'collapsed' | 'expanded' | 'hidden'
 

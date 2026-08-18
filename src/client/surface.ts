@@ -11,6 +11,10 @@ import {
   TUI,
   type Terminal,
 } from '@mariozechner/pi-tui'
+import {
+  TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+  TuiSettingsConflictError,
+} from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
@@ -26,10 +30,8 @@ import {
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import {
-  composerHistoryPath,
-  loadComposerHistory,
+  composerHistoryFromDocuments,
   rememberComposerHistory,
-  saveComposerHistory,
 } from './composer-history.ts'
 import {
   localeFromSettings,
@@ -152,10 +154,36 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
-    const historyPath = composerHistoryPath(profile)
     const historyLimit = initialBehavior.composerHistoryLimit
-    let composerHistory = loadComposerHistory(historyPath, historyLimit)
+    let { entries: composerHistory, revision: composerHistoryRevision } =
+      composerHistoryFromDocuments(settingsDocuments, historyLimit)
     for (const entry of [...composerHistory].reverse()) editor.addToHistory(entry)
+    let historyPersist = Promise.resolve()
+    const persistComposerHistory = (entries: readonly string[]): void => {
+      if (historyLimit <= 0) return
+      historyPersist = historyPersist.then(async () => {
+        const settings = capabilities.managementBridge().settings
+        const write = (revision: number, next: readonly string[]): Promise<number> => (
+          settings.mutate(
+            TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+            [{ op: 'set', path: ['entries'], value: [...next] }],
+            revision,
+          ).then(saved => saved.revision)
+        )
+        try {
+          composerHistoryRevision = await write(composerHistoryRevision, entries)
+        } catch (error) {
+          if (!(error instanceof TuiSettingsConflictError)) return
+          const latest = composerHistoryFromDocuments(
+            await settings.describe(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE),
+            historyLimit,
+          )
+          const merged = rememberComposerHistory(latest.entries, entries[0] ?? '', historyLimit)
+          composerHistory = merged
+          composerHistoryRevision = await write(latest.revision, merged)
+        }
+      }).catch(() => { /* send must not wait on Settings */ })
+    }
     let transcriptFocused = false
     const transcript = new Transcript(
       // The default full transcript becomes normal terminal scrollback, which keeps
@@ -621,9 +649,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (text !== '') {
         editor.addToHistory(text)
         composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
-        if (historyLimit > 0) {
-          try { saveComposerHistory(historyPath, composerHistory) } catch { /* send must not wait on disk */ }
-        }
+        persistComposerHistory(composerHistory)
       }
       editor.setText('')
       if (text.startsWith('/')) void dispatchCommand(text)

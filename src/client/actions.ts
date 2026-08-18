@@ -64,6 +64,7 @@ import {
   settingsFields,
   settingsRootChoices,
   settingsSectionLabel,
+  visibleSettingsDocuments,
   type TuiSettingsField,
 } from './settings.ts'
 import type { Transcript } from './transcript.ts'
@@ -1845,7 +1846,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
 
   private async settings(args: string): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const documents = await bridge.describe()
+    const documents = visibleSettingsDocuments(await bridge.describe())
     if (documents.length === 0) throw new Error(ui('当前 Profile 未注册任何 Settings 命名空间', "The current Profile has no registered Settings namespaces"))
     if (args !== '') {
       const document = documents.find(candidate => candidate.namespace === args)

@@ -23,6 +23,7 @@ import {
   MAX_DIFF_CONTEXT_LINES,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+  TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
@@ -34,6 +35,7 @@ import { ui } from '../client/locale.ts'
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
 const BEHAVIOR_NAMESPACE = settingsNamespace(TUI_BEHAVIOR_SETTINGS_NAMESPACE)
+const COMPOSER_HISTORY_NAMESPACE = settingsNamespace(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE)
 const TUI_BUNDLE = 'seektty'
 const NON_TUI_SURFACE_BUNDLES = ['@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'] as const
 const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
@@ -174,6 +176,9 @@ const BehaviorSettingsSchema = z.object({
       '覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。',
       'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
     )),
+})
+const ComposerHistorySettingsSchema = z.object({
+  entries: z.array(z.string().max(100_000)).max(MAX_COMPOSER_HISTORY).default([]),
 })
 
 interface StoredCatalogSource {
@@ -391,6 +396,7 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
   settings.register(MARKETPLACE_NAMESPACE, MarketplaceSettingsSchema, { applies: 'live' })
   settings.register(APPEARANCE_NAMESPACE, AppearanceSettingsSchema, { applies: 'live' })
   settings.register(BEHAVIOR_NAMESPACE, BehaviorSettingsSchema, { applies: 'live' })
+  settings.register(COMPOSER_HISTORY_NAMESPACE, ComposerHistorySettingsSchema, { applies: 'live' })
   const marketplace = new PluginMarketplace({
     cwd,
     resolveCredential: async ref => (await credentials.resolve(credentialRef(ref)))?.value,

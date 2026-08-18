@@ -1,20 +1,27 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
 import {
-  COMPOSER_HISTORY_FILENAME,
-  composerHistoryPath,
-  loadComposerHistory,
+  composerHistoryFromDocuments,
   rememberComposerHistory,
-  saveComposerHistory,
 } from '../src/client/composer-history.ts'
+import { visibleSettingsDocuments } from '../src/client/settings.ts'
+import {
+  TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+  type TuiSettingsDocument,
+} from '../src/protocol.ts'
 
-const temporaryDirs: string[] = []
-
-afterEach(() => {
-  for (const dir of temporaryDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
+function document(namespace: string, value: unknown, revision = 3): TuiSettingsDocument {
+  return {
+    namespace,
+    schema: {},
+    value,
+    revision,
+    applies: 'live',
+    secrets: [],
+  }
+}
 
 describe('composer history persistence', () => {
   it('keeps newest-first entries, skips consecutive duplicates, and honors a zero limit', () => {
@@ -25,20 +32,24 @@ describe('composer history persistence', () => {
     expect(rememberComposerHistory(['keep'], '   ', 8)).toEqual(['keep'])
   })
 
-  it('loads and saves under the Profile directory, ignoring corrupt files', () => {
-    const home = mkdtempSync(join(tmpdir(), 'seektty-history-'))
-    temporaryDirs.push(home)
-    const path = composerHistoryPath('tui', { DSH_HOME: home }, home)
-    expect(path).toBe(join(home, 'profiles', 'tui', COMPOSER_HISTORY_FILENAME))
-    expect(loadComposerHistory(path, 200)).toEqual([])
+  it('reads entries and revision from the Host Settings document', () => {
+    expect(composerHistoryFromDocuments([], 200)).toEqual({ entries: [], revision: 0 })
+    expect(composerHistoryFromDocuments([
+      document(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE, { entries: ['alpha', 'beta', 1, ''] }, 7),
+    ], 1)).toEqual({ entries: ['alpha'], revision: 7 })
+    expect(composerHistoryFromDocuments([
+      document(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE, { entries: ['keep'] }, 4),
+    ], 0)).toEqual({ entries: [], revision: 4 })
+  })
 
-    mkdirSync(join(home, 'profiles', 'tui'), { recursive: true })
-    writeFileSync(path, '{not json')
-    expect(loadComposerHistory(path, 200)).toEqual([])
+  it('does not read or write Profile-directory JSON from the client', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/client/composer-history.ts'), 'utf8')
+    expect(source).not.toMatch(/node:fs|writeFileSync|readFileSync|mkdirSync|DSH_HOME|seektty-composer-history\.json/u)
+  })
 
-    saveComposerHistory(path, ['alpha', 'beta'])
-    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(['alpha', 'beta'])
-    expect(loadComposerHistory(path, 1)).toEqual(['alpha'])
-    expect(loadComposerHistory(path, 0)).toEqual([])
+  it('hides the history namespace from the Settings editor', () => {
+    const history = document(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE, { entries: ['secret prompt'] })
+    const behavior = document('seektty-behavior', { composerHistoryLimit: 200 })
+    expect(visibleSettingsDocuments([history, behavior]).map(item => item.namespace)).toEqual(['seektty-behavior'])
   })
 })

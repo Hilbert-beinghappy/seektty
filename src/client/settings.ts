@@ -10,6 +10,7 @@ import { LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+  TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { ui, uiLocale } from './locale.ts'
 import type { TuiSettingsDocument } from './management.ts'
@@ -241,13 +242,23 @@ export interface IndexedSettingsField {
 }
 
 /**
+ * Drop Host-internal Settings namespaces that are not user-editable.
+ * @param documents - redacted Settings descriptors.
+ */
+export function visibleSettingsDocuments(
+  documents: readonly TuiSettingsDocument[],
+): readonly TuiSettingsDocument[] {
+  return documents.filter(document => document.namespace !== TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE)
+}
+
+/**
  * Flatten every registered Settings document into a cross-namespace field index.
  * @param documents - redacted Settings descriptors.
  */
 export function indexSettingsFields(
   documents: readonly TuiSettingsDocument[],
 ): readonly IndexedSettingsField[] {
-  return documents.flatMap(document => settingsFields(document).map(field => ({
+  return visibleSettingsDocuments(documents).flatMap(document => settingsFields(document).map(field => ({
     namespace: document.namespace,
     section: settingsSectionLabel(document.namespace),
     field,
@@ -268,13 +279,14 @@ export interface SettingsRootChoice {
 export function settingsRootChoices(
   documents: readonly TuiSettingsDocument[],
 ): readonly SettingsRootChoice[] {
+  const visible = visibleSettingsDocuments(documents)
   return [
-    ...documents.map(document => ({
+    ...visible.map(document => ({
       id: document.namespace,
       label: document.namespace,
       description: `${settingsSectionLabel(document.namespace)} · ${document.applies === 'live' ? ui('立即生效', 'applies immediately') : ui('需重启', 'restart required')}`,
     })),
-    ...indexSettingsFields(documents).map(item => ({
+    ...indexSettingsFields(visible).map(item => ({
       id: `field:${item.namespace}:${JSON.stringify(item.field.path)}`,
       label: item.field.label,
       description: `${item.namespace}.${item.field.path.join('.')} · ${item.section}`,
