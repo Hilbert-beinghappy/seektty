@@ -3711,129 +3711,151 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
   private async question(wait: PendingWait<'question'>): Promise<void> {
     const answers: QuestionResponsePayload['answer']['answers'] = []
     const questions = wait.payload.questions
-    let index = 0
-    while (index < questions.length) {
-      const question = questions[index]
-      if (question === undefined) break
-      const planReview = question.intent?.kind === 'plan-review' ? question.intent : undefined
-      const title = `${planReview === undefined ? question.header ?? ui('问题', "Question") : ui('计划审查', "Plan review")} · ${index + 1}/${questions.length}`
-      const escapeDecision = async (): Promise<'cancel' | 'skip' | 'continue'> => (
-        this.confirmQuestionEscape(index, questions.length, answers.length)
-      )
-      const presentation = (option: NonNullable<typeof question.options>[number]): {
-        readonly label: string
-        readonly description?: string
-      } => {
-        if (planReview === undefined) return option
-        return option.label === planReview.approve
-          ? { label: ui('批准计划', "Approve plan"), description: ui('按此计划继续', "Continue with this plan") }
-          : { label: ui('继续规划', "Continue planning"), description: ui('返回并修改计划', "Return and revise the plan") }
-      }
-      if (question.multiSelect === true) {
-        const picked = await this.host.overlays.multiSelect({
-          title,
-          detail: question.detail ?? question.question,
-          choices: (question.options ?? []).map((option) => {
-            const display = presentation(option)
-            return {
-              id: option.label,
-              label: display.label,
-              ...(display.description === undefined ? {} : { description: display.description }),
-            }
-          }),
-          options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
-        })
-        if (picked === undefined) {
-          const decision = await escapeDecision()
-          if (decision === 'cancel') {
-            this.host.transcript.followLatest()
-            await this.capabilities.cancelQuestion(wait)
-            return
-          }
-          if (decision === 'skip') {
-            answers.push({ id: question.id, selected: [] })
-            index += 1
-          }
-          continue
-        }
-        answers.push({ id: question.id, selected: picked.map(option => option.id) })
-        index += 1
-        continue
-      }
-      const choices: OverlayChoice[] = [
-        ...(question.options ?? []).map((option) => {
-          const display = presentation(option)
-          return {
-            id: `option:${option.label}`,
-            label: display.label,
-            ...(display.description === undefined ? {} : { description: display.description }),
-          }
-        }),
-        ...(planReview === undefined
-          ? [
-            { id: '__custom__', label: ui('自定义回答…', "Custom answer…") },
-            { id: '__skip__', label: ui('跳过', "Skip"), description: ui('提交空选择', "Submit an empty selection") },
-          ]
-          : []),
-      ]
-      const picked = await this.host.overlays.select({
-        title,
-        detail: question.detail ?? question.question,
-        choices,
-        searchable: planReview === undefined,
-        options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
-      })
-      if (picked === undefined) {
-        const decision = await escapeDecision()
-        if (decision === 'cancel') {
+    const options = { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      let index = 0
+      while (index < questions.length) {
+        const question = questions[index]
+        if (question === undefined) break
+        if (navigation.signal.aborted) {
           this.host.transcript.followLatest()
           await this.capabilities.cancelQuestion(wait)
           return
         }
-        if (decision === 'skip') {
-          answers.push({ id: question.id, selected: [] })
-          index += 1
+        const planReview = question.intent?.kind === 'plan-review' ? question.intent : undefined
+        const title = `${planReview === undefined ? question.header ?? ui('问题', "Question") : ui('计划审查', "Plan review")} · ${index + 1}/${questions.length}`
+        let escapeHandled: 'cancel' | 'skip' | 'continue' | undefined
+        const escapeDecision = async (): Promise<'cancel' | 'skip' | 'continue'> => {
+          const decision = await this.confirmQuestionEscape(navigation, index, questions.length, answers.length)
+          escapeHandled = decision
+          return decision
         }
-        continue
-      }
-      if (picked.id === '__custom__') {
-        const custom = await this.host.overlays.multilineInput({
-          title: question.question,
-          ...(question.detail === undefined ? {} : { detail: question.detail }),
-          options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
-        })
-        if (custom === undefined) {
+        const onEscape = async (): Promise<void> => {
           const decision = await escapeDecision()
+          if (decision === 'continue') return
+          navigation.back()
+        }
+        const resolveEscape = async (): Promise<boolean> => {
+          if (navigation.signal.aborted) {
+            this.host.transcript.followLatest()
+            await this.capabilities.cancelQuestion(wait)
+            return false
+          }
+          const decision = escapeHandled ?? await this.confirmQuestionEscape(
+            navigation,
+            index,
+            questions.length,
+            answers.length,
+          )
+          escapeHandled = undefined
           if (decision === 'cancel') {
             this.host.transcript.followLatest()
             await this.capabilities.cancelQuestion(wait)
-            return
+            return false
           }
           if (decision === 'skip') {
             answers.push({ id: question.id, selected: [] })
             index += 1
           }
+          return true
+        }
+        const presentation = (option: NonNullable<typeof question.options>[number]): {
+          readonly label: string
+          readonly description?: string
+        } => {
+          if (planReview === undefined) return option
+          return option.label === planReview.approve
+            ? { label: ui('批准计划', "Approve plan"), description: ui('按此计划继续', "Continue with this plan") }
+            : { label: ui('继续规划', "Continue planning"), description: ui('返回并修改计划', "Return and revise the plan") }
+        }
+        if (question.multiSelect === true) {
+          const picked = await navigation.multiSelect({
+            title,
+            detail: question.detail ?? question.question,
+            choices: (question.options ?? []).map((option) => {
+              const display = presentation(option)
+              return {
+                id: option.label,
+                label: display.label,
+                ...(display.description === undefined ? {} : { description: display.description }),
+              }
+            }),
+            onEscape,
+            options,
+          })
+          if (picked === undefined) {
+            if (!await resolveEscape()) return
+            continue
+          }
+          answers.push({ id: question.id, selected: picked.map(option => option.id) })
+          index += 1
           continue
         }
-        answers.push({ id: question.id, selected: [], custom })
-      } else if (picked.id === '__skip__') {
-        answers.push({ id: question.id, selected: [] })
-      } else {
-        answers.push({ id: question.id, selected: [picked.id.slice('option:'.length)] })
+        const choices: OverlayChoice[] = [
+          ...(question.options ?? []).map((option) => {
+            const display = presentation(option)
+            return {
+              id: `option:${option.label}`,
+              label: display.label,
+              ...(display.description === undefined ? {} : { description: display.description }),
+            }
+          }),
+          ...(planReview === undefined
+            ? [
+              { id: '__custom__', label: ui('自定义回答…', "Custom answer…") },
+              { id: '__skip__', label: ui('跳过', "Skip"), description: ui('提交空选择', "Submit an empty selection") },
+            ]
+            : []),
+        ]
+        const picked = await navigation.select({
+          title,
+          detail: question.detail ?? question.question,
+          choices,
+          searchable: planReview === undefined,
+          onEscape,
+          options,
+        })
+        if (picked === undefined) {
+          if (!await resolveEscape()) return
+          continue
+        }
+        if (picked.id === '__custom__') {
+          const custom = await navigation.multilineInput({
+            title: question.question,
+            ...(question.detail === undefined ? {} : { detail: question.detail }),
+            onEscape,
+            options,
+          })
+          if (custom === undefined) {
+            if (!await resolveEscape()) return
+            continue
+          }
+          answers.push({ id: question.id, selected: [], custom })
+        } else if (picked.id === '__skip__') {
+          answers.push({ id: question.id, selected: [] })
+        } else {
+          answers.push({ id: question.id, selected: [picked.id.slice('option:'.length)] })
+        }
+        index += 1
       }
-      index += 1
-    }
-    this.host.transcript.followLatest()
-    await this.capabilities.answerQuestion(wait, { answers })
-    this.host.notice(questionBatchSummary(answers), 'info')
+      if (navigation.signal.aborted) {
+        this.host.transcript.followLatest()
+        await this.capabilities.cancelQuestion(wait)
+        return
+      }
+      this.host.transcript.followLatest()
+      await this.capabilities.answerQuestion(wait, { answers })
+      this.host.notice(questionBatchSummary(answers), 'info')
+    }, options)
   }
 
   private async confirmQuestionEscape(
+    overlays: OverlayPrompts,
     index: number,
     total: number,
     answered: number,
   ): Promise<'cancel' | 'skip' | 'continue'> {
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title: ui('取消这批问题？', 'Cancel this question batch?'),
       detail: ui(
         `已回答 ${String(answered)}/${String(total)} · 当前第 ${String(index + 1)} 题`,
