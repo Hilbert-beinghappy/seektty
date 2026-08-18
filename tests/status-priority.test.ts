@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { pickStatusLine } from '../src/client/status-priority.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EPHEMERAL_NOTICE_MS, NoticeBoard, pickStatusLine } from '../src/client/status-priority.ts'
 
-const root = resolve(import.meta.dirname, '..')
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('status line priority', () => {
   it('keeps errors, pending, and restart above a success toast', () => {
@@ -38,11 +38,68 @@ describe('status line priority', () => {
     })).toBe('queue 1')
     expect(pickStatusLine({ notice: 'copied' })).toBe('copied')
   })
+})
 
-  it('expires success and info notices in the surface listener', () => {
-    const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    expect(surface).toContain('EPHEMERAL_NOTICE_MS')
-    expect(surface).toContain('pickStatusLine')
-    expect(surface).toMatch(/tone === 'success' \|\| tone === 'info'/u)
+describe('notice board slots', () => {
+  it('keeps a persistent error after a success toast expires', () => {
+    vi.useFakeTimers()
+    const board = new NoticeBoard()
+    board.set('send failed', 'error')
+    board.set('copied', 'success')
+    expect(board.view()).toEqual({
+      error: { message: 'send failed' },
+      toast: { message: 'copied', tone: 'success' },
+    })
+    expect(pickStatusLine({
+      error: board.view().error?.message,
+      notice: board.view().toast?.message,
+    })).toBe('send failed')
+
+    vi.advanceTimersByTime(EPHEMERAL_NOTICE_MS)
+    expect(board.view()).toEqual({ error: { message: 'send failed' } })
+    board.dispose()
+  })
+
+  it('keeps a warning after an info toast and does not let the first timer clear a newer toast', () => {
+    vi.useFakeTimers()
+    const board = new NoticeBoard()
+    board.set('need restart', 'warning')
+    board.set('first', 'info')
+    vi.advanceTimersByTime(1_000)
+    board.set('second', 'info')
+    vi.advanceTimersByTime(1_000)
+    expect(board.view()).toEqual({
+      warning: { message: 'need restart' },
+      toast: { message: 'second', tone: 'info' },
+    })
+    vi.advanceTimersByTime(1_000)
+    expect(board.view()).toEqual({ warning: { message: 'need restart' } })
+    board.dispose()
+  })
+
+  it('dismisses persistent and toast slots together even when the editor has a draft', () => {
+    vi.useFakeTimers()
+    const board = new NoticeBoard()
+    board.set('send failed', 'error')
+    board.set('copied', 'success')
+    expect(board.hasVisible()).toBe(true)
+    board.dismiss()
+    vi.advanceTimersByTime(EPHEMERAL_NOTICE_MS)
+    expect(board.hasVisible()).toBe(false)
+    expect(board.view()).toEqual({})
+    board.dispose()
+  })
+
+  it('lets elapsed-style callbacks coexist with the toast timer', () => {
+    vi.useFakeTimers()
+    let ticks = 0
+    const elapsed = setInterval(() => { ticks += 1 }, 500)
+    const board = new NoticeBoard()
+    board.set('copied', 'success')
+    vi.advanceTimersByTime(EPHEMERAL_NOTICE_MS)
+    expect(ticks).toBe(4)
+    expect(board.view().toast).toBeUndefined()
+    clearInterval(elapsed)
+    board.dispose()
   })
 })
