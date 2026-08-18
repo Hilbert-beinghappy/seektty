@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { resolveHarnessUserPath } from '../src/client/workspace-path.ts'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
 import type { OverlayQueue } from '../src/client/overlays.ts'
@@ -30,6 +32,16 @@ function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocume
     secrets: [],
   }
 }
+
+describe('theme export path resolution', () => {
+  it('expands ~ and file URLs, then resolves relative paths against the workspace', () => {
+    const workspace = '/tmp/seektty-workspace'
+    expect(resolveHarnessUserPath('./ocean.json', workspace)).toBe(resolve(workspace, 'ocean.json'))
+    expect(resolveHarnessUserPath('~/Themes/ocean.json', workspace)).toBe(resolve(homedir(), 'Themes/ocean.json'))
+    expect(resolveHarnessUserPath('~', workspace)).toBe(homedir())
+    expect(resolveHarnessUserPath(pathToFileURL('/tmp/ocean.json').href, workspace)).toBe('/tmp/ocean.json')
+  })
+})
 
 describe('theme export payload', () => {
   it('serializes a portable custom-theme snapshot from a built-in theme', () => {
@@ -99,7 +111,7 @@ describe('/theme export', () => {
       }
       const capabilities = {
         managementBridge: () => ({ settings }) as TuiManagementBridge,
-        active: () => undefined,
+        active: () => ({ workspacePath: root }),
       } as unknown as HarnessTuiCapabilities
       const actions = new TuiActions(capabilities, host)
       const path = join(root, 'ocean.json')
@@ -113,6 +125,12 @@ describe('/theme export', () => {
         colors: custom.colors,
       })
       expect(host.notice).toHaveBeenCalledWith(expect.stringContaining('ocean.json'), 'success')
+
+      await actions.execute('theme', 'export Ocean ./nested/workspace-ocean.json')
+      expect(JSON.parse(await readFile(join(root, 'nested', 'workspace-ocean.json'), 'utf8'))).toMatchObject({
+        id: 'ocean',
+        name: 'Ocean',
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

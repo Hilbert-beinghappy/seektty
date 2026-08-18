@@ -1,9 +1,7 @@
 /** Platform-neutral TUI actions over authoritative Harness Client faces. */
 
 import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { basename, dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { getImageDimensions } from '@mariozechner/pi-tui'
 import type {
   IApiClient,
@@ -44,6 +42,7 @@ import { copyTargets } from './copy-content.ts'
 import { flattenProducedFiles, type ProducedFileGroup } from './produced-files.ts'
 import { explainFailure } from './error-advice.ts'
 import { ui, uiLocale } from './locale.ts'
+import { resolveHarnessUserPath } from './workspace-path.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -982,25 +981,15 @@ export class HarnessTuiCapabilities {
    */
   async addAttachment(rawPath: string): Promise<TuiDraftAttachment> {
     const active = this.requireActive()
-    let input = rawPath.trim()
-    if ((input.startsWith('"') && input.endsWith('"'))
-      || (input.startsWith("'") && input.endsWith("'"))) {
-      input = input.slice(1, -1)
+    const input = rawPath.trim()
+    if (input === '' || input === '""' || input === "''") {
+      throw new Error(ui('附件路径不能为空', 'Attachment path cannot be empty'))
     }
-    if (input === '') throw new Error(ui('附件路径不能为空', 'Attachment path cannot be empty'))
     let path: string
-    if (input.startsWith('file://')) {
-      try {
-        path = fileURLToPath(input)
-      } catch {
-        throw new Error(ui('附件 file URL 无效', 'Attachment file URL is invalid'))
-      }
-    } else if (input === '~') {
-      path = homedir()
-    } else if (/^~[/\\]/u.test(input)) {
-      path = resolve(homedir(), input.slice(2))
-    } else {
-      path = resolve(active.workspacePath, input)
+    try {
+      path = resolveHarnessUserPath(input, active.workspacePath)
+    } catch {
+      throw new Error(ui('附件 file URL 无效', 'Attachment file URL is invalid'))
     }
     const file = await stat(path)
     if (!file.isFile()) throw new Error(ui('附件路径不是文件', 'Attachment path is not a file'))

@@ -89,6 +89,7 @@ import {
 } from './theme-config.ts'
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
+import { resolveHarnessUserPath } from './workspace-path.ts'
 import {
   languageSelection,
   localeFromSettings,
@@ -1394,17 +1395,21 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       options: { width: '95%', maxHeight: '80%', anchor: 'center', margin: 1 },
     })
     if (path === undefined || path.trim() === '') return
+    const destination = resolveHarnessUserPath(
+      path.trim(),
+      this.capabilities.active()?.workspacePath ?? process.cwd(),
+    )
     try {
-      const bytes = await writeThemeExport(path.trim(), serializeThemeExport(payload))
+      const bytes = await writeThemeExport(destination, serializeThemeExport(payload))
       this.host.notice(ui(
-        `已导出 ${payload.name} → ${path.trim()} · ${bytes} B`,
-        `Exported ${payload.name} → ${path.trim()} · ${bytes} B`,
+        `已导出 ${payload.name} → ${destination} · ${bytes} B`,
+        `Exported ${payload.name} → ${destination} · ${bytes} B`,
       ), 'success')
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
         throw new Error(ui(
-          `文件已存在：${path.trim()}`,
-          `File already exists: ${path.trim()}`,
+          `文件已存在：${destination}`,
+          `File already exists: ${destination}`,
         ))
       }
       throw error
