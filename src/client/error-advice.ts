@@ -61,7 +61,7 @@ export function explainFailure(message: string): string {
   if (/pnpm 不在 PATH/u.test(message) || /exit 127/u.test(message)) {
     return ui(
       '安装 pnpm 并确保它在 PATH 中后重试',
-      'Install pnpm and keep it on PATH, then retry',
+      'Install pnpm; it is not on PATH, then retry',
     )
   }
   if (/\bENOENT\b/u.test(message)) {
