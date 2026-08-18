@@ -413,7 +413,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               ?? ui(`等待 ${String(pendingCount)} 项交互`, `Waiting for ${String(pendingCount)} interaction(s)`)),
           }
           : {}),
-        ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启', 'Restart required')) }),
+        ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启 · /restart', 'Restart required · /restart')) }),
         ...(snapshot.running ? { running: color.accent(generating) } : {}),
         ...(noticeView.warning === undefined
           ? {}
@@ -587,11 +587,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           },
         })
       },
-      requireRestart: (message) => {
-        restartRequired = message
+      requireRestart: (label) => {
+        restartRequired = ui('需要重启 · /restart', 'Restart required · /restart')
         setNotice(ui(
-          `${message}；可输入 /restart 稍后重启`,
-          `${message}; use /restart later to apply it`,
+          `${label}。需要重启 · /restart`,
+          `${label}. Restart required · /restart`,
         ), 'warning')
       },
     })
