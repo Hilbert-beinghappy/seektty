@@ -12,6 +12,14 @@ export const DSH_COMPATIBILITY: DshCompatibility = {
   tested: '0.1.0-rc.6',
 }
 
+/**
+ * Value returned by official `@deepseek-ai/dsh-host-apiproxy` `host.describe`.
+ * The gateway still hardcodes `version: '0.0.1'` as a TODO placeholder
+ * (present in 0.1.0-rc.6 and 0.1.0-rc.7) instead of reading `apps/cli`
+ * package.json. Treat it as "version unknown", not as a real 0.0.1 CLI.
+ */
+export const HOST_DESCRIBE_VERSION_PLACEHOLDER = '0.0.1'
+
 interface VersionParts {
   readonly major: number
   readonly minor: number
@@ -69,7 +77,8 @@ export function compareDshVersion(left: string, right: string): number | undefin
 
 /**
  * Explain why a running dsh version is outside this Bundle's declared range.
- * @param hostVersion - `host.describe` version, when known.
+ * @param hostVersion - Host-reported version. Official `host.describe` still
+ *   returns the placeholder `0.0.1`; that value is ignored.
  * @param compatibility - package.json `dsh.compatibility`.
  * @param english - launcher-safe language choice (no locale.ts).
  */
@@ -78,6 +87,7 @@ export function dshCompatibilityError(
   compatibility: DshCompatibility,
   english: boolean,
 ): string | undefined {
+  if (hostVersion === HOST_DESCRIBE_VERSION_PLACEHOLDER) return undefined
   if (hostVersion === undefined || hostVersion.trim() === '') {
     return english
       ? `Could not read the dsh version. SeekTTY needs dsh >= ${compatibility.minimum} (tested ${compatibility.tested}).`

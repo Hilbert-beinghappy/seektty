@@ -37,4 +37,10 @@ describe('dsh version and compatibility', () => {
     expect(dshCompatibilityError('0.2.0', range, true)).toMatch(/tested 0\.1\.0-rc\.6/u)
     expect(dshCompatibilityError('0.1.0-rc.6', range, true)).toBeUndefined()
   })
+
+  it('does not treat the official host.describe placeholder as a real dsh version', () => {
+    const range = { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' }
+    expect(dshCompatibilityError('0.0.1', range, false)).toBeUndefined()
+    expect(dshCompatibilityError('0.0.1', range, true)).toBeUndefined()
+  })
 })
