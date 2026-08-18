@@ -69,7 +69,7 @@ describe('navigation noise', () => {
     const surface = readFileSync(resolve(import.meta.dirname, '../src/client/surface.ts'), 'utf8')
     expect(surface).toContain('noticeAfterFailedHostCommand(current.session, trimmed)')
     expect(surface).toContain('noticeForHostCommand({ ok: true, matched: outcome.matched }, name)')
-    expect(surface).not.toMatch(/已执行 \/\${name}/u)
+    expect(surface).not.toContain('已执行 /${name}')
   })
 
   it('names Space on multi-select and Esc abort on progress pages', async () => {

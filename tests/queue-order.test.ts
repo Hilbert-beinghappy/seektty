@@ -88,7 +88,6 @@ describe('queue reorder', () => {
       if (handle === undefined) throw new Error('queue overlay has no handleInput')
       handle.call(mounted, data)
     }
-    type(DOWN)
     type(ENTER)
     await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑') })
 
