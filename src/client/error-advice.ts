@@ -2,6 +2,9 @@
 
 import { ui } from './locale.ts'
 
+/** Host timeout copy stays Chinese so matching does not follow the UI locale. */
+const TIMEOUT_MARK = { zh: '超时' }
+
 export interface PluginFailureOutput {
   readonly stderr: string
   readonly stdout: string
@@ -36,7 +39,7 @@ export function explainFailure(message: string): string {
       `An internal call failed: ${inner}\nNext: retry this action; if it keeps happening, run /doctor or /restart.`,
     )
   }
-  if (message.includes('超时') && message.includes('/doctor')) {
+  if (message.includes(TIMEOUT_MARK.zh) && message.includes('/doctor')) {
     return ui(
       `${message.replace(/，请运行 \/doctor 检查 Harness 状态$/u, '')}。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek。`,
       'Startup timed out. Next: confirm dsh is on PATH or DSH_BIN, check the Profile, then run deepseek again.',
