@@ -1,5 +1,7 @@
 /** Status-bar line priority: important state is never replaced by a toast. */
 
+import { translateUiText } from './locale.ts'
+
 export interface StatusPriorityInput {
   readonly error?: string
   readonly pending?: string
@@ -36,11 +38,12 @@ export interface NoticeBoardView {
 }
 
 /**
- * Keep persistent error/warning notices in a separate slot from 2s success/info toasts.
- * A later toast must not delete a higher-priority notice.
+ * Keep error, warning, and 2s success/info toasts in separate slots.
+ * A later warning must not delete an error; a later toast must not delete either.
  */
 export class NoticeBoard {
-  private persistent: { message: string; tone: 'error' | 'warning' } | undefined
+  private error: string | undefined
+  private warning: string | undefined
   private toast: { message: string; tone: 'success' | 'info'; seq: number } | undefined
   private seq = 0
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -59,13 +62,17 @@ export class NoticeBoard {
   }
 
   /**
-   * Record a notice. Error/warning persist; success/info expire without clearing them.
-   * @param message - already localized status text.
+   * Record a notice. Error and warning occupy independent persistent slots.
+   * @param message - canonical or Chinese status text; `view()` translates at render time.
    * @param tone - notice severity.
    */
   set(message: string, tone: NoticeTone): void {
-    if (tone === 'error' || tone === 'warning') {
-      this.persistent = { message, tone }
+    if (tone === 'error') {
+      this.error = message
+      return
+    }
+    if (tone === 'warning') {
+      this.warning = message
       return
     }
     this.seq += 1
@@ -83,7 +90,8 @@ export class NoticeBoard {
 
   /** Clear persistent and toast slots, including any pending expire timer. */
   dismiss(): void {
-    this.persistent = undefined
+    this.error = undefined
+    this.warning = undefined
     this.toast = undefined
     this.seq += 1
     this.clearTimer()
@@ -91,15 +99,17 @@ export class NoticeBoard {
 
   /** True when Esc should consume the key to clear status-bar notices. */
   hasVisible(): boolean {
-    return this.persistent !== undefined || this.toast !== undefined
+    return this.error !== undefined || this.warning !== undefined || this.toast !== undefined
   }
 
-  /** Current slots for `pickStatusLine`. */
+  /** Current slots for `pickStatusLine`, re-presented in the active locale. */
   view(): NoticeBoardView {
     return {
-      ...(this.persistent?.tone === 'error' ? { error: { message: this.persistent.message } } : {}),
-      ...(this.persistent?.tone === 'warning' ? { warning: { message: this.persistent.message } } : {}),
-      ...(this.toast === undefined ? {} : { toast: { message: this.toast.message, tone: this.toast.tone } }),
+      ...(this.error === undefined ? {} : { error: { message: translateUiText(this.error) } }),
+      ...(this.warning === undefined ? {} : { warning: { message: translateUiText(this.warning) } }),
+      ...(this.toast === undefined
+        ? {}
+        : { toast: { message: translateUiText(this.toast.message), tone: this.toast.tone } }),
     }
   }
 
