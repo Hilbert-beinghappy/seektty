@@ -650,7 +650,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (content.length === 0) return false
         const result = await current.session.prompt(content, mode)
         if (!result.ok) {
-        setNotice(capabilityError(result.error), 'error')
+          setNotice(
+            withRunningRetry(capabilityError(result.error), current.session.getSnapshot().running),
+            'error',
+          )
           restoreDeferredPrompt(text)
           return false
         }
@@ -690,11 +693,22 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return
         }
         const result = await current.session.command(trimmed)
-        if (!result.ok) setNotice(capabilityError(result.error), 'error')
+        if (!result.ok) {
+          setNotice(
+            withRunningRetry(capabilityError(result.error), current.session.getSnapshot().running),
+            'error',
+          )
+        }
         else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
         else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
-        setNotice(capabilityError(error), 'error')
+        setNotice(
+          withRunningRetry(
+            capabilityError(error),
+            capabilities.active()?.session.getSnapshot().running === true,
+          ),
+          'error',
+        )
       }
     }
 
