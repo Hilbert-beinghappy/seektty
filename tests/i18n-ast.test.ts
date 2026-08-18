@@ -35,6 +35,7 @@ const GATED = [
   'client/theme-import.ts',
   'client/composer-draft.ts',
   'client/provider-onboarding.ts',
+  'client/pending-status.ts',
   'client/surface.ts',
   'client/capabilities.ts',
   'client/transcript.ts',

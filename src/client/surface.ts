@@ -65,6 +65,7 @@ import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
 import { NoticeBoard, pickStatusLine } from './status-priority.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
+import { pendingInteractionStatus } from './pending-status.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
 import { measureStartup } from '../startup-trace.ts'
 
@@ -408,10 +409,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               : { error: noticeText(noticeView.error.message, 'error') }),
         ...(pendingCount > 0
           ? {
-            pending: color.warning(ui(
-              `/pending 处理 ${String(pendingCount)} 项交互`,
-              `/pending handles ${String(pendingCount)} interaction(s)`,
-            )),
+            pending: color.warning(pendingInteractionStatus(snapshot.pending)
+              ?? ui(`等待 ${String(pendingCount)} 项交互`, `Waiting for ${String(pendingCount)} interaction(s)`)),
           }
           : {}),
         ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启', 'Restart required')) }),
