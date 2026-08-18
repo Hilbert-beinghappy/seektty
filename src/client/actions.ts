@@ -58,6 +58,7 @@ import type {
 import { OverlayQueue } from './overlays.ts'
 import {
   formatSettingsValue,
+  hasDedicatedSettingsEditor,
   parseSettingsRootChoice,
   parseSettingsValue,
   settingsFields,
@@ -2029,8 +2030,10 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const bridge = this.capabilities.managementBridge().settings
     const initialDocument = (await bridge.describe(namespace))[0]
     if (initialDocument === undefined) throw new Error(ui(`Settings 命名空间 ${JSON.stringify(namespace)} 不存在`, `Settings namespace ${JSON.stringify(namespace)} does not exist`))
+    const namespaceFields = (current: TuiSettingsDocument) =>
+      settingsFields(current).filter(field => !hasDedicatedSettingsEditor(current.namespace, field.path))
     let document: TuiSettingsDocument = initialDocument
-    let fields = settingsFields(document)
+    let fields = namespaceFields(document)
     let special = this.settingsSpecialChoices(document)
     if (fields.length + special.length === 0) {
       this.host.notice(ui(`${document.namespace} 没有可见设置字段`, `${document.namespace} has no visible Settings fields`), 'info')
@@ -2064,7 +2067,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         return
       }
       document = refreshed
-      fields = settingsFields(document)
+      fields = namespaceFields(document)
       special = this.settingsSpecialChoices(document)
       if (fields.length + special.length === 0) {
         this.host.notice(ui(`${document.namespace} 没有可见设置字段`, `${document.namespace} has no visible Settings fields`), 'info')

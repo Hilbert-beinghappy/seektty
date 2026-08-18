@@ -6,7 +6,7 @@ import {
   rehydrateSchema,
   type SchemaNode,
 } from '@deepseek-ai/dsh-client-schema-form'
-import { LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
+import { LOCALE_PREFERENCE_FIELD, LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
@@ -253,17 +253,41 @@ export function visibleSettingsDocuments(
 }
 
 /**
+ * Report whether `/settings` should hide a field already owned by a dedicated editor.
+ * @param namespace - registered Harness Settings namespace.
+ * @param path - schema path inside that namespace.
+ */
+export function hasDedicatedSettingsEditor(namespace: string, path: readonly string[]): boolean {
+  if (namespace === LOCALE_SETTINGS_NAMESPACE) return samePath(path, [LOCALE_PREFERENCE_FIELD])
+  if (namespace === 'agent-default-model') {
+    return samePath(path, ['provider']) || samePath(path, ['model']) || samePath(path, ['reasoningEffort'])
+  }
+  if (namespace === 'permission' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
+  if (namespace === 'agent-presets' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
+  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (
+    samePath(path, ['theme']) || samePath(path, ['codeTheme']) || samePath(path, ['customThemes'])
+  )) {
+    return true
+  }
+  if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE && samePath(path, ['keyBindings'])) return true
+  return namespace === 'tui-plugin-marketplace' && samePath(path, ['sources'])
+}
+
+/**
  * Flatten every registered Settings document into a cross-namespace field index.
+ * Dedicated-editor fields are omitted so `/settings` search does not duplicate them.
  * @param documents - redacted Settings descriptors.
  */
 export function indexSettingsFields(
   documents: readonly TuiSettingsDocument[],
 ): readonly IndexedSettingsField[] {
-  return visibleSettingsDocuments(documents).flatMap(document => settingsFields(document).map(field => ({
-    namespace: document.namespace,
-    section: settingsSectionLabel(document.namespace),
-    field,
-  })))
+  return visibleSettingsDocuments(documents).flatMap(document => settingsFields(document)
+    .filter(field => !hasDedicatedSettingsEditor(document.namespace, field.path))
+    .map(field => ({
+      namespace: document.namespace,
+      section: settingsSectionLabel(document.namespace),
+      field,
+    })))
 }
 
 /** One row in the searchable Settings root list. */
