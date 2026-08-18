@@ -1851,10 +1851,13 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     })
     if (action === undefined) return
     if (action.id === 'steer') await this.capabilities.updateQueue(row.id, { kind: 'steer' })
-    if (action.id === 'remove') await this.capabilities.updateQueue(row.id, { kind: 'remove' })
-    if (action.id === 'edit' && row.text !== null) {
+    else if (action.id === 'remove') await this.capabilities.updateQueue(row.id, { kind: 'remove' })
+    else if (action.id === 'edit' && row.text !== null) {
       const text = await nav.multilineInput({ title: ui('编辑排队消息', "Edit queued message"), initialValue: row.text })
-      if (text !== undefined) await this.capabilities.updateQueue(row.id, { kind: 'edit', content: [{ type: 'text', text }] })
+      if (text === undefined) return
+      await this.capabilities.updateQueue(row.id, { kind: 'edit', content: [{ type: 'text', text }] })
+    } else {
+      return
     }
     this.host.notice(ui('队列操作已提交', "Queue action submitted"), 'success')
   }

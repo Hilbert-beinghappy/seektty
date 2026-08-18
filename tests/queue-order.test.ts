@@ -25,4 +25,10 @@ describe('queue reorder', () => {
     expect(queueListChoiceOrder(['m1', 'm2'], 2)).toEqual(['m1', 'm2', '__all_steer__', '__clear__'])
     expect(queueListChoiceOrder([], 0)).toEqual([])
   })
+
+  it('returns from queue edit without a success notice when the editor is cancelled', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/client/actions.ts'), 'utf8')
+    expect(source).toMatch(/if \(text === undefined\) return/u)
+    expect(source).toMatch(/await this\.capabilities\.updateQueue\(row\.id, \{ kind: 'edit'/u)
+  })
 })
