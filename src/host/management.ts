@@ -27,7 +27,7 @@ import {
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
-import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
+import { assertCredentialFreeUrl, PluginMarketplace, redactMarketplaceUrl } from './plugin-marketplace.ts'
 import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
 import { ui } from '../client/locale.ts'
@@ -45,6 +45,7 @@ const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
   url: 'https://registry.npmjs.org/',
   enabled: true,
   builtIn: true,
+  rowKey: 'builtin:npm',
 })
 
 const CatalogSourceSchema = z.object({
@@ -274,11 +275,17 @@ function validateCatalogSource(source: TuiMarketplaceSource): StoredCatalogSourc
   }
 }
 
+function storedIndexFromRowKey(rowKey: string | undefined): number | undefined {
+  const match = /^stored:(\d+)$/u.exec(rowKey ?? '')
+  if (match === null) return undefined
+  return Number(match[1])
+}
+
 function degradedCatalogSource(raw: unknown, index: number, diagnostic: string): TuiMarketplaceSource {
   const record = typeof raw === 'object' && raw !== null ? raw as Partial<StoredCatalogSource> : {}
   const id = typeof record.id === 'string' && record.id.trim() !== '' ? record.id.trim() : `invalid-${String(index)}`
   const label = typeof record.label === 'string' && record.label.trim() !== '' ? record.label.trim() : id
-  const url = typeof record.url === 'string' ? record.url : ''
+  const url = typeof record.url === 'string' ? redactMarketplaceUrl(record.url) : ''
   return {
     id,
     kind: 'catalog',
@@ -287,6 +294,7 @@ function degradedCatalogSource(raw: unknown, index: number, diagnostic: string):
     enabled: false,
     builtIn: false,
     diagnostic,
+    rowKey: `stored:${String(index)}`,
   }
 }
 
@@ -339,6 +347,7 @@ export function catalogSourcesFromStored(
         enabled: storedSource.enabled,
         ...(storedSource.credentialRef === '' ? {} : { credentialRef: storedSource.credentialRef }),
         builtIn: false,
+        rowKey: `stored:${String(index)}`,
       })
     } catch (error) {
       sources.push(degradedCatalogSource(raw, index, error instanceof Error ? error.message : String(error)))
@@ -509,7 +518,17 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
       doctor: () => Promise.resolve(manager.doctor()),
       sources: () => Promise.resolve(sourceSnapshot()),
       saveSources: async (sources, expectedRevision) => {
-        const catalog = sources.filter(source => !source.builtIn).map(validateCatalogSource)
+        const currentStored = (documents.one(MARKETPLACE_NAMESPACE).value as MarketplaceSettings).sources
+        const catalog: StoredCatalogSource[] = []
+        for (const source of sources.filter(source => !source.builtIn)) {
+          if (source.diagnostic !== undefined) {
+            const index = storedIndexFromRowKey(source.rowKey)
+            const raw = index === undefined ? undefined : currentStored[index]
+            if (typeof raw === 'object' && raw !== null) catalog.push(raw as StoredCatalogSource)
+            continue
+          }
+          catalog.push(validateCatalogSource(source))
+        }
         if (new Set(catalog.map(source => source.id)).size !== catalog.length) {
           throw new Error(ui('Catalog Source id 不能重复', 'Catalog Source IDs must be unique'))
         }

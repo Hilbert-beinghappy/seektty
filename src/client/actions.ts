@@ -283,6 +283,20 @@ function detailText(value: unknown): string {
   }
 }
 
+function marketplaceSourceKey(source: TuiMarketplaceSource): string {
+  return source.rowKey ?? source.id
+}
+
+function findMarketplaceSource(
+  sources: readonly TuiMarketplaceSource[],
+  token: string,
+): TuiMarketplaceSource | undefined {
+  const byKey = sources.find(source => source.rowKey === token)
+  if (byKey !== undefined) return byKey
+  const matches = sources.filter(source => source.id === token)
+  return matches.length === 1 ? matches[0] : undefined
+}
+
 function pluginIdentity(plugin: TuiPluginEntry): string {
   return `${plugin.name}${plugin.version === undefined ? '' : `@${plugin.version}`}`
 }
@@ -2676,11 +2690,12 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
     if (['remove', 'enable', 'disable'].includes(parsed.command)) {
       if (parsed.rest === '') throw new Error(ui(`/plugin source ${parsed.command} 需要 Source id`, `/plugin source ${parsed.command} requires a Source id`))
       const snapshot = await bridge.sources()
-      const target = snapshot.sources.find(source => source.id === parsed.rest)
+      const target = findMarketplaceSource(snapshot.sources, parsed.rest)
       if (target === undefined || target.builtIn) throw new Error(ui(`插件目录 ${JSON.stringify(parsed.rest)} 不存在或不可修改`, `Plugin catalog ${JSON.stringify(parsed.rest)} does not exist or is read-only`))
+      const key = marketplaceSourceKey(target)
       const sources = parsed.command === 'remove'
-        ? snapshot.sources.filter(source => source.id !== target.id)
-        : snapshot.sources.map(source => source.id === target.id
+        ? snapshot.sources.filter(source => marketplaceSourceKey(source) !== key)
+        : snapshot.sources.map(source => marketplaceSourceKey(source) === key
           ? { ...source, enabled: parsed.command === 'enable' }
           : source)
       await bridge.saveSources(sources, snapshot.revision)
@@ -2696,7 +2711,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       detail: ui('npm 与插件提供的目录为只读；你添加的插件目录可在这里管理', "npm and provider-owned catalogs are read-only; catalogs you add can be managed here"),
       choices: [
         ...snapshot.sources.map(source => ({
-          id: `source:${source.id}`,
+          id: `source:${marketplaceSourceKey(source)}`,
           label: `${source.enabled ? '● ' : '○ '}${source.label}`,
           description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ui(' · 内置', " · built-in") : ''}${source.diagnostic === undefined ? '' : ` · ${source.diagnostic}`}`,
         })),
@@ -2709,7 +2724,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       await this.addPluginSource(overlays, snapshot.sources, snapshot.revision)
       return
     }
-    const source = snapshot.sources.find(item => item.id === selected.id.slice('source:'.length))
+    const source = findMarketplaceSource(snapshot.sources, selected.id.slice('source:'.length))
     if (source === undefined) return
     await this.editPluginSource(overlays, source, snapshot.sources, snapshot.revision)
   }
@@ -2782,7 +2797,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         if (entered === undefined || entered.trim() === '') return
         ref = entered.trim()
         const credentialRef = ref
-        const updated = sources.map(item => item.id === source.id ? { ...item, credentialRef } : item)
+        const updated = sources.map(item => marketplaceSourceKey(item) === marketplaceSourceKey(source) ? { ...item, credentialRef } : item)
         await this.capabilities.managementBridge().plugins.saveSources(updated, revision)
       }
       await this.configureSourceCredential(overlays, ref)
@@ -2793,9 +2808,10 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       const confirmed = await overlays.confirm(ui(`移除 ${source.label}？`, `Remove ${source.label}?`), ui('该目录将不再参与搜索；已安装插件不受影响。', "This catalog will no longer be searched; installed plugins are unaffected."), ui('移除', "Remove"))
       if (!confirmed) return
     }
+    const key = marketplaceSourceKey(source)
     const next = selected.id === 'remove'
-      ? sources.filter(item => item.id !== source.id)
-      : sources.map(item => item.id === source.id ? { ...item, enabled: !source.enabled } : item)
+      ? sources.filter(item => marketplaceSourceKey(item) !== key)
+      : sources.map(item => marketplaceSourceKey(item) === key ? { ...item, enabled: !source.enabled } : item)
     await this.capabilities.managementBridge().plugins.saveSources(next, revision)
     this.host.notice(ui(`插件目录 ${source.id} 已${selected.id === 'remove' ? '移除' : source.enabled ? '停用' : '启用'}`, `Plugin catalog ${source.id} ${selected.id === 'remove' ? 'removed' : source.enabled ? 'disabled' : 'enabled'}`), 'success')
   }

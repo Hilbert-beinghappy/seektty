@@ -278,6 +278,11 @@ export interface TuiMarketplaceSource {
   readonly builtIn: boolean
   /** Present when a stored catalog row failed validation and was kept disabled. */
   readonly diagnostic?: string
+  /**
+   * Stable protocol row identity. Stored catalog rows use `stored:<index>` so
+   * duplicate or invalid ids cannot select the wrong Settings row.
+   */
+  readonly rowKey?: string
 }
 
 /** Marketplace source list with the native Settings revision that produced it. */

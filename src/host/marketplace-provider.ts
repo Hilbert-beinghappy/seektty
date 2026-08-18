@@ -91,6 +91,7 @@ function normalizeSource(kind: string, source: TuiMarketplaceProviderSource): Tu
     enabled: source.enabled,
     ...(credentialRef === undefined ? {} : { credentialRef }),
     builtIn: true,
+    rowKey: `provider:${source.id}`,
   })
 }
 
