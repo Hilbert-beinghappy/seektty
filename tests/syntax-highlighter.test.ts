@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  adoptSyntaxHighlighter,
   SyntaxHighlighter,
   syntaxLanguageForPath,
 } from '../src/client/syntax-highlighter.ts'
@@ -105,6 +108,23 @@ describe('Shiki terminal syntax rendering', () => {
     } finally {
       highlighter.dispose()
     }
+  })
+})
+
+describe('Shiki theme revision', () => {
+  it('applies the latest theme before the highlighter takes over the renderer', () => {
+    const order: string[] = []
+    adoptSyntaxHighlighter(
+      { setTheme: theme => { order.push(`theme:${theme.id}`) } },
+      BUILT_IN_THEMES.light,
+      highlighter => { order.push(`takeover:${highlighter === undefined ? 'missing' : 'ready'}`) },
+    )
+    expect(order).toEqual(['theme:light', 'takeover:ready'])
+
+    const source = readFileSync(resolve(import.meta.dirname, '../src/client/surface.ts'), 'utf8')
+    expect(source).toMatch(/liveTheme = initialTheme/u)
+    expect(source).toMatch(/adoptSyntaxHighlighter\(created, liveTheme,/u)
+    expect(source).toMatch(/liveTheme = theme/u)
   })
 })
 

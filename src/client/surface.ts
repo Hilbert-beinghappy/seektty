@@ -38,7 +38,7 @@ import {
   ui,
 } from './locale.ts'
 import { OverlayQueue, setDangerConfirmDefault } from './overlays.ts'
-import { SyntaxHighlighter } from './syntax-highlighter.ts'
+import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { formatElapsed } from './elapsed.ts'
@@ -144,6 +144,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   let disposeConstructedSyntax = (): void => undefined
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
+    let liveTheme = initialTheme
     const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
     applyKeyBindingOverrides(liveBehavior.get().keyBindings)
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
@@ -220,9 +221,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         created.dispose()
         return
       }
-      syntax = created
-      disposeConstructedSyntax = () => { created.dispose() }
-      setCodeHighlighter((code, lang) => created.highlight(code, lang))
+      adoptSyntaxHighlighter(created, liveTheme, (ready) => {
+        syntax = ready
+        disposeConstructedSyntax = () => { ready.dispose() }
+        setCodeHighlighter((code, lang) => ready.highlight(code, lang))
+      })
       if (stopping !== undefined) {
         created.dispose()
         syntax = undefined
@@ -486,6 +489,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       refresh,
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
+        liveTheme = theme
         setTheme(theme)
         syntax?.setTheme(theme)
         transcript.refreshPresentation()

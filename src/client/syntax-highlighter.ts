@@ -212,6 +212,24 @@ function highlightable(code: string): boolean {
     && code.split('\n').every(line => line.length <= MAX_HIGHLIGHT_LINE_CHARS)
 }
 
+/** Theme-aware highlighter that can receive the latest Surface theme. */
+export interface SyntaxThemeTarget {
+  setTheme(theme: ResolvedTuiTheme): void
+}
+
+/**
+ * Apply the current theme, then hand the highlighter to the renderer.
+ * Call this only after construction finishes so a mid-load theme change wins.
+ */
+export function adoptSyntaxHighlighter<T extends SyntaxThemeTarget>(
+  created: T,
+  currentTheme: ResolvedTuiTheme,
+  takeOver: (highlighter: T) => void,
+): void {
+  created.setTheme(currentTheme)
+  takeOver(created)
+}
+
 /** Synchronous render face backed by asynchronously loaded Shiki grammars. */
 export class SyntaxHighlighter {
   private readonly loaded = new Set<SupportedLanguage>()
