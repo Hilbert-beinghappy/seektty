@@ -32,9 +32,9 @@ import {
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
 import { ui } from '../client/locale.ts'
+import { InstallerOutputRedactor, installerSecrets, redactInstallerText } from './installer-output.ts'
 
 const NAME = 'dsh'
-const MAX_CAPTURE_BYTES = 1024 * 1024
 const MAX_PATCH_BYTES = 2 * 1024 * 1024
 const SENSITIVE_QUERY_KEY = new RegExp(
   String.raw`(?:^|[-_])(?:access[-_]?token|api[-_]?key|auth|authorization|credential|password|secret|signature|token)(?:$|[-_])`,
@@ -211,13 +211,6 @@ function validPatch(packageDir: string, patch: string): boolean {
   }
 }
 
-function appendBounded(current: string, chunk: string): string {
-  const joined = current + chunk
-  return Buffer.byteLength(joined) <= MAX_CAPTURE_BYTES
-    ? joined
-    : joined.slice(Math.max(0, joined.length - MAX_CAPTURE_BYTES))
-}
-
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -320,7 +313,19 @@ export class ProfilePluginManager {
     const command = args.map(argument => this.anchorPathSpec(argument))
     let stdout = ''
     let stderr = ''
-    const exitCode = await new Promise<number>((resolvePromise, reject) => {
+    const stdoutRedactor = new InstallerOutputRedactor()
+    const stderrRedactor = new InstallerOutputRedactor()
+    const flushVisible = (): void => {
+      const stdoutTail = stdoutRedactor.flush()
+      const stderrTail = stderrRedactor.flush()
+      if (stdoutTail !== '') options.onOutput?.('stdout', stdoutTail)
+      if (stderrTail !== '') options.onOutput?.('stderr', stderrTail)
+      stdout = stdoutRedactor.text()
+      stderr = stderrRedactor.text()
+    }
+    let exitCode: number
+    try {
+      exitCode = await new Promise<number>((resolvePromise, reject) => {
       const child = crossSpawn('pnpm', command, {
         cwd: this.dir,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -334,12 +339,12 @@ export class ProfilePluginManager {
       child.stdout.setEncoding('utf8')
       child.stderr.setEncoding('utf8')
       child.stdout.on('data', (chunk: string) => {
-        stdout = appendBounded(stdout, chunk)
-        options.onOutput?.('stdout', chunk)
+        const visible = stdoutRedactor.push(chunk)
+        if (visible !== '') options.onOutput?.('stdout', visible)
       })
       child.stderr.on('data', (chunk: string) => {
-        stderr = appendBounded(stderr, chunk)
-        options.onOutput?.('stderr', chunk)
+        const visible = stderrRedactor.push(chunk)
+        if (visible !== '') options.onOutput?.('stderr', visible)
       })
       child.once('error', (error) => {
         options.signal?.removeEventListener('abort', abort)
@@ -362,6 +367,9 @@ export class ProfilePluginManager {
       if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return 127
       throw error
     })
+    } finally {
+      flushVisible()
+    }
     this.forgetInstalled()
     const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
     const snapshot = this.snapshot()
@@ -411,8 +419,8 @@ export class ProfilePluginManager {
       dir: this.dir,
       command: ['pnpm', ...command.map(safeDependencySpec)],
       exitCode,
-      stdout: typeof result.stdout === 'string' ? result.stdout : '',
-      stderr: typeof result.stderr === 'string' ? result.stderr : '',
+      stdout: typeof result.stdout === 'string' ? redactInstallerText(result.stdout, installerSecrets()) : '',
+      stderr: typeof result.stderr === 'string' ? redactInstallerText(result.stderr, installerSecrets()) : '',
       warnings,
       initialized,
       changed,

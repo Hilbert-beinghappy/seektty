@@ -27,6 +27,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
+import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
 import { ui } from '../client/locale.ts'
 
@@ -237,18 +238,6 @@ export function createSettingsDescribeCache(
       cached = undefined
     },
   }
-}
-
-function redactInstallerOutput(value: string): string {
-  let redacted = value
-    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1***@')
-    .replace(/(https?:\/\/)[^\s/@]+@/giu, '$1***@')
-    .replace(/((?:_authToken|authorization|password|token)\s*[=:]\s*)[^\s]+/giu, '$1***')
-  for (const [key, secret] of Object.entries(process.env)) {
-    if (!/(?:TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL)/iu.test(key) || secret === undefined || secret.length < 4) continue
-    redacted = redacted.replaceAll(secret, '***')
-  }
-  return redacted
 }
 
 function sessionExportFilename(sessionId: string): string {
@@ -495,20 +484,15 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     plugins: {
       snapshot: () => Promise.resolve(manager.snapshot()),
       run: async (args, options = {}) => {
-        const output = options.onOutput
         const result = await manager.run(args, {
           ...options.signal === undefined ? {} : { signal: options.signal },
+          ...options.onOutput === undefined ? {} : { onOutput: options.onOutput },
         })
-        const stdout = redactInstallerOutput(result.stdout)
-        const stderr = redactInstallerOutput(result.stderr)
-        if (output !== undefined) {
-          if (stdout !== '') output('stdout', stdout)
-          if (stderr !== '') output('stderr', stderr)
-        }
+        const secrets = installerSecrets()
         return {
           exitCode: result.exitCode,
-          stdout,
-          stderr,
+          stdout: redactInstallerText(result.stdout, secrets),
+          stderr: redactInstallerText(result.stderr, secrets),
           warnings: result.warnings,
           changed: result.changed,
           restartRequired: result.restartRequired,
