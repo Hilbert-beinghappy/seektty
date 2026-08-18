@@ -63,8 +63,7 @@ import {
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
-import { ctrlCTarget } from './interrupt-priority.ts'
-import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
+import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
 import { measureStartup } from '../startup-trace.ts'
 
@@ -724,17 +723,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
-      if (matchesBinding('interrupt', data)) {
-        const target = ctrlCTarget({
-          running: capabilities.active()?.session.getSnapshot().running === true,
-          overlayActive: overlays.hasActive(),
-        })
-        if (target === 'cancel-session') {
-          void capabilities.active()?.session.cancel()
-          return { consume: true }
-        }
-        if (target === 'overlay') return undefined
-      }
+      const interrupt = consumeRunningInterrupt(data, capabilities.active()?.session)
+      if (interrupt !== undefined) return interrupt
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
