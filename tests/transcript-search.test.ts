@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   findLineMatches,
   highlightQuery,
   nextMatchIndex,
+  planLineSearch,
   scrollOffsetToReveal,
   stripAnsi,
 } from '../src/client/transcript-search.ts'
@@ -18,5 +21,15 @@ describe('transcript in-session search', () => {
     expect(highlightQuery('Hello World', 'lo', text => `[${text}]`)).toBe('Hel[lo] World')
     expect(stripAnsi('\u001B[7mhit\u001B[0m')).toBe('hit')
     expect(scrollOffsetToReveal(20, 8, 2)).toBe(10)
+  })
+
+  it('builds a Set of match indexes so highlight does not rescan includes()', () => {
+    const plan = planLineSearch(['a', 'hit', 'b', 'HIT'], 'hit')
+    expect(plan.matches).toEqual([1, 3])
+    expect(plan.hit.has(1)).toBe(true)
+    expect(plan.hit.has(0)).toBe(false)
+    const source = readFileSync(resolve(import.meta.dirname, '../src/client/transcript.ts'), 'utf8')
+    expect(source).toMatch(/planLineSearch\(/u)
+    expect(source).not.toMatch(/matches\.includes\(/u)
   })
 })

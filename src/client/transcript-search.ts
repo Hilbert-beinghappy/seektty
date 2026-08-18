@@ -24,6 +24,22 @@ export function findLineMatches(lines: readonly string[], query: string): number
     stripAnsi(line).toLowerCase().includes(needle) ? [index] : [])
 }
 
+/** One search pass: ordered matches plus a Set for constant-time highlight. */
+export interface LineSearchPlan {
+  readonly matches: readonly number[]
+  readonly hit: ReadonlySet<number>
+}
+
+/**
+ * Compute match indexes once per query so highlight can use Set lookup.
+ * @param lines - full transcript lines before viewport clipping.
+ * @param query - user-typed needle; blank queries match nothing.
+ */
+export function planLineSearch(lines: readonly string[], query: string): LineSearchPlan {
+  const matches = findLineMatches(lines, query)
+  return { matches, hit: new Set(matches) }
+}
+
 /**
  * Move to the next or previous match, wrapping at the ends.
  * @param matches - document-order line indexes.

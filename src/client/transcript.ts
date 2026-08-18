@@ -41,6 +41,7 @@ import {
   findLineMatches,
   highlightQuery,
   nextMatchIndex,
+  planLineSearch,
   scrollOffsetToReveal,
 } from './transcript-search.ts'
 import {
@@ -1436,13 +1437,13 @@ export class Transcript implements Component, Focusable {
     this.renderedLineCount = lines.length
     this.turnAnchors = anchors
     if (this.search !== undefined) {
-      const matches = findLineMatches(lines, this.search.query)
-      if (this.search.matchIndex >= matches.length) this.search.matchIndex = 0
-      const current = matches[this.search.matchIndex]
+      const plan = planLineSearch(lines, this.search.query)
+      if (this.search.matchIndex >= plan.matches.length) this.search.matchIndex = 0
+      const current = plan.matches[this.search.matchIndex]
       const query = this.search.query
       if (query.trim() !== '') {
         for (const [index, line] of lines.entries()) {
-          if (!matches.includes(index)) continue
+          if (!plan.hit.has(index)) continue
           lines[index] = highlightQuery(line, query, matched =>
             index === current ? `\u001B[7m${matched}\u001B[0m` : color.accent(matched))
         }
