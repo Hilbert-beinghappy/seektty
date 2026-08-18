@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { lastFencedCode, copyTargets } from '../src/client/copy-content.ts'
 import { OSC52_BYTE_LIMIT, osc52Sequence, writeClipboard } from '../src/client/clipboard.ts'
@@ -10,6 +12,9 @@ describe('copy content', () => {
       { id: '1', text: 'older' },
       { id: '2', text: 'newer line' },
     ]).map(row => row.id)).toEqual(['2', '1'])
+    expect(copyTargets([{ id: '3', text: '  keep edges  \n' }])[0]?.text).toBe('  keep edges  \n')
+    const source = readFileSync(resolve(import.meta.dirname, '../src/client/capabilities.ts'), 'utf8')
+    expect(source).not.toMatch(/join\('\\n'\)\.trim\(\)/u)
   })
 })
 

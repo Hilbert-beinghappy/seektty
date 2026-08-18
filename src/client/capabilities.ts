@@ -286,7 +286,7 @@ function assistantText(message: AssistantMessageNode): string {
     if (block.kind === 'text') return [block.text]
     if (block.kind === 'image') return [ui('[图片]', '[image]')]
     return []
-  }).join('\n').trim()
+  }).join('\n')
 }
 
 function latestModelRoute(snapshot: ConversationSnapshot): string | undefined {

@@ -26,12 +26,11 @@ export function copyTargets(
   entries: readonly { readonly id: string; readonly text: string }[],
 ): readonly { readonly id: string; readonly preview: string; readonly text: string }[] {
   return [...entries].reverse().flatMap((entry) => {
-    const text = entry.text.trim()
-    if (text === '') return []
+    if (entry.text === '') return []
     return [{
       id: entry.id,
-      preview: text.replace(/\s+/gu, ' ').slice(0, 160),
-      text,
+      preview: entry.text.replace(/\s+/gu, ' ').slice(0, 160),
+      text: entry.text,
     }]
   })
 }
