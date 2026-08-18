@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleWidth, type Component, type TUI } from '@mariozechner/pi-tui'
 import {
   BottomAnchoredLayout,
+  ContextBar,
   PromptEditor,
   transcriptViewportRows,
 } from '../src/client/chrome.ts'
@@ -189,5 +191,31 @@ describe('composer chrome', () => {
     })
 
     expect(composer.render(60).at(-1)).toMatch(/v4-pro · 最大推理 · 标准$/u)
+  })
+})
+
+describe('context bar running indicator', () => {
+  it('puts the Ctrl+C stop hint on the context bar only', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const bar = new ContextBar('tui', '/workspace')
+    bar.setFacts({
+      hostVersion: '0.1.0',
+      nodeVersion: '24.0.0',
+      platform: 'darwin',
+      architecture: 'arm64',
+      profile: 'tui',
+      workspace: '/workspace',
+      session: 'session',
+      mode: 'standard',
+      model: 'deepseek-v4-pro',
+      permission: 'workspace-write',
+      running: true,
+      runningSince: Date.now() - 1_000,
+    })
+    const rendered = bar.render(80).join('\n')
+    expect(rendered).toContain('生成中')
+    expect(rendered).toContain('Ctrl+C')
+    const surface = readFileSync(new URL('../src/client/surface.ts', import.meta.url), 'utf8')
+    expect(surface).not.toMatch(/status\.setDetail\(color\.accent\(ui\(\s*`生成中/u)
   })
 })
