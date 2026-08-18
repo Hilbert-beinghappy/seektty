@@ -1,8 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
+import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
+import type { HarnessTuiCapabilities, TuiActiveSession } from '../src/client/capabilities.ts'
+import { OverlayQueue } from '../src/client/overlays.ts'
+import type { Transcript } from '../src/client/transcript.ts'
 import { moveIndex, queueListChoiceOrder } from '../src/client/queue-order.ts'
+
+const ESCAPE = '\u001B'
+const ENTER = '\r'
+const DOWN = '\u001B[B'
+
+function plain(lines: readonly string[]): string {
+  return lines.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+}
 
 describe('queue reorder', () => {
   it('moves an item up or down and no-ops at the ends', () => {
@@ -24,5 +37,75 @@ describe('queue reorder', () => {
     expect(queueListChoiceOrder(['m1'], 1)).toEqual(['m1', '__clear__'])
     expect(queueListChoiceOrder(['m1', 'm2'], 2)).toEqual(['m1', 'm2', '__all_steer__', '__clear__'])
     expect(queueListChoiceOrder([], 0)).toEqual([])
+  })
+
+  it('returns from queue edit without a success notice when the editor is cancelled', async () => {
+    let mounted: Component | undefined
+    const tui = {
+      showOverlay: vi.fn((component: Component) => {
+        mounted = component
+        return { hide: vi.fn() } as unknown as OverlayHandle
+      }),
+      requestRender: vi.fn(),
+      terminal: { rows: 24, cols: 80 },
+    } as unknown as TUI
+    const overlays = new OverlayQueue(tui)
+    const notice = vi.fn()
+    const updateQueue = vi.fn(async () => undefined)
+    const snapshot = {
+      queue: [{
+        id: 'msg-1',
+        preview: 'queued hello',
+        text: 'queued hello',
+        placement: 'queued',
+      }],
+    }
+    const host: TuiActionHost = {
+      overlays,
+      transcript: { followLatest: vi.fn() } as unknown as Transcript,
+      notice,
+      refresh: vi.fn(),
+      refreshHeader: vi.fn(),
+      applyTheme: vi.fn(),
+      applyLocale: vi.fn(),
+      setEditor: vi.fn(),
+      copy: vi.fn(),
+      close: vi.fn(),
+      restart: vi.fn(),
+      requireRestart: vi.fn(),
+    }
+    const actions = new TuiActions({
+      active: () => ({ session: { getSnapshot: () => snapshot } }) as unknown as TuiActiveSession,
+      updateQueue,
+    } as unknown as HarnessTuiCapabilities, host)
+
+    const pending = actions.execute('queue', '')
+    await vi.waitFor(() => { expect(mounted).toBeDefined() })
+    expect(plain(mounted!.render(80))).toContain('queued hello')
+
+    const type = (data: string): void => {
+      const handle = mounted?.handleInput
+      if (handle === undefined) throw new Error('queue overlay has no handleInput')
+      handle.call(mounted, data)
+    }
+    type(DOWN)
+    type(ENTER)
+    await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑') })
+
+    type(DOWN)
+    type(ENTER)
+    await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑排队消息') })
+
+    type(ESCAPE)
+    await vi.waitFor(() => {
+      expect(updateQueue).not.toHaveBeenCalled()
+      expect(notice).not.toHaveBeenCalled()
+    })
+
+    type(ESCAPE)
+    type(ESCAPE)
+    await pending
+    expect(updateQueue).not.toHaveBeenCalled()
+    expect(notice.mock.calls.some(call => String(call[0]).includes('已提交'))).toBe(false)
   })
 })
