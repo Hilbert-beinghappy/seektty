@@ -1,8 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
+import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
+import type { HarnessTuiCapabilities, TuiActiveSession } from '../src/client/capabilities.ts'
+import { OverlayQueue } from '../src/client/overlays.ts'
+import type { Transcript } from '../src/client/transcript.ts'
 import { moveIndex } from '../src/client/queue-order.ts'
+
+const ESCAPE = '\u001B'
+const ENTER = '\r'
+const DOWN = '\u001B[B'
+
+function plain(lines: readonly string[]): string {
+  return lines.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+}
 
 describe('queue reorder', () => {
   it('moves an item up or down and no-ops at the ends', () => {
@@ -20,9 +33,68 @@ describe('queue reorder', () => {
     expect(source.includes('Swap with the previous queued message')).toBe(false)
   })
 
-  it('returns from queue edit without a success notice when the editor is cancelled', () => {
-    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/client/actions.ts'), 'utf8')
-    expect(source).toMatch(/if \(text === undefined\) return/u)
-    expect(source).toMatch(/await this\.capabilities\.updateQueue\(row\.id, \{ kind: 'edit'/u)
+  it('returns from queue edit without a success notice when the editor is cancelled', async () => {
+    let mounted: Component | undefined
+    const tui = {
+      showOverlay: vi.fn((component: Component) => {
+        mounted = component
+        return { hide: vi.fn() } as unknown as OverlayHandle
+      }),
+      requestRender: vi.fn(),
+      terminal: { rows: 24, cols: 80 },
+    } as unknown as TUI
+    const overlays = new OverlayQueue(tui)
+    const notice = vi.fn()
+    const updateQueue = vi.fn(async () => undefined)
+    const snapshot = {
+      queue: [{
+        id: 'msg-1',
+        preview: 'queued hello',
+        text: 'queued hello',
+        placement: 'queued',
+      }],
+    }
+    const host: TuiActionHost = {
+      overlays,
+      transcript: { followLatest: vi.fn() } as unknown as Transcript,
+      notice,
+      refresh: vi.fn(),
+      refreshHeader: vi.fn(),
+      applyTheme: vi.fn(),
+      applyLocale: vi.fn(),
+      setEditor: vi.fn(),
+      copy: vi.fn(),
+      close: vi.fn(),
+      restart: vi.fn(),
+      requireRestart: vi.fn(),
+    }
+    const actions = new TuiActions({
+      active: () => ({ session: { getSnapshot: () => snapshot } }) as unknown as TuiActiveSession,
+      updateQueue,
+    } as unknown as HarnessTuiCapabilities, host)
+
+    const pending = actions.execute('queue', '')
+    await vi.waitFor(() => { expect(mounted).toBeDefined() })
+    expect(plain(mounted!.render(80))).toContain('queued hello')
+
+    mounted!.handleInput(DOWN)
+    mounted!.handleInput(ENTER)
+    await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑') })
+
+    mounted!.handleInput(DOWN)
+    mounted!.handleInput(ENTER)
+    await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑排队消息') })
+
+    mounted!.handleInput(ESCAPE)
+    await vi.waitFor(() => {
+      expect(updateQueue).not.toHaveBeenCalled()
+      expect(notice).not.toHaveBeenCalled()
+    })
+
+    mounted!.handleInput(ESCAPE)
+    mounted!.handleInput(ESCAPE)
+    await pending
+    expect(updateQueue).not.toHaveBeenCalled()
+    expect(notice.mock.calls.some(call => String(call[0]).includes('已提交'))).toBe(false)
   })
 })
