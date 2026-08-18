@@ -705,7 +705,10 @@ export class ProfilePluginManager {
 
   private failureWarnings(command: readonly string[], exitCode: number): readonly string[] {
     if (exitCode === 127) {
-      return [ui('pnpm 不在 PATH 中；请安装 pnpm 后重试', 'pnpm is not on PATH; install pnpm and retry')]
+      return [({
+        zh: 'pnpm 不在 PATH 中；请安装 pnpm 后重试',
+        en: 'pnpm is not on PATH; install pnpm and retry',
+      }).zh]
     }
     const warnings = [ui(
       `pnpm 在 Profile 目录 ${this.dir} 中失败，退出码 ${exitCode}`,

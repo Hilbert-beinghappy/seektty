@@ -108,75 +108,91 @@ const CustomThemeSchema = z.object({
   syntax: SyntaxThemeColorsSchema,
   tokenColors: z.array(TextMateRuleSchema).max(MAX_TEXTMATE_RULES).default([]),
 })
-const AppearanceSettingsSchema = z.object({
+function localeDescription(copy: { readonly zh: string; readonly en: string }): string {
+  return copy as unknown as string
+}
+
+export const AppearanceSettingsSchema = z.object({
   theme: z.string().pattern(/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
     .default(DEFAULT_TUI_THEME)
-    .description(ui('SeekTTY 当前使用的界面主题。', 'The interface theme currently used by SeekTTY.')),
+    .description(localeDescription({
+      zh: 'SeekTTY 当前使用的界面主题。',
+      en: 'The interface theme currently used by SeekTTY.',
+    })),
   codeTheme: z.string().pattern(/^(?:auto|dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
     .default(DEFAULT_TUI_CODE_THEME)
-    .description(ui(
-      '代码块独立主题；auto 跟随当前界面主题。',
-      'Independent code-block theme; auto follows the current interface theme.',
-    )),
+    .description(localeDescription({
+      zh: '代码块独立主题；auto 跟随当前界面主题。',
+      en: 'Independent code-block theme; auto follows the current interface theme.',
+    })),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
-    .description(ui('SeekTTY 命名自定义主题。', 'Named custom SeekTTY themes.')),
+    .description(localeDescription({
+      zh: 'SeekTTY 命名自定义主题。',
+      en: 'Named custom SeekTTY themes.',
+    })),
 })
-const BehaviorSettingsSchema = z.object({
+export const BehaviorSettingsSchema = z.object({
   toolCards: z.union(['collapsed', 'expanded', 'hidden'])
     .default(DEFAULT_TUI_BEHAVIOR.toolCards)
-    .description(ui(
-      '工具卡片默认形态；启动时应用到当前会话。',
-      'Default tool-card shape; applied to the current session at startup.',
-    )),
+    .description(localeDescription({
+      zh: '工具卡片默认形态；启动时应用到当前会话。',
+      en: 'Default tool-card shape; applied to the current session at startup.',
+    })),
   showReasoning: z.boolean().default(DEFAULT_TUI_BEHAVIOR.showReasoning)
-    .description(ui('推理内容默认是否显示。', 'Whether reasoning is shown by default.')),
+    .description(localeDescription({
+      zh: '推理内容默认是否显示。',
+      en: 'Whether reasoning is shown by default.',
+    })),
   desktopNotifications: z.boolean().default(DEFAULT_TUI_BEHAVIOR.desktopNotifications)
-    .description(ui(
-      '回合完成或待审批时发送终端桌面通知。',
-      'Send a desktop notification when a turn completes or an approval is pending.',
-    )),
+    .description(localeDescription({
+      zh: '回合完成或待审批时发送终端桌面通知。',
+      en: 'Send a desktop notification when a turn completes or an approval is pending.',
+    })),
   followTerminalTitle: z.boolean().default(DEFAULT_TUI_BEHAVIOR.followTerminalTitle)
-    .description(ui(
-      '终端标题跟随当前会话运行状态。',
-      'Follow the current session status in the terminal title.',
-    )),
+    .description(localeDescription({
+      zh: '终端标题跟随当前会话运行状态。',
+      en: 'Follow the current session status in the terminal title.',
+    })),
   composerHistoryLimit: z.natural().max(MAX_COMPOSER_HISTORY)
     .default(DEFAULT_TUI_BEHAVIOR.composerHistoryLimit)
-    .description(ui(
-      '输入历史持久化条数；0 表示关闭。',
-      'Number of persisted composer history entries; 0 disables history.',
-    )),
+    .description(localeDescription({
+      zh: '输入历史持久化条数；0 表示关闭。',
+      en: 'Number of persisted composer history entries; 0 disables history.',
+    })),
   statusElapsed: z.boolean().default(DEFAULT_TUI_BEHAVIOR.statusElapsed)
-    .description(ui(
-      '状态栏显示当前回合实时耗时。',
-      'Show live elapsed time for the current turn in the status bar.',
-    )),
+    .description(localeDescription({
+      zh: '状态栏显示当前回合实时耗时。',
+      en: 'Show live elapsed time for the current turn in the status bar.',
+    })),
   clipboardFallback: z.union(['auto', 'osc52', 'off'])
     .default(DEFAULT_TUI_BEHAVIOR.clipboardFallback)
-    .description(ui(
-      'OSC 52 失败后的剪贴板回退命令；auto 按平台探测。',
-      'Clipboard fallback after OSC 52 fails; auto probes the platform.',
-    )),
+    .description(localeDescription({
+      zh: 'OSC 52 失败后的剪贴板回退命令；auto 按平台探测。',
+      en: 'Clipboard fallback after OSC 52 fails; auto probes the platform.',
+    })),
   toolOutputLineLimit: z.natural().max(MAX_TOOL_OUTPUT_LINE_LIMIT)
     .default(DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit)
-    .description(ui(
-      '展开态工具输出单块行数上限；0 表示不折叠。',
-      'Line cap for one expanded tool-output block; 0 means no folding.',
-    )),
+    .description(localeDescription({
+      zh: '展开态工具输出单块行数上限；0 表示不折叠。',
+      en: 'Line cap for one expanded tool-output block; 0 means no folding.',
+    })),
   diffContextLines: z.natural().max(MAX_DIFF_CONTEXT_LINES)
     .default(DEFAULT_TUI_BEHAVIOR.diffContextLines)
-    .description(ui('Diff 上下文行数。', 'Number of diff context lines.')),
+    .description(localeDescription({
+      zh: 'Diff 上下文行数。',
+      en: 'Number of diff context lines.',
+    })),
   dangerConfirmDefault: z.union(['cancel', 'confirm'])
     .default(DEFAULT_TUI_BEHAVIOR.dangerConfirmDefault)
-    .description(ui(
-      '危险确认默认焦点；cancel 表示回车不执行。',
-      'Default focus for danger confirmation; cancel means Enter does not proceed.',
-    )),
+    .description(localeDescription({
+      zh: '危险确认默认焦点；cancel 表示回车不执行。',
+      en: 'Default focus for danger confirmation; cancel means Enter does not proceed.',
+    })),
   keyBindings: z.dict(z.string()).default({})
-    .description(ui(
-      '覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。',
-      'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
-    )),
+    .description(localeDescription({
+      zh: '覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。',
+      en: 'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
+    })),
 })
 const ComposerHistorySettingsSchema = z.object({
   entries: z.array(z.string().max(100_000)).max(MAX_COMPOSER_HISTORY).default([]),
