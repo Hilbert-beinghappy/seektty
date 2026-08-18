@@ -7,11 +7,25 @@ export type HostCommandNotice = {
   readonly tone: 'error' | 'warning'
 }
 
-/**
- * Tab/Esc composer and transcript navigation must not write a toast.
- */
-export function noticeForPureNavigation(): undefined {
-  return undefined
+export interface TranscriptChrome {
+  cancelSearch(): boolean
+  exitToolFocus(): boolean
+}
+
+/** Tab between composer and transcript: close chrome, never toast. */
+export function applyTranscriptFocusToggle(transcript: TranscriptChrome): void {
+  transcript.cancelSearch()
+  transcript.exitToolFocus()
+}
+
+/** Esc in the transcript: search, then tool focus, then return to the composer. */
+export function applyTranscriptEscape(
+  transcript: TranscriptChrome,
+  returnToComposer: () => void,
+): void {
+  if (transcript.cancelSearch()) return
+  if (transcript.exitToolFocus()) return
+  returnToComposer()
 }
 
 /**

@@ -18,7 +18,11 @@ import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
-import { noticeForHostCommand, noticeForPureNavigation } from './nav-notice.ts'
+import {
+  applyTranscriptEscape,
+  applyTranscriptFocusToggle,
+  noticeForHostCommand,
+} from './nav-notice.ts'
 import {
   BottomAnchoredLayout,
   ContextBar,
@@ -764,28 +768,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       if (matchesBinding('focusToggle', data) && (transcriptFocused || editor.getText() === '')) {
-        transcript.cancelSearch()
-        transcript.exitToolFocus()
+        applyTranscriptFocusToggle(transcript)
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
-        const tabNotice = noticeForPureNavigation()
-        if (tabNotice !== undefined) setNotice(tabNotice, 'info')
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
-        if (transcript.cancelSearch()) {
-          const escNotice = noticeForPureNavigation()
-          if (escNotice !== undefined) setNotice(escNotice, 'info')
-          return { consume: true }
-        }
-        if (transcript.exitToolFocus()) {
-          const escNotice = noticeForPureNavigation()
-          if (escNotice !== undefined) setNotice(escNotice, 'info')
-          return { consume: true }
-        }
-        focusEditor()
-        const escNotice = noticeForPureNavigation()
-        if (escNotice !== undefined) setNotice(escNotice, 'info')
+        applyTranscriptEscape(transcript, focusEditor)
         return { consume: true }
       }
       if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
