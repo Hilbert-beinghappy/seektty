@@ -1129,7 +1129,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       choices: [
         {
           id: '__default__',
-          label: ui(`Provider 默认${option.defaultEffort === undefined ? '' : `（${option.defaultEffort}）`}`, `Provider default${option.defaultEffort === undefined ? '' : `（${option.defaultEffort}）`}`),
+          label: ui(`Provider 默认${option.defaultEffort === undefined ? '' : `（${option.defaultEffort}）`}`, `Provider default${option.defaultEffort === undefined ? '' : ` (${option.defaultEffort})`}`),
         },
         ...option.efforts.map(effort => ({
           id: effort.id,
@@ -1215,7 +1215,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const appearance = appearanceFromSettings(document)
     const resolved = resolveTheme(appearance, target)
     if (target === appearance.theme && appearance.codeTheme === 'auto') {
-      this.host.notice(ui(`${resolved.name}已启用`, `${resolved.name}enabled`), 'info')
+      this.host.notice(ui(`${resolved.name}已启用`, `${resolved.name} enabled`), 'info')
       return
     }
     const updated = await saveTheme(bridge, document, target)
@@ -1538,7 +1538,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         ? composeResolvedTheme(interfaceTheme, resolvedCandidate)
         : resolvedCandidate)
       const selected = await this.host.overlays.select({
-        title: ui(`${activation === 'code' ? '代码主题' : '主题'}预览 · ${candidate.name}`, `${activation === 'code' ? 'Code theme' : 'Theme'}Preview · ${candidate.name}`),
+        title: ui(`${activation === 'code' ? '代码主题' : '主题'}预览 · ${candidate.name}`, `${activation === 'code' ? 'Code theme' : 'Theme'} Preview · ${candidate.name}`),
         detail: themePreviewText(candidate, warnings),
         searchable: false,
         choices: [
@@ -3409,7 +3409,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           ].join('\n'),
         ),
         choices: [
-          { id: 'close', label: ui('关闭', "Off") },
+          { id: 'close', label: ui('关闭', "Close") },
           { id: 'doctor', label: ui('运行 /doctor', "Run /doctor"), description: ui('检查 Profile、插件和运行环境', "Check the Profile, plugins, and runtime environment") },
           ...settings.map(document => ({
             id: `settings:${document.namespace}`,
