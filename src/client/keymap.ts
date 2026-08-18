@@ -221,13 +221,129 @@ function matchChord(data: string, chord: string): boolean {
   return matchesKey(data, chord as KeyId)
 }
 
-function effectiveChords(binding: SurfaceKeyBinding): readonly string[] {
-  const override = overrides[binding.id]
-  if (override !== undefined) return [override]
+function defaultChords(binding: SurfaceKeyBinding): readonly string[] {
   return binding.keys.flatMap(key => {
     const chord = normalizeChord(key)
     return chord === undefined ? [] : [chord]
   })
+}
+
+function effectiveChords(binding: SurfaceKeyBinding): readonly string[] {
+  const override = overrides[binding.id]
+  if (override !== undefined) return [override]
+  return defaultChords(binding)
+}
+
+const BARE_SPECIAL_KEYS = new Set([
+  'tab',
+  'enter',
+  'escape',
+  'left',
+  'right',
+  'up',
+  'down',
+  'home',
+  'end',
+  'backspace',
+  'delete',
+])
+
+function isUnmodifiedPrintableChord(chord: string): boolean {
+  if (chord.includes('+')) return false
+  if (BARE_SPECIAL_KEYS.has(chord)) return false
+  if (/^f([1-9]|1[0-2])$/u.test(chord)) return false
+  return chord.length === 1
+}
+
+function parsedOverrides(value: unknown): {
+  readonly bindings: Record<string, string>
+  readonly issue?: string
+} {
+  if (typeof value !== 'object' || value === null) return { bindings: {} }
+  const bindings: Record<string, string> = {}
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== 'string') {
+      return {
+        bindings,
+        issue: ui(`键位 ${id} 必须是字符串`, `Key binding ${id} must be a string`),
+      }
+    }
+    const binding = byId.get(id)
+    if (binding === undefined || !isConfigurable(binding)) continue
+    const chord = normalizeChord(raw)
+    if (chord === undefined) {
+      return {
+        bindings,
+        issue: ui(`无法解析组合键 ${raw}`, `Cannot parse chord ${raw}`),
+      }
+    }
+    if (isUnmodifiedPrintableChord(chord)) {
+      return {
+        bindings,
+        issue: ui(
+          `不能把无修饰可打印字符 ${formatChord(chord)} 设为全局快捷键`,
+          `Cannot bind unmodified printable character ${formatChord(chord)} as a global shortcut`,
+        ),
+      }
+    }
+    bindings[id] = chord
+  }
+  return { bindings }
+}
+
+function conflictIssue(overrides: Readonly<Record<string, string>>): string | undefined {
+  const owners = new Map<string, string>()
+  for (const binding of SURFACE_KEYMAP) {
+    const override = overrides[binding.id]
+    const chords = override === undefined ? defaultChords(binding) : [override]
+    for (const chord of chords) {
+      const owner = owners.get(chord)
+      if (owner !== undefined && owner !== binding.id) {
+        const reported = overrides[owner] !== undefined && overrides[binding.id] === undefined
+          ? binding.id
+          : owner
+        return ui(`与 ${reported} 冲突`, `Conflicts with ${reported}`)
+      }
+      owners.set(chord, binding.id)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Explain why a complete override map cannot be written or applied.
+ * @param value - persisted or typed override map.
+ * @returns a localized error, or undefined when the map is valid.
+ */
+export function keyBindingsIssue(value: unknown): string | undefined {
+  const parsed = parsedOverrides(value)
+  return parsed.issue ?? conflictIssue(parsed.bindings)
+}
+
+function dropConflictingOverrides(overrides: Record<string, string>): Record<string, string> {
+  const next = { ...overrides }
+  for (;;) {
+    const owners = new Map<string, string[]>()
+    for (const binding of SURFACE_KEYMAP) {
+      const override = next[binding.id]
+      const chords = override === undefined ? defaultChords(binding) : [override]
+      for (const chord of chords) {
+        const list = owners.get(chord) ?? []
+        list.push(binding.id)
+        owners.set(chord, list)
+      }
+    }
+    let dropped = false
+    for (const ids of owners.values()) {
+      if (ids.length < 2) continue
+      for (const id of ids) {
+        if (next[id] === undefined) continue
+        delete next[id]
+        dropped = true
+      }
+    }
+    if (!dropped) return next
+  }
 }
 
 /**
@@ -242,10 +358,10 @@ export function sanitizeKeyBindings(value: unknown): Readonly<Record<string, str
     const binding = byId.get(id)
     if (binding === undefined || !isConfigurable(binding)) continue
     const chord = normalizeChord(raw)
-    if (chord === undefined) continue
+    if (chord === undefined || isUnmodifiedPrintableChord(chord)) continue
     next[id] = chord
   }
-  return next
+  return dropConflictingOverrides(next)
 }
 
 /**

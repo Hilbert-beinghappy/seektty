@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { BehaviorSettingsSchema } from '../src/host/management.ts'
 import {
   applyKeyBindingOverrides,
   bindingConflict,
   helpKeymapText,
+  keyBindingsIssue,
   matchesBinding,
   normalizeChord,
+  sanitizeKeyBindings,
   SURFACE_KEYMAP,
 } from '../src/client/keymap.ts'
 
@@ -65,5 +68,30 @@ describe('key binding overrides', () => {
     applyKeyBindingOverrides({ sessions: 'ctrl+k' })
     expect(bindingConflict('commandPalette', 'ctrl+k')).toBe('sessions')
     expect(bindingConflict('historySearch', 'ctrl+s')).toBeUndefined()
+  })
+
+  it('rejects unmodified printable characters and duplicate chords in the full map', () => {
+    expect(keyBindingsIssue({ commandPalette: 'k' })).toMatch(/printable|可打印/u)
+    expect(keyBindingsIssue({ commandPalette: '/' })).toMatch(/printable|可打印/u)
+    expect(keyBindingsIssue({ commandPalette: 'ctrl+s' })).toMatch(/sessions/u)
+    expect(keyBindingsIssue({
+      commandPalette: 'ctrl+k',
+      historySearch: 'ctrl+k',
+    })).toMatch(/conflict|冲突/u)
+    expect(keyBindingsIssue({ commandPalette: 'Ctrl+K' })).toBeUndefined()
+    expect(sanitizeKeyBindings({
+      commandPalette: 'k',
+      historySearch: 'ctrl+k',
+      sessions: 'ctrl+k',
+    })).toEqual({})
+    applyKeyBindingOverrides({ commandPalette: 'k' })
+    expect(matchesBinding('commandPalette', 'k')).toBe(false)
+    expect(matchesBinding('commandPalette', '\u0010')).toBe(true)
+    expect(() => BehaviorSettingsSchema({ keyBindings: { commandPalette: 'k' } })).toThrow(/printable|可打印/u)
+    expect(() => BehaviorSettingsSchema({
+      keyBindings: { commandPalette: 'ctrl+k', historySearch: 'ctrl+k' },
+    })).toThrow(/conflict|冲突/u)
+    expect(BehaviorSettingsSchema({ keyBindings: { commandPalette: 'Ctrl+K' } }).keyBindings)
+      .toEqual({ commandPalette: 'ctrl+k' })
   })
 })

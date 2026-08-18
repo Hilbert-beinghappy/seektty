@@ -102,6 +102,14 @@ describe('/keymap', () => {
     expect(host.notice).toHaveBeenCalledWith(expect.stringContaining('sessions'), 'error')
   })
 
+  it('refuses an unmodified printable character as a global shortcut', async () => {
+    const { actions, host, mutate } = actionHarness()
+    await actions.execute('keymap', 'commandPalette k')
+    expect(mutate).not.toHaveBeenCalled()
+    expect(host.applyBehavior).not.toHaveBeenCalled()
+    expect(host.notice).toHaveBeenCalledWith(expect.stringMatching(/printable|可打印/u), 'error')
+  })
+
   it('restores the shipped default for one action', async () => {
     const { actions, mutate } = actionHarness({
       ...DEFAULT_TUI_BEHAVIOR,

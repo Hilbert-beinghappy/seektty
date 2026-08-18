@@ -30,8 +30,8 @@ import { formatByteSize } from './byte-size.ts'
 import { helpSectionChoices, helpSectionText, type HelpSectionId } from './help.ts'
 import {
   applyKeyBindingOverrides,
-  bindingConflict,
   bindingKeysLabel,
+  keyBindingsIssue,
   normalizeChord,
   SURFACE_KEYMAP,
 } from './keymap.ts'
@@ -1903,15 +1903,10 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           `Cannot parse chord ${rest}`,
         ))
       }
-      const conflict = bindingConflict(id, chord)
-      if (conflict !== undefined) {
-        throw new Error(ui(
-          `与 ${conflict} 冲突`,
-          `Conflicts with ${conflict}`,
-        ))
-      }
       next[id] = chord
     }
+    const issue = keyBindingsIssue(next)
+    if (issue !== undefined) throw new Error(issue)
     const updated = await this.capabilities.managementBridge().settings.mutate(
       TUI_BEHAVIOR_SETTINGS_NAMESPACE,
       [{ op: 'set', path: ['keyBindings'], value: next }],

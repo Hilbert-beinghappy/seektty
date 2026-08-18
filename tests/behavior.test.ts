@@ -53,6 +53,9 @@ describe('seektty-behavior settings', () => {
       keyBindings: { commandPalette: 'Ctrl+K', submit: 'ctrl+n', mystery: 'ctrl+f' },
     }).keyBindings).toEqual({ commandPalette: 'ctrl+k' })
     expect(normalizeBehavior({
+      keyBindings: { commandPalette: 'k', historySearch: 'ctrl+s' },
+    }).keyBindings).toEqual({})
+    expect(normalizeBehavior({
       toolCards: 'mystery',
       composerHistoryLimit: 99_999,
       clipboardFallback: 'pbcopy',

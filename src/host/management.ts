@@ -32,6 +32,7 @@ import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
 import { markdownFromSessionLog } from '../client/conversation-markdown.ts'
 import { producedFilesFromSessionLog } from '../client/produced-files.ts'
+import { keyBindingsIssue, sanitizeKeyBindings } from '../client/keymap.ts'
 import { ui } from '../client/locale.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
@@ -190,7 +191,11 @@ export const BehaviorSettingsSchema = z.object({
       zh: '危险确认默认焦点；cancel 表示回车不执行。',
       en: 'Default focus for danger confirmation; cancel means Enter does not proceed.',
     })),
-  keyBindings: z.dict(z.string()).default({})
+  keyBindings: z.transform(z.dict(z.string()), (value) => {
+    const issue = keyBindingsIssue(value)
+    if (issue !== undefined) throw new Error(issue)
+    return sanitizeKeyBindings(value)
+  }).default({})
     .description(localeDescription({
       zh: '覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。',
       en: 'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
