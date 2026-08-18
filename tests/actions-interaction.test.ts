@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
 import type {
   ConversationSnapshot,
   PendingWait,
@@ -13,10 +14,44 @@ import type {
   HarnessTuiCapabilities,
   TuiActiveSession,
 } from '../src/client/capabilities.ts'
-import type { OverlayQueue } from '../src/client/overlays.ts'
+import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
 
-function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript>): TuiActionHost {
+const ESCAPE = '\u001B'
+const ENTER = '\r'
+const UP = '\u001B[A'
+const DOWN = '\u001B[B'
+
+function plain(lines: readonly string[]): string {
+  return lines.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+}
+
+function liveOverlays(): {
+  readonly overlays: OverlayQueue
+  component(): Component & { handleInput(data: string): void }
+} {
+  let mounted: Component | undefined
+  const tui = {
+    showOverlay: vi.fn((component: Component) => {
+      mounted = component
+      return { hide: vi.fn() } as unknown as OverlayHandle
+    }),
+    requestRender: vi.fn(),
+    terminal: { rows: 24, cols: 80 },
+  } as unknown as TUI
+  return {
+    overlays: new OverlayQueue(tui),
+    component: () => {
+      if (mounted === undefined) throw new Error('overlay has not mounted')
+      return mounted as Component & { handleInput(data: string): void }
+    },
+  }
+}
+
+function host(
+  overlays: Partial<OverlayQueue> & Partial<OverlayNavigation>,
+  transcript: Partial<Transcript>,
+): TuiActionHost {
   return {
     overlays: overlays as OverlayQueue,
     transcript: transcript as Transcript,
@@ -52,7 +87,7 @@ function questionBatch(count: number): PendingWait<'question'> {
 
 function pendingActions(
   wait: PendingWait<'question'>,
-  overlays: Partial<OverlayQueue>,
+  overlays: Partial<OverlayQueue> & Partial<OverlayNavigation>,
 ): {
   readonly actions: TuiActions
   readonly answerQuestion: ReturnType<typeof vi.fn>
@@ -201,9 +236,16 @@ describe('pending interaction continuation', () => {
     } as unknown as ConversationSnapshot
     const followLatest = vi.fn()
     const answerApproval = vi.fn(async () => undefined)
-    const select = vi.fn(async (request: { detail?: string }) => {
+    const finish = vi.fn()
+    const detail = vi.fn(async () => undefined)
+    const selectPage = vi.fn(async (
+      request: { detail?: string; initialChoiceId?: string; choices: readonly { id: string }[] },
+      onSelect: (choice: { id: string; label: string }) => Promise<void>,
+    ) => {
       expect(request.detail).toContain('$ ls -la src')
-      return { id: 'reject', label: '拒绝' }
+      expect(request.initialChoiceId).toBe('reject')
+      expect(request.choices.map(choice => choice.id)).toEqual(['allow', 'reject'])
+      await onSelect({ id: 'reject', label: '拒绝' })
     })
     const active = {
       session: { getSnapshot: () => snapshot },
@@ -212,10 +254,58 @@ describe('pending interaction continuation', () => {
       active: () => active,
       answerApproval,
     } as unknown as HarnessTuiCapabilities
-    const actions = new TuiActions(capabilities, host({ select }, { followLatest }))
+    const actions = new TuiActions(capabilities, host({ selectPage, detail, finish }, { followLatest }))
 
     actions.syncPending(snapshot)
     await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(selectPage).toHaveBeenCalledOnce()
+    expect(detail).not.toHaveBeenCalled()
+    expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
+  })
+
+  it('opens full arguments as a child page and keeps the approval selector', async () => {
+    const approval = {
+      key: 'approval:long',
+      kind: 'approval',
+      sessionId: 'session' as SessionId,
+      payload: {
+        toolName: 'shell',
+        callId: 'call-long',
+        approvalId: 'appr-2',
+        reason: '需要执行命令',
+      },
+    } as unknown as PendingWait<'approval'>
+    const longCommand = `printf '${'x'.repeat(1_300)}'`
+    const snapshot = {
+      pending: [approval],
+      runningCalls: [{
+        callId: 'call-long',
+        name: 'shell',
+        argsRaw: JSON.stringify({ command: longCommand }),
+        callView: { card: 'terminal', title: longCommand },
+      }],
+    } as unknown as ConversationSnapshot
+    const answerApproval = vi.fn(async () => undefined)
+    const finish = vi.fn()
+    const detail = vi.fn(async () => undefined)
+    const selectPage = vi.fn(async (
+      request: { initialChoiceId?: string; choices: readonly { id: string }[] },
+      onSelect: (choice: { id: string; label: string }) => Promise<void>,
+    ) => {
+      expect(request.initialChoiceId).toBe('reject')
+      expect(request.choices.map(choice => choice.id)).toEqual(['allow', 'inspect', 'reject'])
+      await onSelect({ id: 'inspect', label: '查看完整参数' })
+      await onSelect({ id: 'reject', label: '拒绝' })
+    })
+    const actions = new TuiActions({
+      active: () => ({ session: { getSnapshot: () => snapshot } }) as unknown as TuiActiveSession,
+      answerApproval,
+    } as unknown as HarnessTuiCapabilities, host({ selectPage, detail, finish }, { followLatest: vi.fn() }))
+
+    actions.syncPending(snapshot as ConversationSnapshot)
+    await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(selectPage).toHaveBeenCalledOnce()
+    expect(detail).toHaveBeenCalledOnce()
     expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
   })
 
@@ -233,5 +323,93 @@ describe('pending interaction continuation', () => {
 
     expect(cancelQuestion).toHaveBeenCalledWith(wait)
     expect(answerQuestion).not.toHaveBeenCalled()
+  })
+
+  it('defaults to reject and submits rejected when Escape closes the root page', async () => {
+    const approval = {
+      key: 'approval:root-esc',
+      kind: 'approval',
+      sessionId: 'session' as SessionId,
+      payload: {
+        toolName: 'shell',
+        callId: 'call-esc',
+        approvalId: 'appr-esc',
+        reason: '需要执行命令',
+      },
+    } as unknown as PendingWait<'approval'>
+    const snapshot = {
+      pending: [approval],
+      runningCalls: [{
+        callId: 'call-esc',
+        name: 'shell',
+        argsRaw: '{"command":"ls"}',
+        callView: { card: 'terminal', title: 'ls -la src' },
+      }],
+    } as unknown as ConversationSnapshot
+    const answerApproval = vi.fn(async () => undefined)
+    const live = liveOverlays()
+    const actions = new TuiActions({
+      active: () => ({ session: { getSnapshot: () => snapshot } }) as unknown as TuiActiveSession,
+      answerApproval,
+    } as unknown as HarnessTuiCapabilities, host(live.overlays, { followLatest: vi.fn() }))
+
+    actions.syncPending(snapshot)
+    await vi.waitFor(() => { expect(plain(live.component().render(80))).toContain('工具审批') })
+    expect(plain(live.component().render(80))).toContain('拒绝')
+
+    live.component().handleInput(ESCAPE)
+    await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
+  })
+
+  it('returns from argument detail onto the same selector with inspect still selected', async () => {
+    const approval = {
+      key: 'approval:inspect',
+      kind: 'approval',
+      sessionId: 'session' as SessionId,
+      payload: {
+        toolName: 'shell',
+        callId: 'call-inspect',
+        approvalId: 'appr-inspect',
+        reason: '需要执行命令',
+      },
+    } as unknown as PendingWait<'approval'>
+    const longCommand = `printf '${'x'.repeat(1_300)}'`
+    const snapshot = {
+      pending: [approval],
+      runningCalls: [{
+        callId: 'call-inspect',
+        name: 'shell',
+        argsRaw: JSON.stringify({ command: longCommand }),
+        callView: { card: 'terminal', title: longCommand },
+      }],
+    } as unknown as ConversationSnapshot
+    const answerApproval = vi.fn(async () => undefined)
+    const live = liveOverlays()
+    const actions = new TuiActions({
+      active: () => ({ session: { getSnapshot: () => snapshot } }) as unknown as TuiActiveSession,
+      answerApproval,
+    } as unknown as HarnessTuiCapabilities, host(live.overlays, { followLatest: vi.fn() }))
+
+    actions.syncPending(snapshot)
+    await vi.waitFor(() => { expect(plain(live.component().render(80))).toContain('查看完整参数') })
+
+    live.component().handleInput(UP)
+    live.component().handleInput(ENTER)
+    await vi.waitFor(() => { expect(plain(live.component().render(80))).toContain('完整参数') })
+
+    live.component().handleInput(ESCAPE)
+    await vi.waitFor(() => { expect(plain(live.component().render(80))).toContain('工具审批') })
+
+    live.component().handleInput(ENTER)
+    await vi.waitFor(() => { expect(plain(live.component().render(80))).toContain('完整参数') })
+    expect(answerApproval).not.toHaveBeenCalled()
+
+    live.component().handleInput(ESCAPE)
+    await vi.waitFor(() => { expect(plain(live.component().render(80))).toContain('工具审批') })
+    live.component().handleInput(DOWN)
+    live.component().handleInput(ENTER)
+    await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
   })
 })

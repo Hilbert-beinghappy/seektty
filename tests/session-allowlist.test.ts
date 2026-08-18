@@ -12,10 +12,13 @@ import type {
   HarnessTuiCapabilities,
   TuiActiveSession,
 } from '../src/client/capabilities.ts'
-import type { OverlayQueue, SelectOverlayRequest } from '../src/client/overlays.ts'
+import type { OverlayNavigation, OverlayQueue } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
 
-function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript> = {}): TuiActionHost {
+function host(
+  overlays: Partial<OverlayQueue> & Partial<OverlayNavigation>,
+  transcript: Partial<Transcript> = {},
+): TuiActionHost {
   return {
     overlays: overlays as OverlayQueue,
     transcript: { followLatest: vi.fn(), ...transcript } as Transcript,
@@ -42,9 +45,13 @@ describe('session tool approvals', () => {
     } as unknown as PendingWait<'approval'>
     const snapshot = { pending: [wait] } as unknown as ConversationSnapshot
     const answerApproval = vi.fn(async () => undefined)
-    const select = vi.fn(async (request: SelectOverlayRequest) => {
+    const selectPage = vi.fn(async (
+      request: { initialChoiceId?: string; choices: readonly { id: string }[] },
+      onSelect: (choice: { id: string; label: string }) => Promise<void>,
+    ) => {
+      expect(request.initialChoiceId).toBe('reject')
       expect(request.choices.map(choice => choice.id)).toEqual(['allow', 'reject'])
-      return { id: 'allow', label: 'Allow this time' }
+      await onSelect({ id: 'allow', label: 'Allow this time' })
     })
     const active = {
       sessionId: 'session' as SessionId,
@@ -54,10 +61,10 @@ describe('session tool approvals', () => {
       active: () => active,
       answerApproval,
     } as unknown as HarnessTuiCapabilities
-    const actions = new TuiActions(capabilities, host({ select }))
+    const actions = new TuiActions(capabilities, host({ selectPage, finish: vi.fn() }))
     actions.syncPending(snapshot)
     await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
-    expect(select).toHaveBeenCalledOnce()
+    expect(selectPage).toHaveBeenCalledOnce()
     expect(answerApproval).toHaveBeenCalledWith(wait, 'allowed-once')
   })
 })
