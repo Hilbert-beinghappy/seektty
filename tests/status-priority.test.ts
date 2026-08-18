@@ -1,8 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EPHEMERAL_NOTICE_MS, NoticeBoard, pickStatusLine } from '../src/client/status-priority.ts'
+import { setUiLocale } from '../src/client/locale.ts'
+import {
+  EPHEMERAL_NOTICE_MS,
+  NoticeBoard,
+  pickStatusLine,
+  type StatusPriorityInput,
+} from '../src/client/status-priority.ts'
+
+function lineOf(board: NoticeBoard, extra: StatusPriorityInput = {}): string | undefined {
+  const view = board.view()
+  return pickStatusLine({
+    ...(view.error === undefined ? {} : { error: view.error.message }),
+    ...(view.warning === undefined ? {} : { warning: view.warning.message }),
+    ...(view.toast === undefined ? {} : { notice: view.toast.message }),
+    ...extra,
+  })
+}
 
 afterEach(() => {
   vi.useRealTimers()
+  setUiLocale('zh')
 })
 
 describe('status line priority', () => {
@@ -50,10 +67,7 @@ describe('notice board slots', () => {
       error: { message: 'send failed' },
       toast: { message: 'copied', tone: 'success' },
     })
-    expect(pickStatusLine({
-      error: board.view().error?.message,
-      notice: board.view().toast?.message,
-    })).toBe('send failed')
+    expect(lineOf(board)).toBe('send failed')
 
     vi.advanceTimersByTime(EPHEMERAL_NOTICE_MS)
     expect(board.view()).toEqual({ error: { message: 'send failed' } })
@@ -74,6 +88,36 @@ describe('notice board slots', () => {
     })
     vi.advanceTimersByTime(1_000)
     expect(board.view()).toEqual({ warning: { message: 'need restart' } })
+    board.dispose()
+  })
+
+  it('keeps a persistent error after a later warning is recorded', () => {
+    const board = new NoticeBoard()
+    board.set('send failed', 'error')
+    board.set('need restart', 'warning')
+    expect(board.view()).toEqual({
+      error: { message: 'send failed' },
+      warning: { message: 'need restart' },
+    })
+    expect(lineOf(board)).toBe('send failed')
+    board.dispose()
+  })
+
+  it('re-presents lasting error and warning copy after the locale switches', () => {
+    setUiLocale('zh')
+    const board = new NoticeBoard()
+    board.set('未打开会话', 'error')
+    board.set('需要重启', 'warning')
+    expect(board.view()).toEqual({
+      error: { message: '未打开会话' },
+      warning: { message: '需要重启' },
+    })
+    setUiLocale('en')
+    expect(board.view()).toEqual({
+      error: { message: 'No session open' },
+      warning: { message: 'Restart required' },
+    })
+    setUiLocale('zh')
     board.dispose()
   })
 
