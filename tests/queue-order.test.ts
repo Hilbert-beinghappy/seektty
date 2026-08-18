@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { moveIndex } from '../src/client/queue-order.ts'
+import { moveIndex, queueListChoiceOrder } from '../src/client/queue-order.ts'
 
 describe('queue reorder', () => {
   it('moves an item up or down and no-ops at the ends', () => {
@@ -18,5 +18,11 @@ describe('queue reorder', () => {
     expect(source.includes('reorderQueued')).toBe(false)
     expect(source.includes('与上一条排队消息对调')).toBe(false)
     expect(source.includes('Swap with the previous queued message')).toBe(false)
+  })
+
+  it('puts queued messages before bulk actions so Enter targets a message', () => {
+    expect(queueListChoiceOrder(['m1'], 1)).toEqual(['m1', '__clear__'])
+    expect(queueListChoiceOrder(['m1', 'm2'], 2)).toEqual(['m1', 'm2', '__all_steer__', '__clear__'])
+    expect(queueListChoiceOrder([], 0)).toEqual([])
   })
 })

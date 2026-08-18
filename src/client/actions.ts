@@ -26,6 +26,7 @@ import {
 import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import { lastFencedCode } from './copy-content.ts'
+import { queueListChoiceOrder } from './queue-order.ts'
 import { formatByteSize } from './byte-size.ts'
 import { helpSectionChoices, helpSectionText, type HelpSectionId } from './help.ts'
 import {
@@ -1789,20 +1790,30 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       detail: ui('查看、编辑或提前处理排队消息 · 打开期间自动刷新', "View, edit, or promote queued messages · refreshes while open"),
       choices: rows.length === 0
         ? [{ id: '__empty__', label: ui('当前队列为空', "The queue is empty"), disabledReason: ui('等待新的排队消息，或 Esc 关闭', "Waiting for a queued message, or Esc to close") }]
-        : [
-          ...(queued.length > 1
-            ? [{ id: '__all_steer__', label: ui('整队引导', "Steer entire queue"), description: ui(`按当前顺序处理 ${queued.length} 条排队消息`, `Process ${queued.length} queued message(s) in the current order`) }]
-            : []),
-          ...(queued.length > 0
-            ? [{ id: '__clear__', label: ui('清空全部', "Clear all"), description: ui('删除所有排队消息，不影响当前轮次', "Remove every queued message; the current turn is unchanged") }]
-            : []),
-          ...rows.map(row => ({
+        : queueListChoiceOrder(rows.map(row => row.id), queued.length).map((id) => {
+          if (id === '__all_steer__') {
+            return {
+              id,
+              label: ui('整队引导', "Steer entire queue"),
+              description: ui(`按当前顺序处理 ${queued.length} 条排队消息`, `Process ${queued.length} queued message(s) in the current order`),
+            }
+          }
+          if (id === '__clear__') {
+            return {
+              id,
+              label: ui('清空全部', "Clear all"),
+              description: ui('删除所有排队消息，不影响当前轮次', "Remove every queued message; the current turn is unchanged"),
+            }
+          }
+          const row = rows.find(candidate => candidate.id === id)
+          if (row === undefined) return { id, label: id }
+          return {
             id: row.id,
             label: row.preview === '' ? ui('(空消息)', "(empty message)") : row.preview,
             description: queuePlacementLabel(row.placement),
             ...(row.placement === 'queued' ? {} : { disabledReason: ui('当前状态不接受队列修改', "The queue cannot be changed in the current state") }),
-          })),
-        ],
+          }
+        }),
       searchable: rows.length > 8,
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
     }
