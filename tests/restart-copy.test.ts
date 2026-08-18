@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { restartFactAfterNotice, restartRequiredFact, restartRequiredNotice } from '../src/client/restart-copy.ts'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { restartRequiredFact, restartRequiredNotice } from '../src/client/restart-copy.ts'
 import { setUiLocale } from '../src/client/locale.ts'
+
+const root = resolve(import.meta.dirname, '..')
 
 afterEach(() => { setUiLocale('zh') })
 
@@ -25,12 +29,14 @@ describe('restart copy', () => {
     expect(fact).not.toMatch(/\p{Script=Han}/u)
   })
 
-  it('does not let a later success or info toast hide the lasting restart fact', () => {
-    const fact = restartRequiredFact()
-    expect(restartFactAfterNotice(fact, 'success')).toBe(fact)
-    expect(restartFactAfterNotice(fact, 'info')).toBe(fact)
-    expect(restartFactAfterNotice(fact, undefined)).toBe(fact)
-    expect(restartFactAfterNotice(fact, 'error')).toBeUndefined()
-    expect(restartFactAfterNotice(undefined, 'success')).toBeUndefined()
+  it('rebuilds the lasting fact from the current locale instead of a stored string', () => {
+    expect(restartRequiredFact()).toBe('需要重启 · /restart')
+    setUiLocale('en')
+    expect(restartRequiredFact()).toBe('Restart required · /restart')
+    const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
+    expect(surface).toMatch(/let restartRequired = false/u)
+    expect(surface).toMatch(/if \(restartRequired\) facts\.push\(restartRequiredFact\(\)\)/u)
+    expect(surface).not.toMatch(/restartFactAfterNotice/u)
+    expect(surface).not.toMatch(/lastingRestart/u)
   })
 })

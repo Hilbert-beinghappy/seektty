@@ -14,17 +14,3 @@ export function restartRequiredFact(): string {
 export function restartRequiredNotice(label: string): string {
   return ui(`${label}。需要重启 · /restart`, `${label}. Restart required · /restart`)
 }
-
-/**
- * A later success/info toast must not hide the lasting restart fact.
- * @param restart - current restart fact.
- * @param noticeTone - tone of the notice that would otherwise replace status.
- */
-export function restartFactAfterNotice(
-  restart: string | undefined,
-  noticeTone: 'info' | 'success' | 'warning' | 'error' | undefined,
-): string | undefined {
-  if (restart === undefined) return undefined
-  if (noticeTone === 'error' || noticeTone === 'warning') return undefined
-  return restart
-}

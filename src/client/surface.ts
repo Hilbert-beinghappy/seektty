@@ -62,7 +62,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
-import { restartFactAfterNotice, restartRequiredFact, restartRequiredNotice } from './restart-copy.ts'
+import { restartRequiredFact, restartRequiredNotice } from './restart-copy.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -268,7 +268,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let exitArmedUntil = 0
     let latestSessionId = ''
     let notice: { message: string; tone: NoticeTone } | undefined
-    let restartRequired: string | undefined
+    let restartRequired = false
     let headerGeneration = 0
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
     const sessionChrome = createSessionChromeStore()
@@ -406,17 +406,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
-      if (restartRequired !== undefined) facts.push(restartRequiredFact())
-      const lastingRestart = restartFactAfterNotice(restartRequired, notice?.tone)
-      const secondary = notice !== undefined && (notice.tone === 'error' || notice.tone === 'warning')
+      if (restartRequired) facts.push(restartRequiredFact())
+      const secondary = notice !== undefined
         ? noticeText(notice.message, notice.tone)
-        : lastingRestart !== undefined
-          ? color.warning(lastingRestart)
-          : notice !== undefined
-            ? noticeText(notice.message, notice.tone)
-            : [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
-              .filter((value): value is string => value !== undefined)
-              .join(' · ') || undefined
+        : [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
+          .filter((value): value is string => value !== undefined)
+          .join(' · ') || undefined
       status.setDetail(secondary)
       applyTerminalTitle()
     }
@@ -577,7 +572,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         })
       },
       requireRestart: (label) => {
-        restartRequired = restartRequiredFact()
+        restartRequired = true
         setNotice(restartRequiredNotice(label), 'warning')
       },
     })
