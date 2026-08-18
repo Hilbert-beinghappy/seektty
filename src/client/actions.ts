@@ -1630,7 +1630,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           { id: 'edit', label: ui('继续调整', "Continue editing"), description: ui('修改界面或代码颜色', "Edit interface or code colors") },
           { id: 'cancel', label: ui('取消', "Cancel"), description: ui('恢复原主题', "Restore original theme") },
         ],
-        footer: ui('Enter 选择 · Esc 返回', "Enter select · Esc back"),
+        footer: themePreviewFooter(),
         options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
       })
       if (selected === undefined || selected.id === 'cancel') {
@@ -3863,6 +3863,13 @@ export function questionBatchSummary(
     `已处理 ${String(answers.length)} 项（回答 ${String(answered)} · 跳过 ${String(skipped)}）`,
     `Processed ${String(answers.length)} item(s) (answered ${String(answered)} · skipped ${String(skipped)})`,
   )
+}
+
+/**
+ * Theme preview Esc restores the previous theme and discards unsaved edits.
+ */
+export function themePreviewFooter(): string {
+  return ui('Enter 选择 · Esc 取消并恢复', 'Enter select · Esc cancel and restore')
 }
 
 /**

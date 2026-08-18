@@ -26,6 +26,11 @@ import {
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import {
+  applyTranscriptEscape,
+  applyTranscriptFocusToggle,
+  noticeForHostCommand,
+} from './nav-notice.ts'
+import {
   BottomAnchoredLayout,
   ContextBar,
   PromptEditor,
@@ -690,8 +695,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return
         }
         const outcome = await noticeAfterFailedHostCommand(current.session, trimmed)
-        if (!outcome.ok) setNotice(outcome.message, 'error')
-        else if (!outcome.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
+        if (!outcome.ok) {
+          setNotice(outcome.message, 'error')
+          return
+        }
+        const hostNotice = noticeForHostCommand({ ok: true, matched: outcome.matched }, name)
+        if (hostNotice !== undefined) setNotice(hostNotice.message, hostNotice.tone)
       } catch (error) {
         setNotice(
           noticeAfterDispatchCatch(error, capabilities.active()?.session),
@@ -773,16 +782,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       if (matchesBinding('focusToggle', data) && (transcriptFocused || editor.getText() === '')) {
-        transcript.cancelSearch()
-        transcript.exitToolFocus()
+        applyTranscriptFocusToggle(transcript)
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
-        if (transcript.cancelSearch()) return { consume: true }
-        if (transcript.exitToolFocus()) return { consume: true }
-        focusEditor()
+        applyTranscriptEscape(transcript, focusEditor)
         return { consume: true }
       }
       if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
