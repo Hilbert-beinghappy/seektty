@@ -3651,7 +3651,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       fallback: ui(`调用 ${wait.payload.callId ?? wait.payload.approvalId}`, `Invoke ${wait.payload.callId ?? wait.payload.approvalId}`),
       preview: toolApprovalPreview(call),
     })
-    const options = { width: '95%', maxHeight: '90%', anchor: 'bottom-center' as const, margin: 1 }
+    const options = { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 } as const
     let decision: 'allowed-once' | 'rejected' | undefined
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
@@ -3675,7 +3675,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           await navigation.detail({
             title: ui(`完整参数 · ${wait.payload.toolName}`, `Full arguments · ${wait.payload.toolName}`),
             content: composed.full,
-            options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+            options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const,
           })
           return
         }

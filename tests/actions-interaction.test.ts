@@ -14,7 +14,7 @@ import type {
   HarnessTuiCapabilities,
   TuiActiveSession,
 } from '../src/client/capabilities.ts'
-import { OverlayQueue } from '../src/client/overlays.ts'
+import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
 
 const ESCAPE = '\u001B'
@@ -48,7 +48,10 @@ function liveOverlays(): {
   }
 }
 
-function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript>): TuiActionHost {
+function host(
+  overlays: Partial<OverlayQueue> & Partial<OverlayNavigation>,
+  transcript: Partial<Transcript>,
+): TuiActionHost {
   return {
     overlays: overlays as OverlayQueue,
     transcript: transcript as Transcript,
@@ -84,7 +87,7 @@ function questionBatch(count: number): PendingWait<'question'> {
 
 function pendingActions(
   wait: PendingWait<'question'>,
-  overlays: Partial<OverlayQueue>,
+  overlays: Partial<OverlayQueue> & Partial<OverlayNavigation>,
 ): {
   readonly actions: TuiActions
   readonly answerQuestion: ReturnType<typeof vi.fn>
