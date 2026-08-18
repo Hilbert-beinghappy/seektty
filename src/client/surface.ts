@@ -1,8 +1,6 @@
 /** Interactive pi-tui lifecycle over the authoritative Harness Client Runtime. */
 
-import { randomUUID } from 'node:crypto'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { chmodSync } from 'node:fs'
 import {
   Box,
   Key,
@@ -45,7 +43,11 @@ import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } f
 import { Transcript } from './transcript.ts'
 import { formatElapsed } from './elapsed.ts'
 import { writeClipboard } from './clipboard.ts'
-import { captureClipboardImage } from './clipboard-image.ts'
+import {
+  captureClipboardImage,
+  cleanupClipboardImageWorkspace,
+  createClipboardImageWorkspace,
+} from './clipboard-image.ts'
 import {
   desktopNotifyBody,
   desktopNotifySequence,
@@ -696,9 +698,26 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (!transcriptFocused && paste !== null) {
         const content = paste[1] ?? ''
         if (content.trim() === '') {
-          const dest = join(tmpdir(), `seektty-paste-${randomUUID()}.png`)
-          const captured = captureClipboardImage({ platform: process.platform, dest })
-          if (captured !== undefined) return attachPastedImage(captured, '')
+          const workspace = createClipboardImageWorkspace()
+          void captureClipboardImage({ platform: process.platform, dest: workspace.dest })
+            .then(async (captured) => {
+              if (captured === undefined) return
+              chmodSync(workspace.dest, 0o600)
+              const attachment = await capabilities.addAttachment(captured)
+              const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
+              setNotice(ui(
+                `已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+                `Attached ${attachment.name} from paste · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
+              ), 'success')
+            })
+            .catch((error: unknown) => {
+              setNotice(ui(
+                `粘贴图片未加入：${capabilityError(error)}`,
+                `Pasted image was not attached: ${capabilityError(error)}`,
+              ), 'warning')
+            })
+            .finally(() => { cleanupClipboardImageWorkspace(workspace) })
+          return { consume: true }
         }
         const safeContent = escapeTerminalText(content)
         if (safeContent !== content) {
