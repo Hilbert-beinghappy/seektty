@@ -8,7 +8,7 @@ export type HelpSectionId = 'keys' | 'flows' | 'doctor'
 export function helpSectionChoices(): readonly { id: HelpSectionId; label: string; description: string }[] {
   return [
     { id: 'keys', label: ui('键位速查', 'Keyboard shortcuts'), description: ui('与当前 TUI 绑定共用一张表', 'Same table as the live TUI bindings') },
-    { id: 'flows', label: ui('常用流程', 'Common workflows'), description: ui('审批、粘贴、导出和查找', 'Approvals, paste, export, and search') },
+    { id: 'flows', label: ui('常用流程', 'Common workflows'), description: ui('输入、停止、会话、审批和浏览', 'Input, stop, sessions, approvals, and browsing') },
     { id: 'doctor', label: ui('/doctor 与安装', '/doctor and setup'), description: ui('环境检查和 QUICKSTART', 'Environment checks and QUICKSTART') },
   ]
 }
@@ -18,22 +18,20 @@ export function helpSectionText(id: HelpSectionId): string {
   if (id === 'flows') {
     return ui(
       [
-        '审批工具：弹窗里查看命令或 diff，再选仅本次允许或拒绝。',
-        '粘贴图片：粘贴文件路径，或在空粘贴时从系统剪贴板读取位图。',
-        '查找对话：Tab 进入对话浏览，按 / 增量搜索，n/N 跳转。',
-        '导出会话：/export 保存 ZIP，/export md 保存 Markdown。',
-        '导出主题：/theme export Ocean ./ocean.json，文件必须还不存在。',
-        '自定义快捷键：/keymap commandPalette Ctrl+K，或 /keymap commandPalette reset 恢复默认。',
-        '命令面板：Ctrl+P；完整帮助：F1 或 /help。',
+        '输入：在底部输入区写消息，Enter 发送。',
+        '换行：Shift+Enter 在输入区插入换行。',
+        '停止：Ctrl+C 停止当前轮次；再按一次退出。',
+        '会话：Ctrl+S 打开会话列表，新建或切换会话。',
+        '审批：弹窗里查看命令或 diff，再选仅本次允许或拒绝。',
+        '浏览对话：Tab 进入对话浏览，按 / 增量搜索，n/N 跳转。',
       ].join('\n'),
       [
-        'Approve tools: inspect the command or diff in the overlay, then allow once or reject.',
-        'Paste images: paste a file path, or capture a clipboard bitmap on an empty paste.',
-        'Search the transcript: Tab into browse mode, press / to search, then n/N to jump.',
-        'Export: /export saves a ZIP; /export md saves Markdown.',
-        'Export a theme: /theme export Ocean ./ocean.json; the file must not already exist.',
-        'Custom shortcuts: /keymap commandPalette Ctrl+K, or /keymap commandPalette reset to restore.',
-        'Command palette: Ctrl+P. Full help: F1 or /help.',
+        'Input: type in the composer and press Enter to send.',
+        'Newline: Shift+Enter inserts a newline in the composer.',
+        'Stop: Ctrl+C stops the active turn; press again to exit.',
+        'Sessions: Ctrl+S opens the session list to create or switch sessions.',
+        'Approvals: inspect the command or diff in the overlay, then allow once or reject.',
+        'Browse the transcript: Tab into browse mode, press / to search, then n/N to jump.',
       ].join('\n'),
     )
   }
