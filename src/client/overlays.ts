@@ -298,8 +298,8 @@ class SearchSelectOverlay implements Component {
     lines.push(...this.list.render(safeWidth))
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
     lines.push(color.muted(translateUiText(this.request.footer ?? ui(
-      '↑↓ 选择 · Enter 确认 · Esc 返回/关闭',
-      '↑↓ Select · Enter confirm · Esc back/close',
+      'Enter 选择 · Esc 返回',
+      'Enter select · Esc back',
     ))))
     return modalFrame(this.request.title, lines, width)
   }
@@ -525,8 +525,8 @@ class MultiSelectOverlay implements Component {
       `${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
       ...this.list.render(safeWidth),
       color.muted(translateUiText(this.request.footer ?? ui(
-        '↑↓ 选择 · Space 勾选 · Enter 提交 · Esc 返回/关闭',
-        '↑↓ Select · Space toggle · Enter submit · Esc back/close',
+        'Space 勾选 · Enter 选择 · Esc 返回',
+        'Space toggle · Enter select · Esc back',
       ))),
     ], width)
   }
@@ -672,7 +672,7 @@ class ProgressOverlay implements Component {
         escapeTerminalText(body === '' ? ui('等待输出…', 'Waiting for output…') : body),
         frameContentWidth(width),
       ).map(line => color.muted(line)),
-      color.muted(ui('按 Esc 取消并中止操作', 'Press Esc to cancel and abort')),
+      color.muted(ui('Esc 中止', 'Esc abort')),
     ], width)
   }
 
@@ -817,7 +817,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       searchable: false,
       choices,
       initialChoiceId,
-      footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', '↑↓ Select · Enter confirm · Esc back/close'),
+      footer: ui('Enter 选择 · Esc 返回', 'Enter select · Esc back'),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'
@@ -1104,7 +1104,7 @@ export class OverlayQueue implements OverlayPrompts {
       searchable: false,
       choices,
       initialChoiceId,
-      footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', '↑↓ Select · Enter confirm · Esc back/close'),
+      footer: ui('Enter 选择 · Esc 返回', 'Enter select · Esc back'),
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     return selected?.id === 'confirm'
