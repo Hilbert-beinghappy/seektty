@@ -723,6 +723,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
+      if (matchesBinding('interrupt', data)) {
+        const current = capabilities.active()
+        if (current !== undefined && current.session.getSnapshot().running) {
+          void current.session.cancel()
+          return { consume: true }
+        }
+      }
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
@@ -883,11 +890,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (!matchesBinding('interrupt', data)) return undefined
-      const current = capabilities.active()
-      if (current !== undefined && current.session.getSnapshot().running) {
-        void current.session.cancel()
-        return { consume: true }
-      }
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
         setNotice(clearIdleComposerDraft(
           editor,
