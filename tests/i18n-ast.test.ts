@@ -38,6 +38,7 @@ const GATED = [
   'client/transcript.ts',
   'client/actions.ts',
   'client/error-advice.ts',
+  'protocol.ts',
 ]
 
 function walk(directory: string): string[] {

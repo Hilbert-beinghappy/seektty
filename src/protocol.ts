@@ -188,7 +188,10 @@ export class TuiSettingsConflictError extends Error {
     readonly expected: number,
     readonly actual: number,
   ) {
-    super(`设置 ${JSON.stringify(namespace)} 已在其他界面更新（期望 revision ${String(expected)}，当前 ${String(actual)}）`)
+    super(({
+      zh: `设置 ${JSON.stringify(namespace)} 已在其他界面更新（期望 revision ${String(expected)}，当前 ${String(actual)}）`,
+      en: `Settings ${JSON.stringify(namespace)} was updated in another surface (expected revision ${String(expected)}, actual ${String(actual)})`,
+    }).zh)
     this.name = 'TuiSettingsConflictError'
   }
 }
