@@ -305,10 +305,6 @@ class SearchSelectOverlay implements Component {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.tab)) {
-      this.choose()
-      return
-    }
     if (matchesKey(data, Key.home)) {
       this.list.setSelectedIndex(0)
       return
