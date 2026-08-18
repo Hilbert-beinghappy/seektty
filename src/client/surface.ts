@@ -62,7 +62,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
-import { EPHEMERAL_NOTICE_MS, pickStatusLine } from './status-priority.ts'
+import { NoticeBoard, pickStatusLine } from './status-priority.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -267,9 +267,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const closed = new Promise<TuiSurfaceOutcome>((resolve) => { resolveClosed = resolve })
     let exitArmedUntil = 0
     let latestSessionId = ''
-    let notice: { message: string; tone: NoticeTone } | undefined
-    let noticeSeq = 0
-    let noticeTimer: ReturnType<typeof setTimeout> | undefined
+    const notices = new NoticeBoard()
     let restartRequired: string | undefined
     let headerGeneration = 0
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
@@ -300,34 +298,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const setNotice = (message: string, tone: NoticeTone = 'info'): void => {
       if (stopping !== undefined) return
-      notice = { message, tone }
-      noticeSeq += 1
-      const seq = noticeSeq
-      if (noticeTimer !== undefined) {
-        clearTimeout(noticeTimer)
-        noticeTimer = undefined
-      }
-      if (tone === 'success' || tone === 'info') {
-        noticeTimer = setTimeout(() => {
-          if (seq !== noticeSeq) return
-          notice = undefined
-          noticeTimer = undefined
-          updateStatus()
-          renderWhileOpen()
-        }, EPHEMERAL_NOTICE_MS)
-        noticeTimer.unref()
-      }
+      notices.set(message, tone)
       updateStatus()
       renderWhileOpen()
     }
 
     const dismissNotice = (): void => {
-      notice = undefined
-      noticeSeq += 1
-      if (noticeTimer !== undefined) {
-        clearTimeout(noticeTimer)
-        noticeTimer = undefined
-      }
+      notices.dismiss()
     }
 
     const onboarding = new ProviderOnboardingGate(
@@ -415,6 +392,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
+      const noticeView = notices.view()
       status.setDetail(pickStatusLine({
         ...(snapshot.removed
           ? { error: color.danger(ui('会话已删除', 'Session deleted')) }
@@ -425,9 +403,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
                 `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
               )),
             }
-            : notice?.tone === 'error'
-              ? { error: noticeText(notice.message, notice.tone) }
-              : {}),
+            : noticeView.error === undefined
+              ? {}
+              : { error: noticeText(noticeView.error.message, 'error') }),
         ...(pendingCount > 0
           ? {
             pending: color.warning(ui(
@@ -438,14 +416,21 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           : {}),
         ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启', 'Restart required')) }),
         ...(snapshot.running ? { running: color.accent(generating) } : {}),
-        ...(notice?.tone === 'warning' ? { warning: noticeText(notice.message, notice.tone) } : {}),
+        ...(noticeView.warning === undefined
+          ? {}
+          : { warning: noticeText(noticeView.warning.message, 'warning') }),
         ...(facts.length === 0 ? {} : { facts: color.muted(facts.join(' · ')) }),
-        ...(notice !== undefined && (notice.tone === 'success' || notice.tone === 'info')
-          ? { notice: noticeText(notice.message, notice.tone) }
-          : {}),
+        ...(noticeView.toast === undefined
+          ? {}
+          : { notice: noticeText(noticeView.toast.message, noticeView.toast.tone) }),
       }))
       applyTerminalTitle()
     }
+
+    notices.setOnExpire(() => {
+      updateStatus()
+      renderWhileOpen()
+    })
 
     const refreshHeader = (forceModel = false): void => {
       const generation = ++headerGeneration
@@ -501,6 +486,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           clearInterval(elapsedTimer)
           elapsedTimer = undefined
         }
+        notices.dispose()
         overlays.dispose()
         transcript.dispose()
         setCodeHighlighter(undefined)
@@ -908,7 +894,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         void actions.execute('settings', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.escape) && notice !== undefined && editor.getText() === '') {
+      if (matchesKey(data, Key.escape) && notices.hasVisible()) {
         dismissNotice()
         updateStatus()
         renderWhileOpen()
