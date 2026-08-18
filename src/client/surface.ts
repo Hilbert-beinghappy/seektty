@@ -62,6 +62,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
+import { NoticeBoard, pickStatusLine } from './status-priority.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -266,7 +267,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const closed = new Promise<TuiSurfaceOutcome>((resolve) => { resolveClosed = resolve })
     let exitArmedUntil = 0
     let latestSessionId = ''
-    let notice: { message: string; tone: NoticeTone } | undefined
+    const notices = new NoticeBoard()
     let restartRequired: string | undefined
     let headerGeneration = 0
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
@@ -297,9 +298,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const setNotice = (message: string, tone: NoticeTone = 'info'): void => {
       if (stopping !== undefined) return
-      notice = { message, tone }
+      notices.set(message, tone)
       updateStatus()
       renderWhileOpen()
+    }
+
+    const dismissNotice = (): void => {
+      notices.dismiss()
     }
 
     const onboarding = new ProviderOnboardingGate(
@@ -337,10 +342,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             if (stopping !== undefined) return
             const elapsed = sessionChrome.of(latestSessionId)
             if (elapsed.runningSince === undefined || !liveBehavior.get().statusElapsed) return
-            status.setDetail(color.accent(ui(
-              `生成中 · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C 停止`,
-              `Generating · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C to stop`,
-            )))
+            updateStatus()
             renderWhileOpen()
           }, 500)
         }
@@ -377,21 +379,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           `Generating · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C to stop`,
         )
         : ui('生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop')
-      const primary = snapshot.removed
-        ? color.danger(ui('会话已删除', 'Session deleted'))
-        : snapshot.promptError !== null
-          ? color.danger(ui(
-            `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
-            `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
-          ))
-          : pendingCount > 0
-            ? color.warning(ui(
-              `/pending 处理 ${String(pendingCount)} 项交互`,
-              `/pending handles ${String(pendingCount)} interaction(s)`,
-            ))
-            : snapshot.running
-              ? color.accent(generating)
-              : undefined
       const facts: string[] = []
       if (snapshot.queue.length > 0) facts.push(ui(`队列 ${String(snapshot.queue.length)}`, `Queue ${String(snapshot.queue.length)}`))
       const jobs = active === undefined ? undefined : capabilities.jobs()
@@ -405,15 +392,45 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
-      if (restartRequired !== undefined) facts.push(ui('需要重启', 'Restart required'))
-      const secondary = notice === undefined
-        ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
-          .filter((value): value is string => value !== undefined)
-          .join(' · ') || undefined
-        : noticeText(notice.message, notice.tone)
-      status.setDetail(secondary)
+      const noticeView = notices.view()
+      status.setDetail(pickStatusLine({
+        ...(snapshot.removed
+          ? { error: color.danger(ui('会话已删除', 'Session deleted')) }
+          : snapshot.promptError !== null
+            ? {
+              error: color.danger(ui(
+                `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
+                `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
+              )),
+            }
+            : noticeView.error === undefined
+              ? {}
+              : { error: noticeText(noticeView.error.message, 'error') }),
+        ...(pendingCount > 0
+          ? {
+            pending: color.warning(ui(
+              `/pending 处理 ${String(pendingCount)} 项交互`,
+              `/pending handles ${String(pendingCount)} interaction(s)`,
+            )),
+          }
+          : {}),
+        ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启', 'Restart required')) }),
+        ...(snapshot.running ? { running: color.accent(generating) } : {}),
+        ...(noticeView.warning === undefined
+          ? {}
+          : { warning: noticeText(noticeView.warning.message, 'warning') }),
+        ...(facts.length === 0 ? {} : { facts: color.muted(facts.join(' · ')) }),
+        ...(noticeView.toast === undefined
+          ? {}
+          : { notice: noticeText(noticeView.toast.message, noticeView.toast.tone) }),
+      }))
       applyTerminalTitle()
     }
+
+    notices.setOnExpire(() => {
+      updateStatus()
+      renderWhileOpen()
+    })
 
     const refreshHeader = (forceModel = false): void => {
       const generation = ++headerGeneration
@@ -469,6 +486,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           clearInterval(elapsedTimer)
           elapsedTimer = undefined
         }
+        notices.dispose()
         overlays.dispose()
         transcript.dispose()
         setCodeHighlighter(undefined)
@@ -602,7 +620,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       editor.disableSubmit = false
       if (latestSessionId !== current.sessionId) {
         latestSessionId = current.sessionId
-        notice = undefined
+        dismissNotice()
         refreshHeader(true)
       } else {
         refreshHeader(false)
@@ -645,7 +663,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return false
         }
         capabilities.clearAttachments()
-        notice = undefined
+        dismissNotice()
         updateStatus()
         return true
       },
@@ -878,8 +896,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         void actions.execute('settings', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.escape) && notice !== undefined && editor.getText() === '') {
-        notice = undefined
+      if (matchesKey(data, Key.escape) && notices.hasVisible()) {
+        dismissNotice()
         updateStatus()
         renderWhileOpen()
         return { consume: true }
