@@ -10,8 +10,9 @@ afterEach(() => { setUiLocale('zh') })
 
 describe('actionable failure text', () => {
   it('unwraps in-process transport failures and keeps installer warnings', () => {
-    expect(explainFailure('transport failure for /api/foo: handler failure: boom')).toContain('内部调用失败：boom')
-    expect(explainFailure('transport failure for /api/foo: handler failure: boom')).toContain('下一步')
+    const transport = explainFailure('transport failure for /api/foo: handler failure: boom')
+    expect(transport).not.toContain('\n')
+    expect(transport).toContain('重试当前操作，再次失败运行 /doctor')
     expect(explainFailure('读取工作区与会话超时，请运行 /doctor 检查 Harness 状态')).not.toContain('/doctor')
     expect(explainFailure('读取工作区与会话超时，请运行 /doctor 检查 Harness 状态')).toContain('重新运行 deepseek')
     expect(explainFailure('读取工作区与会话超时')).toContain('重新运行 deepseek')
