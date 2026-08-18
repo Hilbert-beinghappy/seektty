@@ -77,22 +77,27 @@ describe('queue reorder', () => {
     await vi.waitFor(() => { expect(mounted).toBeDefined() })
     expect(plain(mounted!.render(80))).toContain('queued hello')
 
-    mounted!.handleInput(DOWN)
-    mounted!.handleInput(ENTER)
+    const type = (data: string): void => {
+      const handle = mounted?.handleInput
+      if (handle === undefined) throw new Error('queue overlay has no handleInput')
+      handle.call(mounted, data)
+    }
+    type(DOWN)
+    type(ENTER)
     await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑') })
 
-    mounted!.handleInput(DOWN)
-    mounted!.handleInput(ENTER)
+    type(DOWN)
+    type(ENTER)
     await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑排队消息') })
 
-    mounted!.handleInput(ESCAPE)
+    type(ESCAPE)
     await vi.waitFor(() => {
       expect(updateQueue).not.toHaveBeenCalled()
       expect(notice).not.toHaveBeenCalled()
     })
 
-    mounted!.handleInput(ESCAPE)
-    mounted!.handleInput(ESCAPE)
+    type(ESCAPE)
+    type(ESCAPE)
     await pending
     expect(updateQueue).not.toHaveBeenCalled()
     expect(notice.mock.calls.some(call => String(call[0]).includes('已提交'))).toBe(false)
