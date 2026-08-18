@@ -9,7 +9,7 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection'
 import type { TuiManagementBridge, TuiSurfaceOutcome } from '@deepseek-ai/dsh-tui-protocol'
 import { startTui } from '../client/index.ts'
 import { translateUiText, ui } from '../client/locale.ts'
-import { isActiveFiber } from './fiber-state.ts'
+import { isActiveFiber, resetUnknownFiberWarnings } from './fiber-state.ts'
 import { createTuiManagementBridge } from './management.ts'
 import { TUI_STARTUP_SERVICE, type TuiStartupValues } from './startup.ts'
 
@@ -46,6 +46,7 @@ export const internals: {
 }
 
 async function run(ctx: Context): Promise<void> {
+  resetUnknownFiberWarnings()
   await ctx.get('loader')?.await()
   if (!isActive(ctx)) return
   const startup = ctx.get(TUI_STARTUP_SERVICE) as TuiStartupValues | undefined

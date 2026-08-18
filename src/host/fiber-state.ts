@@ -13,6 +13,12 @@ export const FIBER_STATE = {
 } as const
 
 const KNOWN = new Set<number>(Object.values(FIBER_STATE))
+const warned = new Set<number>()
+
+/** Clear per-connection unknown-state warnings. Call when a Host connection starts. */
+export function resetUnknownFiberWarnings(): void {
+  warned.clear()
+}
 
 /**
  * True when the Host fiber is ACTIVE. Unknown numeric states warn instead of
@@ -24,6 +30,9 @@ export function isActiveFiber(
   state: number,
   warn: (chunk: string) => unknown = () => undefined,
 ): boolean {
-  if (!KNOWN.has(state)) warn(`seektty: unknown Cordis fiber.state ${String(state)}\n`)
+  if (!KNOWN.has(state) && !warned.has(state)) {
+    warned.add(state)
+    warn(`seektty: unknown Cordis fiber.state ${String(state)}\n`)
+  }
   return state === FIBER_STATE.ACTIVE
 }
