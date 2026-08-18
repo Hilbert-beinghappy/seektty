@@ -1675,3 +1675,73 @@ export function capabilityError(error: unknown): string {
 export function failedActionNotice(error: unknown, running: boolean): string {
   return withRunningRetry(capabilityError(error), running)
 }
+
+/** Session slice used after send, steer, Host command, or dispatch catch failures. */
+export interface ActionFailureSession {
+  prompt(
+    content: unknown,
+    mode: 'queue' | 'steer',
+  ): Promise<{ ok: true } | { ok: false; error: unknown }>
+  command(
+    line: string,
+  ): Promise<{ ok: true; value: { matched: boolean } } | { ok: false; error: unknown }>
+  getSnapshot(): { running: boolean }
+}
+
+/**
+ * Run a send or steer prompt and convert a failure using the snapshot after it returns.
+ */
+export async function noticeAfterFailedPrompt<TContent>(
+  session: {
+    prompt(
+      content: TContent,
+      mode: 'queue' | 'steer',
+    ): Promise<{ ok: true } | { ok: false; error: unknown }>
+    getSnapshot(): { running: boolean }
+  },
+  content: TContent,
+  mode: 'queue' | 'steer',
+): Promise<string | undefined> {
+  const result = await session.prompt(content, mode)
+  if (result.ok) return undefined
+  return failedActionNotice(result.error, session.getSnapshot().running)
+}
+
+/**
+ * Run a Host command once and convert a failure using the snapshot after it returns.
+ */
+export async function noticeAfterFailedHostCommand(
+  session: {
+    command(
+      line: string,
+    ): Promise<{ ok: true; value: { matched: boolean } } | { ok: false; error: unknown }>
+    getSnapshot(): { running: boolean }
+  },
+  line: string,
+): Promise<{ ok: true; matched: boolean } | { ok: false; message: string }> {
+  const result = await session.command(line)
+  if (!result.ok) {
+    return { ok: false, message: failedActionNotice(result.error, session.getSnapshot().running) }
+  }
+  return { ok: true, matched: result.value.matched }
+}
+
+/**
+ * Convert a dispatch catch using the still-active session snapshot.
+ */
+export function noticeAfterDispatchCatch(
+  error: unknown,
+  session: Pick<ActionFailureSession, 'getSnapshot'> | undefined,
+): string {
+  return failedActionNotice(error, session?.getSnapshot().running === true)
+}
+
+/**
+ * Convert a persisted promptError using the live snapshot.running flag.
+ */
+export function noticeAfterPromptError(snapshot: {
+  promptError: { error: unknown }
+  running: boolean
+}): string {
+  return failedActionNotice(snapshot.promptError.error, snapshot.running)
+}

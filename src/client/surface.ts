@@ -15,7 +15,14 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
-import { capabilityError, failedActionNotice, type TuiActiveSession } from './capabilities.ts'
+import {
+  capabilityError,
+  noticeAfterDispatchCatch,
+  noticeAfterFailedHostCommand,
+  noticeAfterFailedPrompt,
+  noticeAfterPromptError,
+  type TuiActiveSession,
+} from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import {
@@ -380,7 +387,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const primary = snapshot.removed
         ? color.danger(ui('会话已删除', 'Session deleted'))
         : snapshot.promptError !== null
-          ? color.danger(failedActionNotice(snapshot.promptError.error, snapshot.running))
+          ? color.danger(noticeAfterPromptError({
+            promptError: snapshot.promptError,
+            running: snapshot.running,
+          }))
           : pendingCount > 0
             ? color.warning(ui(
               `/pending 处理 ${String(pendingCount)} 项交互`,
@@ -632,12 +642,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
         const content = capabilities.promptContent(text)
         if (content.length === 0) return false
-        const result = await current.session.prompt(content, mode)
-        if (!result.ok) {
-          setNotice(
-            failedActionNotice(result.error, current.session.getSnapshot().running),
-            'error',
-          )
+        const failed = await noticeAfterFailedPrompt(current.session, content, mode)
+        if (failed !== undefined) {
+          setNotice(failed, 'error')
           restoreDeferredPrompt(text)
           return false
         }
@@ -676,21 +683,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           await sendPrompt(trimmed, 'queue')
           return
         }
-        const result = await current.session.command(trimmed)
-        if (!result.ok) {
-          setNotice(
-            failedActionNotice(result.error, current.session.getSnapshot().running),
-            'error',
-          )
-        }
-        else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
+        const outcome = await noticeAfterFailedHostCommand(current.session, trimmed)
+        if (!outcome.ok) setNotice(outcome.message, 'error')
+        else if (!outcome.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
         else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
         setNotice(
-          failedActionNotice(
-            error,
-            capabilities.active()?.session.getSnapshot().running === true,
-          ),
+          noticeAfterDispatchCatch(error, capabilities.active()?.session),
           'error',
         )
       }
