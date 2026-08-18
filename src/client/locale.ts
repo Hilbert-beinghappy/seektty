@@ -81,6 +81,8 @@ const ENGLISH_TEXT = new Map<string, string>([
   ['创建新会话', 'Create new session'],
   ['重新启动 deepseek？', 'Restart deepseek?'],
   ['需要重启', 'Restart required'],
+  ['等待工具审批', 'Waiting for tool approval'],
+  ['等待回答问题', 'Waiting for a question'],
   ['正在连接 Harness…', 'Connecting to Harness…'],
   ['● 生成中', '● Generating'],
   ['生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop'],
@@ -850,6 +852,9 @@ const ENGLISH_PATTERNS: readonly {
   { pattern: /^查找 (.+) · (\d+) 处 · Enter 确认 · Esc 取消$/u, replace: (query, count) => `Find ${query} · ${count} match(es) · Enter confirm · Esc cancel` },
   { pattern: /^查找 (.+) · (\d+)\/(\d+) · n 下一个 · N 上一个 · Esc 取消$/u, replace: (query, current, total) => `Find ${query} · ${current}/${total} · n next · N previous · Esc cancel` },
   { pattern: /^查找 (.+) · 无匹配 · Esc 取消$/u, replace: query => `Find ${query} · no matches · Esc cancel` },
+  { pattern: /^等待 (\d+) 项工具审批$/u, replace: count => `Waiting for ${count} tool approval(s)` },
+  { pattern: /^等待 (\d+) 项问题$/u, replace: count => `Waiting for ${count} question(s)` },
+  { pattern: /^等待 (\d+) 项交互$/u, replace: count => `Waiting for ${count} interaction(s)` },
 ]
 
 function requestedEnvironmentLocale(env: NodeJS.ProcessEnv): LocaleId {
