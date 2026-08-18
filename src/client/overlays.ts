@@ -75,6 +75,8 @@ export interface SelectOverlayRequest {
   readonly searchable?: boolean
   readonly maxVisible?: number
   readonly options?: OverlayOptions
+  /** When set, Escape runs this instead of Back/close so a child page can open. */
+  readonly onEscape?: () => void | Promise<void>
 }
 
 /** Text input request. */
@@ -85,6 +87,8 @@ export interface InputOverlayRequest {
   readonly placeholder?: string
   readonly footer?: string
   readonly options?: OverlayOptions
+  /** When set, Escape runs this instead of Back/close so a child page can open. */
+  readonly onEscape?: () => void | Promise<void>
 }
 
 /** Scrollable read-only detail request. */
@@ -154,6 +158,7 @@ interface NavigationEntry {
   readonly dismiss: () => void
   busy: boolean
   active: boolean
+  escapeHandler?: (() => void | Promise<void>) | undefined
 }
 
 function rowOf(choice: OverlayChoice, descriptionWidth: number): SelectItem {
@@ -733,6 +738,10 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
         this.pendingBack = current
         return
       }
+      if (current.escapeHandler !== undefined) {
+        this.dispatch(current, current.escapeHandler)
+        return
+      }
       if (this.stack.length <= 1) this.finish()
       else this.back()
       return
@@ -755,6 +764,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
         dismiss: resolve,
         busy: false,
         active: true,
+        escapeHandler: request.onEscape,
       }
       this.stack.push(entry)
       this.requestRender()
@@ -786,23 +796,23 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   }
 
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined> {
-    return this.prompt(submit => new SearchSelectOverlay(request, submit))
+    return this.prompt(submit => new SearchSelectOverlay(request, submit), request.onEscape)
   }
 
   input(request: InputOverlayRequest): Promise<string | undefined> {
-    return this.prompt(submit => new TextInputOverlay(request, submit))
+    return this.prompt(submit => new TextInputOverlay(request, submit), request.onEscape)
   }
 
   multilineInput(request: InputOverlayRequest): Promise<string | undefined> {
-    return this.prompt(submit => new MultilineEditorOverlay(this.tui, request, submit))
+    return this.prompt(submit => new MultilineEditorOverlay(this.tui, request, submit), request.onEscape)
   }
 
   secretInput(request: InputOverlayRequest): Promise<string | undefined> {
-    return this.prompt(submit => new SecretInputOverlay(request, submit))
+    return this.prompt(submit => new SecretInputOverlay(request, submit), request.onEscape)
   }
 
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined> {
-    return this.prompt(submit => new MultiSelectOverlay(request, submit))
+    return this.prompt(submit => new MultiSelectOverlay(request, submit), request.onEscape)
   }
 
   async detail(request: DetailOverlayRequest): Promise<void> {
@@ -869,7 +879,10 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     this.dismissAll()
   }
 
-  private prompt<T>(create: (submit: (value: T) => void) => DisposableComponent): Promise<T | undefined> {
+  private prompt<T>(
+    create: (submit: (value: T) => void) => DisposableComponent,
+    escapeHandler?: (() => void | Promise<void>) | undefined,
+  ): Promise<T | undefined> {
     if (this.closed) return Promise.resolve(undefined)
     return new Promise<T | undefined>((resolve) => {
       let entry: NavigationEntry
@@ -881,6 +894,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
         dismiss: () => { resolve(undefined) },
         busy: false,
         active: true,
+        escapeHandler,
       }
       this.stack.push(entry)
       this.requestRender()
