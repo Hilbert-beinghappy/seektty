@@ -34,4 +34,23 @@ describe('trajectory request detail (task 6.4)', () => {
     })
     expect(text).toContain('结束: 运行中')
   })
+
+  it('omits timestamps outside the ECMAScript Date range instead of throwing', () => {
+    expect(() => trajectoryRequestDetail({
+      purpose: 'assistant',
+      status: 'completed',
+      startedAt: 8.64e15 + 1,
+      completedAt: -8.64e15 - 1,
+      requestConfig: { provider: 'deepseek', model: 'deepseek-chat' },
+    })).not.toThrow()
+    const text = trajectoryRequestDetail({
+      purpose: 'assistant',
+      status: 'completed',
+      startedAt: 8.64e15 + 1,
+      completedAt: Date.parse('2026-01-01T00:00:00.000Z'),
+      requestConfig: { provider: 'deepseek', model: 'deepseek-chat' },
+    })
+    expect(text).not.toContain('开始:')
+    expect(text).toContain('结束: 2026-01-01T00:00:00.000Z')
+  })
 })

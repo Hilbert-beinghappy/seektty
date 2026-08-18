@@ -6,8 +6,12 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
+const MAX_DATE_MS = 8.64e15
+
 function millis(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= MAX_DATE_MS
+    ? value
+    : undefined
 }
 
 /**
