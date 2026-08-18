@@ -21,10 +21,12 @@ describe('idle Ctrl+C draft recovery (review #6)', () => {
     composer.render(80)
 
     const remembered: string[] = []
-    const notice = clearIdleComposerDraft(composer, () => undefined, (text) => { remembered.push(text) })
-    expect(notice).toBe('已清空草稿，按 ↑ 可找回')
+    const clearAttachments = vi.fn()
+    const notice = clearIdleComposerDraft(composer, clearAttachments, (text) => { remembered.push(text) })
+    expect(notice).toBe('已清空文字草稿，按 ↑ 可找回；图片仍保留')
     expect(composer.getText()).toBe('')
     expect(remembered).toEqual([draft])
+    expect(clearAttachments).not.toHaveBeenCalled()
 
     composer.handleInput(UP)
     expect(composer.getText()).toBe(draft)
@@ -37,9 +39,23 @@ describe('idle Ctrl+C draft recovery (review #6)', () => {
 
     const notice = clearIdleComposerDraft(composer, clearAttachments, remember)
 
-    expect(notice).toBe('已清空输入草稿')
+    expect(notice).toBe('已清除待发送图片')
     expect(clearAttachments).toHaveBeenCalledOnce()
     expect(remember).not.toHaveBeenCalled()
+    expect(composer.getText()).toBe('')
+  })
+
+  it('keeps pending attachments when Ctrl+C clears non-empty draft text', () => {
+    const composer = editor()
+    composer.setText('还没发出去的提示')
+    const clearAttachments = vi.fn()
+    const remember = vi.fn()
+
+    const notice = clearIdleComposerDraft(composer, clearAttachments, remember)
+
+    expect(notice).toBe('已清空文字草稿，按 ↑ 可找回；图片仍保留')
+    expect(clearAttachments).not.toHaveBeenCalled()
+    expect(remember).toHaveBeenCalledOnce()
     expect(composer.getText()).toBe('')
   })
 
