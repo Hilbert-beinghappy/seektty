@@ -19,6 +19,8 @@ describe('transcript in-session search', () => {
     expect(nextMatchIndex([0, 5], 5, 1)).toBe(0)
     expect(nextMatchIndex([0, 5], 5, -1)).toBe(0)
     expect(highlightQuery('Hello World', 'lo', text => `[${text}]`)).toBe('Hel[lo] World')
+    expect(highlightQuery('\u001B[32mhello\u001B[0m there', 'hello', text => `{${text}}`))
+      .toBe('{\u001B[32mhello}\u001B[0m there')
     expect(stripAnsi('\u001B[7mhit\u001B[0m')).toBe('hit')
     expect(scrollOffsetToReveal(20, 8, 2)).toBe(10)
   })

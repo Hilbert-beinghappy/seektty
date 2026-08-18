@@ -71,12 +71,32 @@ export function highlightQuery(
   query: string,
   paint: (matched: string) => string,
 ): string {
-  const plain = stripAnsi(line)
   const needle = query.trim()
-  if (needle === '') return plain
+  if (needle === '') return line
+  const plain = stripAnsi(line)
   const index = plain.toLowerCase().indexOf(needle.toLowerCase())
-  if (index < 0) return plain
-  return `${plain.slice(0, index)}${paint(plain.slice(index, index + needle.length))}${plain.slice(index + needle.length)}`
+  if (index < 0) return line
+  const start = visibleOffset(line, index)
+  const end = visibleOffset(line, index + needle.length)
+  if (start < 0 || end < 0) return line
+  return `${line.slice(0, start)}${paint(line.slice(start, end))}${line.slice(end)}`
+}
+
+function visibleOffset(line: string, visibleIndex: number): number {
+  if (visibleIndex === 0) return 0
+  const token = /^\u001B\[[0-9;:]*m/u
+  let visible = 0
+  for (let index = 0; index < line.length; ) {
+    const match = token.exec(line.slice(index))
+    if (match !== null) {
+      index += match[0].length
+      continue
+    }
+    visible += 1
+    index += 1
+    if (visible === visibleIndex) return index
+  }
+  return visibleIndex === visible ? line.length : -1
 }
 
 /**
