@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   LOCALE_PREFERENCE_FIELD,
@@ -13,6 +15,7 @@ import {
   saveLanguage,
   setUiLocale,
   translateUiText,
+  FIRST_ENGLISH_PATTERN,
   ui,
   uiLocale,
 } from '../src/client/locale.ts'
@@ -88,6 +91,14 @@ describe('terminal locale preference', () => {
       [{ op: 'unset', path: [LOCALE_PREFERENCE_FIELD] }],
       1,
     )
+  })
+
+  it('keeps ENGLISH_PATTERNS[0] as the original applies-immediately rule', () => {
+    expect(FIRST_ENGLISH_PATTERN.source).toBe('^(.+) · 立即生效$')
+    const source = readFileSync(resolve(import.meta.dirname, '../src/client/locale.ts'), 'utf8')
+    expect(source).toMatch(/const ENGLISH_PATTERNS[\s\S]*?=\s*\[\s*\{\s*pattern:\s*FIRST_ENGLISH_PATTERN/u)
+    setUiLocale('en')
+    expect(translateUiText('设置 · 立即生效')).toBe('Settings · applies immediately')
   })
 
   it('switches authored and catalog-backed terminal copy without changing unknown content', () => {

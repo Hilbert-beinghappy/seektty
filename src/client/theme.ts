@@ -6,6 +6,7 @@ import {
   type MarkdownTheme,
 } from '@mariozechner/pi-tui'
 import { BUILT_IN_THEMES, type ResolvedTuiTheme } from './theme-config.ts'
+import { ui } from './locale.ts'
 
 const RESET = '\u001B[0m'
 const ESC = 0x1B
@@ -42,7 +43,7 @@ interface ThemePalette {
 
 function semanticColor(value: string): SemanticColor {
   const match = /^#([0-9A-Fa-f]{6})$/u.exec(value)
-  if (match === null) throw new Error(`主题颜色 ${JSON.stringify(value)} 无效`)
+  if (match === null) throw new Error(ui(`主题颜色 ${JSON.stringify(value)} 无效`, `Theme color ${JSON.stringify(value)} is invalid`))
   const digits = match[1] ?? ''
   return {
     rgb: [

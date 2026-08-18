@@ -39,16 +39,16 @@ The current release covers these capabilities:
 | Area | Available operations |
 | --- | --- |
 | Conversation and runs | Streaming responses, Markdown/GFM, fence-free theme-aware syntax-highlighted code blocks, links, tables, reasoning visibility, collapsed/expanded/hidden tool cards, model retries, compaction, output-limit and error states, and Ctrl+C cancellation |
-| Sessions | Create, resume, list, full-text search, rename, fork, archive, copy the last answer, and export the current session or its complete subagent tree and attachments as ZIP |
+| Sessions | Create, resume, list, full-text search, rename, fork, archive, copy the last answer, export ZIP, or `/export md` Markdown |
 | Workspaces | Start from the current directory; add, select, rename, unregister, reorder, and reorder sessions within a workspace; unregistering never deletes files or session logs |
 | Agent modes | Standard, Code/PTC, Minimal, and Cordis/Create baseline modes plus dynamically registered Agent Presets; switching an active conversation creates a new session in the same workspace |
 | Models and Providers | Dynamic Provider, model, and supported reasoning-effort discovery; current route display; per-session switching; catalog, credential, and routing diagnostics |
-| Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, and allow or reject one tool call at a time |
+| Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, allow one tool call, skip further prompts for a tool in this session, or reject |
 | Input queue and steering | Queue prompts while the Agent runs, inspect/edit/remove entries, steer one entry or the entire queue into the active turn, and send `/steer` directly |
 | Human interaction | Single choice, multi-select, custom answers, skip, cancel, and plan review; submitting an interaction returns to the latest output while the blocked turn resumes, with `/pending` recovery when retrying is needed |
-| Image attachments | Add PNG, JPEG, GIF, or WebP by path or paste; enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
+| Image attachments | Add PNG, JPEG, GIF, or WebP by path or by pasting a file path or clipboard bitmap (`pngpaste` / `wl-paste` / `xclip` / PowerShell); enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
 | Plan, Goal, Todo, and compaction | Native `/plan`, `/goal`, and `/compact` commands with plan review, goal state, Todo counts, and compaction records in the transcript |
-| Tools and produced files | `◆ action · duration` headers with live elapsed time and connected invocation code, dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted Shell/JSON/Diff views, safe native terminal ANSI, generic fallback cards, produced-file listing, path copy, and confirmed external open |
+| Tools and produced files | `◆ action · duration` headers with live elapsed time and connected invocation code, dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted Shell/JSON/Diff views, safe native terminal ANSI, generic fallback cards, session-wide produced-file listing grouped by turn, in-TUI view, path copy, and confirmed external open |
 | Subagents | Inspect direct children, activity, tree state, token use, and duration; open continuable or read-only sessions and stop an active child turn |
 | Background jobs and workflows | Job type, status, start/end times, duration, and detail views; workflow phases, members, results, and failure states in the transcript |
 | Statistics and trajectory | Per-turn steps, LLM/tool time, first-token latency, throughput, cache hit, input/output tokens, model requests, running calls, and structured trajectory inspection |
@@ -65,14 +65,14 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 
 ## Install the bare command
 
-The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows.
+The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved.
 
 ```sh
 pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.0
 deepseek
 ```
 
-On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
+`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.6`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
 
 ```sh
 deepseek "check this project"
@@ -80,6 +80,7 @@ deepseek --cwd ../project
 deepseek --resume
 deepseek --resume <sessionId>
 deepseek --profile team-tui
+deepseek --version
 ```
 
 The native dsh entry remains available:
@@ -111,7 +112,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 | Category | Commands |
 | --- | --- |
-| Sessions | `/new`, `/resume`, `/sessions`, `/rename`, `/fork`, `/archive`, `/export`, `/copy` |
+| Sessions | `/new`, `/resume`, `/sessions`, `/rename`, `/fork`, `/archive`, `/export`, `/export md`, `/copy` |
 | Work environment | `/workspace`, `/profile` |
 | Agent | `/mode`, `/model`, `/permission`, `/plan`, `/goal`, `/compact` |
 | Runtime interaction | `/queue`, `/steer`, `/attach`, `/attachments`, `/pending` |
@@ -134,6 +135,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
 | Shift+Tab | Cycle the current permission, confirming full access first |
 | Shift+Left / Shift+Right | Jump to the previous or next user turn |
+| F1 | Open in-app help |
 | Ctrl+P | Open the complete command palette |
 | Ctrl+M | Open model selection when the terminal exposes an extended keyboard protocol |
 | Ctrl+S | Open session resume |
