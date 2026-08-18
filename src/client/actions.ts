@@ -3588,7 +3588,24 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     }
     this.host.transcript.followLatest()
     await this.capabilities.answerQuestion(wait, { answers })
+    this.host.notice(questionBatchSummary(answers), 'info')
   }
+}
+
+/**
+ * Summarize a completed question batch without counting skipped items as answered.
+ * @param answers - submitted answers, including empty skip rows.
+ */
+export function questionBatchSummary(
+  answers: readonly { readonly selected: readonly string[]; readonly custom?: string }[],
+): string {
+  const skipped = answers.filter(answer =>
+    answer.selected.length === 0 && (answer.custom === undefined || answer.custom === '')).length
+  const answered = answers.length - skipped
+  return ui(
+    `已处理 ${String(answers.length)} 项（回答 ${String(answered)} · 跳过 ${String(skipped)}）`,
+    `Processed ${String(answers.length)} item(s) (answered ${String(answered)} · skipped ${String(skipped)})`,
+  )
 }
 
 /**

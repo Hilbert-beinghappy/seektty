@@ -5,6 +5,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/node-client'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import {
+  questionBatchSummary,
   TuiActions,
   type TuiActionHost,
 } from '../src/client/actions.ts'
@@ -74,5 +75,14 @@ describe('pending interaction continuation', () => {
     expect(answerQuestion).toHaveBeenCalledWith(question, {
       answers: [{ id: 'which_pkg', selected: ['visualtex-src 根目录 (Recommended)'] }],
     })
+  })
+
+  it('summarizes answered and skipped items instead of calling skips answered', () => {
+    expect(questionBatchSummary([
+      { selected: ['a'] },
+      { selected: [] },
+      { selected: [], custom: 'note' },
+    ])).toContain('已处理 3 项（回答 2 · 跳过 1）')
+    expect(questionBatchSummary([{ selected: [] }])).not.toContain('已回答')
   })
 })
