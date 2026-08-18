@@ -447,6 +447,9 @@ export class PluginMarketplace {
       if (source.kind === 'catalog') return await this.searchCatalog(text, source, signal)
       return await this.searchProvider(text, source, sources, signal)
     }))
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError')
+    }
     const deduped = new Map<string, TuiMarketplaceCandidate>()
     for (const [index, result] of settled.entries()) {
       const source = enabled[index]

@@ -171,6 +171,44 @@ describe('plugin marketplace search (task 5.3)', () => {
     expect(rows[0]?.diagnostics.join(' ')).toMatch(/aborted|timeout/iu)
   })
 
+  it('rethrows user abort instead of caching a source-failure diagnostic', async () => {
+    const controller = new AbortController()
+    let searches = 0
+    let started!: () => void
+    const ready = new Promise<void>(resolve => { started = resolve })
+    const marketplace = new PluginMarketplace({
+      cwd: root,
+      resolveCredential: () => Promise.resolve(undefined),
+      fetch: (async (input, init) => {
+        const url = String(input)
+        if (!url.includes('/-/v1/search')) throw new Error(`unexpected fetch ${url}`)
+        searches += 1
+        if (searches === 1) {
+          started()
+          return await new Promise<Response>((_resolve, reject) => {
+            const fail = () => reject(init?.signal?.reason ?? new Error('aborted'))
+            if (init?.signal?.aborted) {
+              fail()
+              return
+            }
+            init?.signal?.addEventListener('abort', fail, { once: true })
+          })
+        }
+        return jsonResponse(searchBody())
+      }) as typeof fetch,
+    })
+    const pending = marketplace.search('demo', [source], controller.signal)
+    await ready
+    controller.abort(new DOMException('The operation was aborted.', 'AbortError'))
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+
+    const rows = await marketplace.search('demo', [source])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.name).toBe('demo-plugin')
+    expect(rows[0]?.diagnostics ?? []).not.toContainEqual(expect.stringMatching(/Source failed|来源失败/u))
+    expect(searches).toBe(2)
+  })
+
   it('keeps successful sources when another catalog source fails', async () => {
     const catalog: TuiMarketplaceSource = {
       id: 'bad-catalog',
