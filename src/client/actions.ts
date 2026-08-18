@@ -3854,9 +3854,9 @@ export function commandOf(
   catalog: readonly TuiCommandCandidate[],
   name: string,
 ): TuiCommandCandidate | undefined {
-  const exact = catalog.find(candidate => candidate.name === name)
-  if (exact !== undefined) return exact
   const canonical = canonicalTuiCommandName(name)
-  if (canonical === name) return undefined
-  return catalog.find(candidate => candidate.name === canonical)
+  if (canonical !== name) {
+    return catalog.find(candidate => candidate.name === canonical)
+  }
+  return catalog.find(candidate => candidate.name === name)
 }

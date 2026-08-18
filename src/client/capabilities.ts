@@ -71,6 +71,17 @@ export function canonicalTuiCommandName(name: string): string {
   return TUI_HIDDEN_COMMAND_ALIASES[name as keyof typeof TUI_HIDDEN_COMMAND_ALIASES] ?? name
 }
 
+/**
+ * Visible TUI names plus hidden aliases that must keep occupying the merged catalog.
+ * Host or Skill entries with these names must not steal typed `/resume` `/plugins` `/quit`.
+ */
+export function reservedTuiCatalogNames(): ReadonlySet<string> {
+  return new Set([
+    ...Object.keys(TUI_HIDDEN_COMMAND_ALIASES),
+    ...tuiCommands().map(command => command.name),
+  ])
+}
+
 /** One selectable Agent Preset from the Host directory. */
 export interface TuiModeOption {
   readonly id: string
@@ -1624,12 +1635,11 @@ export class HarnessTuiCapabilities {
       ))
     }
     const commands = tuiCommands()
-    const local = new Map(commands.map(command => [command.name, command]))
+    const reserved = reservedTuiCatalogNames()
     const merged = [...commands]
-    const names = new Set(commands.map(command => command.name))
+    const names = new Set(reserved)
     for (const command of hostResult.value as readonly HostCommandDescriptor[]) {
-      const localCommand = local.get(command.name)
-      if (localCommand !== undefined) continue
+      if (reserved.has(command.name)) continue
       names.add(command.name)
       merged.push({
         name: command.name,
