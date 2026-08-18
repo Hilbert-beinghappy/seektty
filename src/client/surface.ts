@@ -62,6 +62,7 @@ import {
   type DesktopNotifySnapshot,
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
+import { EPHEMERAL_NOTICE_MS, pickStatusLine } from './status-priority.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -267,6 +268,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let exitArmedUntil = 0
     let latestSessionId = ''
     let notice: { message: string; tone: NoticeTone } | undefined
+    let noticeSeq = 0
+    let noticeTimer: ReturnType<typeof setTimeout> | undefined
     let restartRequired: string | undefined
     let headerGeneration = 0
     let elapsedTimer: ReturnType<typeof setInterval> | undefined
@@ -298,8 +301,33 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const setNotice = (message: string, tone: NoticeTone = 'info'): void => {
       if (stopping !== undefined) return
       notice = { message, tone }
+      noticeSeq += 1
+      const seq = noticeSeq
+      if (noticeTimer !== undefined) {
+        clearTimeout(noticeTimer)
+        noticeTimer = undefined
+      }
+      if (tone === 'success' || tone === 'info') {
+        noticeTimer = setTimeout(() => {
+          if (seq !== noticeSeq) return
+          notice = undefined
+          noticeTimer = undefined
+          updateStatus()
+          renderWhileOpen()
+        }, EPHEMERAL_NOTICE_MS)
+        noticeTimer.unref()
+      }
       updateStatus()
       renderWhileOpen()
+    }
+
+    const dismissNotice = (): void => {
+      notice = undefined
+      noticeSeq += 1
+      if (noticeTimer !== undefined) {
+        clearTimeout(noticeTimer)
+        noticeTimer = undefined
+      }
     }
 
     const onboarding = new ProviderOnboardingGate(
@@ -337,10 +365,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             if (stopping !== undefined) return
             const elapsed = sessionChrome.of(latestSessionId)
             if (elapsed.runningSince === undefined || !liveBehavior.get().statusElapsed) return
-            status.setDetail(color.accent(ui(
-              `生成中 · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C 停止`,
-              `Generating · ${formatElapsed(Date.now() - elapsed.runningSince)} · Ctrl+C to stop`,
-            )))
+            updateStatus()
             renderWhileOpen()
           }, 500)
         }
@@ -377,21 +402,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           `Generating · ${formatElapsed(Date.now() - chrome.runningSince)} · Ctrl+C to stop`,
         )
         : ui('生成中 · Ctrl+C 停止', 'Generating · Ctrl+C to stop')
-      const primary = snapshot.removed
-        ? color.danger(ui('会话已删除', 'Session deleted'))
-        : snapshot.promptError !== null
-          ? color.danger(ui(
-            `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
-            `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
-          ))
-          : pendingCount > 0
-            ? color.warning(ui(
-              `/pending 处理 ${String(pendingCount)} 项交互`,
-              `/pending handles ${String(pendingCount)} interaction(s)`,
-            ))
-            : snapshot.running
-              ? color.accent(generating)
-              : undefined
       const facts: string[] = []
       if (snapshot.queue.length > 0) facts.push(ui(`队列 ${String(snapshot.queue.length)}`, `Queue ${String(snapshot.queue.length)}`))
       const jobs = active === undefined ? undefined : capabilities.jobs()
@@ -405,13 +415,35 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
-      if (restartRequired !== undefined) facts.push(ui('需要重启', 'Restart required'))
-      const secondary = notice === undefined
-        ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
-          .filter((value): value is string => value !== undefined)
-          .join(' · ') || undefined
-        : noticeText(notice.message, notice.tone)
-      status.setDetail(secondary)
+      status.setDetail(pickStatusLine({
+        ...(snapshot.removed
+          ? { error: color.danger(ui('会话已删除', 'Session deleted')) }
+          : snapshot.promptError !== null
+            ? {
+              error: color.danger(ui(
+                `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
+                `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
+              )),
+            }
+            : notice?.tone === 'error'
+              ? { error: noticeText(notice.message, notice.tone) }
+              : {}),
+        ...(pendingCount > 0
+          ? {
+            pending: color.warning(ui(
+              `/pending 处理 ${String(pendingCount)} 项交互`,
+              `/pending handles ${String(pendingCount)} interaction(s)`,
+            )),
+          }
+          : {}),
+        ...(restartRequired === undefined ? {} : { restart: color.warning(ui('需要重启', 'Restart required')) }),
+        ...(snapshot.running ? { running: color.accent(generating) } : {}),
+        ...(notice?.tone === 'warning' ? { warning: noticeText(notice.message, notice.tone) } : {}),
+        ...(facts.length === 0 ? {} : { facts: color.muted(facts.join(' · ')) }),
+        ...(notice !== undefined && (notice.tone === 'success' || notice.tone === 'info')
+          ? { notice: noticeText(notice.message, notice.tone) }
+          : {}),
+      }))
       applyTerminalTitle()
     }
 
@@ -602,7 +634,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       editor.disableSubmit = false
       if (latestSessionId !== current.sessionId) {
         latestSessionId = current.sessionId
-        notice = undefined
+        dismissNotice()
         refreshHeader(true)
       } else {
         refreshHeader(false)
@@ -645,7 +677,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return false
         }
         capabilities.clearAttachments()
-        notice = undefined
+        dismissNotice()
         updateStatus()
         return true
       },
@@ -879,7 +911,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (matchesKey(data, Key.escape) && notice !== undefined && editor.getText() === '') {
-        notice = undefined
+        dismissNotice()
         updateStatus()
         renderWhileOpen()
         return { consume: true }
