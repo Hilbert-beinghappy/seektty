@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  APP_HANDOFF_DIRNAME,
   APP_HANDOFF_ENV,
   consumeAppHandoff,
   internals,
@@ -42,6 +43,14 @@ describe('app handoff (task 6.6)', () => {
     const result = consumeAppHandoff('seektty-v1')
     expect(result.kind).toBe('degraded')
     expect(process.env[APP_HANDOFF_ENV]).toBeUndefined()
+  })
+
+  it('writes and sweeps only inside a SeekTTY private temp subdirectory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'seektty-handoff-root-'))
+    internals.tmpdir = () => root
+    const path = writeAppHandoff('seektty-v1', { ok: true })
+    expect(path).toContain(APP_HANDOFF_DIRNAME)
+    expect(path.startsWith(join(root, APP_HANDOFF_DIRNAME))).toBe(true)
   })
 
   it('sweeps leftover prefix files older than the stale window', () => {

@@ -1,7 +1,7 @@
 /** Bounded, single-use launcher handoff files for controlled process restart. */
 
 import { randomUUID } from 'node:crypto'
-import { lstatSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -11,6 +11,14 @@ export const APP_HANDOFF_ENV = 'DSH_APP_HANDOFF_FILE'
 export const APP_HANDOFF_MAX_BYTES = 256 * 1024
 /** Filename prefix for launcher-owned handoff files in the process temp directory. */
 export const APP_HANDOFF_PREFIX = 'deepseek-handoff-'
+/** Private subdirectory under the process temp directory. */
+export const APP_HANDOFF_DIRNAME = 'seektty-handoff'
+
+function handoffDirectory(): string {
+  const directory = join(internals.tmpdir(), APP_HANDOFF_DIRNAME)
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  return directory
+}
 
 /** Replaceable process seams used by handoff tests. */
 export const internals: {
@@ -44,7 +52,7 @@ function canonical(path: string): string {
 
 function allowedPath(path: string): boolean {
   const absolute = canonical(path)
-  return dirname(absolute) === canonical(internals.tmpdir())
+  return dirname(absolute) === canonical(handoffDirectory())
     && basename(absolute).startsWith(APP_HANDOFF_PREFIX)
 }
 
@@ -57,7 +65,12 @@ function degrade(reason: string): ConsumeAppHandoffResult {
  * Called on write and consume so a child crash does not fill tmpdir.
  */
 export function sweepStaleAppHandoffs(): void {
-  const directory = internals.tmpdir()
+  let directory: string
+  try {
+    directory = handoffDirectory()
+  } catch {
+    return
+  }
   let names: string[]
   try {
     names = readdirSync(directory)
@@ -105,7 +118,7 @@ export function writeAppHandoff(channel: string, payload: unknown): string {
   sweepStaleAppHandoffs()
   const body = JSON.stringify({ version: 1, channel, payload } satisfies AppHandoffEnvelope)
   if (Buffer.byteLength(body) > APP_HANDOFF_MAX_BYTES) throw new Error('app handoff payload exceeds size limit')
-  const path = join(internals.tmpdir(), `${APP_HANDOFF_PREFIX}${randomUUID()}.json`)
+  const path = join(handoffDirectory(), `${APP_HANDOFF_PREFIX}${randomUUID()}.json`)
   writeFileSync(path, body, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
   return path
 }
