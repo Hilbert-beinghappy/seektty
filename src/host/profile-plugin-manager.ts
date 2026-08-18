@@ -31,6 +31,7 @@ import {
   writeProfileManifest,
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
+import { ui } from '../client/locale.ts'
 
 const NAME = 'dsh'
 const MAX_CAPTURE_BYTES = 1024 * 1024
@@ -454,7 +455,7 @@ export class ProfilePluginManager {
     })
     const pnpm = version.status === 0 && typeof version.stdout === 'string' ? version.stdout.trim() : undefined
     diagnostics.push(pnpm === undefined
-      ? { level: 'error', message: 'pnpm 不可用；Profile 插件操作需要 PATH 中的 pnpm' }
+      ? { level: 'error', message: ui('pnpm 不可用；Profile 插件操作需要 PATH 中的 pnpm', 'pnpm is unavailable; Profile plugin operations require pnpm on PATH') }
       : { level: 'info', message: `pnpm ${pnpm}` })
     for (const plugin of snapshot.plugins) {
       for (const diagnostic of plugin.diagnostics) {
@@ -467,16 +468,25 @@ export class ProfilePluginManager {
       if (facts.manifest === undefined) {
         diagnostics.push({
           level: 'error',
-          message: facts.diagnostic ?? `${bundle} 无法读取已安装清单`,
+          message: facts.diagnostic ?? ui(`${bundle} 无法读取已安装清单`, `${bundle} cannot read the installed manifest`),
         })
       } else if (patch === undefined) {
-        diagnostics.push({ level: 'error', message: `${bundle} 未声明 dsh.bundle.patch` })
+        diagnostics.push({
+          level: 'error',
+          message: ui(`${bundle} 未声明 dsh.bundle.patch`, `${bundle} does not declare dsh.bundle.patch`),
+        })
       } else if (!facts.patchValid) {
-        diagnostics.push({ level: 'error', message: `${bundle} 的 Bundle patch 缺失或格式无效` })
+        diagnostics.push({
+          level: 'error',
+          message: ui(`${bundle} 的 Bundle patch 缺失或格式无效`, `The Bundle patch of ${bundle} is missing or invalid`),
+        })
       }
     }
     if (diagnostics.every(item => item.level !== 'error')) {
-      diagnostics.push({ level: 'info', message: 'Profile Bundle 结构可解析' })
+      diagnostics.push({
+        level: 'info',
+        message: ui('Profile Bundle 结构可解析', 'Profile Bundle structure is valid'),
+      })
     }
     return { profile: this.profile, ...(pnpm === undefined ? {} : { pnpm }), diagnostics, snapshot }
   }
@@ -509,7 +519,12 @@ export class ProfilePluginManager {
    */
   createProfile(name: string, copyFrom?: string, options: ProfileCreateOptions = {}): ProfileSummary {
     const target = resolveProfileDir(name, this.home)
-    if (existsSync(join(target, 'package.json'))) throw new Error(`Profile ${JSON.stringify(name)} 已存在`)
+    if (existsSync(join(target, 'package.json'))) {
+      throw new Error(ui(
+        `Profile ${JSON.stringify(name)} 已存在`,
+        `Profile ${JSON.stringify(name)} already exists`,
+      ))
+    }
     if (copyFrom === undefined) {
       initProfile(target, convertedBundles(
         PROFILE_TEMPLATES[name] ?? PROFILE_TEMPLATES.tui ?? DEFAULT_PROFILE_BUNDLES,
@@ -573,8 +588,18 @@ export class ProfilePluginManager {
     const diagnostics: string[] = []
     if (facts.diagnostic !== undefined) diagnostics.push(facts.diagnostic)
     const patch = facts.manifest?.dsh?.bundle?.patch
-    if (patch !== undefined && !facts.patchValid) diagnostics.push(`声明的 Bundle patch ${JSON.stringify(patch)} 缺失或格式无效`)
-    if (bundles.includes(packageName) && patch === undefined) diagnostics.push('位于 Bundle 顺序中但未声明 dsh.bundle.patch')
+    if (patch !== undefined && !facts.patchValid) {
+      diagnostics.push(ui(
+        `声明的 Bundle patch ${JSON.stringify(patch)} 缺失或格式无效`,
+        `Declared Bundle patch ${JSON.stringify(patch)} is missing or invalid`,
+      ))
+    }
+    if (bundles.includes(packageName) && patch === undefined) {
+      diagnostics.push(ui(
+        '位于 Bundle 顺序中但未声明 dsh.bundle.patch',
+        'Listed in Bundle order but does not declare dsh.bundle.patch',
+      ))
+    }
     return Object.freeze({
       name: packageName,
       spec: safeDependencySpec(spec),
@@ -603,7 +628,10 @@ export class ProfilePluginManager {
         bundles.push(packageName)
         changed = true
       } else if (!isBundle && !beforeDeps.has(packageName)) {
-        warnings.push(`${packageName} 未声明 dsh.bundle；它只是 Profile 依赖，不会成为 Harness Bundle`)
+        warnings.push(ui(
+          `${packageName} 未声明 dsh.bundle；它只是 Profile 依赖，不会成为 Harness Bundle`,
+          `${packageName} does not declare dsh.bundle; it is only a Profile dependency and will not become a Harness Bundle`,
+        ))
       }
     }
     const dependencySet = new Set(dependencies)
@@ -668,10 +696,18 @@ export class ProfilePluginManager {
   }
 
   private failureWarnings(command: readonly string[], exitCode: number): readonly string[] {
-    if (exitCode === 127) return ['pnpm 不在 PATH 中；请安装 pnpm 后重试']
-    const warnings = [`pnpm 在 Profile 目录 ${this.dir} 中失败，退出码 ${exitCode}`]
+    if (exitCode === 127) {
+      return [ui('pnpm 不在 PATH 中；请安装 pnpm 后重试', 'pnpm is not on PATH; install pnpm and retry')]
+    }
+    const warnings = [ui(
+      `pnpm 在 Profile 目录 ${this.dir} 中失败，退出码 ${exitCode}`,
+      `pnpm failed in Profile directory ${this.dir} with exit code ${exitCode}`,
+    )]
     if (command.some(argument => /^git\+|^github:|\.git(?:#|$)/.test(argument))) {
-      warnings.push(`Git 插件的 prepare/install 脚本可能需要在 ${join(this.dir, 'pnpm-workspace.yaml')} 的 allowBuilds 中明确授权`)
+      warnings.push(ui(
+        `Git 插件的 prepare/install 脚本可能需要在 ${join(this.dir, 'pnpm-workspace.yaml')} 的 allowBuilds 中明确授权`,
+        `prepare/install scripts for a Git plugin may need an explicit allowBuilds entry in ${join(this.dir, 'pnpm-workspace.yaml')}`,
+      ))
     }
     return warnings
   }

@@ -12,6 +12,7 @@ import type {
   TuiMarketplaceSource,
   TuiPluginEntry,
 } from '@deepseek-ai/dsh-tui-protocol'
+import { ui } from '../client/locale.ts'
 import type { TuiMarketplaceProviderRegistry } from './marketplace-provider.ts'
 
 const gunzip = promisify(gunzipCallback)
@@ -23,7 +24,12 @@ const MAX_PATCH_BYTES = 2 * 1024 * 1024
 const MAX_TAR_ENTRIES = 8_192
 const MAX_SEARCH_RESULTS = 12
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000
-const TARBALL_PENDING = '尚未下载 tarball；选中后才会校验 Bundle patch'
+function tarballPendingNotice(): string {
+  return ui(
+    '尚未下载 tarball；选中后才会校验 Bundle patch',
+    'The tarball has not been downloaded yet; Bundle patch is checked after selection',
+  )
+}
 const SENSITIVE_QUERY_KEY = new RegExp(
   String.raw`(?:^|[-_])(?:access[-_]?token|api[-_]?key|auth|authorization|credential|password|secret|signature|token)(?:$|[-_])`,
   'i',
@@ -93,18 +99,26 @@ export function assertCredentialFreeUrl(value: string, label: string): void {
   if (!/^https?:\/\//i.test(raw)) return
   const url = new URL(raw)
   if (url.username !== '' || url.password !== '') {
-    throw new Error(`${label} 不能在 URL 中内嵌用户名或 Secret；请使用 Credential Ref`)
+    throw new Error(ui(
+      `${label} 不能在 URL 中内嵌用户名或 Secret；请使用 Credential Ref`,
+      `${label} must not embed a username or secret in the URL; use a Credential Ref`,
+    ))
   }
   const sensitive = [...url.searchParams.keys()].find(key => SENSITIVE_QUERY_KEY.test(key))
   if (sensitive !== undefined) {
-    throw new Error(`${label} 不能在 URL query 中内嵌 ${JSON.stringify(sensitive)}；请使用 Credential Ref`)
+    throw new Error(ui(
+      `${label} 不能在 URL query 中内嵌 ${JSON.stringify(sensitive)}；请使用 Credential Ref`,
+      `${label} must not embed ${JSON.stringify(sensitive)} in the URL query; use a Credential Ref`,
+    ))
   }
 }
 
 function readLocalBounded(path: string, maxBytes: number, label: string): Uint8Array {
   const stat = statSync(path)
-  if (!stat.isFile()) throw new Error(`${label} 不是普通文件`)
-  if (stat.size > maxBytes) throw new Error(`${label} 超过 ${maxBytes} 字节限制`)
+  if (!stat.isFile()) throw new Error(ui(`${label} 不是普通文件`, `${label} is not a regular file`))
+  if (stat.size > maxBytes) {
+    throw new Error(ui(`${label} 超过 ${maxBytes} 字节限制`, `${label} exceeds the ${maxBytes}-byte limit`))
+  }
   return readFileSync(path)
 }
 
@@ -127,14 +141,24 @@ function parseJson(bytes: Uint8Array, label: string): unknown {
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown
   } catch (error) {
-    throw new Error(`${label} 不是有效 JSON：${messageOf(error)}`)
+    throw new Error(ui(
+      `${label} 不是有效 JSON：${messageOf(error)}`,
+      `${label} is not valid JSON: ${messageOf(error)}`,
+    ))
   }
 }
 
 async function readBounded(response: Response, maxBytes: number, label: string): Promise<Uint8Array> {
-  if (!response.ok) throw new Error(`${label} 请求失败：HTTP ${response.status}`)
+  if (!response.ok) {
+    throw new Error(ui(
+      `${label} 请求失败：HTTP ${response.status}`,
+      `${label} request failed: HTTP ${response.status}`,
+    ))
+  }
   const length = Number(response.headers.get('content-length'))
-  if (Number.isFinite(length) && length > maxBytes) throw new Error(`${label} 超过 ${maxBytes} 字节限制`)
+  if (Number.isFinite(length) && length > maxBytes) {
+    throw new Error(ui(`${label} 超过 ${maxBytes} 字节限制`, `${label} exceeds the ${maxBytes}-byte limit`))
+  }
   if (response.body === null) return new Uint8Array()
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
@@ -146,7 +170,7 @@ async function readBounded(response: Response, maxBytes: number, label: string):
       size += result.value.byteLength
       if (size > maxBytes) {
         await reader.cancel()
-        throw new Error(`${label} 超过 ${maxBytes} 字节限制`)
+        throw new Error(ui(`${label} 超过 ${maxBytes} 字节限制`, `${label} exceeds the ${maxBytes}-byte limit`))
       }
       chunks.push(result.value)
     }
@@ -168,7 +192,7 @@ function tarText(bytes: Uint8Array, start: number, length: number): string {
 
 function tarSize(bytes: Uint8Array, offset: number): number {
   const text = tarText(bytes, offset + 124, 12).trim()
-  if (!/^[0-7]*$/.test(text)) throw new Error('tarball 含无效文件大小')
+  if (!/^[0-7]*$/.test(text)) throw new Error(ui('tarball 含无效文件大小', 'The tarball contains an invalid file size'))
   return text === '' ? 0 : Number.parseInt(text, 8)
 }
 
@@ -193,7 +217,9 @@ async function tarEntries(compressed: Uint8Array): Promise<ReadonlyMap<string, U
   const bytes = gzip
     ? await gunzip(compressed, { maxOutputLength: MAX_INFLATED_BYTES })
     : compressed
-  if (bytes.byteLength > MAX_INFLATED_BYTES) throw new Error('tarball 解压后超过限制')
+  if (bytes.byteLength > MAX_INFLATED_BYTES) {
+    throw new Error(ui('tarball 解压后超过限制', 'The inflated tarball exceeds the size limit'))
+  }
   const entries = new Map<string, Uint8Array>()
   let offset = 0
   let count = 0
@@ -201,11 +227,15 @@ async function tarEntries(compressed: Uint8Array): Promise<ReadonlyMap<string, U
   while (offset + 512 <= bytes.byteLength) {
     const header = bytes.subarray(offset, offset + 512)
     if (header.every(byte => byte === 0)) break
-    if (++count > MAX_TAR_ENTRIES) throw new Error('tarball 文件数量超过限制')
+    if (++count > MAX_TAR_ENTRIES) {
+      throw new Error(ui('tarball 文件数量超过限制', 'The tarball has too many files'))
+    }
     const size = tarSize(bytes, offset)
     const dataStart = offset + 512
     const dataEnd = dataStart + size
-    if (!Number.isSafeInteger(dataEnd) || dataEnd > bytes.byteLength) throw new Error('tarball 文件边界无效')
+    if (!Number.isSafeInteger(dataEnd) || dataEnd > bytes.byteLength) {
+      throw new Error(ui('tarball 文件边界无效', 'The tarball file boundary is invalid'))
+    }
     const name = tarText(bytes, offset, 100)
     const prefix = tarText(bytes, offset + 345, 155)
     const type = String.fromCharCode(header[156] ?? 0)
@@ -244,13 +274,27 @@ function packageCandidate(
   const normalized = patch === undefined ? undefined : safePatchPath(patch)
   const patchValid = normalized !== undefined && patchBytes !== undefined && patchBytes.byteLength <= MAX_PATCH_BYTES
     && validPatchText(new TextDecoder().decode(patchBytes))
-  if (patch === undefined) diagnostics.push('package.json 未声明 dsh.bundle.patch')
-  else if (normalized === undefined) diagnostics.push('dsh.bundle.patch 必须是包内相对路径')
-  else if (patchBytes === undefined) diagnostics.push(`发布内容不含 ${normalized}`)
-  else if (patchBytes.byteLength > MAX_PATCH_BYTES) diagnostics.push(`${normalized} 超过 ${MAX_PATCH_BYTES} 字节限制`)
-  else if (!patchValid) diagnostics.push(`${normalized} 不是有效的 Loader patch 数组`)
+  if (patch === undefined) {
+    diagnostics.push(ui('package.json 未声明 dsh.bundle.patch', 'package.json does not declare dsh.bundle.patch'))
+  } else if (normalized === undefined) {
+    diagnostics.push(ui('dsh.bundle.patch 必须是包内相对路径', 'dsh.bundle.patch must be a package-relative path'))
+  } else if (patchBytes === undefined) {
+    diagnostics.push(ui(`发布内容不含 ${normalized}`, `The published contents do not include ${normalized}`))
+  } else if (patchBytes.byteLength > MAX_PATCH_BYTES) {
+    diagnostics.push(ui(
+      `${normalized} 超过 ${MAX_PATCH_BYTES} 字节限制`,
+      `${normalized} exceeds the ${MAX_PATCH_BYTES}-byte limit`,
+    ))
+  } else if (!patchValid) {
+    diagnostics.push(ui(
+      `${normalized} 不是有效的 Loader patch 数组`,
+      `${normalized} is not a valid Loader patch array`,
+    ))
+  }
   const scripts = Object.keys(manifest.scripts ?? {})
-  if (scripts.length > 0) diagnostics.push(`安装包声明脚本：${scripts.join('、')}`)
+  if (scripts.length > 0) {
+    diagnostics.push(ui(`安装包声明脚本：${scripts.join('、')}`, `The package declares scripts: ${scripts.join(', ')}`))
+  }
   return {
     id: facts.id,
     name: manifest.name ?? facts.spec,
@@ -274,10 +318,12 @@ async function manifestFromTarball(
 ): Promise<TuiMarketplaceCandidate> {
   const entries = await tarEntries(bytes)
   const manifestBytes = entries.get('package/package.json') ?? entries.get('package.json')
-  if (manifestBytes === undefined) throw new Error('tarball 不含 package.json')
+  if (manifestBytes === undefined) {
+    throw new Error(ui('tarball 不含 package.json', 'The tarball does not contain package.json'))
+  }
   const parsed = parseJson(manifestBytes, 'package.json')
   if (typeof parsed !== 'object' || parsed === null || typeof (parsed as { name?: unknown }).name !== 'string') {
-    throw new Error('tarball package.json 缺少包名')
+    throw new Error(ui('tarball package.json 缺少包名', 'The tarball package.json has no package name'))
   }
   const manifest = parsed as PackageManifest
   const patch = manifest.dsh?.bundle?.patch
@@ -312,7 +358,7 @@ function pendingSearchCandidate(facts: {
     patchValid: false,
     scripts: [],
     immutable: facts.immutable,
-    diagnostics: [TARBALL_PENDING],
+    diagnostics: [tarballPendingNotice()],
   }
 }
 
@@ -321,7 +367,9 @@ function parseNpmSpec(spec: string): { name: string; version?: string } {
   if (value.startsWith('@')) {
     const slash = value.indexOf('/')
     const at = value.lastIndexOf('@')
-    if (slash <= 1) throw new Error(`无效 npm 包名 ${JSON.stringify(spec)}`)
+    if (slash <= 1) {
+      throw new Error(ui(`无效 npm 包名 ${JSON.stringify(spec)}`, `Invalid npm package name ${JSON.stringify(spec)}`))
+    }
     return at > slash
       ? { name: value.slice(0, at), version: value.slice(at + 1) }
       : { name: value }
@@ -366,7 +414,7 @@ export class PluginMarketplace {
     signal?: AbortSignal,
   ): Promise<readonly TuiMarketplaceCandidate[]> {
     const text = query.trim()
-    if (text === '') throw new Error('插件搜索词不能为空')
+    if (text === '') throw new Error(ui('插件搜索词不能为空', 'Plugin search query cannot be empty'))
     const enabled = sources.filter(source => source.enabled)
     const cacheKey = `search:${text}:${enabled.map(source => source.id).join(',')}`
     const cached = this.searchCache.get(cacheKey)
@@ -395,7 +443,7 @@ export class PluginMarketplace {
         patchValid: false,
         scripts: [],
         immutable: false,
-        diagnostics: [`来源失败：${message}`],
+        diagnostics: [ui(`来源失败：${message}`, `Source failed: ${message}`)],
       })
     }
     const result = [...deduped.values()]
@@ -416,7 +464,7 @@ export class PluginMarketplace {
     signal?: AbortSignal,
   ): Promise<TuiMarketplaceCandidate> {
     const value = spec.trim()
-    if (value === '') throw new Error('插件 spec 不能为空')
+    if (value === '') throw new Error(ui('插件 spec 不能为空', 'Plugin spec cannot be empty'))
     const cached = this.inspectCache.get(value)
     if (cached !== undefined) return cached
     const candidate = await this.inspectUncached(value, sources, signal)
@@ -429,7 +477,7 @@ export class PluginMarketplace {
     sources: readonly TuiMarketplaceSource[],
     signal?: AbortSignal,
   ): Promise<TuiMarketplaceCandidate> {
-    assertCredentialFreeUrl(value, '插件 spec')
+    assertCredentialFreeUrl(value, ui('插件 spec', 'plugin spec'))
     const type = sourceType(value)
     if (type === 'git') {
       const immutable = /#[0-9a-f]{7,40}$/i.test(value)
@@ -444,8 +492,14 @@ export class PluginMarketplace {
         scripts: [],
         immutable,
         diagnostics: [
-          'Git 来源必须安装后由原生 Manager 再验证 Bundle；安装可能执行 prepare/install 脚本',
-          ...immutable ? [] : ['Git spec 未固定 commit，后续内容可能变化'],
+          ui(
+            'Git 来源必须安装后由原生 Manager 再验证 Bundle；安装可能执行 prepare/install 脚本',
+            'A Git source can be revalidated as a Bundle only after installation by the native Manager; installation may run prepare/install scripts',
+          ),
+          ...immutable ? [] : [ui(
+            'Git spec 未固定 commit，后续内容可能变化',
+            'The Git spec is not pinned to a commit; future content may change',
+          )],
         ],
       }
     }
@@ -453,7 +507,7 @@ export class PluginMarketplace {
     if (type === 'tarball') {
       if (/^https?:/i.test(value)) {
         const response = await this.fetcher(value, requestInit({}, this.timeoutMs, signal))
-        return manifestFromTarball(await readBounded(response, MAX_TARBALL_BYTES, '插件 tarball'), {
+        return manifestFromTarball(await readBounded(response, MAX_TARBALL_BYTES, ui('插件 tarball', 'plugin tarball')), {
           id: `direct:${value}`, sourceId: 'direct', source: 'tarball', spec: value, immutable: false,
         })
       }
@@ -461,7 +515,7 @@ export class PluginMarketplace {
     }
     const npm = sources.find(source => source.kind === 'npm' && source.enabled)
       ?? sources.find(source => source.kind === 'npm')
-    if (npm === undefined) throw new Error('没有可用 npm Registry Source')
+    if (npm === undefined) throw new Error(ui('没有可用 npm Registry Source', 'No npm Registry Source is available'))
     return this.inspectNpm(value, npm, signal)
   }
 
@@ -483,7 +537,10 @@ export class PluginMarketplace {
     url.searchParams.set('text', `${query} keywords:dsh`)
     url.searchParams.set('size', String(MAX_SEARCH_RESULTS))
     const response = await this.fetcher(url, requestInit(await this.headers(source, url), this.timeoutMs, signal))
-    const body = parseJson(await readBounded(response, MAX_INDEX_BYTES, `npm Source ${source.label}`), 'npm 搜索响应')
+    const body = parseJson(
+      await readBounded(response, MAX_INDEX_BYTES, `npm Source ${source.label}`),
+      ui('npm 搜索响应', 'npm search response'),
+    )
     const objects = typeof body === 'object' && body !== null && Array.isArray((body as { objects?: unknown }).objects)
       ? (body as { objects: unknown[] }).objects
       : []
@@ -520,17 +577,30 @@ export class PluginMarketplace {
     const registry = source.url.endsWith('/') ? source.url : `${source.url}/`
     const metadataUrl = new URL(encodeURIComponent(parsed.name), registry)
     const response = await this.fetcher(metadataUrl, requestInit(await this.headers(source, metadataUrl), this.timeoutMs, signal))
-    const metadata = parseJson(await readBounded(response, MAX_INDEX_BYTES, `npm 包 ${parsed.name}`), 'npm 包元数据')
-    if (typeof metadata !== 'object' || metadata === null) throw new Error('npm 元数据不是对象')
+    const metadata = parseJson(
+      await readBounded(response, MAX_INDEX_BYTES, ui(`npm 包 ${parsed.name}`, `npm package ${parsed.name}`)),
+      ui('npm 包元数据', 'npm package metadata'),
+    )
+    if (typeof metadata !== 'object' || metadata === null) {
+      throw new Error(ui('npm 元数据不是对象', 'npm metadata is not an object'))
+    }
     const record = metadata as { versions?: Record<string, PackageManifest>; 'dist-tags'?: Record<string, string> }
     const version = parsed.version ?? record['dist-tags']?.latest
-    if (version === undefined) throw new Error(`${parsed.name} 没有 latest 版本`)
+    if (version === undefined) {
+      throw new Error(ui(`${parsed.name} 没有 latest 版本`, `${parsed.name} has no latest version`))
+    }
     const manifest = record.versions?.[version]
-    if (manifest === undefined) throw new Error(`${parsed.name} 不含版本 ${version}`)
+    if (manifest === undefined) {
+      throw new Error(ui(`${parsed.name} 不含版本 ${version}`, `${parsed.name} does not contain version ${version}`))
+    }
     const tarball = manifest.dist?.tarball
-    if (typeof tarball !== 'string') throw new Error(`${parsed.name}@${version} 缺少 dist.tarball`)
+    if (typeof tarball !== 'string') {
+      throw new Error(ui(`${parsed.name}@${version} 缺少 dist.tarball`, `${parsed.name}@${version} is missing dist.tarball`))
+    }
     const tarballUrl = new URL(tarball)
-    if (!['http:', 'https:'].includes(tarballUrl.protocol)) throw new Error('npm dist.tarball 必须使用 HTTP(S)')
+    if (!['http:', 'https:'].includes(tarballUrl.protocol)) {
+      throw new Error(ui('npm dist.tarball 必须使用 HTTP(S)', 'npm dist.tarball must use HTTP(S)'))
+    }
     const tarResponse = await this.fetcher(tarballUrl, requestInit(await this.headers(source, tarballUrl), this.timeoutMs, signal))
     const exactSpec = `${parsed.name}@${version}`
     const publisher = publisherOf(manifest)
@@ -543,7 +613,10 @@ export class PluginMarketplace {
       immutable: true,
     })
     if (candidate.name !== parsed.name || candidate.version !== version) {
-      throw new Error(`${exactSpec} tarball 的 package.json 名称或版本与 Registry 元数据不一致`)
+      throw new Error(ui(
+        `${exactSpec} tarball 的 package.json 名称或版本与 Registry 元数据不一致`,
+        `The package.json name or version in the ${exactSpec} tarball does not match the Registry metadata`,
+      ))
     }
     return {
       ...candidate,
@@ -558,19 +631,23 @@ export class PluginMarketplace {
     const prefix = /^(?:file:|link:)/.exec(spec)?.[0] ?? ''
     const raw = prefix === '' ? spec : spec.slice(prefix.length)
     const path = fileUrl ? fileURLToPath(spec) : resolve(this.cwd, raw)
-    if (!existsSync(path)) throw new Error(`本地插件不存在：${path}`)
+    if (!existsSync(path)) {
+      throw new Error(ui(`本地插件不存在：${path}`, `Local plugin does not exist: ${path}`))
+    }
     const stat = statSync(path)
     if (stat.isFile()) {
       const finalSpec = fileUrl ? spec : prefix === '' ? path : `${prefix}${path}`
-      return await manifestFromTarball(readLocalBounded(path, MAX_TARBALL_BYTES, '本地插件 tarball'), {
+      return await manifestFromTarball(readLocalBounded(path, MAX_TARBALL_BYTES, ui('本地插件 tarball', 'local plugin tarball')), {
         id: `local:${path}`, sourceId: 'local', source: 'tarball', spec: finalSpec, immutable: false,
       })
     }
-    if (!stat.isDirectory()) throw new Error(`本地插件不是目录或 tarball：${path}`)
+    if (!stat.isDirectory()) {
+      throw new Error(ui(`本地插件不是目录或 tarball：${path}`, `Local plugin is not a directory or tarball: ${path}`))
+    }
     const root = realpathSync(path)
     const manifestPath = join(root, 'package.json')
     const manifest = JSON.parse(new TextDecoder().decode(
-      readLocalBounded(manifestPath, MAX_MANIFEST_BYTES, '本地插件 package.json'),
+      readLocalBounded(manifestPath, MAX_MANIFEST_BYTES, ui('本地插件 package.json', 'local plugin package.json')),
     )) as PackageManifest
     const patch = manifest.dsh?.bundle?.patch
     const normalized = patch === undefined ? undefined : safePatchPath(patch)
@@ -581,7 +658,7 @@ export class PluginMarketplace {
         const realTarget = realpathSync(target)
         const within = relative(root, realTarget)
         if (within !== '..' && !within.startsWith(`..${sep}`) && !isAbsolute(within)) {
-          patchBytes = readLocalBounded(realTarget, MAX_PATCH_BYTES, '本地 Bundle patch')
+          patchBytes = readLocalBounded(realTarget, MAX_PATCH_BYTES, ui('本地 Bundle patch', 'local Bundle patch'))
         }
       }
     }
@@ -642,7 +719,12 @@ export class PluginMarketplace {
     _sources: readonly TuiMarketplaceSource[],
     signal?: AbortSignal,
   ): Promise<readonly TuiMarketplaceCandidate[]> {
-    if (this.providers === undefined) throw new Error(`Source Provider ${JSON.stringify(source.kind)} 未装配`)
+    if (this.providers === undefined) {
+      throw new Error(ui(
+        `Source Provider ${JSON.stringify(source.kind)} 未装配`,
+        `Source Provider ${JSON.stringify(source.kind)} is not mounted`,
+      ))
+    }
     const discoveries = await this.providers.search(query, source, signal)
     return discoveries.map(entry => pendingSearchCandidate({
       id: `${source.id}:${entry.spec}`,

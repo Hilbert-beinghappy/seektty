@@ -28,6 +28,7 @@ import {
 import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace } from './plugin-marketplace.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
+import { ui } from '../client/locale.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
@@ -106,42 +107,72 @@ const CustomThemeSchema = z.object({
 const AppearanceSettingsSchema = z.object({
   theme: z.string().pattern(/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
     .default(DEFAULT_TUI_THEME)
-    .description('SeekTTY 当前使用的界面主题。'),
+    .description(ui('SeekTTY 当前使用的界面主题。', 'The interface theme currently used by SeekTTY.')),
   codeTheme: z.string().pattern(/^(?:auto|dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u)
     .default(DEFAULT_TUI_CODE_THEME)
-    .description('代码块独立主题；auto 跟随当前界面主题。'),
+    .description(ui(
+      '代码块独立主题；auto 跟随当前界面主题。',
+      'Independent code-block theme; auto follows the current interface theme.',
+    )),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
-    .description('SeekTTY 命名自定义主题。'),
+    .description(ui('SeekTTY 命名自定义主题。', 'Named custom SeekTTY themes.')),
 })
 const BehaviorSettingsSchema = z.object({
   toolCards: z.union(['collapsed', 'expanded', 'hidden'])
     .default(DEFAULT_TUI_BEHAVIOR.toolCards)
-    .description('工具卡片默认形态；启动时应用到当前会话。'),
+    .description(ui(
+      '工具卡片默认形态；启动时应用到当前会话。',
+      'Default tool-card shape; applied to the current session at startup.',
+    )),
   showReasoning: z.boolean().default(DEFAULT_TUI_BEHAVIOR.showReasoning)
-    .description('推理内容默认是否显示。'),
+    .description(ui('推理内容默认是否显示。', 'Whether reasoning is shown by default.')),
   desktopNotifications: z.boolean().default(DEFAULT_TUI_BEHAVIOR.desktopNotifications)
-    .description('回合完成或待审批时发送终端桌面通知。'),
+    .description(ui(
+      '回合完成或待审批时发送终端桌面通知。',
+      'Send a desktop notification when a turn completes or an approval is pending.',
+    )),
   followTerminalTitle: z.boolean().default(DEFAULT_TUI_BEHAVIOR.followTerminalTitle)
-    .description('终端标题跟随当前会话运行状态。'),
+    .description(ui(
+      '终端标题跟随当前会话运行状态。',
+      'Follow the current session status in the terminal title.',
+    )),
   composerHistoryLimit: z.natural().max(MAX_COMPOSER_HISTORY)
     .default(DEFAULT_TUI_BEHAVIOR.composerHistoryLimit)
-    .description('输入历史持久化条数；0 表示关闭。'),
+    .description(ui(
+      '输入历史持久化条数；0 表示关闭。',
+      'Number of persisted composer history entries; 0 disables history.',
+    )),
   statusElapsed: z.boolean().default(DEFAULT_TUI_BEHAVIOR.statusElapsed)
-    .description('状态栏显示当前回合实时耗时。'),
+    .description(ui(
+      '状态栏显示当前回合实时耗时。',
+      'Show live elapsed time for the current turn in the status bar.',
+    )),
   clipboardFallback: z.union(['auto', 'osc52', 'off'])
     .default(DEFAULT_TUI_BEHAVIOR.clipboardFallback)
-    .description('OSC 52 失败后的剪贴板回退命令；auto 按平台探测。'),
+    .description(ui(
+      'OSC 52 失败后的剪贴板回退命令；auto 按平台探测。',
+      'Clipboard fallback after OSC 52 fails; auto probes the platform.',
+    )),
   toolOutputLineLimit: z.natural().max(MAX_TOOL_OUTPUT_LINE_LIMIT)
     .default(DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit)
-    .description('展开态工具输出单块行数上限；0 表示不折叠。'),
+    .description(ui(
+      '展开态工具输出单块行数上限；0 表示不折叠。',
+      'Line cap for one expanded tool-output block; 0 means no folding.',
+    )),
   diffContextLines: z.natural().max(MAX_DIFF_CONTEXT_LINES)
     .default(DEFAULT_TUI_BEHAVIOR.diffContextLines)
-    .description('Diff 上下文行数。'),
+    .description(ui('Diff 上下文行数。', 'Number of diff context lines.')),
   dangerConfirmDefault: z.union(['cancel', 'confirm'])
     .default(DEFAULT_TUI_BEHAVIOR.dangerConfirmDefault)
-    .description('危险确认默认焦点；cancel 表示回车不执行。'),
+    .description(ui(
+      '危险确认默认焦点；cancel 表示回车不执行。',
+      'Default focus for danger confirmation; cancel means Enter does not proceed.',
+    )),
   keyBindings: z.dict(z.string()).default({})
-    .description('覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。'),
+    .description(ui(
+      '覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。',
+      'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
+    )),
 })
 
 interface StoredCatalogSource {
@@ -188,7 +219,12 @@ export function createSettingsDescribeCache(
   }
   const one = (namespace: string): TuiSettingsDocument => {
     const document = all().find(row => row.namespace === namespace)
-    if (document === undefined) throw new Error(`设置命名空间 ${JSON.stringify(namespace)} 已卸载`)
+    if (document === undefined) {
+      throw new Error(ui(
+        `设置命名空间 ${JSON.stringify(namespace)} 已卸载`,
+        `Settings namespace ${JSON.stringify(namespace)} is no longer available`,
+      ))
+    }
     return document
   }
   return {
@@ -221,11 +257,18 @@ function sessionExportFilename(sessionId: string): string {
 }
 
 function validateCatalogSource(source: TuiMarketplaceSource): StoredCatalogSource {
-  if (source.builtIn || source.kind !== 'catalog') throw new Error('内置 npm Source 不能写入用户来源')
-  if (!/^[a-z][a-z0-9-]*$/.test(source.id) || source.id === NPM_SOURCE.id) {
-    throw new Error(`Catalog Source id ${JSON.stringify(source.id)} 必须是唯一的小写 kebab-case`)
+  if (source.builtIn || source.kind !== 'catalog') {
+    throw new Error(ui('内置 npm Source 不能写入用户来源', 'The built-in npm Source cannot be written as a user source'))
   }
-  if (source.label.trim() === '' || source.url.trim() === '') throw new Error('Catalog Source 名称和 URL 不能为空')
+  if (!/^[a-z][a-z0-9-]*$/.test(source.id) || source.id === NPM_SOURCE.id) {
+    throw new Error(ui(
+      `Catalog Source id ${JSON.stringify(source.id)} 必须是唯一的小写 kebab-case`,
+      `Catalog Source id ${JSON.stringify(source.id)} must be a unique lowercase kebab-case value`,
+    ))
+  }
+  if (source.label.trim() === '' || source.url.trim() === '') {
+    throw new Error(ui('Catalog Source 名称和 URL 不能为空', 'Catalog Source name and URL cannot be empty'))
+  }
   assertCredentialFreeUrl(source.url, 'Catalog Source URL')
   if (source.credentialRef !== undefined && source.credentialRef !== '') credentialRef(source.credentialRef)
   return {
@@ -245,7 +288,7 @@ function degradedCatalogSource(raw: unknown, index: number, diagnostic: string):
   return {
     id,
     kind: 'catalog',
-    label: `${label}（无效）`,
+    label: ui(`${label}（无效）`, `${label} (invalid)`),
     url,
     enabled: false,
     builtIn: false,
@@ -268,7 +311,10 @@ export function catalogSourcesFromStored(
     const record = typeof raw === 'object' && raw !== null ? raw as Partial<StoredCatalogSource> : {}
     const rawId = typeof record.id === 'string' ? record.id : ''
     if (rawId !== '' && seen.has(rawId)) {
-      sources.push(degradedCatalogSource(raw, index, `Catalog Source ${rawId} 与内置或 Provider Source 冲突`))
+      sources.push(degradedCatalogSource(raw, index, ui(
+        `Catalog Source ${rawId} 与内置或 Provider Source 冲突`,
+        `Catalog Source ${rawId} conflicts with a built-in or Provider Source`,
+      )))
       continue
     }
     try {
@@ -284,7 +330,10 @@ export function catalogSourcesFromStored(
         builtIn: false,
       })
       if (seen.has(storedSource.id)) {
-        sources.push(degradedCatalogSource(raw, index, `Catalog Source ${storedSource.id} 与内置或 Provider Source 冲突`))
+        sources.push(degradedCatalogSource(raw, index, ui(
+          `Catalog Source ${storedSource.id} 与内置或 Provider Source 冲突`,
+          `Catalog Source ${storedSource.id} conflicts with a built-in or Provider Source`,
+        )))
         continue
       }
       seen.add(storedSource.id)
@@ -309,7 +358,10 @@ function tuiProfile(summary: TuiProfileSummary): TuiProfileSummary {
   return {
     ...summary,
     compatible: false,
-    diagnostic: 'Profile 未组合 TUI Surface；可以复制为新的 TUI Profile，但不能由 deepseek 直接启动',
+    diagnostic: ui(
+      'Profile 未组合 TUI Surface；可以复制为新的 TUI Profile，但不能由 deepseek 直接启动',
+      'This Profile does not compose a TUI Surface; copy it into a new TUI Profile instead of launching it with deepseek',
+    ),
   }
 }
 
@@ -342,7 +394,10 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
   const settings = ctx.settings
   const credentials = ctx.credentials
   if (manager === undefined) {
-    throw new Error('tui-runner: Settings、Credentials 或 Profile Plugin Manager 未装配')
+    throw new Error(ui(
+      'tui-runner: Settings、Credentials 或 Profile Plugin Manager 未装配',
+      'tui-runner: Settings, Credentials, or the Profile Plugin Manager is not mounted',
+    ))
   }
   settings.register(MARKETPLACE_NAMESPACE, MarketplaceSettingsSchema, { applies: 'live' })
   settings.register(APPEARANCE_NAMESPACE, AppearanceSettingsSchema, { applies: 'live' })
@@ -377,7 +432,12 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     sessionExport: {
       download: async (sessionId, includeDescendants, signal) => {
         const apiProxy = ctx.get('apiProxy')
-        if (apiProxy === undefined) throw new Error('Harness Session Export 服务未装配')
+        if (apiProxy === undefined) {
+          throw new Error(ui(
+            'Harness Session Export 服务未装配',
+            'Harness Session Export service is not mounted',
+          ))
+        }
         const request: Parameters<typeof apiProxy.downloads.sessionLog>[0] = {
           sessionId: sessionId as Parameters<typeof apiProxy.downloads.sessionLog>[0]['sessionId'],
           ...(includeDescendants ? { includeDescendants: true } : {}),
@@ -385,9 +445,17 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
         const response = await apiProxy.downloads.sessionLog(request, signal ?? new AbortController().signal)
         if (!response.ok) {
           const detail = (await response.text()).trim().slice(0, 1_000)
-          throw new Error(`Harness Session Export 失败（HTTP ${String(response.status)}）${detail === '' ? '' : `：${detail}`}`)
+          throw new Error(ui(
+            `Harness Session Export 失败（HTTP ${String(response.status)}）${detail === '' ? '' : `：${detail}`}`,
+            `Harness Session Export failed (HTTP ${String(response.status)})${detail === '' ? '' : `: ${detail}`}`,
+          ))
         }
-        if (response.body === null) throw new Error('Harness Session Export 返回了空响应体')
+        if (response.body === null) {
+          throw new Error(ui(
+            'Harness Session Export 返回了空响应体',
+            'Harness Session Export returned an empty response body',
+          ))
+        }
         const rawLength = response.headers.get('content-length')
         const contentLength = rawLength === null ? undefined : Number.parseInt(rawLength, 10)
         return {
@@ -452,10 +520,17 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
       sources: () => Promise.resolve(sourceSnapshot()),
       saveSources: async (sources, expectedRevision) => {
         const catalog = sources.filter(source => !source.builtIn).map(validateCatalogSource)
-        if (new Set(catalog.map(source => source.id)).size !== catalog.length) throw new Error('Catalog Source id 不能重复')
+        if (new Set(catalog.map(source => source.id)).size !== catalog.length) {
+          throw new Error(ui('Catalog Source id 不能重复', 'Catalog Source IDs must be unique'))
+        }
         const reserved = new Set([NPM_SOURCE.id, ...(providers?.sources() ?? []).map(source => source.id)])
         const conflict = catalog.find(source => reserved.has(source.id))
-        if (conflict !== undefined) throw new Error(`Catalog Source ${conflict.id} 与内置或 Provider Source 冲突`)
+        if (conflict !== undefined) {
+          throw new Error(ui(
+            `Catalog Source ${conflict.id} 与内置或 Provider Source 冲突`,
+            `Catalog Source ${conflict.id} conflicts with a built-in or Provider Source`,
+          ))
+        }
         await mutateSettings(settings, MARKETPLACE_NAMESPACE, [{ op: 'set', path: ['sources'], value: catalog }], expectedRevision)
         documents.invalidate()
         return sourceSnapshot()
