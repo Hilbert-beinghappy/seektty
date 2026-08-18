@@ -71,7 +71,9 @@ const SYNTAX_COLOR_KEYS = [
 
 const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
   id: 'dark',
-  name: ui('DeepSeek 暗色', 'DeepSeek dark'),
+  get name() {
+    return ui('DeepSeek 暗色', 'DeepSeek dark')
+  },
   tone: 'dark',
   syntaxTone: 'dark',
   source: 'builtin',
@@ -92,7 +94,9 @@ const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
 
 const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
   id: 'light',
-  name: ui('DeepSeek 亮色', 'DeepSeek light'),
+  get name() {
+    return ui('DeepSeek 亮色', 'DeepSeek light')
+  },
   tone: 'light',
   syntaxTone: 'light',
   source: 'builtin',
