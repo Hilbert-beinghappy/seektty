@@ -373,10 +373,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
-      const allowedTools = actions.sessionAllowlistCount()
-      if (allowedTools > 0) {
-        facts.push(ui(`自动允许 ${String(allowedTools)} 个工具`, `Auto-allow ${String(allowedTools)} tool(s)`))
-      }
       if (restartRequired !== undefined) facts.push(ui('需要重启', 'Restart required'))
       const secondary = notice === undefined
         ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]

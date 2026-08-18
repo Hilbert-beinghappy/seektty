@@ -12,9 +12,8 @@ import type {
   HarnessTuiCapabilities,
   TuiActiveSession,
 } from '../src/client/capabilities.ts'
-import type { OverlayQueue } from '../src/client/overlays.ts'
+import type { OverlayQueue, SelectOverlayRequest } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
-import { SessionToolAllowlist } from '../src/client/session-tool-allowlist.ts'
 
 function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript> = {}): TuiActionHost {
   return {
@@ -33,18 +32,8 @@ function host(overlays: Partial<OverlayQueue>, transcript: Partial<Transcript> =
   }
 }
 
-describe('session tool allowlist', () => {
-  it('clears remembered tools when the session changes', () => {
-    const allowlist = new SessionToolAllowlist()
-    allowlist.bind('session-a')
-    allowlist.add('bash')
-    expect(allowlist.has('bash')).toBe(true)
-    allowlist.bind('session-b')
-    expect(allowlist.has('bash')).toBe(false)
-    expect(allowlist.size).toBe(0)
-  })
-
-  it('auto-allows a remembered tool without opening the overlay', async () => {
+describe('session tool approvals', () => {
+  it('asks every time and only submits allow-once or reject', async () => {
     const wait = {
       key: 'approval:2',
       kind: 'approval',
@@ -53,7 +42,10 @@ describe('session tool allowlist', () => {
     } as unknown as PendingWait<'approval'>
     const snapshot = { pending: [wait] } as unknown as ConversationSnapshot
     const answerApproval = vi.fn(async () => undefined)
-    const select = vi.fn()
+    const select = vi.fn(async (request: SelectOverlayRequest) => {
+      expect(request.choices.map(choice => choice.id)).toEqual(['allow', 'reject'])
+      return { id: 'allow', label: 'Allow this time' }
+    })
     const active = {
       sessionId: 'session' as SessionId,
       session: { getSnapshot: () => snapshot },
@@ -63,11 +55,9 @@ describe('session tool allowlist', () => {
       answerApproval,
     } as unknown as HarnessTuiCapabilities
     const actions = new TuiActions(capabilities, host({ select }))
-    actions.rememberSessionTool('session', 'bash')
     actions.syncPending(snapshot)
     await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
-    expect(select).not.toHaveBeenCalled()
+    expect(select).toHaveBeenCalledOnce()
     expect(answerApproval).toHaveBeenCalledWith(wait, 'allowed-once')
-    expect(actions.sessionAllowlistCount()).toBe(1)
   })
 })
