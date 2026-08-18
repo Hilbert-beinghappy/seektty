@@ -41,7 +41,6 @@ import { TuiSettingsConflictError } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { copyTargets } from './copy-content.ts'
-import { conversationMarkdown } from './conversation-markdown.ts'
 import { flattenProducedFiles, groupProducedFiles } from './produced-files.ts'
 import { explainFailure } from './error-advice.ts'
 import { ui, uiLocale } from './locale.ts'
@@ -1491,19 +1490,19 @@ export class HarnessTuiCapabilities {
   }
 
   /**
-   * Write a client-rendered Markdown transcript beside the workspace.
+   * Write Host Session-log Markdown beside the workspace.
    * @param requestedPath - absolute or Workspace-relative destination.
    * @returns saved path, byte count, and Markdown media type.
    */
-  async exportMarkdown(requestedPath?: string): Promise<TuiExportResult> {
+  async exportMarkdown(requestedPath?: string, signal?: AbortSignal): Promise<TuiExportResult> {
     const active = this.requireActive()
-    const markdown = conversationMarkdown(
-      active.summary.displayTitle,
-      active.session.getSnapshot().nodes,
+    const payload = await this.managementBridge().sessionExport.markdown(active.sessionId, signal)
+    const path = resolve(
+      active.workspacePath,
+      requestedPath ?? payload.suggestedFilename ?? markdownExportName(active.summary.displayTitle),
     )
-    const path = resolve(active.workspacePath, requestedPath ?? markdownExportName(active.summary.displayTitle))
-    const bytes = await saveTextExport(path, markdown)
-    return { path, bytes, mediaType: 'text/markdown', includeDescendants: false }
+    const bytes = await saveExport(path, payload.stream)
+    return { path, bytes, mediaType: payload.mediaType, includeDescendants: false }
   }
 
   /**

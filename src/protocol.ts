@@ -325,6 +325,7 @@ export interface TuiSessionExport {
 export interface TuiManagementBridge {
   readonly sessionExport: {
     download(sessionId: string, includeDescendants: boolean, signal?: AbortSignal): Promise<TuiSessionExport>
+    markdown(sessionId: string, signal?: AbortSignal): Promise<TuiSessionExport>
   }
   readonly settings: {
     describe(namespace?: string): Promise<readonly TuiSettingsDocument[]>

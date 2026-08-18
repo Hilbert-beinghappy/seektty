@@ -30,6 +30,7 @@ import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace, redactMarketplaceUrl } from './plugin-marketplace.ts'
 import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
+import { markdownFromSessionLog } from '../client/conversation-markdown.ts'
 import { ui } from '../client/locale.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
@@ -267,6 +268,35 @@ function sessionExportFilename(sessionId: string): string {
   return `dsh-session-${safe}.zip`
 }
 
+function sessionMarkdownFilename(sessionId: string): string {
+  const safe = sessionId.replace(/[^A-Za-z0-9._-]/gu, '_').slice(0, 120) || 'session'
+  return `${safe}.md`
+}
+
+async function bufferStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return Buffer.concat(chunks)
+}
+
+function textStream(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(Buffer.from(text, 'utf8'))
+      controller.close()
+    },
+  })
+}
+
 function validateCatalogSource(source: TuiMarketplaceSource): StoredCatalogSource {
   if (source.builtIn || source.kind !== 'catalog') {
     throw new Error(ui('内置 npm Source 不能写入用户来源', 'The built-in npm Source cannot be written as a user source'))
@@ -448,43 +478,61 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     }
   }
 
+  const downloadSessionLog = async (
+    sessionId: string,
+    includeDescendants: boolean,
+    signal?: AbortSignal,
+  ) => {
+    const apiProxy = ctx.get('apiProxy')
+    if (apiProxy === undefined) {
+      throw new Error(ui(
+        'Harness Session Export 服务未装配',
+        'Harness Session Export service is not mounted',
+      ))
+    }
+    const request: Parameters<typeof apiProxy.downloads.sessionLog>[0] = {
+      sessionId: sessionId as Parameters<typeof apiProxy.downloads.sessionLog>[0]['sessionId'],
+      ...(includeDescendants ? { includeDescendants: true } : {}),
+    }
+    const response = await apiProxy.downloads.sessionLog(request, signal ?? new AbortController().signal)
+    if (!response.ok) {
+      const detail = (await response.text()).trim().slice(0, 1_000)
+      throw new Error(ui(
+        `Harness Session Export 失败（HTTP ${String(response.status)}）${detail === '' ? '' : `：${detail}`}`,
+        `Harness Session Export failed (HTTP ${String(response.status)})${detail === '' ? '' : `: ${detail}`}`,
+      ))
+    }
+    if (response.body === null) {
+      throw new Error(ui(
+        'Harness Session Export 返回了空响应体',
+        'Harness Session Export returned an empty response body',
+      ))
+    }
+    const rawLength = response.headers.get('content-length')
+    const contentLength = rawLength === null ? undefined : Number.parseInt(rawLength, 10)
+    return {
+      suggestedFilename: sessionExportFilename(sessionId),
+      mediaType: response.headers.get('content-type') ?? 'application/zip',
+      ...(contentLength === undefined || !Number.isSafeInteger(contentLength) || contentLength < 0
+        ? {}
+        : { contentLength }),
+      stream: response.body,
+    }
+  }
+
   return {
     sessionExport: {
-      download: async (sessionId, includeDescendants, signal) => {
-        const apiProxy = ctx.get('apiProxy')
-        if (apiProxy === undefined) {
-          throw new Error(ui(
-            'Harness Session Export 服务未装配',
-            'Harness Session Export service is not mounted',
-          ))
-        }
-        const request: Parameters<typeof apiProxy.downloads.sessionLog>[0] = {
-          sessionId: sessionId as Parameters<typeof apiProxy.downloads.sessionLog>[0]['sessionId'],
-          ...(includeDescendants ? { includeDescendants: true } : {}),
-        }
-        const response = await apiProxy.downloads.sessionLog(request, signal ?? new AbortController().signal)
-        if (!response.ok) {
-          const detail = (await response.text()).trim().slice(0, 1_000)
-          throw new Error(ui(
-            `Harness Session Export 失败（HTTP ${String(response.status)}）${detail === '' ? '' : `：${detail}`}`,
-            `Harness Session Export failed (HTTP ${String(response.status)})${detail === '' ? '' : `: ${detail}`}`,
-          ))
-        }
-        if (response.body === null) {
-          throw new Error(ui(
-            'Harness Session Export 返回了空响应体',
-            'Harness Session Export returned an empty response body',
-          ))
-        }
-        const rawLength = response.headers.get('content-length')
-        const contentLength = rawLength === null ? undefined : Number.parseInt(rawLength, 10)
+      download: downloadSessionLog,
+      markdown: async (sessionId, signal) => {
+        const exported = await downloadSessionLog(sessionId, false, signal)
+        const bytes = await bufferStream(exported.stream)
+        const markdown = markdownFromSessionLog(bytes, sessionId)
+        const encoded = Buffer.from(markdown, 'utf8')
         return {
-          suggestedFilename: sessionExportFilename(sessionId),
-          mediaType: response.headers.get('content-type') ?? 'application/zip',
-          ...(contentLength === undefined || !Number.isSafeInteger(contentLength) || contentLength < 0
-            ? {}
-            : { contentLength }),
-          stream: response.body,
+          suggestedFilename: sessionMarkdownFilename(sessionId),
+          mediaType: 'text/markdown',
+          contentLength: encoded.byteLength,
+          stream: textStream(markdown),
         }
       },
     },

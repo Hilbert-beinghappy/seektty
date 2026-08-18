@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { formatByteSize } from '../src/client/byte-size.ts'
-import { conversationMarkdown } from '../src/client/conversation-markdown.ts'
+import { conversationMarkdown, markdownFromSessionLog } from '../src/client/conversation-markdown.ts'
 
 describe('export size and markdown', () => {
   it('renders binary byte sizes with one decimal below 100 units', () => {
@@ -38,5 +40,22 @@ describe('export size and markdown', () => {
       '- tool `Read`',
       '',
     ].join('\n'))
+  })
+
+  it('builds Markdown from a Host session-log snapshot, not the loaded client page', () => {
+    const log = {
+      title: 'Full session',
+      nodes: [
+        { kind: 'user', content: [{ type: 'text', text: 'early turn that paging hid' }] },
+        { kind: 'assistant', blocks: [{ kind: 'text', text: 'complete answer' }] },
+      ],
+    }
+    const markdown = markdownFromSessionLog(Buffer.from(JSON.stringify(log)), 'fallback')
+    expect(markdown).toContain('early turn that paging hid')
+    expect(markdown).toContain('complete answer')
+    expect(markdown).toContain('# Full session')
+    const capabilities = readFileSync(resolve(import.meta.dirname, '../src/client/capabilities.ts'), 'utf8')
+    expect(capabilities).toMatch(/sessionExport\.markdown\(/u)
+    expect(capabilities).not.toMatch(/exportMarkdown[\s\S]*getSnapshot\(\)\.nodes/u)
   })
 })
