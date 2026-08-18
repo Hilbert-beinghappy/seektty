@@ -405,7 +405,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
-      if (restartRequired !== undefined) facts.push(ui('需要重启', 'Restart required'))
+      if (restartRequired !== undefined) facts.push(ui('需要重启 · /restart', 'Restart required · /restart'))
       const secondary = notice === undefined
         ? [primary, facts.length === 0 ? undefined : color.muted(facts.join(' · '))]
           .filter((value): value is string => value !== undefined)
@@ -570,11 +570,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           },
         })
       },
-      requireRestart: (message) => {
-        restartRequired = message
+      requireRestart: (label) => {
+        restartRequired = ui('需要重启 · /restart', 'Restart required · /restart')
         setNotice(ui(
-          `${message}；可输入 /restart 稍后重启`,
-          `${message}; use /restart later to apply it`,
+          `${label}。需要重启 · /restart`,
+          `${label}. Restart required · /restart`,
         ), 'warning')
       },
     })

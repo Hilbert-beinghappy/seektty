@@ -2383,7 +2383,7 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
       ui('立即重启', "Restart now"),
     )
     if (restart) this.host.restart(this.capabilities.currentProfile(), ui(`已应用 ${label}`, `Applied ${label}`))
-    else this.host.requireRestart(ui(`${label} 已修改，输入 /restart 生效`, `${label} was changed; use /restart to apply it`))
+    else this.host.requireRestart(ui(`${label} 已修改`, `${label} was changed`))
   }
 
   private async plugin(args: string): Promise<void> {
@@ -2753,7 +2753,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       ui('立即重启', "Restart now"),
     )
     if (restart) this.host.restart(this.capabilities.currentProfile(), ui(`${label} 已应用`, `${label} applied`))
-    else this.host.requireRestart(ui(`${label} 已完成，输入 /restart 加载变更`, `${label} completed; use /restart to load the change`))
+    else this.host.requireRestart(ui(`${label} 已完成`, `${label} completed`))
   }
 
   private async pluginReorder(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
