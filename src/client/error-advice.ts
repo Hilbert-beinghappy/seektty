@@ -55,13 +55,13 @@ export function explainFailure(message: string): string {
   if (message.includes(STARTUP_TIMEOUT_MARK)) {
     return ui(
       '确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek',
-      'Startup timed out; confirm dsh is on PATH or DSH_BIN, check the Profile, then run deepseek again.',
+      'Confirm dsh is on PATH or DSH_BIN, check the Profile, then run deepseek again.',
     )
   }
   if (/pnpm 不在 PATH/u.test(message) || /exit 127/u.test(message)) {
     return ui(
       '安装 pnpm 并确保它在 PATH 中后重试',
-      'pnpm is not on PATH; install pnpm and retry',
+      'Install pnpm and keep it on PATH, then retry',
     )
   }
   if (/\bENOENT\b/u.test(message)) {
@@ -73,7 +73,7 @@ export function explainFailure(message: string): string {
   if (/\bEACCES\b/u.test(message) || /\bEPERM\b/u.test(message)) {
     return ui(
       '权限不足，检查当前权限后重试',
-      'Permission denied; check the current permission and retry',
+      'Check the current permission and retry',
     )
   }
   return oneLine(message)
