@@ -857,6 +857,7 @@ const ENGLISH_PATTERNS: readonly {
   { pattern: /^等待 (\d+) 项工具审批$/u, replace: count => `Waiting for ${count} tool approval(s)` },
   { pattern: /^等待 (\d+) 项问题$/u, replace: count => `Waiting for ${count} question(s)` },
   { pattern: /^等待 (\d+) 项交互$/u, replace: count => `Waiting for ${count} interaction(s)` },
+  { pattern: /^(.+) · 仍在生成 · Ctrl\+C 重试$/u, replace: value => `${value} · Still generating · Ctrl+C to retry` },
 ]
 
 function requestedEnvironmentLocale(env: NodeJS.ProcessEnv): LocaleId {

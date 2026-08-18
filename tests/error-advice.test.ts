@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { explainFailure, pluginFailureDetail, startupTimeoutError } from '../src/client/error-advice.ts'
+import { explainFailure, pluginFailureDetail, startupTimeoutError, withRunningRetry } from '../src/client/error-advice.ts'
 import { setUiLocale } from '../src/client/locale.ts'
 
 const root = resolve(import.meta.dirname, '..')
@@ -56,5 +56,14 @@ describe('actionable failure text', () => {
     expect(cases[3]).toMatch(/^Confirm the path exists/)
     expect(cases[4]).toMatch(/^Check the current permission/)
     expect(cases[5]).toMatch(/^Check the current permission/)
+  })
+
+  it('keeps a still-running turn visible after a stop or send failure', () => {
+    expect(withRunningRetry('停止失败：boom', false)).toBe('停止失败：boom')
+    expect(withRunningRetry('停止失败：boom', true)).toBe('停止失败：boom · 仍在生成 · Ctrl+C 重试')
+    const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
+    expect(surface).toMatch(/capabilityError\(snapshot\.promptError\.error\)/u)
+    expect(surface).toMatch(/capabilityError\(result\.error\)/u)
+    expect(surface).not.toMatch(/发送失败：\$\{snapshot\.promptError/u)
   })
 })

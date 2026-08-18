@@ -16,6 +16,7 @@ import {
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
+import { withRunningRetry } from './error-advice.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import {
@@ -400,10 +401,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           ? { error: color.danger(ui('会话已删除', 'Session deleted')) }
           : snapshot.promptError !== null
             ? {
-              error: color.danger(ui(
-                `${snapshot.promptError.op === 'send' ? '发送' : '停止'}失败：${snapshot.promptError.error.message}`,
-                `${snapshot.promptError.op === 'send' ? 'Send' : 'Stop'} failed: ${snapshot.promptError.error.message}`,
-              )),
+              error: color.danger(withRunningRetry(capabilityError(snapshot.promptError.error), snapshot.running)),
             }
             : noticeView.error === undefined
               ? {}
@@ -652,10 +650,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (content.length === 0) return false
         const result = await current.session.prompt(content, mode)
         if (!result.ok) {
-          setNotice(ui(
-            `${mode === 'steer' ? '引导' : '发送'}失败：${result.error.message}`,
-            `${mode === 'steer' ? 'Steering' : 'Send'} failed: ${result.error.message}`,
-          ), 'error')
+        setNotice(capabilityError(result.error), 'error')
           restoreDeferredPrompt(text)
           return false
         }
@@ -695,7 +690,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return
         }
         const result = await current.session.command(trimmed)
-        if (!result.ok) setNotice(ui(`命令失败：${result.error.message}`, `Command failed: ${result.error.message}`), 'error')
+        if (!result.ok) setNotice(capabilityError(result.error), 'error')
         else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
         else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
