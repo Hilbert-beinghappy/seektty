@@ -37,6 +37,7 @@ import type {
   MessageFeedbackVersion,
 } from '@deepseek-ai/dsh-message-feedback/types'
 import type { TrajectorySnapshot } from '@deepseek-ai/dsh-client-ui-trajectory/projection'
+import { TuiSettingsConflictError } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { copyTargets } from './copy-content.ts'
@@ -1662,5 +1663,11 @@ export class HarnessTuiCapabilities {
  * @returns a safe user-facing failure message.
  */
 export function capabilityError(error: unknown): string {
+  if (error instanceof TuiSettingsConflictError) {
+    return ui(
+      `设置 ${JSON.stringify(error.namespace)} 已在其他界面更新（期望 revision ${String(error.expected)}，当前 ${String(error.actual)}）`,
+      `Settings ${JSON.stringify(error.namespace)} was updated in another surface (expected revision ${String(error.expected)}, actual ${String(error.actual)})`,
+    )
+  }
   return explainFailure(messageOf(error))
 }
