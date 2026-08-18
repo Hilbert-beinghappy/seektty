@@ -41,11 +41,14 @@ function host(overlays: Partial<OverlayQueue>): TuiActionHost & {
 describe('command palette execution', () => {
   it('fills the editor only for Host, Skill, quit, and required-argument commands', () => {
     expect(paletteFillsEditor(command('model', 'local'))).toBe(false)
+    expect(paletteFillsEditor(command('model', 'local', '<unused hint>'))).toBe(false)
     expect(paletteFillsEditor(command('sessions', 'local', '[query]'))).toBe(false)
     expect(paletteFillsEditor(command('help', 'local'))).toBe(false)
     expect(paletteFillsEditor(command('quit', 'local'))).toBe(true)
     expect(paletteFillsEditor(command('exit', 'local'))).toBe(true)
-    expect(paletteFillsEditor(command('steer', 'local', '<message>'))).toBe(true)
+    expect(paletteFillsEditor(command('rename', 'local'))).toBe(true)
+    expect(paletteFillsEditor(command('steer', 'local'))).toBe(true)
+    expect(paletteFillsEditor(command('attach', 'local'))).toBe(true)
     expect(paletteFillsEditor(command('compact', 'host'))).toBe(true)
     expect(paletteFillsEditor(command('review', 'skill'))).toBe(true)
   })
@@ -67,17 +70,26 @@ describe('command palette execution', () => {
     execute.mockRestore()
   })
 
-  it('still fills the editor for quit and Host commands', async () => {
-    const catalog = [command('quit', 'local'), command('compact', 'host', '[text]')]
-    const quitHost = host({
-      select: vi.fn(async () => ({ id: 'quit', label: '/quit' })),
-    })
-    const actions = new TuiActions({
-      commandCatalog: async () => catalog,
-    } as unknown as HarnessTuiCapabilities, quitHost)
+  it('still fills the editor for quit, exit, rename, steer, attach, and Host commands', async () => {
+    const catalog = [
+      command('quit', 'local'),
+      command('exit', 'local'),
+      command('rename', 'local'),
+      command('steer', 'local'),
+      command('attach', 'local'),
+      command('compact', 'host', '[text]'),
+    ]
+    const execute = vi.spyOn(TuiActions.prototype, 'execute').mockResolvedValue(undefined)
 
-    await actions.commandPalette()
-    expect(quitHost.setEditor).toHaveBeenCalledWith('/quit')
+    for (const name of ['quit', 'exit', 'rename', 'steer', 'attach'] as const) {
+      const paletteHost = host({
+        select: vi.fn(async () => ({ id: name, label: `/${name}` })),
+      })
+      await new TuiActions({
+        commandCatalog: async () => catalog,
+      } as unknown as HarnessTuiCapabilities, paletteHost).commandPalette()
+      expect(paletteHost.setEditor).toHaveBeenCalledWith(`/${name}`)
+    }
 
     const hostCommand = host({
       select: vi.fn(async () => ({ id: 'compact', label: '/compact' })),
@@ -86,5 +98,7 @@ describe('command palette execution', () => {
       commandCatalog: async () => catalog,
     } as unknown as HarnessTuiCapabilities, hostCommand).commandPalette()
     expect(hostCommand.setEditor).toHaveBeenCalledWith('/compact ')
+    expect(execute).not.toHaveBeenCalled()
+    execute.mockRestore()
   })
 })
