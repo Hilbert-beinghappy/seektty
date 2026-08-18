@@ -1061,11 +1061,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       ['zh', 'zh'],
       ['zh-cn', 'zh'],
       ['chinese', 'zh'],
-      [{ zh: '中文' }.zh, 'zh'],
+      ['中文', 'zh'],
       ['en', 'en'],
       ['en-us', 'en'],
       ['english', 'en'],
-      [{ zh: '英语' }.zh, 'en'],
+      ['英语', 'en'],
     ])
     let selection = requested === '' ? undefined : aliases.get(requested)
     if (requested !== '' && selection === undefined) {
