@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
-import type { OverlayQueue } from '../src/client/overlays.ts'
+import type { OverlayNavigation, OverlayQueue } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
 import { BUILT_IN_THEMES, editableTheme } from '../src/client/theme-config.ts'
 import {
@@ -58,7 +58,7 @@ function settingsState(initial: TuiAppearanceSettings): {
 
 function actionHarness(
   settings: TuiManagementBridge['settings'],
-  overlays: Partial<OverlayQueue> = {},
+  overlays: Partial<OverlayQueue> & Partial<OverlayNavigation> = {},
 ): {
   readonly actions: TuiActions
   readonly host: TuiActionHost
@@ -144,7 +144,7 @@ describe('/theme commands', () => {
       .mockResolvedValueOnce('Ocean')
       .mockResolvedValueOnce('#071426 #F4F8FF #6682FF #37C99B #E7AE5B #F0717F')
     const select = vi.fn().mockResolvedValue({ id: 'apply', label: '应用并保存' })
-    const { actions, host } = actionHarness(state.settings, { input, select } as Partial<OverlayQueue>)
+    const { actions, host } = actionHarness(state.settings, { input, select } as Partial<OverlayQueue> & Partial<OverlayNavigation>)
 
     await actions.execute('theme', 'palette')
 
@@ -171,7 +171,7 @@ describe('/theme commands', () => {
       .mockResolvedValueOnce('Ocean')
       .mockResolvedValueOnce('#071426 #F4F8FF #6682FF')
     const select = vi.fn().mockResolvedValue({ id: 'cancel', label: '取消' })
-    const { actions, host } = actionHarness(state.settings, { input, select } as Partial<OverlayQueue>)
+    const { actions, host } = actionHarness(state.settings, { input, select } as Partial<OverlayQueue> & Partial<OverlayNavigation>)
 
     await actions.execute('theme', 'palette')
 
@@ -196,7 +196,7 @@ describe('/theme commands', () => {
       }`, 'utf8')
       const state = settingsState({ theme: 'light', codeTheme: 'auto', customThemes: [] })
       const select = vi.fn().mockResolvedValue({ id: 'apply', label: '应用并保存' })
-      const { actions, host } = actionHarness(state.settings, { select } as Partial<OverlayQueue>)
+      const { actions, host } = actionHarness(state.settings, { select } as Partial<OverlayQueue> & Partial<OverlayNavigation>)
 
       await actions.execute('theme', `import "${path}"`)
 
@@ -223,7 +223,7 @@ describe('/theme commands', () => {
     const state = settingsState({ theme: 'custom:ocean', codeTheme: 'custom:ocean', customThemes: [custom] })
     const confirm = vi.fn().mockResolvedValue(false)
     const select = vi.fn()
-    const { actions } = actionHarness(state.settings, { confirm, select } as Partial<OverlayQueue>)
+    const { actions } = actionHarness(state.settings, { confirm, select } as Partial<OverlayQueue> & Partial<OverlayNavigation>)
 
     await actions.execute('theme', 'edit Ocean')
 
@@ -240,7 +240,7 @@ describe('/theme commands', () => {
     const custom = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
     const state = settingsState({ theme: 'custom:ocean', codeTheme: 'custom:ocean', customThemes: [custom] })
     const confirm = vi.fn().mockResolvedValue(true)
-    const { actions, host } = actionHarness(state.settings, { confirm } as Partial<OverlayQueue>)
+    const { actions, host } = actionHarness(state.settings, { confirm } as Partial<OverlayQueue> & Partial<OverlayNavigation>)
 
     await actions.execute('theme', 'delete Ocean')
 
