@@ -124,7 +124,7 @@ describe('i18n English chrome gate (task 7)', () => {
   it('keeps renderable chrome, help, and launcher copy free of Chinese in en mode', () => {
     const rendered = englishChromeFrom('en')
     expect(rendered).not.toMatch(HAN)
-    expect(rendered).toContain('Command palette')
+    expect(rendered).toContain('Open the command palette')
     expect(rendered).toContain('New session')
     expect(rendered).toContain('Enter a message below')
     expect(rendered).toContain('The interface theme currently used by SeekTTY')

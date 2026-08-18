@@ -8,21 +8,16 @@ export interface EmptySessionExample {
   readonly en: string
 }
 
-/** Two or three tasks a coding session can send without typing. */
+/** Two tasks a coding session can send without typing. */
 export const EMPTY_SESSION_EXAMPLES: readonly EmptySessionExample[] = [
   {
     id: 'review',
-    zh: '审查当前改动并指出风险',
-    en: 'Review the current changes and call out risks',
-  },
-  {
-    id: 'test',
-    zh: '为刚才改过的文件补测试',
-    en: 'Add tests for the files just changed',
+    zh: '概览当前仓库，并指出最值得先处理的问题',
+    en: 'Give an overview of this repo and name the problems worth handling first',
   },
   {
     id: 'boot',
-    zh: '解释这个仓库怎么启动和验证',
+    zh: '说明这个仓库如何启动和验证',
     en: 'Explain how this repo starts and how to verify it',
   },
 ]
