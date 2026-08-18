@@ -56,4 +56,11 @@ describe('settings field index', () => {
     })
     expect(parseSettingsRootChoice('agent-presets')).toEqual({ namespace: 'agent-presets' })
   })
+
+  it('labels known fields only by namespace and path, not a bare field name', () => {
+    expect(settingsFieldLabel('other-plugin', ['theme'])).toBe('theme')
+    expect(settingsFieldLabel('other-plugin', ['default'])).toBe('default')
+    expect(settingsFieldLabel('seektty-appearance', ['theme'])).toBe('界面主题')
+    expect(settingsFieldLabel('permission', ['default'])).toBe('默认权限')
+  })
 })
