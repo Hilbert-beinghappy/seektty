@@ -439,7 +439,7 @@ export class PluginMarketplace {
     const text = query.trim()
     if (text === '') throw new Error(ui('插件搜索词不能为空', 'Plugin search query cannot be empty'))
     const enabled = sources.filter(source => source.enabled)
-    const cacheKey = `search:${text}:${enabled.map(source => source.id).join(',')}`
+    const cacheKey = this.searchCacheKey(text, enabled)
     const cached = this.searchCache.get(cacheKey)
     if (cached !== undefined) return cached
     const settled = await Promise.allSettled(enabled.map(async (source) => {
@@ -491,11 +491,46 @@ export class PluginMarketplace {
   ): Promise<TuiMarketplaceCandidate> {
     const value = spec.trim()
     if (value === '') throw new Error(ui('插件 spec 不能为空', 'Plugin spec cannot be empty'))
-    const cached = this.inspectCache.get(value)
-    if (cached !== undefined) return cached
+    const cacheKey = this.inspectCacheKey(value, sources)
+    if (cacheKey !== undefined) {
+      const cached = this.inspectCache.get(cacheKey)
+      if (cached !== undefined) return cached
+    }
     const candidate = await this.inspectUncached(value, sources, signal)
-    this.inspectCache.set(value, candidate)
+    if (cacheKey !== undefined) this.inspectCache.set(cacheKey, candidate)
     return candidate
+  }
+
+  private sourceFingerprint(source: TuiMarketplaceSource): string {
+    return [
+      source.id,
+      source.kind,
+      source.url,
+      source.credentialRef ?? '',
+      source.enabled ? '1' : '0',
+      this.localCatalogStamp(source),
+    ].join('\0')
+  }
+
+  private localCatalogStamp(source: TuiMarketplaceSource): string {
+    if (source.kind !== 'catalog' || /^https?:/iu.test(source.url)) return ''
+    try {
+      const path = source.url.startsWith('file:') ? fileURLToPath(source.url) : resolve(this.cwd, source.url)
+      if (!existsSync(path)) return 'missing'
+      const stat = statSync(path)
+      return `${stat.mtimeMs}:${stat.size}`
+    } catch {
+      return 'invalid'
+    }
+  }
+
+  private searchCacheKey(query: string, sources: readonly TuiMarketplaceSource[]): string {
+    return `search:${query}:${sources.map(source => this.sourceFingerprint(source)).join('|')}`
+  }
+
+  private inspectCacheKey(spec: string, sources: readonly TuiMarketplaceSource[]): string | undefined {
+    if (sourceType(spec) === 'local') return undefined
+    return `inspect:${spec}:${sources.filter(source => source.enabled).map(source => this.sourceFingerprint(source)).join('|')}`
   }
 
   private async inspectUncached(

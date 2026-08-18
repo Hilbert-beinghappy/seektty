@@ -449,7 +449,10 @@ export class TuiActions {
   private async settingsConflict(error: TuiSettingsConflictError): Promise<void> {
     let actual = error.actual
     try {
-      const document = (await this.capabilities.managementBridge().settings.describe(error.namespace))[0]
+      const document = (await this.capabilities.managementBridge().settings.describe(
+        error.namespace,
+        { bypassCache: true },
+      ))[0]
       if (document !== undefined) actual = document.revision
     } catch (refreshError) {
       this.host.notice(ui(`设置冲突后重新读取失败：${capabilityError(refreshError)}`, `Failed to reload after a Settings conflict: ${capabilityError(refreshError)}`), 'error')

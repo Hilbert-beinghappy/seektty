@@ -1,6 +1,7 @@
 import { gzipSync } from 'node:zlib'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PluginMarketplace } from '../src/host/plugin-marketplace.ts'
 import type { TuiMarketplaceSource } from '../src/protocol.ts'
@@ -230,5 +231,45 @@ describe('plugin marketplace search (task 5.3)', () => {
     const rows = await marketplace.search('demo', [source, catalog])
     expect(rows.some(row => row.name === 'demo-plugin')).toBe(true)
     expect(rows.some(row => row.sourceId === 'bad-catalog' && row.diagnostics.some(item => item.includes('catalog down')))).toBe(true)
+  })
+
+  it('does not reuse a search when the registry URL or credential changes', async () => {
+    let searches = 0
+    const marketplace = new PluginMarketplace({
+      cwd: root,
+      resolveCredential: () => Promise.resolve(undefined),
+      fetch: (async (input) => {
+        const url = String(input)
+        if (url.includes('/-/v1/search')) {
+          searches += 1
+          return jsonResponse(searchBody())
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }) as typeof fetch,
+    })
+    await marketplace.search('demo', [source])
+    await marketplace.search('demo', [{ ...source, url: 'https://registry.example.test/' }])
+    await marketplace.search('demo', [{ ...source, credentialRef: 'NPM_TOKEN' }])
+    expect(searches).toBe(3)
+  })
+
+  it('does not cache inspect results for a local mutable spec', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'seektty-local-inspect-'))
+    const spec = join(home, 'plugin')
+    mkdirSync(spec)
+    writeFileSync(join(spec, 'package.json'), '{"name":"local-plugin","version":"1.0.0"}\n')
+    try {
+      const marketplace = new PluginMarketplace({
+        cwd: home,
+        resolveCredential: () => Promise.resolve(undefined),
+      })
+      const first = await marketplace.inspect(spec, [])
+      expect(first.version).toBe('1.0.0')
+      writeFileSync(join(spec, 'package.json'), '{"name":"local-plugin","version":"2.0.0"}\n')
+      const second = await marketplace.inspect(spec, [])
+      expect(second.version).toBe('2.0.0')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })

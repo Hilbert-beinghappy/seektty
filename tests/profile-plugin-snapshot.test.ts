@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -21,5 +21,12 @@ describe('profile plugin snapshot (task 5.3)', () => {
     const third = manager.snapshot()
     expect(third).not.toBe(first)
     expect(third.profile).toBe('tui')
+    writeFileSync(join(manager.dir, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
+    const afterLock = manager.snapshot()
+    expect(afterLock).not.toBe(third)
+    mkdirSync(join(manager.dir, 'node_modules'))
+    writeFileSync(join(manager.dir, 'node_modules', '.modules.yaml'), 'hoisted: {}\n')
+    const afterModules = manager.snapshot()
+    expect(afterModules).not.toBe(afterLock)
   })
 })

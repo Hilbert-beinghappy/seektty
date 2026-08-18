@@ -337,7 +337,7 @@ export interface TuiManagementBridge {
     index(sessionId: string, signal?: AbortSignal): Promise<readonly TuiProducedFileGroup[]>
   }
   readonly settings: {
-    describe(namespace?: string): Promise<readonly TuiSettingsDocument[]>
+    describe(namespace?: string, options?: { bypassCache?: boolean }): Promise<readonly TuiSettingsDocument[]>
     mutate(namespace: string, ops: readonly TuiSettingsPathOp[], expectedRevision: number): Promise<TuiSettingsDocument>
     credentialInfo(ref: string): Promise<TuiCredentialInfo>
     setCredential(ref: string, value: string): Promise<TuiCredentialInfo>

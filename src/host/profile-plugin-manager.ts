@@ -688,8 +688,19 @@ export class ProfilePluginManager {
   }
 
   private profileStamp(): string {
-    const path = join(this.dir, 'package.json')
-    return existsSync(path) ? String(statSync(path).mtimeMs) : 'missing'
+    return [
+      join(this.dir, 'package.json'),
+      join(this.dir, 'pnpm-lock.yaml'),
+      join(this.dir, 'package-lock.json'),
+      join(this.dir, PROFILE_PATCH_FILENAME),
+      join(this.dir, 'node_modules'),
+    ].map(path => this.pathStamp(path)).join('|')
+  }
+
+  private pathStamp(path: string): string {
+    if (!existsSync(path)) return `${basename(path)}:missing`
+    const stat = statSync(path)
+    return `${basename(path)}:${stat.mtimeMs}:${stat.isFile() ? stat.size : 'dir'}`
   }
 
   private forgetInstalled(): void {

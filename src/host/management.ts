@@ -237,18 +237,24 @@ function settingsDocument(descriptor: SettingsDescriptor): TuiSettingsDocument {
  */
 export function createSettingsDescribeCache(
   load: () => readonly TuiSettingsDocument[],
+  fingerprint?: () => string,
 ): {
-  describe(namespace?: string): readonly TuiSettingsDocument[]
-  one(namespace: string): TuiSettingsDocument
+  describe(namespace?: string, options?: { bypassCache?: boolean }): readonly TuiSettingsDocument[]
+  one(namespace: string, options?: { bypassCache?: boolean }): TuiSettingsDocument
   invalidate(): void
 } {
   let cached: readonly TuiSettingsDocument[] | undefined
-  const all = (): readonly TuiSettingsDocument[] => {
-    cached ??= load()
+  let cachedFingerprint: string | undefined
+  const all = (bypass = false): readonly TuiSettingsDocument[] => {
+    const stamp = fingerprint?.()
+    if (bypass || cached === undefined || (stamp !== undefined && stamp !== cachedFingerprint)) {
+      cached = load()
+      cachedFingerprint = stamp
+    }
     return cached
   }
-  const one = (namespace: string): TuiSettingsDocument => {
-    const document = all().find(row => row.namespace === namespace)
+  const one = (namespace: string, options?: { bypassCache?: boolean }): TuiSettingsDocument => {
+    const document = all(options?.bypassCache === true).find(row => row.namespace === namespace)
     if (document === undefined) {
       throw new Error(ui(
         `设置命名空间 ${JSON.stringify(namespace)} 已卸载`,
@@ -258,13 +264,14 @@ export function createSettingsDescribeCache(
     return document
   }
   return {
-    describe(namespace?: string): readonly TuiSettingsDocument[] {
-      if (namespace === undefined) return all()
-      return [one(namespace)]
+    describe(namespace?: string, options?: { bypassCache?: boolean }): readonly TuiSettingsDocument[] {
+      if (namespace === undefined) return all(options?.bypassCache === true)
+      return [one(namespace, options)]
     },
     one,
     invalidate(): void {
       cached = undefined
+      cachedFingerprint = undefined
     },
   }
 }
@@ -464,9 +471,15 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     ...(providers === undefined ? {} : { providers }),
   })
 
+  let settingsGeneration = 0
   const documents = createSettingsDescribeCache(
     () => settings.describe({ redactSecrets: true }).map(settingsDocument),
+    () => String(settingsGeneration),
   )
+  ctx.on('settings/document-updated', () => {
+    settingsGeneration += 1
+    documents.invalidate()
+  })
   const sourceSnapshot = (): TuiMarketplaceSources => {
     const document = documents.one(MARKETPLACE_NAMESPACE)
     const value = document.value as MarketplaceSettings
@@ -550,9 +563,14 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
       },
     },
     settings: {
-      describe: namespace => Promise.resolve(documents.describe(namespace)),
+      describe: (namespace, options) => Promise.resolve(documents.describe(namespace, options)),
       mutate: async (namespace, ops, expectedRevision) => {
-        await mutateSettings(settings, namespace, ops, expectedRevision)
+        try {
+          await mutateSettings(settings, namespace, ops, expectedRevision)
+        } catch (error) {
+          documents.invalidate()
+          throw error
+        }
         documents.invalidate()
         return documents.one(namespace)
       },

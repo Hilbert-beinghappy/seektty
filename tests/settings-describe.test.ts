@@ -20,7 +20,7 @@ function document(namespace: string): TuiSettingsDocument {
 describe('settings describe (task 5.3)', () => {
   it('exposes an optional namespace on the management bridge', () => {
     const source = readFileSync(resolve(root, 'src/protocol.ts'), 'utf8')
-    expect(source).toMatch(/describe\(namespace\?: string\): Promise<readonly TuiSettingsDocument\[\]>/u)
+    expect(source).toMatch(/describe\(namespace\?: string, options\?: \{ bypassCache\?: boolean \}\): Promise<readonly TuiSettingsDocument\[\]>/u)
   })
 
   it('loads every namespace once then serves one() from that snapshot', () => {
@@ -54,5 +54,20 @@ describe('settings describe (task 5.3)', () => {
     revision = 2
     cache.invalidate()
     expect(cache.one('seektty-appearance').revision).toBe(2)
+  })
+
+  it('reloads when the Host revision fingerprint changes or bypass is requested', () => {
+    let revision = 1
+    let hostRevision = '1'
+    const cache = createSettingsDescribeCache(
+      () => [{ ...document('seektty-appearance'), revision }],
+      () => hostRevision,
+    )
+    expect(cache.one('seektty-appearance').revision).toBe(1)
+    revision = 2
+    hostRevision = '2'
+    expect(cache.one('seektty-appearance').revision).toBe(2)
+    revision = 3
+    expect(cache.describe('seektty-appearance', { bypassCache: true })[0]?.revision).toBe(3)
   })
 })
