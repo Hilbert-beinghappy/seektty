@@ -53,6 +53,24 @@ export interface TuiCommandCandidate {
   readonly behavior: 'local' | 'host' | 'skill'
 }
 
+/**
+ * Compatible names that still execute, but stay out of `/`, Ctrl+P, and help.
+ * Hidden name → visible canonical name.
+ */
+export const TUI_HIDDEN_COMMAND_ALIASES = Object.freeze({
+  resume: 'sessions',
+  plugins: 'plugin',
+  quit: 'exit',
+} as const)
+
+/**
+ * Map a typed command token to the catalog name used for lookup.
+ * @param name - token without a leading slash.
+ */
+export function canonicalTuiCommandName(name: string): string {
+  return TUI_HIDDEN_COMMAND_ALIASES[name as keyof typeof TUI_HIDDEN_COMMAND_ALIASES] ?? name
+}
+
 /** One selectable Agent Preset from the Host directory. */
 export interface TuiModeOption {
   readonly id: string
@@ -212,17 +230,17 @@ export function shortFunctionDescription(description: string, fallback: string):
 export function tuiCommands(): readonly TuiCommandCandidate[] {
   return Object.freeze([
     { name: 'new', description: ui('新建会话', 'New session'), source: 'TUI', behavior: 'local' },
-    { name: 'resume', description: ui('恢复会话', 'Resume session'), source: 'TUI', behavior: 'local' },
     { name: 'sessions', description: ui('查看或搜索会话', 'View or search sessions'), argumentHint: ui('[搜索词]', '[query]'), source: 'TUI', behavior: 'local' },
+    { name: 'model', description: ui('切换模型和推理强度', 'Switch model and reasoning effort'), source: 'TUI', behavior: 'local' },
+    { name: 'mode', description: ui('切换模式', 'Switch mode'), source: 'TUI', behavior: 'local' },
+    { name: 'permission', description: ui('切换权限', 'Switch permission'), argumentHint: ui('[权限]', '[permission]'), source: 'Host + TUI', behavior: 'local' },
+    { name: 'workspace', description: ui('管理工作区', 'Manage workspaces'), argumentHint: ui('[子命令|路径]', '[subcommand|path]'), source: 'TUI', behavior: 'local' },
     { name: 'rename', description: ui('重命名当前会话', 'Rename current session'), argumentHint: ui('<标题>', '<title>'), source: 'TUI', behavior: 'local' },
     { name: 'fork', description: ui('从当前会话创建分支', 'Fork current session'), source: 'TUI', behavior: 'local' },
     { name: 'archive', description: ui('归档当前会话', 'Archive current session'), source: 'TUI', behavior: 'local' },
     { name: 'export', description: ui('导出当前会话', 'Export current session'), argumentHint: ui('[md] [路径]', '[md] [path]'), source: 'TUI', behavior: 'local' },
     { name: 'copy', description: ui('复制最后一条回复', 'Copy last response'), argumentHint: '[pick|code]', source: 'TUI', behavior: 'local' },
-    { name: 'workspace', description: ui('管理工作区', 'Manage workspaces'), argumentHint: ui('[子命令|路径]', '[subcommand|path]'), source: 'TUI', behavior: 'local' },
     { name: 'profile', description: ui('管理 Profile', 'Manage Profiles'), argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
-    { name: 'mode', description: ui('切换模式', 'Switch mode'), source: 'TUI', behavior: 'local' },
-    { name: 'model', description: ui('切换模型和推理强度', 'Switch model and reasoning effort'), source: 'TUI', behavior: 'local' },
     { name: 'language', description: ui('切换界面语言', 'Switch interface language'), argumentHint: '[auto|zh|en]', source: 'TUI', behavior: 'local' },
     { name: 'theme', description: ui('切换界面或独立代码主题', 'Switch interface or code theme'), argumentHint: '[dark|light|code|use|edit|palette|import|export|delete]', source: 'TUI', behavior: 'local' },
     { name: 'queue', description: ui('管理排队消息', 'Manage queued messages'), source: 'TUI', behavior: 'local' },
@@ -233,7 +251,6 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'settings', description: ui('打开设置', 'Open Settings'), argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },
     { name: 'keymap', description: ui('自定义快捷键', 'Customize shortcuts'), argumentHint: '[binding [chord|reset]]', source: 'TUI', behavior: 'local' },
     { name: 'plugin', description: ui('打开插件中心', 'Open plugin center'), argumentHint: ui('[子命令]', '[subcommand]'), source: 'TUI', behavior: 'local' },
-    { name: 'plugins', description: ui('打开插件中心', 'Open plugin center'), argumentHint: ui('[子命令]', '[subcommand]'), source: 'TUI', behavior: 'local' },
     { name: 'doctor', description: ui('检查运行环境', 'Check runtime environment'), source: 'TUI', behavior: 'local' },
     { name: 'restart', description: ui('重启并恢复当前会话', 'Restart and resume current session'), source: 'TUI', behavior: 'local' },
     { name: 'tools', description: ui('查看工具', 'View tools'), argumentHint: '[display]', source: 'TUI', behavior: 'local' },
@@ -245,7 +262,6 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'mcp', description: ui('查看 MCP', 'View MCP'), source: 'TUI', behavior: 'local' },
     { name: 'status', description: ui('查看状态和统计', 'View status and statistics'), source: 'TUI', behavior: 'local' },
     { name: 'help', description: ui('查看帮助', 'View help'), source: 'TUI', behavior: 'local' },
-    { name: 'quit', description: ui('退出', 'Exit'), source: 'TUI', behavior: 'local' },
     { name: 'exit', description: ui('退出', 'Exit'), source: 'TUI', behavior: 'local' },
   ])
 }

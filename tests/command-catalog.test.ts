@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { shortFunctionDescription } from '../src/client/capabilities.ts'
+import { commandOf } from '../src/client/actions.ts'
+import {
+  canonicalTuiCommandName,
+  shortFunctionDescription,
+  tuiCommands,
+} from '../src/client/capabilities.ts'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -22,5 +27,26 @@ describe('command catalog copy (review #60)', () => {
     expect(source).toMatch(/if \(localCommand !== undefined\) continue/u)
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
     expect(surface).toMatch(/invalidateCommandCatalog\(\)/u)
+  })
+
+  it('puts daily commands first and hides compatible aliases from the visible catalog', () => {
+    const names = tuiCommands().map(command => command.name)
+    expect(names.slice(0, 6)).toEqual(['new', 'sessions', 'model', 'mode', 'permission', 'workspace'])
+    expect(names).toContain('plugin')
+    expect(names).toContain('exit')
+    expect(names).not.toContain('resume')
+    expect(names).not.toContain('plugins')
+    expect(names).not.toContain('quit')
+    expect(canonicalTuiCommandName('resume')).toBe('sessions')
+    expect(canonicalTuiCommandName('plugins')).toBe('plugin')
+    expect(canonicalTuiCommandName('quit')).toBe('exit')
+    expect(commandOf(tuiCommands(), 'resume')?.name).toBe('sessions')
+    expect(commandOf(tuiCommands(), 'plugins')?.name).toBe('plugin')
+    expect(commandOf(tuiCommands(), 'quit')?.name).toBe('exit')
+    expect(commandOf(tuiCommands(), 'sessions')?.name).toBe('sessions')
+    const execute = readFileSync(resolve(root, 'src/client/actions.ts'), 'utf8')
+    expect(execute).toMatch(/case 'resume':/u)
+    expect(execute).toMatch(/case 'plugins':/u)
+    expect(execute).toMatch(/case 'quit':/u)
   })
 })
