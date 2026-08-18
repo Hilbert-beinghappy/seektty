@@ -15,3 +15,16 @@ export function moveIndex<T>(items: readonly T[], index: number, direction: -1 |
   copy.splice(next, 0, row)
   return copy
 }
+
+/**
+ * Message rows first, bulk actions last, so Enter targets a queued message.
+ * @param rowIds - snapshot queue ids in Host order.
+ * @param queuedCount - number of rows still in `queued` placement.
+ */
+export function queueListChoiceOrder(rowIds: readonly string[], queuedCount: number): readonly string[] {
+  return [
+    ...rowIds,
+    ...(queuedCount > 1 ? ['__all_steer__'] : []),
+    ...(queuedCount > 0 ? ['__clear__'] : []),
+  ]
+}
