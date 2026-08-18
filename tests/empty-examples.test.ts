@@ -55,11 +55,12 @@ afterEach(() => {
 })
 
 describe('empty session examples', () => {
-  it('lists three sendable starter prompts on an empty session', () => {
+  it('lists two sendable starter prompts on an empty session', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 20)
     transcript.update(snapshot())
     const rendered = stripAnsi(transcript.render(80).join('\n'))
+    expect(EMPTY_SESSION_EXAMPLES).toHaveLength(2)
     expect(rendered).toContain('探索未至之境')
     for (const example of EMPTY_SESSION_EXAMPLES) {
       expect(rendered).toContain(emptyExampleText(example))
@@ -83,8 +84,8 @@ describe('empty session examples', () => {
     transcript.update(snapshot())
     const rendered = stripAnsi(transcript.render(80).join('\n'))
     expect(rendered).toContain('Explore beyond the known')
-    expect(rendered).toContain('Review the current changes and call out risks')
-    expect(rendered).not.toContain('审查当前改动并指出风险')
+    expect(rendered).toContain('Give an overview of this repo and name the problems worth handling first')
+    expect(rendered).not.toContain('概览当前仓库，并指出最值得先处理的问题')
   })
 
   it('keeps the selected empty-session example inside a short viewport', () => {
@@ -93,8 +94,7 @@ describe('empty session examples', () => {
     transcript.update(snapshot())
     transcript.focused = true
     transcript.handleInput('\u001b[B')
-    transcript.handleInput('\u001b[B')
-    const last = emptyExampleText(EMPTY_SESSION_EXAMPLES[2]!)
+    const last = emptyExampleText(EMPTY_SESSION_EXAMPLES[1]!)
     expect(transcript.activateFocused()).toEqual({ kind: 'example', text: last })
     const visible = stripAnsi(transcript.render(80).join('\n'))
     expect(visible).toContain(last)
