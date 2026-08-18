@@ -40,7 +40,7 @@ import type { TuiManagementBridge } from './management.ts'
 import type { TuiClientContext } from './context.ts'
 import { copyTargets } from './copy-content.ts'
 import { flattenProducedFiles, type ProducedFileGroup } from './produced-files.ts'
-import { explainFailure } from './error-advice.ts'
+import { explainFailure, withRunningRetry } from './error-advice.ts'
 import { ui, uiLocale } from './locale.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
 
@@ -1691,4 +1691,13 @@ export function capabilityError(error: unknown): string {
     )
   }
   return explainFailure(messageOf(error))
+}
+
+/**
+ * Convert a send, steer, Host command, or catch failure using the live snapshot.
+ * @param error - unknown failure crossing into terminal presentation.
+ * @param running - current `snapshot.running` flag.
+ */
+export function failedActionNotice(error: unknown, running: boolean): string {
+  return withRunningRetry(capabilityError(error), running)
 }

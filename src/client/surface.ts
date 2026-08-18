@@ -15,8 +15,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
-import { capabilityError, type TuiActiveSession } from './capabilities.ts'
-import { withRunningRetry } from './error-advice.ts'
+import { capabilityError, failedActionNotice, type TuiActiveSession } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import {
@@ -401,7 +400,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           ? { error: color.danger(ui('会话已删除', 'Session deleted')) }
           : snapshot.promptError !== null
             ? {
-              error: color.danger(withRunningRetry(capabilityError(snapshot.promptError.error), snapshot.running)),
+              error: color.danger(failedActionNotice(snapshot.promptError.error, snapshot.running)),
             }
             : noticeView.error === undefined
               ? {}
@@ -651,7 +650,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const result = await current.session.prompt(content, mode)
         if (!result.ok) {
           setNotice(
-            withRunningRetry(capabilityError(result.error), current.session.getSnapshot().running),
+            failedActionNotice(result.error, current.session.getSnapshot().running),
             'error',
           )
           restoreDeferredPrompt(text)
@@ -695,7 +694,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const result = await current.session.command(trimmed)
         if (!result.ok) {
           setNotice(
-            withRunningRetry(capabilityError(result.error), current.session.getSnapshot().running),
+            failedActionNotice(result.error, current.session.getSnapshot().running),
             'error',
           )
         }
@@ -703,8 +702,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
         setNotice(
-          withRunningRetry(
-            capabilityError(error),
+          failedActionNotice(
+            error,
             capabilities.active()?.session.getSnapshot().running === true,
           ),
           'error',
