@@ -114,6 +114,33 @@ describe('overlay navigation', () => {
     expect(signal?.aborted).toBe(true)
   })
 
+  it('does not treat Tab as confirm inside a selector', async () => {
+    const harness = overlayHarness()
+    const selected = harness.overlays.select({
+      title: 'pick a model',
+      choices: [
+        { id: 'alpha', label: 'alpha model' },
+        { id: 'bravo', label: 'bravo model' },
+      ],
+    })
+
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('pick a model')
+    })
+
+    harness.component().handleInput('\t')
+    expect(plain(harness.component().render(80))).toContain('pick a model')
+    expect(harness.hide).not.toHaveBeenCalled()
+    await expect(Promise.race([
+      selected.then(() => 'resolved'),
+      Promise.resolve('pending'),
+    ])).resolves.toBe('pending')
+
+    harness.component().handleInput(ENTER)
+    await expect(selected).resolves.toEqual({ id: 'alpha', label: 'alpha model' })
+    expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
   it('treats Escape as Back even when a searchable page contains a query', async () => {
     const harness = overlayHarness()
     const selected = harness.overlays.select({
