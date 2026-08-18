@@ -1,6 +1,6 @@
 /** Product command and pending-interaction orchestration for the TUI Surface. */
 
-import { visibleWidth } from '@mariozechner/pi-tui'
+import { visibleWidth, type OverlayOptions } from '@mariozechner/pi-tui'
 import {
   LOCALE_SETTINGS_NAMESPACE,
   type LocaleId,
@@ -390,6 +390,22 @@ export class TuiActions {
   ) {}
 
   /**
+   * Run a multi-page overlay on one Escape stack.
+   * Reuses an existing navigation session so nested slash-command flows do not queue.
+   */
+  private async overlayFlow(
+    overlays: OverlayPrompts,
+    run: (navigation: OverlayNavigation) => Promise<void>,
+    options?: OverlayOptions,
+  ): Promise<void> {
+    if ('selectPage' in overlays) {
+      await run(overlays as OverlayNavigation)
+      return
+    }
+    await this.host.overlays.navigate(run, options)
+  }
+
+  /**
    * Execute one exact TUI-owned slash command.
    * @param name - normalized command name without a leading slash.
    * @param rawArgs - unparsed command argument text.
@@ -498,19 +514,22 @@ export class TuiActions {
 
   /** F1 / `/help`: partitioned shortcuts, workflows, and doctor guidance. */
   async help(): Promise<void> {
-    const selected = await this.host.overlays.select({
-      title: ui('帮助', 'Help'),
-      detail: ui('F1 与 /help 打开此页；Ctrl+P 仍是命令面板', 'F1 and /help open this page; Ctrl+P remains the command palette'),
-      choices: helpSectionChoices(),
-      searchable: false,
-      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    await this.host.overlays.detail({
-      title: selected.label,
-      content: helpSectionText(selected.id as HelpSectionId),
-      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+    const options = { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('帮助', 'Help'),
+        detail: ui('F1 与 /help 打开此页；Ctrl+P 仍是命令面板', 'F1 and /help open this page; Ctrl+P remains the command palette'),
+        choices: helpSectionChoices(),
+        searchable: false,
+        options,
+      }, async (selected) => {
+        await navigation.detail({
+          title: selected.label,
+          content: helpSectionText(selected.id as HelpSectionId),
+          options,
+        })
+      })
+    }, options)
   }
 
   /** Shift+Tab: use Host order and apply the same risk gate as /permission. */
@@ -617,37 +636,39 @@ export class TuiActions {
       await this.exportMarkdown(parsed.rest)
       return
     }
-    const scope = await this.host.overlays.select({
-      title: ui('导出会话', "Export session"),
-      detail: ui('将原始会话记录和附件保存为 ZIP 文件', "Save the original session log and attachments as a ZIP file"),
-      searchable: false,
-      choices: [
-        { id: 'session', label: ui('仅当前会话', "Current session only"), description: ui('包含当前会话记录和附件', "Includes the current session log and attachments") },
-        { id: 'descendants', label: ui('当前会话与子 Agent', "Current session and subagents"), description: ui('同时包含全部子 Agent 会话', "Also includes every subagent session") },
-      ],
-    })
-    if (scope === undefined) return
-    const requested = args === ''
-      ? await this.host.overlays.input({
-        title: ui('保存会话 ZIP', "Save session ZIP"),
-        detail: ui('留空则保存到工作区根目录；已有文件不会被覆盖', "Leave blank to save in the workspace root; existing files are never overwritten"),
-        placeholder: ui('可选：相对工作区或绝对路径', "Optional: workspace-relative or absolute path"),
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('导出会话', "Export session"),
+        detail: ui('将原始会话记录和附件保存为 ZIP 文件', "Save the original session log and attachments as a ZIP file"),
+        searchable: false,
+        choices: [
+          { id: 'session', label: ui('仅当前会话', "Current session only"), description: ui('包含当前会话记录和附件', "Includes the current session log and attachments") },
+          { id: 'descendants', label: ui('当前会话与子 Agent', "Current session and subagents"), description: ui('同时包含全部子 Agent 会话', "Also includes every subagent session") },
+        ],
+      }, async (scope) => {
+        const requested = args === ''
+          ? await navigation.input({
+            title: ui('保存会话 ZIP', "Save session ZIP"),
+            detail: ui('留空则保存到工作区根目录；已有文件不会被覆盖', "Leave blank to save in the workspace root; existing files are never overwritten"),
+            placeholder: ui('可选：相对工作区或绝对路径', "Optional: workspace-relative or absolute path"),
+          })
+          : args
+        if (requested === undefined) return
+        const result = await navigation.progress({
+          title: ui('导出会话', "Export session"),
+          work: (_report, signal) => this.capabilities.exportSession(
+            requested.trim() === '' ? undefined : requested.trim(),
+            scope.id === 'descendants',
+            signal,
+          ),
+        })
+        if (result === undefined) return
+        this.host.notice(ui(
+          `已保存会话 ZIP（${formatByteSize(result.bytes)}）到 ${result.path}`,
+          `Saved session ZIP (${formatByteSize(result.bytes)}) to ${result.path}`,
+        ), 'success')
       })
-      : args
-    if (requested === undefined) return
-    const result = await this.host.overlays.runBusy(
-      ui('导出会话', "Export session"),
-      signal => this.capabilities.exportSession(
-        requested.trim() === '' ? undefined : requested.trim(),
-        scope.id === 'descendants',
-        signal,
-      ),
-    )
-    if (result === undefined) return
-    this.host.notice(ui(
-      `已保存会话 ZIP（${formatByteSize(result.bytes)}）到 ${result.path}`,
-      `Saved session ZIP (${formatByteSize(result.bytes)}) to ${result.path}`,
-    ), 'success')
+    })
   }
 
   private async exportMarkdown(requested: string): Promise<void> {
@@ -722,27 +743,34 @@ export class TuiActions {
       return
     }
     if (parsed.command === 'rename') {
-      const workspace = this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择要重命名的工作区', "Choose a workspace to rename"))
-      if (workspace === undefined) return
-      await this.renameWorkspace(workspace, parsed.rest)
+      await this.overlayFlow(this.host.overlays, async (navigation) => {
+        const workspace = this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择要重命名的工作区', "Choose a workspace to rename"), navigation)
+        if (workspace !== undefined) await this.renameWorkspace(workspace, parsed.rest, navigation)
+      })
       return
     }
     if (parsed.command === 'delete' || parsed.command === 'remove') {
-      const workspace = parsed.rest === ''
-        ? this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择要移除注册的工作区', "Choose a workspace to unregister"))
-        : this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === parsed.rest)
-      if (workspace === undefined) throw new Error(ui(`找不到工作区 ${JSON.stringify(parsed.rest)}`, `Workspace ${JSON.stringify(parsed.rest)} was not found`))
-      await this.deleteWorkspace(workspace)
+      await this.overlayFlow(this.host.overlays, async (navigation) => {
+        const workspace = parsed.rest === ''
+          ? this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择要移除注册的工作区', "Choose a workspace to unregister"), navigation)
+          : this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === parsed.rest)
+        if (workspace === undefined) throw new Error(ui(`找不到工作区 ${JSON.stringify(parsed.rest)}`, `Workspace ${JSON.stringify(parsed.rest)} was not found`))
+        await this.deleteWorkspace(workspace, navigation)
+      })
       return
     }
     if (parsed.command === 'reorder') {
-      const workspace = this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择要移动的工作区', "Choose a workspace to move"))
-      if (workspace !== undefined) await this.reorderWorkspace(workspace)
+      await this.overlayFlow(this.host.overlays, async (navigation) => {
+        const workspace = this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择要移动的工作区', "Choose a workspace to move"), navigation)
+        if (workspace !== undefined) await this.reorderWorkspace(workspace, navigation)
+      })
       return
     }
     if (parsed.command === 'sessions') {
-      const workspace = this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择工作区', "Choose a workspace"))
-      if (workspace !== undefined) await this.reorderWorkspaceSession(workspace)
+      await this.overlayFlow(this.host.overlays, async (navigation) => {
+        const workspace = this.currentWorkspace() ?? await this.chooseWorkspace(ui('选择工作区', "Choose a workspace"), navigation)
+        if (workspace !== undefined) await this.reorderWorkspaceSession(workspace, navigation)
+      })
       return
     }
     if (parsed.command !== '' && parsed.command !== 'list') {
@@ -756,48 +784,50 @@ export class TuiActions {
   private async workspaceCenter(): Promise<void> {
     const workspaces = this.capabilities.listWorkspaces()
     const current = this.capabilities.active()?.workspaceId
-    const selected = await this.host.overlays.select({
-      title: ui('工作区', "Workspace"),
-      choices: [
-        ...workspaces.map(workspace => ({
-          id: workspace.workspaceId,
-          label: `${workspace.workspaceId === current ? '● ' : ''}${workspace.title}`,
-          description: workspace.path,
-        })),
-        { id: '__add__', label: ui('添加目录…', "Add directory…"), description: ui('注册现有目录并打开空白会话', "Register an existing directory and open a blank session") },
-      ],
-    })
-    if (selected === undefined) return
-    if (selected.id === '__add__') {
-      const path = await this.host.overlays.input({ title: ui('添加工作区', "Add workspace"), placeholder: ui('输入目录路径', "Enter a directory path") })
-      if (path === undefined || path.trim() === '') return
-      await this.capabilities.openWorkspace(path)
-      this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
-      return
-    }
-    const workspace = workspaces.find(candidate => candidate.workspaceId === selected.id)
-    if (workspace === undefined) return
-    const action = await this.host.overlays.select({
-      title: workspace.title,
-      detail: ui(`${workspace.path}\n${workspace.sessionIds.length} 个已登记会话`, `${workspace.path}
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('工作区', "Workspace"),
+        choices: [
+          ...workspaces.map(workspace => ({
+            id: workspace.workspaceId,
+            label: `${workspace.workspaceId === current ? '● ' : ''}${workspace.title}`,
+            description: workspace.path,
+          })),
+          { id: '__add__', label: ui('添加目录…', "Add directory…"), description: ui('注册现有目录并打开空白会话', "Register an existing directory and open a blank session") },
+        ],
+      }, async (selected) => {
+        if (selected.id === '__add__') {
+          const path = await navigation.input({ title: ui('添加工作区', "Add workspace"), placeholder: ui('输入目录路径', "Enter a directory path") })
+          if (path === undefined || path.trim() === '') return
+          await this.capabilities.openWorkspace(path)
+          this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
+          return
+        }
+        const workspace = workspaces.find(candidate => candidate.workspaceId === selected.id)
+        if (workspace === undefined) return
+        const action = await navigation.select({
+          title: workspace.title,
+          detail: ui(`${workspace.path}\n${workspace.sessionIds.length} 个已登记会话`, `${workspace.path}
 ${workspace.sessionIds.length} registered session(s)`),
-      searchable: false,
-      choices: [
-        { id: 'open', label: ui('打开／新建会话', "Open / create session"), description: ui('复用该工作区的空白会话，必要时创建', "Reuse this workspace's blank session, creating it if needed") },
-        { id: 'rename', label: ui('重命名工作区', "Rename workspace"), description: ui('只改变这里显示的名称', "Changes only the displayed name") },
-        { id: 'sessions', label: ui('调整会话顺序', "Reorder sessions"), description: ui('修改该工作区的手动会话顺序', "Change this workspace's manual session order") },
-        { id: 'reorder', label: ui('调整工作区顺序', "Reorder workspaces"), description: ui('修改工作区目录显示顺序', "Change the workspace display order") },
-        { id: 'delete', label: ui('移除工作区注册', "Unregister workspace"), description: ui('不会删除目录、文件或会话日志', "Does not delete the directory, files, or session logs") },
-      ],
+          searchable: false,
+          choices: [
+            { id: 'open', label: ui('打开／新建会话', "Open / create session"), description: ui('复用该工作区的空白会话，必要时创建', "Reuse this workspace's blank session, creating it if needed") },
+            { id: 'rename', label: ui('重命名工作区', "Rename workspace"), description: ui('只改变这里显示的名称', "Changes only the displayed name") },
+            { id: 'sessions', label: ui('调整会话顺序', "Reorder sessions"), description: ui('修改该工作区的手动会话顺序', "Change this workspace's manual session order") },
+            { id: 'reorder', label: ui('调整工作区顺序', "Reorder workspaces"), description: ui('修改工作区目录显示顺序', "Change the workspace display order") },
+            { id: 'delete', label: ui('移除工作区注册', "Unregister workspace"), description: ui('不会删除目录、文件或会话日志', "Does not delete the directory, files, or session logs") },
+          ],
+        })
+        if (action === undefined) return
+        if (action.id === 'open') {
+          const sessionId = await this.capabilities.selectWorkspace(workspace.workspaceId)
+          this.host.notice(ui(`已打开会话 ${sessionId}`, `Opened session ${sessionId}`), 'success')
+        } else if (action.id === 'rename') await this.renameWorkspace(workspace, '', navigation)
+        else if (action.id === 'sessions') await this.reorderWorkspaceSession(workspace, navigation)
+        else if (action.id === 'reorder') await this.reorderWorkspace(workspace, navigation)
+        else await this.deleteWorkspace(workspace, navigation)
+      })
     })
-    if (action === undefined) return
-    if (action.id === 'open') {
-      const sessionId = await this.capabilities.selectWorkspace(workspace.workspaceId)
-      this.host.notice(ui(`已打开会话 ${sessionId}`, `Opened session ${sessionId}`), 'success')
-    } else if (action.id === 'rename') await this.renameWorkspace(workspace, '')
-    else if (action.id === 'sessions') await this.reorderWorkspaceSession(workspace)
-    else if (action.id === 'reorder') await this.reorderWorkspace(workspace)
-    else await this.deleteWorkspace(workspace)
   }
 
   private currentWorkspace(): WorkspaceView | undefined {
@@ -805,9 +835,12 @@ ${workspace.sessionIds.length} registered session(s)`),
     return this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === id)
   }
 
-  private async chooseWorkspace(title: string): Promise<WorkspaceView | undefined> {
+  private async chooseWorkspace(
+    title: string,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<WorkspaceView | undefined> {
     const workspaces = this.capabilities.listWorkspaces()
-    const selected = await this.host.overlays.select({
+    const selected = await overlays.select({
       title,
       choices: workspaces.map(workspace => ({
         id: workspace.workspaceId,
@@ -818,8 +851,12 @@ ${workspace.sessionIds.length} registered session(s)`),
     return workspaces.find(candidate => candidate.workspaceId === selected?.id)
   }
 
-  private async renameWorkspace(workspace: WorkspaceView, supplied: string): Promise<void> {
-    const title = supplied !== '' ? supplied : await this.host.overlays.input({
+  private async renameWorkspace(
+    workspace: WorkspaceView,
+    supplied: string,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
+    const title = supplied !== '' ? supplied : await overlays.input({
       title: ui(`重命名 ${workspace.title}`, `Rename ${workspace.title}`),
       initialValue: workspace.title,
       placeholder: ui('输入新标题', "Enter a new title"),
@@ -829,8 +866,11 @@ ${workspace.sessionIds.length} registered session(s)`),
     this.host.notice(ui(`工作区已重命名为 ${updated.title}`, `Workspace renamed to ${updated.title}`), 'success')
   }
 
-  private async deleteWorkspace(workspace: WorkspaceView): Promise<void> {
-    const confirmed = await this.host.overlays.confirm(
+  private async deleteWorkspace(
+    workspace: WorkspaceView,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
+    const confirmed = await overlays.confirm(
       ui(`移除工作区注册 ${workspace.title}？`, `Unregister workspace ${workspace.title}?`),
       ui(`${workspace.path}\n目录、用户文件和全部会话记录都会保留；会话将成为未分组。`, `${workspace.path}
 The directory, user files, and all session logs are kept; sessions become ungrouped.`),
@@ -841,12 +881,15 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     this.host.notice(ui(`已移除工作区注册 ${workspace.title}`, `Unregistered workspace ${workspace.title}`), 'success')
   }
 
-  private async reorderWorkspace(workspace: WorkspaceView): Promise<void> {
+  private async reorderWorkspace(
+    workspace: WorkspaceView,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     const choices: OverlayChoice[] = this.capabilities.listWorkspaces()
       .filter(candidate => candidate.workspaceId !== workspace.workspaceId)
       .map(candidate => ({ id: candidate.workspaceId, label: ui(`移到 ${candidate.title} 前`, `Move before ${candidate.title}`), description: candidate.path }))
     choices.push({ id: '__append__', label: ui('移到末尾', "Move to end"), description: ui('追加到工作区目录末尾', "Append to the workspace list") })
-    const selected = await this.host.overlays.select({ title: ui(`移动 ${workspace.title}`, `Move ${workspace.title}`), choices })
+    const selected = await overlays.select({ title: ui(`移动 ${workspace.title}`, `Move ${workspace.title}`), choices })
     if (selected === undefined) return
     await this.capabilities.moveWorkspace(
       workspace.workspaceId,
@@ -855,13 +898,16 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     this.host.notice(ui(`已调整工作区 ${workspace.title} 的顺序`, `Updated the order of workspace ${workspace.title}`), 'success')
   }
 
-  private async reorderWorkspaceSession(workspace: WorkspaceView): Promise<void> {
+  private async reorderWorkspaceSession(
+    workspace: WorkspaceView,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     if (workspace.sessionIds.length < 2) {
       this.host.notice(ui(`${workspace.title} 没有可调整的多个会话`, `${workspace.title} does not have multiple sessions to reorder`), 'info')
       return
     }
     const summaries = new Map(this.capabilities.listSessions().map(row => [row.id, row]))
-    const source = await this.host.overlays.select({
+    const source = await overlays.select({
       title: ui(`${workspace.title} · 选择会话`, `${workspace.title} · choose a session`),
       choices: workspace.sessionIds.map(id => ({
         id,
@@ -874,7 +920,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       .filter(id => id !== source.id)
       .map(id => ({ id, label: ui(`移到 ${summaries.get(id)?.displayTitle ?? id} 前`, `Move before ${summaries.get(id)?.displayTitle ?? id}`) }))
     anchors.push({ id: '__append__', label: ui('移到末尾', "Move to end") })
-    const anchor = await this.host.overlays.select({ title: ui('选择新位置', "Choose a new position"), choices: anchors })
+    const anchor = await overlays.select({ title: ui('选择新位置', "Choose a new position"), choices: anchors })
     if (anchor === undefined) return
     await this.capabilities.moveWorkspaceSession(
       workspace.workspaceId,
@@ -916,44 +962,47 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       if (right.name === current) return 1
       return 0
     })
-    const selected = await this.host.overlays.select({
-      title: 'Profile',
-      detail: ui('切换后会重启，并恢复当前工作区、会话、草稿和附件', "Switching restarts DeepSeek and restores the workspace, session, draft, and attachments"),
-      choices: [
-        ...orderedProfiles.map(profile => ({
-          id: `profile:${profile.name}`,
-          label: `${profile.name === current ? '● ' : ''}${profile.name}`,
-          description: this.profileDescription(profile),
-          ...(profile.compatible ? {} : { disabledReason: ui('不能直接用于终端；可复制为新的终端 Profile', "Cannot be used directly in the terminal; copy it to a new terminal Profile") }),
-        })),
-        { id: '__create__', label: ui('创建 Profile…', "Create Profile…"), description: ui('创建新的终端运行配置', "Create a new terminal runtime configuration") },
-        { id: '__copy__', label: ui('复制 Profile…', "Copy Profile…"), description: ui('基于现有 Profile 创建终端版本', "Create a terminal version from an existing Profile") },
-      ],
-      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id === '__create__') {
-      const name = await this.host.overlays.input({ title: ui('创建 Profile', "Create Profile"), placeholder: ui('输入小写 Profile 名称', "Enter a lowercase Profile name") })
-      if (name === undefined || name.trim() === '') return
-      await this.createdProfile(await management.profiles.create(name.trim()))
-      return
-    }
-    if (selected.id === '__copy__') {
-      const source = await this.host.overlays.select({
-        title: ui('选择源 Profile', "Choose source Profile"),
-        choices: profiles.map(profile => ({
-          id: profile.name,
-          label: profile.name,
-          description: `${this.profileDescription(profile)}${profile.compatible ? '' : ui(' · 将转换为终端版本', " · will be converted to a terminal version")}`,
-        })),
+    const options = { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: 'Profile',
+        detail: ui('切换后会重启，并恢复当前工作区、会话、草稿和附件', "Switching restarts DeepSeek and restores the workspace, session, draft, and attachments"),
+        choices: [
+          ...orderedProfiles.map(profile => ({
+            id: `profile:${profile.name}`,
+            label: `${profile.name === current ? '● ' : ''}${profile.name}`,
+            description: this.profileDescription(profile),
+            ...(profile.compatible ? {} : { disabledReason: ui('不能直接用于终端；可复制为新的终端 Profile', "Cannot be used directly in the terminal; copy it to a new terminal Profile") }),
+          })),
+          { id: '__create__', label: ui('创建 Profile…', "Create Profile…"), description: ui('创建新的终端运行配置', "Create a new terminal runtime configuration") },
+          { id: '__copy__', label: ui('复制 Profile…', "Copy Profile…"), description: ui('基于现有 Profile 创建终端版本', "Create a terminal version from an existing Profile") },
+        ],
+        options,
+      }, async (selected) => {
+        if (selected.id === '__create__') {
+          const name = await navigation.input({ title: ui('创建 Profile', "Create Profile"), placeholder: ui('输入小写 Profile 名称', "Enter a lowercase Profile name") })
+          if (name === undefined || name.trim() === '') return
+          await this.createdProfile(await management.profiles.create(name.trim()), navigation)
+          return
+        }
+        if (selected.id === '__copy__') {
+          const source = await navigation.select({
+            title: ui('选择源 Profile', "Choose source Profile"),
+            choices: profiles.map(profile => ({
+              id: profile.name,
+              label: profile.name,
+              description: `${this.profileDescription(profile)}${profile.compatible ? '' : ui(' · 将转换为终端版本', " · will be converted to a terminal version")}`,
+            })),
+          })
+          if (source === undefined) return
+          const name = await navigation.input({ title: ui('复制 Profile', "Copy Profile"), placeholder: ui('输入新 Profile 名称', "Enter the new Profile name") })
+          if (name === undefined || name.trim() === '') return
+          await this.createdProfile(await management.profiles.create(name.trim(), source.id), navigation)
+          return
+        }
+        await this.switchProfile(selected.id.slice('profile:'.length), navigation)
       })
-      if (source === undefined) return
-      const name = await this.host.overlays.input({ title: ui('复制 Profile', "Copy Profile"), placeholder: ui('输入新 Profile 名称', "Enter the new Profile name") })
-      if (name === undefined || name.trim() === '') return
-      await this.createdProfile(await management.profiles.create(name.trim(), source.id))
-      return
-    }
-    await this.switchProfile(selected.id.slice('profile:'.length))
+    }, options)
   }
 
   private profileDescription(profile: TuiProfileSummary): string {
@@ -961,7 +1010,10 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     return ui(`${initialized} · ${profile.bundles.length} 个功能组件 · ${profile.dependencyCount} 个额外插件`, `${initialized} · ${profile.bundles.length} capability bundle(s) · ${profile.dependencyCount} extra plugin(s)`)
   }
 
-  private async switchProfile(profile: string): Promise<void> {
+  private async switchProfile(
+    profile: string,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     if (profile === this.capabilities.currentProfile()) {
       this.host.notice(ui(`${profile} 已是当前 Profile`, `${profile} is already the current Profile`), 'info')
       return
@@ -970,7 +1022,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const target = profiles.find(candidate => candidate.name === profile)
     if (target === undefined) throw new Error(ui(`Profile ${JSON.stringify(profile)} 不存在`, `Profile ${JSON.stringify(profile)} does not exist`))
     if (!target.compatible) throw new Error(target.diagnostic ?? ui(`Profile ${profile} 不兼容`, `Profile ${profile} is incompatible`))
-    const confirmed = await this.host.overlays.confirm(
+    const confirmed = await overlays.confirm(
       ui(`切换到 Profile ${profile}？`, `Switch to Profile ${profile}?`),
       ui('deepseek 会重新启动，并恢复工作区、会话、未发送草稿和附件；正在运行的任务会停止。', "DeepSeek will restart and restore the workspace, session, unsent draft, and attachments; any running task will stop."),
       ui('切换并重启', "Switch and restart"),
@@ -978,9 +1030,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     if (confirmed) this.host.restart(profile, ui(`已切换到 Profile ${profile}`, `Switched to Profile ${profile}`))
   }
 
-  private async createdProfile(profile: TuiProfileSummary): Promise<void> {
+  private async createdProfile(
+    profile: TuiProfileSummary,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     this.host.notice(ui(`已创建 Profile ${profile.name}`, `Created Profile ${profile.name}`), 'success')
-    const activate = await this.host.overlays.confirm(
+    const activate = await overlays.confirm(
       ui(`立即切换到 ${profile.name}？`, `Switch to ${profile.name} now?`),
       ui('切换会受控重启并恢复当前上下文。', "Switching performs a controlled restart and restores the current context."),
       ui('切换并重启', "Switch and restart"),
@@ -990,36 +1045,38 @@ The directory, user files, and all session logs are kept; sessions become ungrou
 
   private async mode(): Promise<void> {
     const modes = await this.capabilities.listModes()
-    const selected = await this.host.overlays.select({
-      title: ui('Agent 模式', "Agent mode"),
-      detail: ui('选择当前会话的工作模式；用户创建的模式会单独标记', "Choose the current session mode; user-created modes are marked separately"),
-      choices: modes.map(mode => ({
-        id: mode.id,
-        label: `${currentMark(mode.current)}${mode.label}${mode.trust === 'user' ? ui(' · 用户', " · user") : ''}`,
-        description: mode.description ?? (mode.isDefault ? ui('部署默认模式', "Deployment default") : mode.id),
-        ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
-      })),
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('Agent 模式', "Agent mode"),
+        detail: ui('选择当前会话的工作模式；用户创建的模式会单独标记', "Choose the current session mode; user-created modes are marked separately"),
+        choices: modes.map(mode => ({
+          id: mode.id,
+          label: `${currentMark(mode.current)}${mode.label}${mode.trust === 'user' ? ui(' · 用户', " · user") : ''}`,
+          description: mode.description ?? (mode.isDefault ? ui('部署默认模式', "Deployment default") : mode.id),
+          ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
+        })),
+      }, async (selected) => {
+        const target = modes.find(mode => mode.id === selected.id)
+        if (target?.current === true) {
+          this.host.notice(ui(`${target.label} 已是当前模式`, `${target.label} is already the current mode`), 'info')
+          return
+        }
+        let allowNewSession = false
+        if (this.capabilities.modeNeedsNewSession()) {
+          allowNewSession = await navigation.confirm(
+            ui('活跃会话不能原地切换模式', "An active session cannot change mode in place"),
+            ui('确认后会在同一工作区创建空白会话并应用目标模式；原会话、日志和标题保持不变。', "A blank session will be created in the same workspace with the selected mode; the original session, log, and title remain unchanged."),
+            ui('创建新会话', "Create new session"),
+          )
+          if (!allowNewSession) return
+        }
+        await this.capabilities.selectMode(selected.id, allowNewSession)
+        this.host.notice(
+          allowNewSession ? ui(`已创建新会话并切换为${target?.label ?? selected.label}`, `Created a new session and changed mode to ${target?.label ?? selected.label}`) : ui(`模式已切换为${target?.label ?? selected.label}`, `Mode changed to ${target?.label ?? selected.label}`),
+          'success',
+        )
+      })
     })
-    if (selected === undefined) return
-    const target = modes.find(mode => mode.id === selected.id)
-    if (target?.current === true) {
-      this.host.notice(ui(`${target.label} 已是当前模式`, `${target.label} is already the current mode`), 'info')
-      return
-    }
-    let allowNewSession = false
-    if (this.capabilities.modeNeedsNewSession()) {
-      allowNewSession = await this.host.overlays.confirm(
-        ui('活跃会话不能原地切换模式', "An active session cannot change mode in place"),
-        ui('确认后会在同一工作区创建空白会话并应用目标模式；原会话、日志和标题保持不变。', "A blank session will be created in the same workspace with the selected mode; the original session, log, and title remain unchanged."),
-        ui('创建新会话', "Create new session"),
-      )
-      if (!allowNewSession) return
-    }
-    await this.capabilities.selectMode(selected.id, allowNewSession)
-    this.host.notice(
-      allowNewSession ? ui(`已创建新会话并切换为${target?.label ?? selected.label}`, `Created a new session and changed mode to ${target?.label ?? selected.label}`) : ui(`模式已切换为${target?.label ?? selected.label}`, `Mode changed to ${target?.label ?? selected.label}`),
-      'success',
-    )
   }
 
   private async model(): Promise<void> {
@@ -1037,20 +1094,23 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     if (!directory.routable) {
       this.host.notice(ui('当前模型路由不可用；请选择一个已加载 Provider 的模型', "The current model route is unavailable; choose a model from a loaded Provider"), 'warning')
     }
-    const selected = await this.host.overlays.select({
-      title: ui('模型', "Model"),
-      detail: ui('选择当前会话使用的 Provider、模型和推理强度', "Choose the Provider, model, and reasoning effort for the current session"),
-      choices,
-      options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    const option = directory.options.find(candidate => candidate.id === selected.id)
-    if (option === undefined) return
-    const selection = await this.reasoningSelection(option)
-    if (selection === undefined) return
-    await this.capabilities.selectModel(selection)
-    this.host.refreshHeader()
-    this.host.notice(ui(`模型已切换为 ${selection.provider}/${selection.model}`, `Model changed to ${selection.provider}/${selection.model}`), 'success')
+    const options = { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('模型', "Model"),
+        detail: ui('选择当前会话使用的 Provider、模型和推理强度', "Choose the Provider, model, and reasoning effort for the current session"),
+        choices,
+        options,
+      }, async (selected) => {
+        const option = directory.options.find(candidate => candidate.id === selected.id)
+        if (option === undefined) return
+        const selection = await this.reasoningSelection(option, navigation)
+        if (selection === undefined) return
+        await this.capabilities.selectModel(selection)
+        this.host.refreshHeader()
+        this.host.notice(ui(`模型已切换为 ${selection.provider}/${selection.model}`, `Model changed to ${selection.provider}/${selection.model}`), 'success')
+      })
+    }, options)
   }
 
   private async language(
@@ -1190,24 +1250,27 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       { id: '__export__', label: ui('导出主题 JSON', "Export theme JSON"), description: ui('写出可分享的 SeekTTY 主题文件', "Write a shareable SeekTTY theme file") },
       { id: '__delete__', label: ui('删除主题', "Delete theme"), description: ui('管理命名自定义主题', "Manage named custom themes") },
     )
-    const selected = await this.host.overlays.select({
-      title: ui('主题', "Theme"),
-      detail: ui('手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC', "Edit colors, generate from a palette, or import VS Code JSON/JSONC"),
-      choices: choices.map(choice => ({
-        ...choice,
-        label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
-      })),
-      footer: ui('↑↓ 选择 · Enter 确认 · Esc 关闭', "↑↓ Select · Enter confirm · Esc close"),
-      options: { width: 68, maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id === '__code__') await this.themeCode('')
-    else if (selected.id === '__palette__') await this.themePalette('')
-    else if (selected.id === '__import__') await this.themeImport('')
-    else if (selected.id === '__export__') await this.themeExport('')
-    else if (selected.id === '__edit__') await this.themeEdit('')
-    else if (selected.id === '__delete__') await this.themeDelete('')
-    else await this.activateTheme(selected.id as TuiThemeId)
+    const options = { width: 68, maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('主题', "Theme"),
+        detail: ui('手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC', "Edit colors, generate from a palette, or import VS Code JSON/JSONC"),
+        choices: choices.map(choice => ({
+          ...choice,
+          label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
+        })),
+        footer: ui('↑↓ 选择 · Enter 确认 · Esc 返回/关闭', "↑↓ Select · Enter confirm · Esc back/close"),
+        options,
+      }, async (selected) => {
+        if (selected.id === '__code__') await this.themeCode('', navigation)
+        else if (selected.id === '__palette__') await this.themePalette('', navigation)
+        else if (selected.id === '__import__') await this.themeImport('', navigation)
+        else if (selected.id === '__export__') await this.themeExport('', navigation)
+        else if (selected.id === '__edit__') await this.themeEdit('', navigation)
+        else if (selected.id === '__delete__') await this.themeDelete('', navigation)
+        else await this.activateTheme(selected.id as TuiThemeId)
+      })
+    }, options)
   }
 
   private async activateTheme(target: TuiThemeId): Promise<void> {
@@ -1239,7 +1302,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.activateTheme(customThemeId(theme))
   }
 
-  private async themeCode(value: string): Promise<void> {
+  private async themeCode(value: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
@@ -1255,7 +1318,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         target = customThemeId(custom)
       }
     } else {
-      const selected = await this.host.overlays.select({
+      const selected = await overlays.select({
         title: ui('代码块主题', "Code-block theme"),
         detail: ui('只改变代码块、工具指令、文件内容、JSON 与 Diff；界面颜色保持不变。', "Changes only code blocks, tool commands, file content, JSON, and diffs; interface colors stay unchanged."),
         choices: [
@@ -1290,6 +1353,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   private async themeIdentity(
     nameValue: string,
     appearance: TuiAppearanceSettings,
+    overlays: OverlayPrompts = this.host.overlays,
   ): Promise<{ readonly id: string; readonly name: string } | undefined> {
     const name = nameValue.trim()
     if (name === '' || name.length > 80) throw new Error(ui('主题名称必须为 1–80 个字符', "Theme name must contain 1–80 characters"))
@@ -1297,7 +1361,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const existing = appearance.customThemes.find(theme =>
       theme.name.toLowerCase() === name.toLowerCase())
     if (existing !== undefined) {
-      const overwrite = await this.host.overlays.confirm(
+      const overwrite = await overlays.confirm(
         ui(`覆盖主题 ${existing.name}？`, `Replace theme ${existing.name}?`),
         ui('原主题颜色会被新配置替换，其他命名主题不受影响。', "The new configuration replaces this theme; other named themes are unchanged."),
         ui('覆盖', "Replace"),
@@ -1314,8 +1378,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     return { id, name }
   }
 
-  private async promptThemeName(initialValue = ''): Promise<string | undefined> {
-    const value = await this.host.overlays.input({
+  private async promptThemeName(
+    initialValue = '',
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<string | undefined> {
+    const value = await overlays.input({
       title: ui('主题名称', "Theme name"),
       initialValue,
       placeholder: ui('例如 DeepSeek Ocean', "For example, DeepSeek Ocean"),
@@ -1323,15 +1390,15 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     return value === undefined || value.trim() === '' ? undefined : value.trim()
   }
 
-  private async themePalette(requestedName: string): Promise<void> {
+  private async themePalette(requestedName: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
-    const enteredName = requestedName === '' ? await this.promptThemeName() : requestedName
+    const enteredName = requestedName === '' ? await this.promptThemeName('', overlays) : requestedName
     if (enteredName === undefined) return
-    const identity = await this.themeIdentity(enteredName, appearance)
+    const identity = await this.themeIdentity(enteredName, appearance, overlays)
     if (identity === undefined) return
-    const palette = await this.host.overlays.input({
+    const palette = await overlays.input({
       title: ui(`生成主题 · ${identity.name}`, `Generate theme · ${identity.name}`),
       detail: ui('粘贴 3–16 个 HEX/RGB 颜色；程序会自动分配背景、正文、状态和代码高亮。', "Paste 3–16 HEX/RGB colors; backgrounds, text, status, and syntax colors are assigned automatically."),
       placeholder: '#0B1020 #E8ECF5 #6682FF #42C99A',
@@ -1341,10 +1408,10 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const candidates = generateThemeCandidates(identity.id, identity.name, palette)
     const first = candidates[candidates.recommended]
     const alternate = candidates[candidates.recommended === 'dark' ? 'light' : 'dark']
-    await this.previewAndSaveTheme(document, first, alternate)
+    await this.previewAndSaveTheme(document, first, alternate, 'both', overlays)
   }
 
-  private async themeImport(args: string): Promise<void> {
+  private async themeImport(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
@@ -1352,7 +1419,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const looksLikePath = /^(?:[./~]|file:)/u.test(first) || /\.jsonc?$/iu.test(first)
     const requestedName = looksLikePath ? '' : first
     const suppliedPath = (looksLikePath ? [first, ...rest] : rest).join(' ')
-    const path = suppliedPath !== '' ? suppliedPath : await this.host.overlays.input({
+    const path = suppliedPath !== '' ? suppliedPath : await overlays.input({
       title: ui('导入 VS Code 主题', "Import VS Code theme"),
       detail: ui('读取本地 JSON/JSONC；相对 include 会从主题文件目录递归解析。', "Reads local JSON/JSONC; relative includes are resolved recursively from the theme directory."),
       placeholder: '~/.vscode/extensions/.../themes/theme.json',
@@ -1361,17 +1428,18 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     if (path === undefined || path.trim() === '') return
     const loaded = await loadVsCodeThemeFile(path)
     const name = requestedName === '' ? loaded.suggestedName : requestedName
-    const identity = await this.themeIdentity(name, appearance)
+    const identity = await this.themeIdentity(name, appearance, overlays)
     if (identity === undefined) return
     await this.previewAndSaveTheme(
       document,
       convertVsCodeTheme(loaded, identity.id, identity.name),
       undefined,
       'code',
+      overlays,
     )
   }
 
-  private async themeExport(args: string): Promise<void> {
+  private async themeExport(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
     const [first = '', ...rest] = commandArguments(args)
@@ -1389,7 +1457,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       source = resolvedCustomTheme(custom)
     }
     const payload = themeForExport(source)
-    const path = suppliedPath !== '' ? suppliedPath : await this.host.overlays.input({
+    const path = suppliedPath !== '' ? suppliedPath : await overlays.input({
       title: ui('导出主题', 'Export theme'),
       detail: ui(
         `写出 ${payload.name} 的 JSON；目标文件必须还不存在。`,
@@ -1420,7 +1488,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
   }
 
-  private async themeEdit(requested: string): Promise<void> {
+  private async themeEdit(requested: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
@@ -1437,7 +1505,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     } else {
       source = resolveTheme(appearance)
       if (source.source === 'builtin' && appearance.customThemes.length > 0) {
-        const selected = await this.host.overlays.select({
+        const selected = await overlays.select({
           title: ui('编辑主题', "Edit theme"),
           detail: ui('内置主题会先复制为命名主题', "A built-in theme is copied to a named theme before editing"),
           choices: [
@@ -1453,13 +1521,13 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
     let editable: TuiCustomTheme
     if (source.source === 'builtin') {
-      const requestedCopyName = await this.promptThemeName(ui(`${source.name} 自定义`, `${source.name} custom`))
+      const requestedCopyName = await this.promptThemeName(ui(`${source.name} 自定义`, `${source.name} custom`), overlays)
       if (requestedCopyName === undefined) return
-      const identity = await this.themeIdentity(requestedCopyName, appearance)
+      const identity = await this.themeIdentity(requestedCopyName, appearance, overlays)
       if (identity === undefined) return
       editable = editableTheme(source, identity.id, identity.name)
     } else {
-      const overwrite = await this.host.overlays.confirm(
+      const overwrite = await overlays.confirm(
         ui(`编辑并覆盖主题 ${source.name}？`, `Edit and replace theme ${source.name}?`),
         ui('保存后会替换这个命名主题；其他主题不受影响。', "Saving replaces this named theme; other themes are unchanged."),
         ui('继续编辑', "Continue editing"),
@@ -1467,15 +1535,18 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       if (!overwrite) return
       editable = editableTheme(source, source.id.slice('custom:'.length), source.name)
     }
-    const edited = await this.editThemeValue(editable)
+    const edited = await this.editThemeValue(editable, overlays)
     if (edited === undefined) return
-    await this.previewAndSaveTheme(document, edited)
+    await this.previewAndSaveTheme(document, edited, undefined, 'both', overlays)
   }
 
-  private async editThemeValue(initial: TuiCustomTheme): Promise<TuiCustomTheme | undefined> {
+  private async editThemeValue(
+    initial: TuiCustomTheme,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<TuiCustomTheme | undefined> {
     let theme = initial
     while (true) {
-      const selected = await this.host.overlays.select({
+      const selected = await overlays.select({
         title: ui(`编辑主题 · ${theme.name}`, `Edit theme · ${theme.name}`),
         detail: ui('只修改界面背景、文字和代码语法高亮颜色', "Edit interface backgrounds, text, and code syntax colors"),
         choices: [
@@ -1493,7 +1564,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       if (selected === undefined) return undefined
       if (selected.id === '__done__') return normalizeCustomTheme(theme)
       if (selected.id === '__tone__') {
-        const tone = await this.host.overlays.select({
+        const tone = await overlays.select({
           title: ui('暗亮方向', "Tone"),
           choices: [
             { id: 'dark', label: ui('暗色', "Dark"), ...(theme.tone === 'dark' ? { description: ui('当前', "Current") } : {}) },
@@ -1509,7 +1580,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       const current = section === 'ui'
         ? theme.colors[key as keyof typeof THEME_UI_FIELDS]
         : theme.syntax[key as keyof typeof THEME_SYNTAX_FIELDS]
-      const value = await this.host.overlays.input({
+      const value = await overlays.input({
         title: selected.label,
         detail: ui('输入 HEX 或 rgb(r,g,b)', "Enter HEX or rgb(r,g,b)"),
         initialValue: current,
@@ -1527,6 +1598,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     initial: TuiCustomTheme,
     initialAlternate?: TuiCustomTheme,
     activation: 'both' | 'code' = 'both',
+    overlays: OverlayPrompts = this.host.overlays,
   ): Promise<void> {
     const original = themeFromAppearance(document)
     const interfaceTheme = resolveTheme(appearanceFromSettings(document))
@@ -1538,7 +1610,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       this.host.applyTheme(activation === 'code'
         ? composeResolvedTheme(interfaceTheme, resolvedCandidate)
         : resolvedCandidate)
-      const selected = await this.host.overlays.select({
+      const selected = await overlays.select({
         title: ui(`${activation === 'code' ? '代码主题' : '主题'}预览 · ${candidate.name}`, `${activation === 'code' ? 'Code theme' : 'Theme'} Preview · ${candidate.name}`),
         detail: themePreviewText(candidate, warnings),
         searchable: false,
@@ -1566,7 +1638,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         continue
       }
       if (selected.id === 'edit') {
-        const edited = await this.editThemeValue(candidate)
+        const edited = await this.editThemeValue(candidate, overlays)
         if (edited !== undefined) {
           candidate = edited
           alternate = undefined
@@ -1574,7 +1646,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         continue
       }
       if (warnings.length > 0) {
-        const confirmed = await this.host.overlays.confirm(
+        const confirmed = await overlays.confirm(
           ui('主题存在对比度警告', "Theme has contrast warnings"),
           ui(`${warnings.join('；')}。颜色不会被静默修改。是否仍然保存？`, `${warnings.join('；')}. Colors will not be changed silently. Save anyway?`),
           ui('仍然保存', "Save anyway"),
@@ -1597,7 +1669,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
   }
 
-  private async themeDelete(requested: string): Promise<void> {
+  private async themeDelete(requested: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
     const appearance = appearanceFromSettings(document)
@@ -1606,7 +1678,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       candidate.id === requested || candidate.name.toLowerCase() === requested.toLowerCase())
     if (requested !== '' && theme === undefined) throw new Error(ui(`找不到主题 ${JSON.stringify(requested)}`, `Theme ${JSON.stringify(requested)} was not found`))
     if (theme === undefined) {
-      const selected = await this.host.overlays.select({
+      const selected = await overlays.select({
         title: ui('删除主题', "Delete theme"),
         choices: appearance.customThemes.map(candidate => ({
           id: candidate.id,
@@ -1622,7 +1694,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       theme = appearance.customThemes.find(candidate => candidate.id === selected.id)
     }
     if (theme === undefined) return
-    const confirmed = await this.host.overlays.confirm(
+    const confirmed = await overlays.confirm(
       ui(`删除主题 ${theme.name}？`, `Delete theme ${theme.name}?`),
       appearance.theme === customThemeId(theme) && appearance.codeTheme === customThemeId(theme)
         ? ui('该主题会从 Harness Settings 删除；界面切换到 DeepSeek 暗色，代码主题恢复自动匹配。', "The theme is deleted from Harness Settings; the interface switches to DeepSeek dark and code returns to automatic matching.")
@@ -1646,24 +1718,29 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       await this.selectPermission(target)
       return
     }
-    const selected = await this.host.overlays.select({
-      title: ui('权限', "Permission"),
-      detail: ui(`作用工作区：${this.capabilities.active()?.workspacePath ?? '未知'}`, `Workspace scope: ${this.capabilities.active()?.workspacePath ?? 'Unknown'}`),
-      choices: options.map(option => ({
-        id: option.id,
-        label: `${currentMark(option.current)}${permissionLabel(option)}`,
-        description: permissionDescription(option),
-      })),
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('权限', "Permission"),
+        detail: ui(`作用工作区：${this.capabilities.active()?.workspacePath ?? '未知'}`, `Workspace scope: ${this.capabilities.active()?.workspacePath ?? 'Unknown'}`),
+        choices: options.map(option => ({
+          id: option.id,
+          label: `${currentMark(option.current)}${permissionLabel(option)}`,
+          description: permissionDescription(option),
+        })),
+      }, async (selected) => {
+        const target = options.find(option => option.id === selected.id)
+        if (target !== undefined) await this.selectPermission(target, navigation)
+      })
     })
-    if (selected === undefined) return
-    const target = options.find(option => option.id === selected.id)
-    if (target !== undefined) await this.selectPermission(target)
   }
 
-  private async selectPermission(option: TuiPermissionOption): Promise<void> {
+  private async selectPermission(
+    option: TuiPermissionOption,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     if (option.current) return
     if (option.needsConfirmation) {
-      const confirmed = await this.host.overlays.confirm(
+      const confirmed = await overlays.confirm(
         option.id === 'danger-full-access' ? ui('进入完全访问？', "Enter full access?") : ui('切换到未知风险权限？', "Switch to a permission with unknown risk?"),
         ui(`${permissionLabel(option)}：${permissionDescription(option)}。切换后立即作用于当前会话。`, `${permissionLabel(option)}: ${permissionDescription(option)}. The change applies to the current session immediately.`),
         ui('确认切换', "Switch"),
@@ -1800,7 +1877,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     this.host.notice(ui('已清空待发送图片', "Pending images cleared"), 'success')
   }
 
-  private async settings(args: string): Promise<void> {
+  private async settings(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const documents = visibleSettingsDocuments(await bridge.describe())
     if (documents.length === 0) throw new Error(ui('当前 Profile 未注册任何 Settings 命名空间', "The current Profile has no registered Settings namespaces"))
@@ -1808,7 +1885,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       const document = documents.find(candidate => candidate.namespace === args)
       if (document === undefined) throw new Error(ui(`Settings 命名空间 ${JSON.stringify(args)} 不存在`, `Settings namespace ${JSON.stringify(args)} does not exist`))
     }
-    await this.host.overlays.navigate<void>(async (navigation) => {
+    await this.overlayFlow(overlays, async (navigation) => {
       const root = navigation.selectPage({
         title: ui('设置', "Settings"),
         detail: ui('搜索并修改全部功能设置', "Search and edit all feature settings"),
@@ -1844,42 +1921,44 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     document: TuiSettingsDocument,
     current: TuiBehaviorSettings,
   ): Promise<void> {
-    const selected = await this.host.overlays.select({
-      title: ui('快捷键', 'Key bindings'),
-      detail: ui(
-        '选择一项以改绑或恢复默认。Enter、换行和对话查找不可改。',
-        'Choose a shortcut to rebind or restore. Enter, newline, and transcript search stay fixed.',
-      ),
-      choices: SURFACE_KEYMAP.filter(binding => binding.configurable !== false).map(binding => ({
-        id: binding.id,
-        label: ui(binding.zh, binding.en),
-        description: bindingKeysLabel(binding.id),
-      })),
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('快捷键', 'Key bindings'),
+        detail: ui(
+          '选择一项以改绑或恢复默认。Enter、换行和对话查找不可改。',
+          'Choose a shortcut to rebind or restore. Enter, newline, and transcript search stay fixed.',
+        ),
+        choices: SURFACE_KEYMAP.filter(binding => binding.configurable !== false).map(binding => ({
+          id: binding.id,
+          label: ui(binding.zh, binding.en),
+          description: bindingKeysLabel(binding.id),
+        })),
+      }, async (selected) => {
+        const target = SURFACE_KEYMAP.find(binding => binding.id === selected.id)
+        const action = await navigation.select({
+          title: ui(target?.zh ?? selected.id, target?.en ?? selected.id),
+          detail: ui(
+            `当前：${bindingKeysLabel(selected.id)}。输入 Ctrl+K 或 Cmd+, 这类组合。`,
+            `Current: ${bindingKeysLabel(selected.id)}. Type a chord such as Ctrl+K or Cmd+,.`,
+          ),
+          choices: [
+            { id: 'set', label: ui('设置新组合…', 'Set a new chord…') },
+            { id: 'reset', label: ui('恢复默认', 'Restore default') },
+          ],
+        })
+        if (action === undefined) return
+        if (action.id === 'reset') {
+          await this.keymapAssign(document, current, selected.id, 'reset')
+          return
+        }
+        const typed = await navigation.input({
+          title: ui('新组合键', 'New chord'),
+          placeholder: 'Ctrl+K',
+        })
+        if (typed === undefined || typed.trim() === '') return
+        await this.keymapAssign(document, current, selected.id, typed)
+      })
     })
-    if (selected === undefined) return
-    const target = SURFACE_KEYMAP.find(binding => binding.id === selected.id)
-    const action = await this.host.overlays.select({
-      title: ui(target?.zh ?? selected.id, target?.en ?? selected.id),
-      detail: ui(
-        `当前：${bindingKeysLabel(selected.id)}。输入 Ctrl+K 或 Cmd+, 这类组合。`,
-        `Current: ${bindingKeysLabel(selected.id)}. Type a chord such as Ctrl+K or Cmd+,.`,
-      ),
-      choices: [
-        { id: 'set', label: ui('设置新组合…', 'Set a new chord…') },
-        { id: 'reset', label: ui('恢复默认', 'Restore default') },
-      ],
-    })
-    if (action === undefined) return
-    if (action.id === 'reset') {
-      await this.keymapAssign(document, current, selected.id, 'reset')
-      return
-    }
-    const typed = await this.host.overlays.input({
-      title: ui('新组合键', 'New chord'),
-      placeholder: 'Ctrl+K',
-    })
-    if (typed === undefined || typed.trim() === '') return
-    await this.keymapAssign(document, current, selected.id, typed)
   }
 
   private async keymapAssign(
@@ -2330,59 +2409,68 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
 
   private async pluginCenter(): Promise<void> {
     const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
-    const selected = await this.host.overlays.select({
-      title: ui(`插件中心 · ${snapshot.profile}`, `Plugin center · ${snapshot.profile}`),
-      detail: ui('查看已安装插件、启用状态和加载顺序', "View installed plugins, enabled state, and load order"),
-      choices: [
-        ...snapshot.plugins.map(plugin => ({
-          id: `plugin:${plugin.name}`,
-          label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
-          description: pluginDescription(plugin),
-        })),
-        { id: '__search__', label: ui('搜索插件…', "Search plugins…"), description: ui('从已启用的插件目录中搜索', "Search enabled plugin catalogs") },
-        { id: '__install__', label: ui('安装插件…', "Install plugin…"), description: ui('支持 npm、Git、压缩包和本地目录；安装前确认', "Supports npm, Git, archives, and local directories; confirmation is required") },
-        { id: '__update__', label: ui('更新插件…', "Update plugin…"), description: ui('更新当前 Profile 的插件', "Update plugins in the current Profile") },
-        { id: '__reorder__', label: ui('调整插件顺序…', "Reorder plugins…"), description: ui(`${snapshot.bundles.length} 个活动插件`, `${snapshot.bundles.length} active plugin(s)`) },
-        { id: '__sources__', label: ui('插件目录…', "Plugin catalogs…"), description: ui('查看或添加插件目录', "View or add plugin catalogs") },
-        { id: '__doctor__', label: ui('运行诊断', "Run diagnostics"), description: ui('检查插件加载和运行环境', "Check plugin loading and the runtime environment") },
-      ],
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id.startsWith('plugin:')) {
-      const plugin = snapshot.plugins.find(candidate => candidate.name === selected.id.slice('plugin:'.length))
-      if (plugin !== undefined) await this.installedPlugin(plugin)
-      return
-    }
-    if (selected.id === '__search__') await this.pluginSearch('')
-    if (selected.id === '__install__') await this.pluginInstall('')
-    if (selected.id === '__update__') await this.pluginUpdate('')
-    if (selected.id === '__reorder__') await this.pluginReorder()
-    if (selected.id === '__sources__') await this.pluginSources('')
-    if (selected.id === '__doctor__') await this.doctor()
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui(`插件中心 · ${snapshot.profile}`, `Plugin center · ${snapshot.profile}`),
+        detail: ui('查看已安装插件、启用状态和加载顺序', "View installed plugins, enabled state, and load order"),
+        choices: [
+          ...snapshot.plugins.map(plugin => ({
+            id: `plugin:${plugin.name}`,
+            label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
+            description: pluginDescription(plugin),
+          })),
+          { id: '__search__', label: ui('搜索插件…', "Search plugins…"), description: ui('从已启用的插件目录中搜索', "Search enabled plugin catalogs") },
+          { id: '__install__', label: ui('安装插件…', "Install plugin…"), description: ui('支持 npm、Git、压缩包和本地目录；安装前确认', "Supports npm, Git, archives, and local directories; confirmation is required") },
+          { id: '__update__', label: ui('更新插件…', "Update plugin…"), description: ui('更新当前 Profile 的插件', "Update plugins in the current Profile") },
+          { id: '__reorder__', label: ui('调整插件顺序…', "Reorder plugins…"), description: ui(`${snapshot.bundles.length} 个活动插件`, `${snapshot.bundles.length} active plugin(s)`) },
+          { id: '__sources__', label: ui('插件目录…', "Plugin catalogs…"), description: ui('查看或添加插件目录', "View or add plugin catalogs") },
+          { id: '__doctor__', label: ui('运行诊断', "Run diagnostics"), description: ui('检查插件加载和运行环境', "Check plugin loading and the runtime environment") },
+        ],
+        options,
+      }, async (selected) => {
+        if (selected.id.startsWith('plugin:')) {
+          const plugin = snapshot.plugins.find(candidate => candidate.name === selected.id.slice('plugin:'.length))
+          if (plugin !== undefined) await this.installedPlugin(plugin, navigation)
+          return
+        }
+        if (selected.id === '__search__') await this.pluginSearch('', navigation)
+        if (selected.id === '__install__') await this.pluginInstall('', navigation)
+        if (selected.id === '__update__') await this.pluginUpdate('', navigation)
+        if (selected.id === '__reorder__') await this.pluginReorder(navigation)
+        if (selected.id === '__sources__') await this.pluginSources('', navigation)
+        if (selected.id === '__doctor__') await this.doctor(navigation)
+      })
+    }, options)
   }
 
-  private async pluginList(): Promise<void> {
+  private async pluginList(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
     if (snapshot.plugins.length === 0) {
       this.host.notice(ui(`Profile ${snapshot.profile} 没有已安装插件依赖`, `Profile ${snapshot.profile} has no installed plugin dependencies`), 'info')
       return
     }
-    const selected = await this.host.overlays.select({
-      title: ui(`已安装插件 · ${snapshot.profile}`, `Installed plugins · ${snapshot.profile}`),
-      choices: snapshot.plugins.map(plugin => ({
-        id: plugin.name,
-        label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
-        description: pluginDescription(plugin),
-      })),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    const plugin = snapshot.plugins.find(candidate => candidate.name === selected.id)
-    if (plugin !== undefined) await this.installedPlugin(plugin)
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui(`已安装插件 · ${snapshot.profile}`, `Installed plugins · ${snapshot.profile}`),
+        choices: snapshot.plugins.map(plugin => ({
+          id: plugin.name,
+          label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
+          description: pluginDescription(plugin),
+        })),
+        options,
+      }, async (selected) => {
+        const plugin = snapshot.plugins.find(candidate => candidate.name === selected.id)
+        if (plugin !== undefined) await this.installedPlugin(plugin, navigation)
+      })
+    }, options)
   }
 
-  private async installedPlugin(plugin: TuiPluginEntry): Promise<void> {
+  private async installedPlugin(
+    plugin: TuiPluginEntry,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     const detail = ui(
       `${plugin.description ?? '无包说明'}
 spec：${plugin.spec}
@@ -2399,68 +2487,79 @@ patch: ${plugin.patch ?? 'not declared'} · ${plugin.patchValid ? 'valid' : 'inv
 Lifecycle scripts: ${plugin.scripts.length === 0 ? 'none' : plugin.scripts.join(', ')}
 Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map(translateUiText).join('; ')}`,
     )
-    const selected = await this.host.overlays.select({
-      title: pluginIdentity(plugin),
-      detail,
-      choices: [
-        { id: 'update', label: ui('更新…', "Update…"), description: `pnpm update ${plugin.name}` },
-        { id: 'remove', label: ui('移除…', "Remove…"), description: `pnpm remove ${plugin.name}` },
-      ],
-      searchable: false,
+    await this.overlayFlow(overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: pluginIdentity(plugin),
+        detail,
+        choices: [
+          { id: 'update', label: ui('更新…', "Update…"), description: `pnpm update ${plugin.name}` },
+          { id: 'remove', label: ui('移除…', "Remove…"), description: `pnpm remove ${plugin.name}` },
+        ],
+        searchable: false,
+      }, async (selected) => {
+        if (selected.id === 'update') await this.pluginUpdate(plugin.name, navigation)
+        if (selected.id === 'remove') await this.pluginRemove(plugin.name, navigation)
+      })
     })
-    if (selected?.id === 'update') await this.pluginUpdate(plugin.name)
-    if (selected?.id === 'remove') await this.pluginRemove(plugin.name)
   }
 
-  private async pluginSearch(query: string): Promise<void> {
-    let text = query.trim()
-    if (text === '') {
-      const entered = await this.host.overlays.input({ title: ui('搜索插件', "Search plugins"), placeholder: ui('名称、描述或 Catalog 关键词', "Name, description, or catalog keyword") })
-      if (entered === undefined || entered.trim() === '') return
-      text = entered.trim()
-    }
-    const candidates = await this.host.overlays.runBusy(
-      ui(`插件搜索 · ${text}`, `Plugin search · ${text}`),
-      signal => this.capabilities.managementBridge().plugins.search(text, signal),
-    )
-    if (candidates === undefined) return
-    if (candidates.length === 0) {
-      this.host.notice(ui(`未找到与 ${JSON.stringify(text)} 匹配的插件`, `No plugins match ${JSON.stringify(text)}`), 'info')
-      return
-    }
-    const selected = await this.host.overlays.select({
-      title: ui(`插件搜索 · ${text}`, `Plugin search · ${text}`),
-      detail: ui('“验证通过”只表示包结构兼容，不表示官方、审核过、安全或可信', "“Validated” means only that the package structure is compatible; it does not mean official, reviewed, safe, or trusted"),
-      choices: candidates.map(candidate => ({
-        id: candidate.id,
-        label: `${candidate.name}${candidate.version === undefined ? '' : `@${candidate.version}`}`,
-        description: `${candidate.description ?? candidate.spec} · ${candidateDescription(candidate)}${candidate.diagnostics.length === 0 ? '' : ` · ${candidate.diagnostics.join('；')}`}`,
-      })),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+  private async pluginSearch(query: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    await this.overlayFlow(overlays, async (navigation) => {
+      let text = query.trim()
+      if (text === '') {
+        const entered = await navigation.input({ title: ui('搜索插件', "Search plugins"), placeholder: ui('名称、描述或 Catalog 关键词', "Name, description, or catalog keyword") })
+        if (entered === undefined || entered.trim() === '') return
+        text = entered.trim()
+      }
+      const candidates = await navigation.progress({
+        title: ui(`插件搜索 · ${text}`, `Plugin search · ${text}`),
+        work: (_report, signal) => this.capabilities.managementBridge().plugins.search(text, signal),
+      })
+      if (candidates === undefined) return
+      if (candidates.length === 0) {
+        this.host.notice(ui(`未找到与 ${JSON.stringify(text)} 匹配的插件`, `No plugins match ${JSON.stringify(text)}`), 'info')
+        return
+      }
+      const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+      await navigation.selectPage({
+        title: ui(`插件搜索 · ${text}`, `Plugin search · ${text}`),
+        detail: ui('“验证通过”只表示包结构兼容，不表示官方、审核过、安全或可信', "“Validated” means only that the package structure is compatible; it does not mean official, reviewed, safe, or trusted"),
+        choices: candidates.map(candidate => ({
+          id: candidate.id,
+          label: `${candidate.name}${candidate.version === undefined ? '' : `@${candidate.version}`}`,
+          description: `${candidate.description ?? candidate.spec} · ${candidateDescription(candidate)}${candidate.diagnostics.length === 0 ? '' : ` · ${candidate.diagnostics.join('；')}`}`,
+        })),
+        options,
+      }, async (selected) => {
+        const candidate = candidates.find(item => item.id === selected.id)
+        if (candidate !== undefined) await this.marketplaceCandidate(candidate, navigation)
+      })
     })
-    if (selected === undefined) return
-    const candidate = candidates.find(item => item.id === selected.id)
-    if (candidate !== undefined) await this.marketplaceCandidate(candidate)
   }
 
-  private async pluginInfo(spec: string): Promise<void> {
+  private async pluginInfo(spec: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     if (spec === '') throw new Error(ui('用法：/plugin info <包名或 spec>', "Usage: /plugin info <package or spec>"))
     const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
     const installed = snapshot.plugins.find(plugin => plugin.name === spec)
     if (installed !== undefined) {
-      await this.installedPlugin(installed)
+      await this.installedPlugin(installed, overlays)
       return
     }
-    const candidate = await this.host.overlays.runBusy(
-      ui(`检查 ${spec}`, `Inspect ${spec}`),
-      signal => this.capabilities.managementBridge().plugins.inspect(spec, signal),
-    )
-    if (candidate === undefined) return
-    await this.marketplaceCandidate(candidate)
+    await this.overlayFlow(overlays, async (navigation) => {
+      const candidate = await navigation.progress({
+        title: ui(`检查 ${spec}`, `Inspect ${spec}`),
+        work: (_report, signal) => this.capabilities.managementBridge().plugins.inspect(spec, signal),
+      })
+      if (candidate === undefined) return
+      await this.marketplaceCandidate(candidate, navigation)
+    })
   }
 
-  private async marketplaceCandidate(candidate: TuiMarketplaceCandidate): Promise<void> {
-    const selected = await this.host.overlays.select({
+  private async marketplaceCandidate(
+    candidate: TuiMarketplaceCandidate,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
+    const selected = await overlays.select({
       title: `${candidate.name}${candidate.version === undefined ? '' : `@${candidate.version}`}`,
       detail: this.candidateDetail(candidate),
       choices: [{
@@ -2474,7 +2573,7 @@ Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map
       searchable: false,
       options: { width: '90%', maxHeight: '85%', anchor: 'center', margin: 1 },
     })
-    if (selected?.id === 'install') await this.installCandidate(candidate)
+    if (selected?.id === 'install') await this.installCandidate(candidate, overlays)
   }
 
   private candidateDetail(candidate: TuiMarketplaceCandidate): string {
@@ -2502,31 +2601,36 @@ Warning: structural validation is not a security, trust, or quality review.`,
     )
   }
 
-  private async pluginInstall(spec: string): Promise<void> {
-    let value = spec.trim()
-    if (value === '') {
-      const entered = await this.host.overlays.input({
-        title: ui('按 spec 安装插件', "Install plugin by spec"),
-        detail: ui('支持 npm、Git、tarball 和本地路径；不接受带内嵌凭证的 URL', "Supports npm, Git, tarballs, and local paths; URLs with embedded credentials are rejected"),
-        placeholder: ui('例如 @scope/plugin@1.2.3', "For example, @scope/plugin@1.2.3"),
+  private async pluginInstall(spec: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    await this.overlayFlow(overlays, async (navigation) => {
+      let value = spec.trim()
+      if (value === '') {
+        const entered = await navigation.input({
+          title: ui('按 spec 安装插件', "Install plugin by spec"),
+          detail: ui('支持 npm、Git、tarball 和本地路径；不接受带内嵌凭证的 URL', "Supports npm, Git, tarballs, and local paths; URLs with embedded credentials are rejected"),
+          placeholder: ui('例如 @scope/plugin@1.2.3', "For example, @scope/plugin@1.2.3"),
+        })
+        if (entered === undefined || entered.trim() === '') return
+        value = entered.trim()
+      }
+      const candidate = await navigation.progress({
+        title: ui(`检查 ${value}`, `Inspect ${value}`),
+        work: (_report, signal) => this.capabilities.managementBridge().plugins.inspect(value, signal),
       })
-      if (entered === undefined || entered.trim() === '') return
-      value = entered.trim()
-    }
-    const candidate = await this.host.overlays.runBusy(
-      ui(`检查 ${value}`, `Inspect ${value}`),
-      signal => this.capabilities.managementBridge().plugins.inspect(value, signal),
-    )
-    if (candidate === undefined) return
-    if (candidate.source !== 'git' && (!candidate.bundle || !candidate.patchValid)) {
-      throw new Error(ui(`已拒绝安装：${candidate.diagnostics.join('；') || '未通过 dsh.bundle.patch 验证'}`, `Installation rejected: ${candidate.diagnostics.join('；') || 'Failed dsh.bundle.patch validation'}`))
-    }
-    await this.installCandidate(candidate)
+      if (candidate === undefined) return
+      if (candidate.source !== 'git' && (!candidate.bundle || !candidate.patchValid)) {
+        throw new Error(ui(`已拒绝安装：${candidate.diagnostics.join('；') || '未通过 dsh.bundle.patch 验证'}`, `Installation rejected: ${candidate.diagnostics.join('；') || 'Failed dsh.bundle.patch validation'}`))
+      }
+      await this.installCandidate(candidate, navigation)
+    })
   }
 
-  private async installCandidate(candidate: TuiMarketplaceCandidate): Promise<void> {
+  private async installCandidate(
+    candidate: TuiMarketplaceCandidate,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     const profile = this.capabilities.currentProfile()
-    const confirmed = await this.host.overlays.confirm(
+    const confirmed = await overlays.confirm(
       ui(`安装 ${candidate.name} 到 ${profile}？`, `Install ${candidate.name} in ${profile}?`),
       ui(
         `${this.candidateDetail(candidate)}
@@ -2541,7 +2645,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       ui('理解风险并安装', "Install with acknowledged risk"),
     )
     if (!confirmed) return
-    const result = await this.host.overlays.progress({
+    const result = await overlays.progress({
       title: ui(`安装 ${candidate.name}`, `Install ${candidate.name}`),
       work: (report, signal) => this.capabilities.managementBridge().plugins.run(
         ['add', '--save-exact', candidate.spec],
@@ -2549,78 +2653,86 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       ),
     })
     if (result === undefined) return
-    await this.pluginOperation(ui(`安装 ${candidate.name}`, `Install ${candidate.name}`), result)
+    await this.pluginOperation(ui(`安装 ${candidate.name}`, `Install ${candidate.name}`), result, overlays)
   }
 
-  private async pluginRemove(name: string): Promise<void> {
-    let target = name.trim()
-    const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
-    if (target === '') {
-      const selected = await this.host.overlays.select({
-        title: ui('移除插件', "Remove plugin"),
-        choices: snapshot.plugins.map(plugin => ({
-          id: plugin.name,
-          label: pluginIdentity(plugin),
-          description: pluginDescription(plugin),
-        })),
+  private async pluginRemove(name: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    await this.overlayFlow(overlays, async (navigation) => {
+      let target = name.trim()
+      const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
+      if (target === '') {
+        const selected = await navigation.select({
+          title: ui('移除插件', "Remove plugin"),
+          choices: snapshot.plugins.map(plugin => ({
+            id: plugin.name,
+            label: pluginIdentity(plugin),
+            description: pluginDescription(plugin),
+          })),
+        })
+        if (selected === undefined) return
+        target = selected.id
+      }
+      const plugin = snapshot.plugins.find(candidate => candidate.name === target)
+      if (plugin === undefined) throw new Error(ui(`当前 Profile 未安装 ${JSON.stringify(target)}`, `${JSON.stringify(target)} is not installed in the current Profile`))
+      const confirmed = await navigation.confirm(
+        ui(`从 ${snapshot.profile} 移除 ${target}？`, `Remove ${target} from ${snapshot.profile}?`),
+        ui(`将执行：pnpm remove ${target}。Bundle 列表会由原生 Manager 对账。`, `This will run: pnpm remove ${target}. The Bundle list is reconciled by the native Manager.`),
+        ui('移除', "Remove"),
+      )
+      if (!confirmed) return
+      const result = await navigation.progress({
+        title: ui(`移除 ${target}`, `Remove ${target}`),
+        work: (report, signal) => this.capabilities.managementBridge().plugins.run(
+          ['remove', target],
+          { signal, onOutput: (_stream, chunk) => { report(chunk) } },
+        ),
       })
-      if (selected === undefined) return
-      target = selected.id
-    }
-    const plugin = snapshot.plugins.find(candidate => candidate.name === target)
-    if (plugin === undefined) throw new Error(ui(`当前 Profile 未安装 ${JSON.stringify(target)}`, `${JSON.stringify(target)} is not installed in the current Profile`))
-    const confirmed = await this.host.overlays.confirm(
-      ui(`从 ${snapshot.profile} 移除 ${target}？`, `Remove ${target} from ${snapshot.profile}?`),
-      ui(`将执行：pnpm remove ${target}。Bundle 列表会由原生 Manager 对账。`, `This will run: pnpm remove ${target}. The Bundle list is reconciled by the native Manager.`),
-      ui('移除', "Remove"),
-    )
-    if (!confirmed) return
-    const result = await this.host.overlays.progress({
-      title: ui(`移除 ${target}`, `Remove ${target}`),
-      work: (report, signal) => this.capabilities.managementBridge().plugins.run(
-        ['remove', target],
-        { signal, onOutput: (_stream, chunk) => { report(chunk) } },
-      ),
+      if (result === undefined) return
+      await this.pluginOperation(ui(`移除 ${target}`, `Remove ${target}`), result, navigation)
     })
-    if (result === undefined) return
-    await this.pluginOperation(ui(`移除 ${target}`, `Remove ${target}`), result)
   }
 
-  private async pluginUpdate(name: string): Promise<void> {
-    let target = name.trim()
-    const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
-    if (target === '') {
-      const selected = await this.host.overlays.select({
-        title: ui('更新插件', "Update plugin"),
-        choices: [
-          { id: '__all__', label: ui('更新全部 Profile 依赖', "Update all Profile dependencies"), description: 'pnpm update' },
-          ...snapshot.plugins.map(plugin => ({ id: plugin.name, label: pluginIdentity(plugin), description: plugin.spec })),
-        ],
+  private async pluginUpdate(name: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    await this.overlayFlow(overlays, async (navigation) => {
+      let target = name.trim()
+      const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
+      if (target === '') {
+        const selected = await navigation.select({
+          title: ui('更新插件', "Update plugin"),
+          choices: [
+            { id: '__all__', label: ui('更新全部 Profile 依赖', "Update all Profile dependencies"), description: 'pnpm update' },
+            ...snapshot.plugins.map(plugin => ({ id: plugin.name, label: pluginIdentity(plugin), description: plugin.spec })),
+          ],
+        })
+        if (selected === undefined) return
+        target = selected.id === '__all__' ? '' : selected.id
+      } else if (!snapshot.plugins.some(plugin => plugin.name === target)) {
+        throw new Error(ui(`当前 Profile 未安装 ${JSON.stringify(target)}`, `${JSON.stringify(target)} is not installed in the current Profile`))
+      }
+      const args = target === '' ? ['update'] : ['update', target]
+      const confirmed = await navigation.confirm(
+        target === '' ? ui(`更新 ${snapshot.profile} 全部依赖？`, `Update all dependencies in ${snapshot.profile}?`) : ui(`更新 ${target}？`, `Update ${target}?`),
+        ui(`将执行：pnpm ${args.join(' ')}。解析结果由 Profile lockfile 持久化。`, `This will run: pnpm ${args.join(' ')}. The resolution is persisted in the Profile lockfile.`),
+        ui('更新', "Update"),
+      )
+      if (!confirmed) return
+      const result = await navigation.progress({
+        title: target === '' ? ui('更新全部插件', "Update all plugins") : ui(`更新 ${target}`, `Update ${target}`),
+        work: (report, signal) => this.capabilities.managementBridge().plugins.run(
+          args,
+          { signal, onOutput: (_stream, chunk) => { report(chunk) } },
+        ),
       })
-      if (selected === undefined) return
-      target = selected.id === '__all__' ? '' : selected.id
-    } else if (!snapshot.plugins.some(plugin => plugin.name === target)) {
-      throw new Error(ui(`当前 Profile 未安装 ${JSON.stringify(target)}`, `${JSON.stringify(target)} is not installed in the current Profile`))
-    }
-    const args = target === '' ? ['update'] : ['update', target]
-    const confirmed = await this.host.overlays.confirm(
-      target === '' ? ui(`更新 ${snapshot.profile} 全部依赖？`, `Update all dependencies in ${snapshot.profile}?`) : ui(`更新 ${target}？`, `Update ${target}?`),
-      ui(`将执行：pnpm ${args.join(' ')}。解析结果由 Profile lockfile 持久化。`, `This will run: pnpm ${args.join(' ')}. The resolution is persisted in the Profile lockfile.`),
-      ui('更新', "Update"),
-    )
-    if (!confirmed) return
-    const result = await this.host.overlays.progress({
-      title: target === '' ? ui('更新全部插件', "Update all plugins") : ui(`更新 ${target}`, `Update ${target}`),
-      work: (report, signal) => this.capabilities.managementBridge().plugins.run(
-        args,
-        { signal, onOutput: (_stream, chunk) => { report(chunk) } },
-      ),
+      if (result === undefined) return
+      await this.pluginOperation(target === '' ? ui('更新全部插件', "Update all plugins") : ui(`更新 ${target}`, `Update ${target}`), result, navigation)
     })
-    if (result === undefined) return
-    await this.pluginOperation(target === '' ? ui('更新全部插件', "Update all plugins") : ui(`更新 ${target}`, `Update ${target}`), result)
   }
 
-  private async pluginOperation(label: string, result: TuiPluginOperation): Promise<void> {
+  private async pluginOperation(
+    label: string,
+    result: TuiPluginOperation,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
     if (result.exitCode !== 0) {
       const detail = pluginFailureDetail(result)
       throw new Error(ui(`${label} 失败（exit ${result.exitCode}）：${detail.slice(-1200)}`, `${label} failed (exit ${result.exitCode}): ${detail.slice(-1200)}`))
@@ -2628,11 +2740,14 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
     const warnings = result.warnings.length === 0 ? '' : `；${result.warnings.join('；')}`
     this.host.notice(ui(`${label} 完成${result.changed ? '' : '（没有变化）'}${warnings}`, `${label} completed${result.changed ? '' : '(no changes)'}${warnings}`), warnings === '' ? 'success' : 'warning')
     if (!result.restartRequired) return
-    await this.restartAfterPluginChange(label)
+    await this.restartAfterPluginChange(label, overlays)
   }
 
-  private async restartAfterPluginChange(label: string): Promise<void> {
-    const restart = await this.host.overlays.confirm(
+  private async restartAfterPluginChange(
+    label: string,
+    overlays: OverlayPrompts = this.host.overlays,
+  ): Promise<void> {
+    const restart = await overlays.confirm(
       ui(`${label} 后需要重启`, `Restart required after ${label}`),
       ui('重启后会恢复当前工作区、会话、草稿和附件。', "After restart, the current workspace, session, draft, and attachments are restored."),
       ui('立即重启', "Restart now"),
@@ -2641,42 +2756,44 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
     else this.host.requireRestart(ui(`${label} 已完成，输入 /restart 加载变更`, `${label} completed; use /restart to load the change`))
   }
 
-  private async pluginReorder(): Promise<void> {
+  private async pluginReorder(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().plugins
     const snapshot = await bridge.snapshot()
     if (snapshot.bundles.length < 2) {
       this.host.notice(ui('当前插件少于 2 个，无需调整顺序', "Fewer than two plugins are installed; no reordering is needed"), 'info')
       return
     }
-    const selected = await this.host.overlays.select({
-      title: ui('Bundle 顺序', "Bundle order"),
-      detail: ui('顺序直接对应 dsh.profile.bundles；不会增删 Bundle', "Order maps directly to dsh.profile.bundles; no Bundle is added or removed"),
-      choices: snapshot.bundles.map((bundle, index) => ({ id: bundle, label: `${index + 1}. ${bundle}` })),
+    await this.overlayFlow(overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('Bundle 顺序', "Bundle order"),
+        detail: ui('顺序直接对应 dsh.profile.bundles；不会增删 Bundle', "Order maps directly to dsh.profile.bundles; no Bundle is added or removed"),
+        choices: snapshot.bundles.map((bundle, index) => ({ id: bundle, label: `${index + 1}. ${bundle}` })),
+      }, async (selected) => {
+        const index = snapshot.bundles.indexOf(selected.id)
+        const direction = await navigation.select({
+          title: ui(`移动 ${selected.id}`, `Move ${selected.id}`),
+          choices: [
+            { id: 'top', label: ui('移到最前', "Move to first"), ...(index === 0 ? { disabledReason: ui('已在最前', "Already first") } : {}) },
+            { id: 'up', label: ui('上移一位', "Move up"), ...(index === 0 ? { disabledReason: ui('已在最前', "Already first") } : {}) },
+            { id: 'down', label: ui('下移一位', "Move down"), ...(index === snapshot.bundles.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
+            { id: 'bottom', label: ui('移到最后', "Move to last"), ...(index === snapshot.bundles.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
+          ],
+          searchable: false,
+        })
+        if (direction === undefined) return
+        const bundles = [...snapshot.bundles]
+        bundles.splice(index, 1)
+        const target = direction.id === 'top'
+          ? 0
+          : direction.id === 'bottom'
+            ? bundles.length
+            : direction.id === 'up' ? index - 1 : index + 1
+        bundles.splice(target, 0, selected.id)
+        await bridge.reorder(bundles)
+        this.host.notice(ui('插件顺序已保存', "Plugin order saved"), 'success')
+        await this.restartAfterPluginChange(ui('调整 Bundle 顺序', "Reorder Bundles"), navigation)
+      })
     })
-    if (selected === undefined) return
-    const index = snapshot.bundles.indexOf(selected.id)
-    const direction = await this.host.overlays.select({
-      title: ui(`移动 ${selected.id}`, `Move ${selected.id}`),
-      choices: [
-        { id: 'top', label: ui('移到最前', "Move to first"), ...(index === 0 ? { disabledReason: ui('已在最前', "Already first") } : {}) },
-        { id: 'up', label: ui('上移一位', "Move up"), ...(index === 0 ? { disabledReason: ui('已在最前', "Already first") } : {}) },
-        { id: 'down', label: ui('下移一位', "Move down"), ...(index === snapshot.bundles.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
-        { id: 'bottom', label: ui('移到最后', "Move to last"), ...(index === snapshot.bundles.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
-      ],
-      searchable: false,
-    })
-    if (direction === undefined) return
-    const bundles = [...snapshot.bundles]
-    bundles.splice(index, 1)
-    const target = direction.id === 'top'
-      ? 0
-      : direction.id === 'bottom'
-        ? bundles.length
-        : direction.id === 'up' ? index - 1 : index + 1
-    bundles.splice(target, 0, selected.id)
-    await bridge.reorder(bundles)
-    this.host.notice(ui('插件顺序已保存', "Plugin order saved"), 'success')
-    await this.restartAfterPluginChange(ui('调整 Bundle 顺序', "Reorder Bundles"))
   }
 
   private async pluginSources(
@@ -2719,27 +2836,30 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       throw new Error(ui('用法：/plugin source [list|add <id> <URL>|remove|enable|disable]', "Usage: /plugin source [list|add <id> <URL>|remove|enable|disable]"))
     }
     const snapshot = await bridge.sources()
-    const selected = await overlays.select({
-      title: ui('插件市场来源', "Plugin marketplace sources"),
-      detail: ui('npm 与插件提供的目录为只读；你添加的插件目录可在这里管理', "npm and provider-owned catalogs are read-only; catalogs you add can be managed here"),
-      choices: [
-        ...snapshot.sources.map(source => ({
-          id: `source:${marketplaceSourceKey(source)}`,
-          label: `${source.enabled ? '● ' : '○ '}${source.label}`,
-          description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ui(' · 内置', " · built-in") : ''}${source.diagnostic === undefined ? '' : ` · ${source.diagnostic}`}`,
-        })),
-        { id: '__add__', label: ui('添加插件目录…', "Add plugin catalog…") },
-      ],
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id === '__add__') {
-      await this.addPluginSource(overlays, snapshot.sources, snapshot.revision)
-      return
-    }
-    const source = findMarketplaceSource(snapshot.sources, selected.id.slice('source:'.length))
-    if (source === undefined) return
-    await this.editPluginSource(overlays, source, snapshot.sources, snapshot.revision)
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('插件市场来源', "Plugin marketplace sources"),
+        detail: ui('npm 与插件提供的目录为只读；你添加的插件目录可在这里管理', "npm and provider-owned catalogs are read-only; catalogs you add can be managed here"),
+        choices: [
+          ...snapshot.sources.map(source => ({
+            id: `source:${marketplaceSourceKey(source)}`,
+            label: `${source.enabled ? '● ' : '○ '}${source.label}`,
+            description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ui(' · 内置', " · built-in") : ''}${source.diagnostic === undefined ? '' : ` · ${source.diagnostic}`}`,
+          })),
+          { id: '__add__', label: ui('添加插件目录…', "Add plugin catalog…") },
+        ],
+        options,
+      }, async (selected) => {
+        if (selected.id === '__add__') {
+          await this.addPluginSource(navigation, snapshot.sources, snapshot.revision)
+          return
+        }
+        const source = findMarketplaceSource(snapshot.sources, selected.id.slice('source:'.length))
+        if (source === undefined) return
+        await this.editPluginSource(navigation, source, snapshot.sources, snapshot.revision)
+      })
+    }, options)
   }
 
   private async addPluginSource(
@@ -2846,7 +2966,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     this.host.notice(ui(`Credential ${ref} 已配置`, `Credential ${ref} configured`), 'success')
   }
 
-  private async doctor(): Promise<void> {
+  private async doctor(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const [report, status, inventory] = await Promise.all([
       this.capabilities.managementBridge().plugins.doctor(),
       this.capabilities.headerFacts(true),
@@ -2856,100 +2976,103 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     const warnings = report.diagnostics.filter(item => item.level === 'warning').length
     const failedInstances = inventory.filter(item => item.fiberPhase === 'failed')
     const enabledInstances = inventory.filter(item => item.enabled).length
-    const selected = await this.host.overlays.select({
-      title: ui(`诊断 · ${report.profile}`, `Diagnostics · ${report.profile}`),
-      detail: ui(
-        `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm：${report.pnpm ?? '不可用'} · ${errors} 个错误 · ${warnings} 个警告 · ${enabledInstances} 个插件运行中`,
-        `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm: ${report.pnpm ?? 'unavailable'} · ${errors} error(s) · ${warnings} warning(s) · ${enabledInstances} plugin(s) running`,
-      ),
-      choices: [
-        {
-          id: 'runtime',
-          label: `Runtime · ${status.running ? ui('运行中', "Running") : ui('空闲', "Idle")}`,
-          description: `${status.workspace} · ${status.model} · ${status.permission}`,
-        },
-        ...report.diagnostics.map((item, index) => ({
-          id: `plugin:${index}`,
-          label: `${item.level === 'error' ? '✕' : item.level === 'warning' ? '!' : '✓'} ${translateUiText(item.message)}`,
-          description: item.level,
-        })),
-        ...failedInstances.map(item => ({
-          id: `loader:${item.entryId}`,
-          label: ui(`插件实例 · ${item.moduleName}`, `Plugin instances · ${item.moduleName}`),
-          description: `${item.enabled ? ui('已启用', "Enabled") : ui('已禁用', "Disabled")} · ${item.fiberPhase ?? ui('未挂载', "Not mounted")}`,
-        })),
-      ],
-      searchable: false,
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id === 'runtime') {
-      await this.host.overlays.detail({
-        title: ui('运行环境详情', 'Runtime details'),
-        content: ui(
-          [
-            `Harness：${status.hostVersion}`,
-            `Node：${status.nodeVersion}`,
-            `系统：${status.platform}/${status.architecture}`,
-            `pnpm：${report.pnpm ?? '不可用'}`,
-            `Profile：${report.profile}`,
-            `工作区：${status.workspace}`,
-            `会话：${status.session}`,
-            `模式：${status.mode}`,
-            `模型：${status.model}`,
-            `权限：${status.permission}`,
-            `状态：${status.running ? '运行中' : '空闲'}`,
-          ].join('\n'),
-          [
-            `Harness: ${status.hostVersion}`,
-            `Node: ${status.nodeVersion}`,
-            `System: ${status.platform}/${status.architecture}`,
-            `pnpm: ${report.pnpm ?? 'unavailable'}`,
-            `Profile: ${report.profile}`,
-            `Workspace: ${status.workspace}`,
-            `Session: ${status.session}`,
-            `Mode: ${status.mode}`,
-            `Model: ${status.model}`,
-            `Permission: ${status.permission}`,
-            `Status: ${status.running ? 'running' : 'idle'}`,
-          ].join('\n'),
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui(`诊断 · ${report.profile}`, `Diagnostics · ${report.profile}`),
+        detail: ui(
+          `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm：${report.pnpm ?? '不可用'} · ${errors} 个错误 · ${warnings} 个警告 · ${enabledInstances} 个插件运行中`,
+          `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}\npnpm: ${report.pnpm ?? 'unavailable'} · ${errors} error(s) · ${warnings} warning(s) · ${enabledInstances} plugin(s) running`,
         ),
-        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+        choices: [
+          {
+            id: 'runtime',
+            label: `Runtime · ${status.running ? ui('运行中', "Running") : ui('空闲', "Idle")}`,
+            description: `${status.workspace} · ${status.model} · ${status.permission}`,
+          },
+          ...report.diagnostics.map((item, index) => ({
+            id: `plugin:${index}`,
+            label: `${item.level === 'error' ? '✕' : item.level === 'warning' ? '!' : '✓'} ${translateUiText(item.message)}`,
+            description: item.level,
+          })),
+          ...failedInstances.map(item => ({
+            id: `loader:${item.entryId}`,
+            label: ui(`插件实例 · ${item.moduleName}`, `Plugin instances · ${item.moduleName}`),
+            description: `${item.enabled ? ui('已启用', "Enabled") : ui('已禁用', "Disabled")} · ${item.fiberPhase ?? ui('未挂载', "Not mounted")}`,
+          })),
+        ],
+        searchable: false,
+        options,
+      }, async (selected) => {
+        if (selected.id === 'runtime') {
+          await navigation.detail({
+            title: ui('运行环境详情', 'Runtime details'),
+            content: ui(
+              [
+                `Harness：${status.hostVersion}`,
+                `Node：${status.nodeVersion}`,
+                `系统：${status.platform}/${status.architecture}`,
+                `pnpm：${report.pnpm ?? '不可用'}`,
+                `Profile：${report.profile}`,
+                `工作区：${status.workspace}`,
+                `会话：${status.session}`,
+                `模式：${status.mode}`,
+                `模型：${status.model}`,
+                `权限：${status.permission}`,
+                `状态：${status.running ? '运行中' : '空闲'}`,
+              ].join('\n'),
+              [
+                `Harness: ${status.hostVersion}`,
+                `Node: ${status.nodeVersion}`,
+                `System: ${status.platform}/${status.architecture}`,
+                `pnpm: ${report.pnpm ?? 'unavailable'}`,
+                `Profile: ${report.profile}`,
+                `Workspace: ${status.workspace}`,
+                `Session: ${status.session}`,
+                `Mode: ${status.mode}`,
+                `Model: ${status.model}`,
+                `Permission: ${status.permission}`,
+                `Status: ${status.running ? 'running' : 'idle'}`,
+              ].join('\n'),
+            ),
+            options,
+          })
+          return
+        }
+        if (selected.id.startsWith('plugin:')) {
+          const index = Number(selected.id.slice('plugin:'.length))
+          const diagnostic = Number.isInteger(index) ? report.diagnostics[index] : undefined
+          if (diagnostic === undefined) return
+          const level = diagnostic.level === 'error' ? ui('错误', "Error") : diagnostic.level === 'warning' ? ui('警告', "Warning") : ui('信息', "Information")
+          await navigation.detail({
+            title: ui(`诊断详情 · ${level}`, `Diagnostic details · ${level}`),
+            content: translateUiText(diagnostic.message),
+            options,
+          })
+          return
+        }
+        const loader = inventory.find(item => `loader:${item.entryId}` === selected.id)
+        if (loader === undefined) return
+        await navigation.detail({
+          title: ui(`插件实例详情 · ${loader.moduleName}`, `Plugin instance details · ${loader.moduleName}`),
+          content: ui(
+            [
+              `模块：${loader.moduleName}`,
+              `实例：${loader.entryId}`,
+              `状态：${loader.enabled ? '已启用' : '已禁用'}`,
+              `加载阶段：${loader.fiberPhase ?? '未挂载'}`,
+            ].join('\n'),
+            [
+              `Module: ${loader.moduleName}`,
+              `Instance: ${loader.entryId}`,
+              `Status: ${loader.enabled ? 'enabled' : 'disabled'}`,
+              `Load phase: ${loader.fiberPhase ?? 'not mounted'}`,
+            ].join('\n'),
+          ),
+          options,
+        })
       })
-      return
-    }
-    if (selected.id.startsWith('plugin:')) {
-      const index = Number(selected.id.slice('plugin:'.length))
-      const diagnostic = Number.isInteger(index) ? report.diagnostics[index] : undefined
-      if (diagnostic === undefined) return
-      const level = diagnostic.level === 'error' ? ui('错误', "Error") : diagnostic.level === 'warning' ? ui('警告', "Warning") : ui('信息', "Information")
-      await this.host.overlays.detail({
-        title: ui(`诊断详情 · ${level}`, `Diagnostic details · ${level}`),
-        content: translateUiText(diagnostic.message),
-        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-      })
-      return
-    }
-    const loader = inventory.find(item => `loader:${item.entryId}` === selected.id)
-    if (loader === undefined) return
-    await this.host.overlays.detail({
-      title: ui(`插件实例详情 · ${loader.moduleName}`, `Plugin instance details · ${loader.moduleName}`),
-      content: ui(
-        [
-          `模块：${loader.moduleName}`,
-          `实例：${loader.entryId}`,
-          `状态：${loader.enabled ? '已启用' : '已禁用'}`,
-          `加载阶段：${loader.fiberPhase ?? '未挂载'}`,
-        ].join('\n'),
-        [
-          `Module: ${loader.moduleName}`,
-          `Instance: ${loader.entryId}`,
-          `Status: ${loader.enabled ? 'enabled' : 'disabled'}`,
-          `Load phase: ${loader.fiberPhase ?? 'not mounted'}`,
-        ].join('\n'),
-      ),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+    }, options)
   }
 
   private async restart(): Promise<void> {
@@ -2982,25 +3105,28 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         return { id: `tool:${tool.name}`, label: tool.name, description: `${tool.description} · ${boundary.label}` }
       }),
     ]
-    const selected = await this.host.overlays.select({
-      title: ui('工具', "Tools"),
-      detail: tools.length === 0 ? ui('当前会话尚无工具记录', "The current session has no tool records") : ui(`${tools.length} 个可用工具`, `${tools.length} available tool(s)`),
-      choices,
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id === '__display__') {
-      await this.tools('display')
-      return
-    }
-    const tool = tools.find(candidate => `tool:${candidate.name}` === selected.id)
-    const value = selected.id === '__todos__' ? todos : tool?.parameters
-    const boundary = tool === undefined ? undefined : toolBoundary(tool)
-    await this.host.overlays.detail({
-      title: selected.label,
-      content: `${boundary === undefined ? '' : `${boundary.detail}\n\n`}${ui('参数 / 数据', 'Parameters / data')}:\n${detailText(value)}`,
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('工具', "Tools"),
+        detail: tools.length === 0 ? ui('当前会话尚无工具记录', "The current session has no tool records") : ui(`${tools.length} 个可用工具`, `${tools.length} available tool(s)`),
+        choices,
+        options,
+      }, async (selected) => {
+        if (selected.id === '__display__') {
+          await this.tools('display')
+          return
+        }
+        const tool = tools.find(candidate => `tool:${candidate.name}` === selected.id)
+        const value = selected.id === '__todos__' ? todos : tool?.parameters
+        const boundary = tool === undefined ? undefined : toolBoundary(tool)
+        await navigation.detail({
+          title: selected.label,
+          content: `${boundary === undefined ? '' : `${boundary.detail}\n\n`}${ui('参数 / 数据', 'Parameters / data')}:\n${detailText(value)}`,
+          options,
+        })
+      })
+    }, options)
   }
 
   private async files(): Promise<void> {
@@ -3009,47 +3135,50 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       this.host.notice(ui('本会话没有生成文件', 'This session has not produced any files'), 'info')
       return
     }
-    const selected = await this.host.overlays.select({
-      title: ui('产出文件', 'Produced files'),
-      detail: ui('查看、复制或打开本会话生成的文件', 'View, copy, or open files produced in this session'),
-      choices: groups.flatMap(group => group.paths.map(path => ({
-        id: path,
-        label: path,
-        description: ui(`第 ${String(group.turn)} 轮`, `Turn ${String(group.turn)}`),
-      }))),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    const action = await this.host.overlays.select({
-      title: selected.label,
-      choices: [
-        { id: 'view', label: ui('在 TUI 内查看', 'View in TUI'), description: ui('用只读详情页打开文本文件', 'Open a text file in a read-only detail page') },
-        { id: 'copy', label: ui('复制绝对路径', 'Copy absolute path') },
-        { id: 'open', label: ui('用外部程序打开', 'Open with an external program'), description: ui('使用编辑器或系统默认程序', 'Use the editor or the system default program') },
-      ],
-      searchable: false,
-    })
-    if (action?.id === 'view') {
-      const content = await this.capabilities.readProducedFile(selected.id)
-      await this.host.overlays.detail({
-        title: selected.label,
-        content,
-        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('产出文件', 'Produced files'),
+        detail: ui('查看、复制或打开本会话生成的文件', 'View, copy, or open files produced in this session'),
+        choices: groups.flatMap(group => group.paths.map(path => ({
+          id: path,
+          label: path,
+          description: ui(`第 ${String(group.turn)} 轮`, `Turn ${String(group.turn)}`),
+        }))),
+        options,
+      }, async (selected) => {
+        const action = await navigation.select({
+          title: selected.label,
+          choices: [
+            { id: 'view', label: ui('在 TUI 内查看', 'View in TUI'), description: ui('用只读详情页打开文本文件', 'Open a text file in a read-only detail page') },
+            { id: 'copy', label: ui('复制绝对路径', 'Copy absolute path') },
+            { id: 'open', label: ui('用外部程序打开', 'Open with an external program'), description: ui('使用编辑器或系统默认程序', 'Use the editor or the system default program') },
+          ],
+          searchable: false,
+        })
+        if (action?.id === 'view') {
+          const content = await this.capabilities.readProducedFile(selected.id)
+          await navigation.detail({
+            title: selected.label,
+            content,
+            options,
+          })
+        } else if (action?.id === 'copy') {
+          this.host.copy(this.capabilities.producedFilePath(selected.id))
+          this.host.notice(ui('已复制产出文件路径', "Produced-file path copied"), 'success')
+        } else if (action?.id === 'open') {
+          const confirmed = await navigation.confirm(
+            ui(`使用外部程序打开 ${selected.label}？`, `Open ${selected.label} with an external program?`),
+            ui('所选绝对路径将交给编辑器或系统程序；该程序不受 Agent 权限限制。', "The selected absolute path is passed to an editor or system application, which is outside Agent permission controls."),
+            ui('打开', "Open"),
+          )
+          if (confirmed) {
+            await this.capabilities.openProducedFile(selected.id)
+            this.host.notice(ui(`已打开 ${selected.id}`, `Opened ${selected.id}`), 'success')
+          }
+        }
       })
-    } else if (action?.id === 'copy') {
-      this.host.copy(this.capabilities.producedFilePath(selected.id))
-      this.host.notice(ui('已复制产出文件路径', "Produced-file path copied"), 'success')
-    } else if (action?.id === 'open') {
-      const confirmed = await this.host.overlays.confirm(
-        ui(`使用外部程序打开 ${selected.label}？`, `Open ${selected.label} with an external program?`),
-        ui('所选绝对路径将交给编辑器或系统程序；该程序不受 Agent 权限限制。', "The selected absolute path is passed to an editor or system application, which is outside Agent permission controls."),
-        ui('打开', "Open"),
-      )
-      if (confirmed) {
-        await this.capabilities.openProducedFile(selected.id)
-        this.host.notice(ui(`已打开 ${selected.id}`, `Opened ${selected.id}`), 'success')
-      }
-    }
+    }, options)
   }
 
   private async jobs(): Promise<void> {
@@ -3241,21 +3370,24 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       this.host.notice(ui('当前会话还没有请求或工具轨迹', "The current session has no model-request or tool trajectory yet"), 'info')
       return
     }
-    const selected = await this.host.overlays.select({
-      title: ui('轨迹', "Trajectory"),
-      detail: ui(`${trajectory.eventNodes.length} 个事件节点 · ${trajectory.requests.length} 个请求 · ${trajectory.runningCalls.length} 个运行中工具`, `${trajectory.eventNodes.length} event node(s) · ${trajectory.requests.length} request(s) · ${trajectory.runningCalls.length} running tool(s)`),
-      choices,
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    const value = selected.id.startsWith('request:')
-      ? trajectory.requests[Number(selected.id.slice('request:'.length))]
-      : trajectory.runningCalls.find(call => `call:${call.callId}` === selected.id)
-    await this.host.overlays.detail({
-      title: selected.label,
-      content: selected.id.startsWith('request:') ? trajectoryRequestDetail(value) : detailText(value),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('轨迹', "Trajectory"),
+        detail: ui(`${trajectory.eventNodes.length} 个事件节点 · ${trajectory.requests.length} 个请求 · ${trajectory.runningCalls.length} 个运行中工具`, `${trajectory.eventNodes.length} event node(s) · ${trajectory.requests.length} request(s) · ${trajectory.runningCalls.length} running tool(s)`),
+        choices,
+        options,
+      }, async (selected) => {
+        const value = selected.id.startsWith('request:')
+          ? trajectory.requests[Number(selected.id.slice('request:'.length))]
+          : trajectory.runningCalls.find(call => `call:${call.callId}` === selected.id)
+        await navigation.detail({
+          title: selected.label,
+          content: selected.id.startsWith('request:') ? trajectoryRequestDetail(value) : detailText(value),
+          options,
+        })
+      })
+    }, options)
   }
 
   private async feedback(args: string): Promise<void> {
@@ -3264,73 +3396,79 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       this.host.notice(ui('已记录会话反馈', "Session feedback recorded"), 'success')
       return
     }
-    const kind = await this.host.overlays.select({
-      title: ui('反馈', "Feedback"),
-      detail: ui('记录对当前会话或某条回复的评价', "Rate the current session or an individual response"),
-      choices: [
-        { id: 'session', label: ui('记录会话反馈', "Record session feedback"), description: ui('说明本次会话的使用感受', "Describe your experience with this session") },
-        { id: 'message', label: ui('评价一条回复', "Rate a response"), description: ui('好评、差评、说明或删除现有评价', "Submit a positive or negative rating, add a note, or remove a rating") },
-      ],
-      searchable: false,
-    })
-    if (kind === undefined) return
-    if (kind.id === 'session') {
-      const text = await this.host.overlays.input({
-        title: ui('会话反馈', "Session feedback"),
-        placeholder: ui('输入对当前会话的反馈', "Enter feedback for the current session"),
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('反馈', "Feedback"),
+        detail: ui('记录对当前会话或某条回复的评价', "Rate the current session or an individual response"),
+        choices: [
+          { id: 'session', label: ui('记录会话反馈', "Record session feedback"), description: ui('说明本次会话的使用感受', "Describe your experience with this session") },
+          { id: 'message', label: ui('评价一条回复', "Rate a response"), description: ui('好评、差评、说明或删除现有评价', "Submit a positive or negative rating, add a note, or remove a rating") },
+        ],
+        searchable: false,
+      }, async (kind) => {
+        if (kind.id === 'session') {
+          const text = await navigation.input({
+            title: ui('会话反馈', "Session feedback"),
+            placeholder: ui('输入对当前会话的反馈', "Enter feedback for the current session"),
+          })
+          if (text === undefined || text.trim() === '') return
+          await this.capabilities.recordSessionFeedback(text)
+          this.host.notice(ui('已记录会话反馈', "Session feedback recorded"), 'success')
+          return
+        }
+        await this.messageFeedback(navigation)
       })
-      if (text === undefined || text.trim() === '') return
-      await this.capabilities.recordSessionFeedback(text)
-      this.host.notice(ui('已记录会话反馈', "Session feedback recorded"), 'success')
-      return
-    }
-    await this.messageFeedback()
+    })
   }
 
-  private async messageFeedback(): Promise<void> {
+  private async messageFeedback(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const targets = await this.capabilities.feedbackTargets()
     if (targets.length === 0) throw new Error(ui('当前会话中没有可评价的回复', "The current session has no response that can be rated"))
-    const selected = await this.host.overlays.select({
-      title: ui('消息反馈', "Message feedback"),
-      detail: ui('选择要评价的回复', "Choose a response to rate"),
-      choices: targets.map(target => ({
-        id: String(target.message.messageId),
-        label: `${target.feedback?.rating === 'positive' ? ui('好评', "Positive") : target.feedback?.rating === 'negative' ? ui('差评', "Negative") : ui('未评价', "Not rated")} · ${target.preview}`,
-        description: target.feedback?.note ?? new Date(target.message.time).toLocaleString(),
-      })),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    const target = targets.find(candidate => String(candidate.message.messageId) === selected?.id)
-    if (target?.message.messageId === undefined) return
-    const action = await this.host.overlays.select({
-      title: target.preview,
-      choices: [
-        { id: 'positive', label: ui('好评', "Positive"), description: 'positive' },
-        { id: 'negative', label: ui('差评', "Negative"), description: 'negative' },
-        ...(target.feedback === undefined ? [] : [{ id: 'remove', label: ui('删除现有反馈', "Delete existing feedback"), description: ui('回复内容不会删除', "The response itself is not deleted") }]),
-      ],
-      searchable: false,
-    })
-    if (action === undefined) return
-    if (action.id === 'remove') {
-      if (target.feedback === undefined) return
-      await this.capabilities.clearFeedback(target.message.messageId, target.feedback.version)
-      this.host.notice(ui('已删除该消息反馈', "Message feedback deleted"), 'success')
-      return
-    }
-    const note = await this.host.overlays.input({
-      title: action.id === 'positive' ? ui('好评说明（可选）', "Positive-rating note (optional)") : ui('差评说明（可选）', "Negative-rating note (optional)"),
-      initialValue: target.feedback?.note ?? '',
-      placeholder: ui('留空表示不附说明', "Leave blank to submit without a note"),
-    })
-    if (note === undefined) return
-    await this.capabilities.putFeedback(
-      target.message.messageId,
-      action.id === 'positive' ? 'positive' : 'negative',
-      note.trim() === '' ? undefined : note,
-      target.feedback?.version ?? null,
-    )
-    this.host.notice(ui('已提交消息反馈', "Message feedback submitted"), 'success')
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('消息反馈', "Message feedback"),
+        detail: ui('选择要评价的回复', "Choose a response to rate"),
+        choices: targets.map(target => ({
+          id: String(target.message.messageId),
+          label: `${target.feedback?.rating === 'positive' ? ui('好评', "Positive") : target.feedback?.rating === 'negative' ? ui('差评', "Negative") : ui('未评价', "Not rated")} · ${target.preview}`,
+          description: target.feedback?.note ?? new Date(target.message.time).toLocaleString(),
+        })),
+        options,
+      }, async (selected) => {
+        const target = targets.find(candidate => String(candidate.message.messageId) === selected.id)
+        if (target?.message.messageId === undefined) return
+        const action = await navigation.select({
+          title: target.preview,
+          choices: [
+            { id: 'positive', label: ui('好评', "Positive"), description: 'positive' },
+            { id: 'negative', label: ui('差评', "Negative"), description: 'negative' },
+            ...(target.feedback === undefined ? [] : [{ id: 'remove', label: ui('删除现有反馈', "Delete existing feedback"), description: ui('回复内容不会删除', "The response itself is not deleted") }]),
+          ],
+          searchable: false,
+        })
+        if (action === undefined) return
+        if (action.id === 'remove') {
+          if (target.feedback === undefined) return
+          await this.capabilities.clearFeedback(target.message.messageId, target.feedback.version)
+          this.host.notice(ui('已删除该消息反馈', "Message feedback deleted"), 'success')
+          return
+        }
+        const note = await navigation.input({
+          title: action.id === 'positive' ? ui('好评说明（可选）', "Positive-rating note (optional)") : ui('差评说明（可选）', "Negative-rating note (optional)"),
+          initialValue: target.feedback?.note ?? '',
+          placeholder: ui('留空表示不附说明', "Leave blank to submit without a note"),
+        })
+        if (note === undefined) return
+        await this.capabilities.putFeedback(
+          target.message.messageId,
+          action.id === 'positive' ? 'positive' : 'negative',
+          note.trim() === '' ? undefined : note,
+          target.feedback?.version ?? null,
+        )
+        this.host.notice(ui('已提交消息反馈', "Message feedback submitted"), 'success')
+      })
+    }, options)
   }
 
   private async skills(): Promise<void> {
@@ -3364,117 +3502,124 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       this.host.notice(ui('当前 Profile 没有可见 MCP 工具、实例或 Settings；可用 /plugin 安装扩展', "The current Profile has no visible MCP tools, instances, or Settings; use /plugin to install an extension"), 'info')
       return
     }
-    const selected = await this.host.overlays.select({
-      title: 'MCP',
-      detail: ui('查看 MCP 工具、实例和设置。MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护。', "View MCP tools, instances, and Settings. MCP may run in a separate process or remote service outside the Agent sandbox."),
-      choices: [
-        ...tools.map(tool => ({
-          id: `tool:${tool.name}`,
-          label: ui(`工具 · ${tool.name}`, `Tool · ${tool.name}`),
-          description: `${tool.description} · ${ui('外部服务', 'external service')}`,
-        })),
-        ...plugins.map(item => ({
-          id: `plugin:${item.entryId}`,
-          label: ui(`实例 · ${item.moduleName}`, `Instance · ${item.moduleName}`),
-          description: `${item.enabled ? ui('启用', 'enabled') : ui('禁用', 'disabled')} · ${item.fiberPhase ?? ui('未挂载', 'not mounted')}`,
-        })),
-        ...settings.map(document => ({
-          id: `settings:${document.namespace}`,
-          label: ui(`设置 · ${document.namespace}`, `Settings · ${document.namespace}`),
-          description: document.applies === 'live' ? ui('立即生效', 'Applies immediately') : ui('需要重启', 'Restart required'),
-        })),
-      ],
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined) return
-    if (selected.id.startsWith('settings:')) {
-      await this.settings(selected.id.slice('settings:'.length))
-      return
-    }
-    const plugin = plugins.find(candidate => `plugin:${candidate.entryId}` === selected.id)
-    if (plugin !== undefined) {
-      const phase = plugin.fiberPhase ?? ui('未挂载', 'not mounted')
-      const followUp = await this.host.overlays.select({
-        title: ui(`MCP 实例 · ${plugin.moduleName}`, `MCP instance · ${plugin.moduleName}`),
-        detail: ui(
-          [
-            `模块：${plugin.moduleName}`,
-            `实例 ID：${plugin.entryId}`,
-            `运行状态：${plugin.enabled ? '已启用' : '已禁用'} · ${phase}`,
-            '作用范围：当前 Profile；工具是否可用取决于当前会话和模型。',
-            '安全提示：MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护；请单独检查其配置、凭证、文件和网络权限。',
-            phase === 'failed'
-              ? '诊断：实例启动失败；运行 /doctor，并检查对应的 MCP 设置。'
-              : '诊断：运行 /doctor 查看完整检查结果。',
-          ].join('\n'),
-          [
-            `Module: ${plugin.moduleName}`,
-            `Instance ID: ${plugin.entryId}`,
-            `Runtime status: ${plugin.enabled ? 'enabled' : 'disabled'} · ${phase}`,
-            'Scope: current Profile; tool availability depends on the current session and model.',
-            'Security: MCP may run in another process or remote service outside the Agent sandbox; review its configuration, credentials, file access, and network access separately.',
-            phase === 'failed'
-              ? 'Diagnostics: the instance failed to start; run /doctor and inspect the corresponding MCP Settings.'
-              : 'Diagnostics: run /doctor for the complete report.',
-          ].join('\n'),
-        ),
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: 'MCP',
+        detail: ui('查看 MCP 工具、实例和设置。MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护。', "View MCP tools, instances, and Settings. MCP may run in a separate process or remote service outside the Agent sandbox."),
         choices: [
-          { id: 'close', label: ui('关闭', "Close") },
-          { id: 'doctor', label: ui('运行 /doctor', "Run /doctor"), description: ui('检查 Profile、插件和运行环境', "Check the Profile, plugins, and runtime environment") },
+          ...tools.map(tool => ({
+            id: `tool:${tool.name}`,
+            label: ui(`工具 · ${tool.name}`, `Tool · ${tool.name}`),
+            description: `${tool.description} · ${ui('外部服务', 'external service')}`,
+          })),
+          ...plugins.map(item => ({
+            id: `plugin:${item.entryId}`,
+            label: ui(`实例 · ${item.moduleName}`, `Instance · ${item.moduleName}`),
+            description: `${item.enabled ? ui('启用', 'enabled') : ui('禁用', 'disabled')} · ${item.fiberPhase ?? ui('未挂载', 'not mounted')}`,
+          })),
           ...settings.map(document => ({
             id: `settings:${document.namespace}`,
-            label: ui(`打开设置 · ${document.namespace}`, `Open Settings · ${document.namespace}`),
-            description: document.applies === 'live' ? ui('立即生效', "Applies immediately") : ui('需要重启', "Restart required"),
+            label: ui(`设置 · ${document.namespace}`, `Settings · ${document.namespace}`),
+            description: document.applies === 'live' ? ui('立即生效', 'Applies immediately') : ui('需要重启', 'Restart required'),
           })),
         ],
-        searchable: false,
-        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+        options,
+      }, async (selected) => {
+        if (selected.id.startsWith('settings:')) {
+          await this.settings(selected.id.slice('settings:'.length), navigation)
+          return
+        }
+        const plugin = plugins.find(candidate => `plugin:${candidate.entryId}` === selected.id)
+        if (plugin !== undefined) {
+          const phase = plugin.fiberPhase ?? ui('未挂载', 'not mounted')
+          const followUp = await navigation.select({
+            title: ui(`MCP 实例 · ${plugin.moduleName}`, `MCP instance · ${plugin.moduleName}`),
+            detail: ui(
+              [
+                `模块：${plugin.moduleName}`,
+                `实例 ID：${plugin.entryId}`,
+                `运行状态：${plugin.enabled ? '已启用' : '已禁用'} · ${phase}`,
+                '作用范围：当前 Profile；工具是否可用取决于当前会话和模型。',
+                '安全提示：MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护；请单独检查其配置、凭证、文件和网络权限。',
+                phase === 'failed'
+                  ? '诊断：实例启动失败；运行 /doctor，并检查对应的 MCP 设置。'
+                  : '诊断：运行 /doctor 查看完整检查结果。',
+              ].join('\n'),
+              [
+                `Module: ${plugin.moduleName}`,
+                `Instance ID: ${plugin.entryId}`,
+                `Runtime status: ${plugin.enabled ? 'enabled' : 'disabled'} · ${phase}`,
+                'Scope: current Profile; tool availability depends on the current session and model.',
+                'Security: MCP may run in another process or remote service outside the Agent sandbox; review its configuration, credentials, file access, and network access separately.',
+                phase === 'failed'
+                  ? 'Diagnostics: the instance failed to start; run /doctor and inspect the corresponding MCP Settings.'
+                  : 'Diagnostics: run /doctor for the complete report.',
+              ].join('\n'),
+            ),
+            choices: [
+              { id: 'close', label: ui('关闭', "Close") },
+              { id: 'doctor', label: ui('运行 /doctor', "Run /doctor"), description: ui('检查 Profile、插件和运行环境', "Check the Profile, plugins, and runtime environment") },
+              ...settings.map(document => ({
+                id: `settings:${document.namespace}`,
+                label: ui(`打开设置 · ${document.namespace}`, `Open Settings · ${document.namespace}`),
+                description: document.applies === 'live' ? ui('立即生效', "Applies immediately") : ui('需要重启', "Restart required"),
+              })),
+            ],
+            searchable: false,
+            options,
+          })
+          if (followUp?.id === 'doctor') await this.doctor(navigation)
+          else if (followUp !== undefined && followUp.id.startsWith('settings:')) {
+            await this.settings(followUp.id.slice('settings:'.length), navigation)
+          }
+          return
+        }
+        const tool = tools.find(candidate => `tool:${candidate.name}` === selected.id)
+        if (tool !== undefined) {
+          await navigation.detail({
+            title: tool.name,
+            content: `${toolBoundary(tool).detail}\n\n${ui('参数', 'Parameters')}:\n${detailText(tool.parameters)}`,
+          })
+        }
       })
-      if (followUp?.id === 'doctor') await this.doctor()
-      else if (followUp !== undefined && followUp.id.startsWith('settings:')) {
-        await this.settings(followUp.id.slice('settings:'.length))
-      }
-      return
-    }
-    const tool = tools.find(candidate => `tool:${candidate.name}` === selected.id)
-    if (tool !== undefined) {
-      await this.host.overlays.detail({
-        title: tool.name,
-        content: `${toolBoundary(tool).detail}\n\n${ui('参数', 'Parameters')}:\n${detailText(tool.parameters)}`,
-      })
-    }
+    }, options)
   }
 
   private async status(): Promise<void> {
     const status = await this.capabilities.headerFacts(true)
     const statistics = this.capabilities.sessionStatistics()
     const projections = this.capabilities.projectionEntries()
-    const selected = await this.host.overlays.select({
-      title: ui('状态与统计', "Status and statistics"),
-      detail: [
-        `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}`,
-        `Profile ${status.profile} · ${status.running ? ui('运行中', 'running') : ui('空闲', 'idle')}`,
-        status.workspace,
-        `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
-        ...statistics.lines,
-      ].join('\n'),
-      choices: projections.length === 0
-        ? [{ id: 'none', label: ui('当前没有会话数据', "No session data"), description: ui('暂无可显示内容', "Nothing to display") }]
-        : projections.map(([key, value]) => ({
-          id: key,
-          label: key,
-          description: detailText(value).replace(/\s+/gu, ' ').slice(0, 240),
-        })),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
-    if (selected === undefined || selected.id === 'none') return
-    const projection = projections.find(([key]) => key === selected.id)
-    if (projection === undefined) return
-    await this.host.overlays.detail({
-      title: ui(`会话数据 · ${projection[0]}`, `Session data · ${projection[0]}`),
-      content: detailText(projection[1]),
-      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
-    })
+    const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      await navigation.selectPage({
+        title: ui('状态与统计', "Status and statistics"),
+        detail: [
+          `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}`,
+          `Profile ${status.profile} · ${status.running ? ui('运行中', 'running') : ui('空闲', 'idle')}`,
+          status.workspace,
+          `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
+          ...statistics.lines,
+        ].join('\n'),
+        choices: projections.length === 0
+          ? [{ id: 'none', label: ui('当前没有会话数据', "No session data"), description: ui('暂无可显示内容', "Nothing to display") }]
+          : projections.map(([key, value]) => ({
+            id: key,
+            label: key,
+            description: detailText(value).replace(/\s+/gu, ' ').slice(0, 240),
+          })),
+        options,
+      }, async (selected) => {
+        if (selected.id === 'none') return
+        const projection = projections.find(([key]) => key === selected.id)
+        if (projection === undefined) return
+        await navigation.detail({
+          title: ui(`会话数据 · ${projection[0]}`, `Session data · ${projection[0]}`),
+          content: detailText(projection[1]),
+          options,
+        })
+      })
+    }, options)
   }
 
   private retryPending(): void {
