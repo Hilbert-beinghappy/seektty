@@ -682,7 +682,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const result = await current.session.command(trimmed)
         if (!result.ok) setNotice(ui(`命令失败：${result.error.message}`, `Command failed: ${result.error.message}`), 'error')
         else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
-        else setNotice(ui(`已执行 /${name}`, `Ran /${name}`), 'success')
       } catch (error) {
         setNotice(capabilityError(error), 'error')
       }
@@ -763,22 +762,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         transcript.exitToolFocus()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
-        setNotice(transcriptFocused
-          ? ui('对话浏览 · Tab/Escape 返回输入', 'Transcript navigation · Tab/Escape returns to the composer')
-          : ui('已返回输入区', 'Returned to the composer'), 'info')
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
-        if (transcript.cancelSearch()) {
-          setNotice(ui('已取消查找', 'Search cancelled'), 'info')
-          return { consume: true }
-        }
-        if (transcript.exitToolFocus()) {
-          setNotice(ui('已退出工具卡焦点', 'Left tool-card focus'), 'info')
-          return { consume: true }
-        }
+        if (transcript.cancelSearch()) return { consume: true }
+        if (transcript.exitToolFocus()) return { consume: true }
         focusEditor()
-        setNotice(ui('已返回输入区', 'Returned to the composer'), 'info')
         return { consume: true }
       }
       if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
