@@ -89,10 +89,14 @@ export class InProcessConnectionService extends Service implements InProcessConn
     signal?: AbortSignal,
   ): Promise<RpcResult<unknown>> {
     signal?.throwIfAborted()
-    const carrierSignal = signal ?? new AbortController().signal
     try {
-      const pending = this.registry.dispatch(channel, endpoint, payload, carrierSignal)
-      return signal === undefined ? await pending : await abortable(pending, signal)
+      if (signal === undefined) {
+        return await this.registry.dispatch(channel, endpoint, payload, new AbortController().signal)
+      }
+      return await abortInProcessCall(
+        inner => this.registry.dispatch(channel, endpoint, payload, inner),
+        signal,
+      )
     } catch (error) {
       if (signal?.aborted === true) throw abortReason(signal)
       throw new Error(
@@ -117,9 +121,38 @@ export function apply(ctx: Context): void {
   new InProcessConnectionService(ctx)
 }
 
-function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+/**
+ * Run one RPC handler under a caller AbortSignal, aborting the handler when
+ * the wrapper is cancelled instead of only rejecting the outer promise.
+ * @param run - handler invocation that observes the inner signal.
+ * @param signal - caller cancellation signal.
+ */
+export function abortInProcessCall<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  const inner = new AbortController()
+  const combined = AbortSignal.any([signal, inner.signal])
+  const pending = run(combined)
+  return abortable(pending, signal, () => {
+    if (!inner.signal.aborted) inner.abort(signal.reason)
+  })
+}
+
+function abortable<T>(
+  pending: Promise<T>,
+  signal: AbortSignal,
+  onAbort?: () => void,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const abort = (): void => { reject(abortReason(signal)) }
+    const abort = (): void => {
+      onAbort?.()
+      reject(abortReason(signal))
+    }
+    if (signal.aborted) {
+      abort()
+      return
+    }
     signal.addEventListener('abort', abort, { once: true })
     pending.then(
       (value) => {

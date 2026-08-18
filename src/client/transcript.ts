@@ -32,7 +32,19 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
+import {
+  EMPTY_SESSION_EXAMPLES,
+  emptyExampleText,
+} from './empty-examples.ts'
 import { translateUiText, ui } from './locale.ts'
+import {
+  findLineMatches,
+  highlightQuery,
+  nextMatchIndex,
+  planLineSearch,
+  scrollOffsetToContain,
+  scrollOffsetToReveal,
+} from './transcript-search.ts'
 import {
   background,
   color,
@@ -42,8 +54,17 @@ import {
   terminalColorLevel,
 } from './theme.ts'
 import { syntaxLanguageForPath } from './syntax-highlighter.ts'
+import { foldLineBlock } from './tool-output-limit.ts'
+import { unifiedHunks } from './line-diff.ts'
+import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 
 const PULSE_FRAME_MS = 160
+
+/** Replaceable counters used by incremental-render tests. */
+export const internals = {
+  markdownCreated: 0,
+  componentRenders: 0,
+}
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
 export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
@@ -51,6 +72,11 @@ export type ToolVisibility = 'collapsed' | 'expanded' | 'hidden'
 interface TranscriptPreferences {
   readonly tools: ToolVisibility
   readonly reasoning: boolean
+  readonly toolOutputLineLimit: number
+  readonly diffContextLines: number
+  readonly expandedTools: ReadonlySet<string>
+  readonly collapsedTools: ReadonlySet<string>
+  readonly focusedTool?: string
 }
 
 type TranscriptImageAttachment = Extract<AssistantBlock, { kind: 'image' }>['attachment']
@@ -92,6 +118,19 @@ type TranscriptRow = ({
   readonly pulse?: 'thinking' | 'marker'
   /** Unix epoch ms used to render an in-flight duration beside this row. */
   readonly liveDurationSince?: number
+  /** Empty-session starter prompt that Enter can submit while browsing. */
+  readonly exampleId?: string
+  /** Tool-card identity for per-card expand in focus mode. */
+  readonly toolKey?: string
+}
+
+/** Result of Enter on the focused transcript row. */
+export type TranscriptFocusAction = {
+  readonly kind: 'example'
+  readonly text: string
+} | {
+  readonly kind: 'tool'
+  readonly key: string
 }
 
 function thinkingRow(): TranscriptRow {
@@ -363,12 +402,7 @@ function prettyArgs(argsRaw: string): string {
   try { return jsonText(JSON.parse(argsRaw)) } catch { return argsRaw }
 }
 
-function contentLines(text: string): string[] {
-  if (text === '') return []
-  return (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
-}
-
-function diffText(value: unknown): string {
+function diffText(value: unknown, context = DEFAULT_TUI_BEHAVIOR.diffContextLines): string {
   if (!Array.isArray(value) || value.length === 0) return jsonText(value)
   const rows: string[] = []
   const paths = new Set<string>()
@@ -384,15 +418,11 @@ function diffText(value: unknown): string {
     rows.push(`diff -- ${path}`)
     rows.push(oldText === null ? '--- /dev/null' : `--- a/${path}`)
     rows.push(`+++ b/${path}`)
-    if (oldText !== null) {
-      for (const line of contentLines(oldText)) {
-        rows.push(`-${line}`)
-        removed += 1
-      }
-    }
-    for (const line of contentLines(newText)) {
-      rows.push(`+${line}`)
-      added += 1
+    const hunks = unifiedHunks(oldText, newText, context)
+    for (const line of hunks) {
+      if (line.startsWith('+') && !line.startsWith('+++')) added += 1
+      if (line.startsWith('-') && !line.startsWith('---')) removed += 1
+      rows.push(line)
     }
   }
   const visible = rows.length <= 80
@@ -402,24 +432,24 @@ function diffText(value: unknown): string {
   return visible.join('\n')
 }
 
-const PRODUCT_TOOL_TITLES: Readonly<Record<string, readonly [zh: string, en: string]>> = {
-  ask_user_question: ['向用户提问', 'Ask user'],
-  create_goal: ['创建目标', 'Create goal'],
-  exit_plan_mode: ['计划审查', 'Plan review'],
-  get_goal: ['查看目标', 'View goal'],
-  job_kill: ['停止后台任务', 'Stop background job'],
-  job_list: ['查看后台任务', 'View background jobs'],
-  job_output: ['读取后台任务', 'Read background job'],
-  subagent: ['子 Agent', 'Subagent'],
-  todo_write: ['更新任务清单', 'Update task list'],
-  update_goal: ['更新目标', 'Update goal'],
-  workflow: ['工作流', 'Workflow'],
+const PRODUCT_TOOL_TITLES: Readonly<Record<string, { readonly zh: string; readonly en: string }>> = {
+  ask_user_question: { zh: '向用户提问', en: 'Ask user' },
+  create_goal: { zh: '创建目标', en: 'Create goal' },
+  exit_plan_mode: { zh: '计划审查', en: 'Plan review' },
+  get_goal: { zh: '查看目标', en: 'View goal' },
+  job_kill: { zh: '停止后台任务', en: 'Stop background job' },
+  job_list: { zh: '查看后台任务', en: 'View background jobs' },
+  job_output: { zh: '读取后台任务', en: 'Read background job' },
+  subagent: { zh: '子 Agent', en: 'Subagent' },
+  todo_write: { zh: '更新任务清单', en: 'Update task list' },
+  update_goal: { zh: '更新目标', en: 'Update goal' },
+  workflow: { zh: '工作流', en: 'Workflow' },
 }
 
 function toolTitle(node: ToolResultNode | RunningToolCall): string {
   const name = 'kind' in node ? node.call?.name : node.name
   const productTitle = name === undefined ? undefined : PRODUCT_TOOL_TITLES[name]
-  if (productTitle !== undefined) return ui(productTitle[0], productTitle[1])
+  if (productTitle !== undefined) return ui(productTitle.zh, productTitle.en)
   const callView = node.callView
   if (callView?.card === 'terminal') {
     const description = callView.description?.trim()
@@ -525,14 +555,14 @@ function readInvocationFallback(node: ToolResultNode): ToolDetail | undefined {
   return location === undefined ? undefined : invocationCode('read', { file_path: location.path })
 }
 
-function settledInvocationDetails(node: ToolResultNode): ToolDetail[] {
+function settledInvocationDetails(node: ToolResultNode, context: number): ToolDetail[] {
   const call = node.callView
   const details: ToolDetail[] = []
   if (call?.card === 'terminal') {
     const command = terminalCommandDetail(call)
     if (command !== undefined) details.push(command)
   } else if (call?.card === 'diff') {
-    details.push({ kind: 'code', text: diffText(call.diffs), language: 'diff' })
+    details.push({ kind: 'code', text: diffText(call.diffs, context), language: 'diff' })
   } else if (node.call !== null) {
     details.push(toolInvocationDetail(node.call.name, node.call.argsRaw))
   } else if (call?.card === 'generic' && call.rawInput !== undefined) {
@@ -543,9 +573,9 @@ function settledInvocationDetails(node: ToolResultNode): ToolDetail[] {
   return details
 }
 
-function viewDetails(node: ToolResultNode): ToolDetail[] {
+function viewDetails(node: ToolResultNode, context: number): ToolDetail[] {
   const result = node.resultView
-  const details = settledInvocationDetails(node)
+  const details = settledInvocationDetails(node, context)
   if (result?.card === 'terminal') {
     if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
     if (result.exitCode !== undefined) details.push({
@@ -557,7 +587,7 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
       text: ui(`信号 ${result.signal}`, `Signal ${result.signal}`),
     })
   } else if (result?.card === 'diff') {
-    details.push({ kind: 'code', text: diffText(result.diffs), language: 'diff' })
+    details.push({ kind: 'code', text: diffText(result.diffs, context), language: 'diff' })
   } else if (result?.card === 'generic' && result.content !== undefined) {
     details.push(...contentDetails(result.content))
   } else if (result?.card === 'read') {
@@ -620,14 +650,28 @@ function viewDetails(node: ToolResultNode): ToolDetail[] {
   return details.filter(value => value.text !== '')
 }
 
-function runningViewDetails(node: RunningToolCall): ToolDetail[] {
+function runningViewDetails(node: RunningToolCall, context: number): ToolDetail[] {
   const view = node.callView
   if (view?.card === 'terminal') {
     const command = terminalCommandDetail(view)
     return command === undefined ? [] : [command]
   }
-  if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs), language: 'diff' }]
+  if (view?.card === 'diff') return [{ kind: 'code', text: diffText(view.diffs, context), language: 'diff' }]
   return [toolInvocationDetail(node.name, node.argsRaw)]
+}
+
+/** Flatten the same tool preview the transcript uses so approval overlays are not blind. */
+export function toolApprovalPreview(
+  call: RunningToolCall | undefined,
+  context: number = DEFAULT_TUI_BEHAVIOR.diffContextLines,
+): string {
+  if (call === undefined) return ''
+  return runningViewDetails(call, context).map(detail => detail.text).filter(text => text !== '').join('\n')
+}
+
+function foldDetail(detail: ToolDetail, limit: number): ToolDetail {
+  const folded = foldLineBlock(detail.text, limit)
+  return folded.omitted === 0 ? detail : { ...detail, text: folded.text }
 }
 
 function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
@@ -643,29 +687,57 @@ function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
   }
 }
 
-function toolBlockRows(block: ToolCallBlock, preferences: TranscriptPreferences, depth: number): TranscriptRow[] {
+function toolFocusMark(preferences: TranscriptPreferences, key: string | undefined): string {
+  return key !== undefined && preferences.focusedTool === key ? color.accent('› ') : ''
+}
+
+function toolCardExpanded(preferences: TranscriptPreferences, key: string | undefined): boolean {
+  if (preferences.tools === 'hidden') return false
+  if (key !== undefined) {
+    if (preferences.expandedTools.has(key)) return true
+    if (preferences.collapsedTools.has(key)) return false
+  }
+  return preferences.tools === 'expanded'
+}
+
+function callKey(block: ToolCallBlock, fallback?: string): string | undefined {
+  if ('callId' in block && typeof block.callId === 'string' && block.callId !== '') return block.callId
+  return fallback
+}
+
+function toolBlockRows(
+  block: ToolCallBlock,
+  preferences: TranscriptPreferences,
+  depth: number,
+  cardKey?: string,
+): TranscriptRow[] {
   const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
+  const key = callKey(block, cardKey)
+  const expanded = toolCardExpanded(preferences, key)
   if ('kind' in block) {
     const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
     const failed = settledToolFailed(block)
-    const details = preferences.tools === 'expanded'
-      ? viewDetails(block)
-      : settledInvocationDetails(block)
+    const details = expanded ? viewDetails(block, preferences.diffContextLines) : settledInvocationDetails(block, preferences.diffContextLines)
     return [
-      { format: 'plain', text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}` },
-      ...details.map(detail => detailRow(detail, depth)),
+      {
+        format: 'plain',
+        text: `${toolFocusMark(preferences, key)}${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}`,
+        ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
+      },
+      ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
   }
-  const details = runningViewDetails(block)
+  const details = runningViewDetails(block, preferences.diffContextLines)
   return [
     {
       format: 'plain',
-      text: `${prefix}${color.accent(toolTitle(block))}`,
+      text: `${toolFocusMark(preferences, key)}${prefix}${color.accent(toolTitle(block))}`,
       pulse: 'marker',
       liveDurationSince: block.time,
+      ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
     },
-    ...details.map(detail => detailRow(detail, depth)),
+    ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
     ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
   ]
 }
@@ -799,6 +871,31 @@ function deliverablesText(node: ChatConversationViewNode, data: unknown): string
 
 function grouped(rows: readonly TranscriptRow[]): TranscriptRow[] {
   return rows.map((row, index) => index === 0 ? { ...row, gapBefore: true } : row)
+}
+
+function deliverablesFingerprint(node: ChatConversationViewNode): readonly string[] {
+  if (!isConversationNode(node.data) || node.data.kind !== 'assistant') return []
+  const location = node.location
+  if (location.kind !== 'turn' && location.kind !== 'step') return []
+  return producedForClosing(location.turn.data.get('deliverables'), node.data.seq)
+}
+
+function nodeFingerprint(
+  node: ChatConversationViewNode,
+  preferences: TranscriptPreferences,
+): string {
+  return JSON.stringify({
+    kind: node.kind,
+    data: node.data,
+    deliverables: deliverablesFingerprint(node),
+    tools: preferences.tools,
+    reasoning: preferences.reasoning,
+    toolOutputLineLimit: preferences.toolOutputLineLimit,
+    diffContextLines: preferences.diffContextLines,
+    expanded: preferences.expandedTools.has(node.key),
+    collapsed: preferences.collapsedTools.has(node.key),
+    focusedTool: preferences.focusedTool,
+  })
 }
 
 function nonnegativeNumber(value: unknown): number | undefined {
@@ -995,7 +1092,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   if (node.kind === 'tool-call') {
     if (preferences.tools === 'hidden') return []
     const data = toolChatData(node.data)
-    return data === undefined ? [] : grouped(toolBlockRows(data.root, preferences, 0))
+    return data === undefined ? [] : grouped(toolBlockRows(data.root, preferences, 0, node.key))
   }
   if (node.kind === 'manual-compaction') return manualCompactionRows(node.data, preferences)
   if (node.kind === 'model-retry') return retryRows(node.data, preferences)
@@ -1047,10 +1144,12 @@ export class Transcript implements Component, Focusable {
   private imageGeneration = 0
   private imageLoader: TranscriptImageLoader | undefined
   private snapshot: ConversationSnapshot | undefined
-  private emptyMessage = '在下方输入消息，或用 /help 查看命令。'
+  private emptyMessage: string | undefined
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
+  private toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit
+  private diffContextLines = DEFAULT_TUI_BEHAVIOR.diffContextLines
   private emptyState = true
   private hasMore = false
   private loadingOlder = false
@@ -1060,6 +1159,19 @@ export class Transcript implements Component, Focusable {
   private turnCursor: number | undefined
   private pulseFrame = 0
   private pulseTimer: ReturnType<typeof setInterval> | undefined
+  private lastFullLines: readonly string[] = []
+  private search: { query: string; composing: boolean; matchIndex: number } | undefined
+  private exampleCursor = 0
+  private toolCursor = 0
+  private toolFocus = false
+  private readonly expandedTools = new Set<string>()
+  private readonly collapsedTools = new Set<string>()
+  private readonly nodeCache = new Map<string, {
+    fingerprint: string
+    rows: TranscriptRow[]
+    components: Component[]
+  }>()
+  private readonly lineCache = new WeakMap<Component, { width: number; lines: readonly string[] }>()
   focused = false
 
   /**
@@ -1093,6 +1205,23 @@ export class Transcript implements Component, Focusable {
     return this.reasoningVisible
   }
 
+  /**
+   * Restore the Settings-owned startup presentation without mutating the Harness log.
+   * @param tools - default tool-card shape.
+   * @param reasoning - whether reasoning blocks are visible at session open.
+   */
+  applyPresentationDefaults(
+    tools: ToolVisibility,
+    reasoning: boolean,
+    toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit,
+    diffContextLines = DEFAULT_TUI_BEHAVIOR.diffContextLines,
+  ): void {
+    this.toolVisibility = tools
+    this.reasoningVisible = reasoning
+    this.toolOutputLineLimit = toolOutputLineLimit
+    this.diffContextLines = diffContextLines
+  }
+
   /** Follow new transcript output after the user submits from a historical viewport. */
   followLatest(): void {
     this.turnCursor = undefined
@@ -1112,7 +1241,7 @@ export class Transcript implements Component, Focusable {
    * Replace the transcript with non-durable empty-selection guidance.
    * @param message - guidance rendered when no Session is active.
    */
-  empty(message = '在下方输入消息，或用 /help 查看命令。'): void {
+  empty(message?: string): void {
     this.imageGeneration += 1
     this.imageLoader = undefined
     this.snapshot = undefined
@@ -1120,10 +1249,17 @@ export class Transcript implements Component, Focusable {
     this.sessionId = undefined
     this.pendingImages.clear()
     this.imageComponents.clear()
+    this.nodeCache.clear()
     this.emptyState = true
     this.hasMore = false
     this.loadingOlder = false
-    this.replace([{ format: 'plain', text: color.muted(translateUiText(message)) }])
+    this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
+  }
+
+  private emptyCopy(): string {
+    return this.emptyMessage === undefined
+      ? ui('在下方输入消息，或用 /help 查看命令。', 'Enter a message below, or use /help to view commands.')
+      : translateUiText(this.emptyMessage)
   }
 
   /**
@@ -1139,6 +1275,10 @@ export class Transcript implements Component, Focusable {
       this.pendingImages.clear()
       this.imageComponents.clear()
       this.sessionId = sessionId
+      this.expandedTools.clear()
+      this.collapsedTools.clear()
+      this.toolCursor = 0
+      this.nodeCache.clear()
     }
     this.imageLoader = imageLoader
     this.hasMore = snapshot.hasMore
@@ -1146,30 +1286,124 @@ export class Transcript implements Component, Focusable {
     const preferences: TranscriptPreferences = {
       tools: this.toolVisibility,
       reasoning: this.reasoningVisible,
+      toolOutputLineLimit: this.toolOutputLineLimit,
+      diffContextLines: this.diffContextLines,
+      expandedTools: this.expandedTools,
+      collapsedTools: this.collapsedTools,
+      ...(this.toolFocus ? { focusedTool: this.toolKeys()[this.toolCursor] } : {}),
     }
     const visibleNodes = snapshot.chat.order.flatMap((key) => {
       const node = snapshot.chat.nodes.get(key)
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
-    const rows: TranscriptRow[] = visibleNodes.flatMap(node => chatNodeRows(node, preferences))
+    const rows: TranscriptRow[] = []
+    const components: Component[] = []
+    const keep = new Set<string>()
+    const take = (key: string, fingerprint: string, build: () => TranscriptRow[]): void => {
+      keep.add(key)
+      const hit = this.nodeCache.get(key)
+      if (hit !== undefined && hit.fingerprint === fingerprint) {
+        rows.push(...hit.rows)
+        components.push(...hit.components)
+        return
+      }
+      const built = build()
+      const created = built.map(row => this.component(row))
+      this.nodeCache.set(key, { fingerprint, rows: built, components: created })
+      rows.push(...built)
+      components.push(...created)
+    }
+    for (const node of visibleNodes) {
+      take(node.key, nodeFingerprint(node, preferences), () => chatNodeRows(node, preferences))
+    }
     if (snapshot.partial !== null && !visibleNodes.some(node => node.kind === 'assistant-step')) {
-      const partialRows = snapshot.partial.blocks.flatMap(block => assistantBlockRows(block, preferences))
-      rows.push(...grouped([
-        ...(partialRows.length === 0
-          ? [thinkingRow()]
-          : []),
-        ...partialRows,
-      ]))
+      const partial = snapshot.partial
+      take('__partial__', JSON.stringify({
+        partial,
+        tools: preferences.tools,
+        reasoning: preferences.reasoning,
+        toolOutputLineLimit: preferences.toolOutputLineLimit,
+        diffContextLines: preferences.diffContextLines,
+      }), () => {
+        const partialRows = partial.blocks.flatMap(block => assistantBlockRows(block, preferences))
+        return grouped([
+          ...(partialRows.length === 0 ? [thinkingRow()] : []),
+          ...partialRows,
+        ])
+      })
     }
     if (preferences.tools !== 'hidden' && !visibleNodes.some(node => node.kind === 'tool-call')) {
-      rows.push(...snapshot.runningCalls.flatMap(call => grouped(toolBlockRows(call, preferences, 0))))
+      for (const call of snapshot.runningCalls) {
+        take(`__running__:${call.callId}`, JSON.stringify({
+          call,
+          tools: preferences.tools,
+          reasoning: preferences.reasoning,
+          toolOutputLineLimit: preferences.toolOutputLineLimit,
+          diffContextLines: preferences.diffContextLines,
+          expanded: preferences.expandedTools.has(call.callId),
+          collapsed: preferences.collapsedTools.has(call.callId),
+        }), () => grouped(toolBlockRows(call, preferences, 0, call.callId)))
+      }
     }
     this.emptyState = rows.length === 0
-    if (this.emptyState) rows.push({
-      format: 'plain',
-      text: `${color.brand('deepseek')}\n${color.muted(ui('探索未至之境', 'Explore beyond the known'))}\n${color.muted(ui('直接描述你想完成的事', 'Describe what you want to accomplish'))}`,
-    })
-    this.replace(rows)
+    if (this.emptyState) {
+      take('__empty__', JSON.stringify({
+        cursor: this.exampleCursor,
+        session: this.sessionId,
+      }), () => this.emptySessionRows())
+    }
+    for (const key of [...this.nodeCache.keys()]) {
+      if (!keep.has(key)) this.nodeCache.delete(key)
+    }
+    this.commit(rows, components)
+    const keys = this.toolKeys()
+    if (this.toolCursor >= keys.length) this.toolCursor = Math.max(0, keys.length - 1)
+  }
+
+  /**
+   * Submit the focused empty-session example when the transcript has browse focus.
+   * @returns the prompt to send, or undefined when Enter has no local action.
+   */
+  activateFocused(): TranscriptFocusAction | undefined {
+    if (this.emptyState && this.snapshot !== undefined) {
+      const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
+      return example === undefined ? undefined : { kind: 'example', text: emptyExampleText(example) }
+    }
+    if (!this.toolFocus) {
+      this.enterToolFocus()
+      return undefined
+    }
+    const key = this.toolKeys()[this.toolCursor]
+    if (key === undefined || this.snapshot === undefined) return undefined
+    this.toggleToolCard(key)
+    this.update(this.snapshot, this.imageLoader)
+    return { kind: 'tool', key }
+  }
+
+  /**
+   * Enter tool-card focus so ↑↓ move among cards instead of scrolling.
+   * @returns true when at least one tool card can be focused.
+   */
+  enterToolFocus(): boolean {
+    const keys = this.toolKeys()
+    if (keys.length === 0 || this.snapshot === undefined) return false
+    this.toolFocus = true
+    this.toolCursor = Math.min(this.toolCursor, keys.length - 1)
+    this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return true
+  }
+
+  /**
+   * Leave tool-card focus and restore ordinary transcript scrolling.
+   * @returns true when focus mode was active.
+   */
+  exitToolFocus(): boolean {
+    if (!this.toolFocus) return false
+    this.toolFocus = false
+    if (this.snapshot !== undefined) this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return true
   }
 
   /**
@@ -1180,8 +1414,9 @@ export class Transcript implements Component, Focusable {
     const scrollOffset = this.scrollOffset
     const turnCursor = this.turnCursor
     const snapshot = this.snapshot
+    this.nodeCache.clear()
     if (snapshot === undefined) {
-      this.replace([{ format: 'plain', text: color.muted(translateUiText(this.emptyMessage)) }])
+      this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
     } else {
       this.update(snapshot, this.imageLoader)
     }
@@ -1191,7 +1426,10 @@ export class Transcript implements Component, Focusable {
   }
 
   invalidate(): void {
-    for (const component of this.components) component.invalidate()
+    for (const [index, component] of this.components.entries()) {
+      const row = this.rows[index]
+      if (row?.pulse !== undefined || row?.liveDurationSince !== undefined) component.invalidate()
+    }
   }
 
   /** Stop pending attachment presentation updates during terminal teardown. */
@@ -1206,8 +1444,14 @@ export class Transcript implements Component, Focusable {
   render(width: number): string[] {
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
-    const withInset = (values: readonly string[]): string[] => values.map(line =>
-      line === '' ? '' : `${' '.repeat(inset)}${line}`)
+    const totalRows = Math.max(1, Math.floor(this.viewportRows()))
+    const withInset = (values: readonly string[]): string[] => {
+      const body = values.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
+      if (this.search === undefined) return body
+      const label = `${' '.repeat(inset)}${color.accent(this.searchLabel())}`
+      if (!Number.isFinite(totalRows)) return [...body, label]
+      return [...body.slice(0, Math.max(0, totalRows - 1)), label]
+    }
     const olderMarker = (count: number): string => {
       if (this.loadingOlder) return color.muted(ui('↑ 正在加载更早内容…', '↑ Loading older content…'))
       const hint = this.focused ? 'PgUp/Home' : ui('滚轮上翻', 'Scroll up')
@@ -1223,7 +1467,16 @@ export class Transcript implements Component, Focusable {
         anchors.push(lines.length)
       }
       const row = this.rows[index]
-      const rendered = component.render(contentWidth)
+      const pulsing = row?.pulse !== undefined || row?.liveDurationSince !== undefined
+      const cached = pulsing ? undefined : this.lineCache.get(component)
+      const rendered = cached !== undefined && cached.width === contentWidth
+        ? cached.lines
+        : (() => {
+          internals.componentRenders += 1
+          const lines = component.render(contentWidth)
+          if (!pulsing) this.lineCache.set(component, { width: contentWidth, lines })
+          return lines
+        })()
       const escaped = row?.format === 'image'
         ? rendered
         : rendered.map(escapeTerminalText)
@@ -1236,9 +1489,25 @@ export class Transcript implements Component, Focusable {
         lines[index] = `${' '.repeat(Math.max(0, Math.floor((contentWidth - visibleWidth(content)) / 2)))}${content}`
       }
     }
+    this.lastFullLines = [...lines]
     this.renderedLineCount = lines.length
     this.turnAnchors = anchors
-    const rows = Math.max(1, Math.floor(this.viewportRows()))
+    if (this.search !== undefined) {
+      const plan = planLineSearch(lines, this.search.query)
+      if (this.search.matchIndex >= plan.matches.length) this.search.matchIndex = 0
+      const current = plan.matches[this.search.matchIndex]
+      const query = this.search.query
+      if (query.trim() !== '') {
+        for (const [index, line] of lines.entries()) {
+          if (!plan.hit.has(index)) continue
+          lines[index] = highlightQuery(line, query, matched =>
+            index === current ? `\u001B[7m${matched}\u001B[0m` : color.accent(matched))
+        }
+      }
+    }
+    const rows = this.search !== undefined && Number.isFinite(totalRows)
+      ? Math.max(1, totalRows - 1)
+      : totalRows
     if (!Number.isFinite(rows)) {
       this.scrollOffset = 0
       return withInset(lines)
@@ -1266,10 +1535,23 @@ export class Transcript implements Component, Focusable {
       ])
     }
     const maxOffset = Math.max(0, lines.length - rows)
-    this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
+    if (this.emptyState) {
+      const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
+      const needle = example === undefined ? undefined : emptyExampleText(example)
+      const selected = needle === undefined
+        ? -1
+        : lines.findIndex(line => line.includes(needle))
+      this.scrollOffset = scrollOffsetToContain(
+        lines.length,
+        rows,
+        selected === -1 ? 0 : selected,
+      )
+    } else {
+      this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
+    }
     const end = lines.length - this.scrollOffset
     const start = Math.max(0, end - rows)
-    if (this.scrollOffset === 0 && start > 0) {
+    if (!this.emptyState && this.scrollOffset === 0 && start > 0) {
       const alignedStart = this.turnAnchors.find(anchor =>
         anchor >= start && end - anchor <= rows - 1)
       if (alignedStart !== undefined) {
@@ -1282,22 +1564,56 @@ export class Transcript implements Component, Focusable {
       }
     }
     const visible = lines.slice(start, end)
-    if (start > 0 && visible.length > 0) {
-      visible[0] = olderMarker(start)
-    } else if (this.hasMore && visible.length > 0) {
-      visible[0] = olderMarker(0)
-    }
-    if (end < lines.length && visible.length > 0) {
-      const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
-      visible[visible.length - 1] = color.muted(ui(
-        `↓ ${String(lines.length - end)} 行更新内容 · ${hint}`,
-        `↓ ${String(lines.length - end)} newer line(s) · ${hint}`,
-      ))
+    if (!this.emptyState) {
+      if (start > 0 && visible.length > 0) {
+        visible[0] = olderMarker(start)
+      } else if (this.hasMore && visible.length > 0) {
+        visible[0] = olderMarker(0)
+      }
+      if (end < lines.length && visible.length > 0) {
+        const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
+        visible[visible.length - 1] = color.muted(ui(
+          `↓ ${String(lines.length - end)} 行更新内容 · ${hint}`,
+          `↓ ${String(lines.length - end)} newer line(s) · ${hint}`,
+        ))
+      }
     }
     return withInset(visible)
   }
 
   handleInput(data: string): void {
+    if (this.search !== undefined) {
+      this.handleSearchInput(data)
+      return
+    }
+    if (data === '/') {
+      this.search = { query: '', composing: true, matchIndex: 0 }
+      this.requestRender()
+      return
+    }
+    if (this.emptyState && this.snapshot !== undefined) {
+      if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
+        const delta = matchesKey(data, Key.up) ? -1 : 1
+        const next = this.exampleCursor + delta
+        if (next >= 0 && next < EMPTY_SESSION_EXAMPLES.length) {
+          this.exampleCursor = next
+          this.replace(this.emptySessionRows())
+          this.requestRender()
+        }
+        return
+      }
+    }
+    if (this.toolFocus && (matchesKey(data, Key.up) || matchesKey(data, Key.down))) {
+      const keys = this.toolKeys()
+      const delta = matchesKey(data, Key.up) ? -1 : 1
+      const next = this.toolCursor + delta
+      if (next >= 0 && next < keys.length) {
+        this.toolCursor = next
+        if (this.snapshot !== undefined) this.update(this.snapshot, this.imageLoader)
+        this.requestRender()
+      }
+      return
+    }
     this.turnCursor = undefined
     const rows = Math.max(1, Math.floor(this.viewportRows()))
     const maxOffset = Math.max(0, this.renderedLineCount - rows)
@@ -1307,6 +1623,121 @@ export class Transcript implements Component, Focusable {
     else if (matchesKey(data, Key.pageDown)) this.scrollBy(-Math.max(1, rows - 1))
     else if (matchesKey(data, Key.home)) this.scrollBy(maxOffset)
     else if (matchesKey(data, Key.end)) this.scrollBy(-this.scrollOffset)
+  }
+
+  /**
+   * Leave incremental search and restore the ordinary transcript chrome.
+   * @returns true when a search session was closed.
+   */
+  cancelSearch(): boolean {
+    if (this.search === undefined) return false
+    this.search = undefined
+    this.requestRender()
+    return true
+  }
+
+  private searchLabel(): string {
+    const query = this.search?.query ?? ''
+    const matches = findLineMatches(this.lastFullLines, query)
+    if (query.trim() === '') return ui('查找：', 'Find:')
+    if (matches.length === 0) {
+      return ui(`查找 ${query} · 无匹配 · Esc 取消`, `Find ${query} · no matches · Esc cancel`)
+    }
+    if (this.search?.composing === true) {
+      return ui(
+        `查找 ${query} · ${String(matches.length)} 处 · Enter 确认 · Esc 取消`,
+        `Find ${query} · ${String(matches.length)} match(es) · Enter confirm · Esc cancel`,
+      )
+    }
+    const current = Math.min((this.search?.matchIndex ?? 0) + 1, matches.length)
+    return ui(
+      `查找 ${query} · ${String(current)}/${String(matches.length)} · n 下一个 · N 上一个 · Esc 取消`,
+      `Find ${query} · ${String(current)}/${String(matches.length)} · n next · N previous · Esc cancel`,
+    )
+  }
+
+  private handleSearchInput(data: string): void {
+    if (matchesKey(data, Key.escape)) {
+      this.cancelSearch()
+      return
+    }
+    if (matchesKey(data, Key.enter) || data === '\r' || data === '\n') {
+      if ((this.search?.query.trim() ?? '') === '') this.cancelSearch()
+      else {
+        this.search = { ...this.search!, composing: false }
+        this.revealCurrentMatch()
+        this.requestRender()
+      }
+      return
+    }
+    if (data === '\x7f' || data === '\b') {
+      const chars = Array.from(this.search?.query ?? '')
+      chars.pop()
+      this.search = { query: chars.join(''), composing: true, matchIndex: 0 }
+      this.revealCurrentMatch()
+      this.requestRender()
+      return
+    }
+    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)
+      || matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)
+      || matchesKey(data, Key.home) || matchesKey(data, Key.end)) {
+      this.turnCursor = undefined
+      const rows = Math.max(1, Math.floor(this.viewportRows()))
+      const maxOffset = Math.max(0, this.renderedLineCount - rows)
+      if (matchesKey(data, Key.up)) this.scrollBy(1)
+      else if (matchesKey(data, Key.down)) this.scrollBy(-1)
+      else if (matchesKey(data, Key.pageUp)) this.scrollBy(Math.max(1, rows - 1))
+      else if (matchesKey(data, Key.pageDown)) this.scrollBy(-Math.max(1, rows - 1))
+      else if (matchesKey(data, Key.home)) this.scrollBy(maxOffset)
+      else this.scrollBy(-this.scrollOffset)
+      return
+    }
+    if (this.search?.composing === false) {
+      if (data === 'n') {
+        this.stepSearch(1)
+        return
+      }
+      if (data === 'N') {
+        this.stepSearch(-1)
+        return
+      }
+      if (data === '/') {
+        this.search = { query: '', composing: true, matchIndex: 0 }
+        this.requestRender()
+        return
+      }
+    }
+    if (data.includes('\u001B') || [...data].some(character => character < ' ')) return
+    this.search = {
+      query: `${this.search?.query ?? ''}${data}`,
+      composing: true,
+      matchIndex: 0,
+    }
+    this.revealCurrentMatch()
+    this.requestRender()
+  }
+
+  private stepSearch(direction: 1 | -1): void {
+    if (this.search === undefined) return
+    const matches = findLineMatches(this.lastFullLines, this.search.query)
+    const current = matches[this.search.matchIndex] ?? -1
+    const next = nextMatchIndex(matches, current, direction)
+    if (next < 0) return
+    this.search = { ...this.search, matchIndex: Math.max(0, matches.indexOf(next)) }
+    this.revealCurrentMatch()
+    this.requestRender()
+  }
+
+  private revealCurrentMatch(): void {
+    if (this.search === undefined) return
+    const matches = findLineMatches(this.lastFullLines, this.search.query)
+    const lineIndex = matches[this.search.matchIndex]
+    if (lineIndex === undefined) return
+    this.scrollOffset = scrollOffsetToReveal(
+      this.lastFullLines.length,
+      this.viewportRows(),
+      lineIndex,
+    )
   }
 
   /**
@@ -1355,16 +1786,65 @@ export class Transcript implements Component, Focusable {
     return true
   }
 
+  private toolKeys(): readonly string[] {
+    return [...new Set(this.rows.flatMap(row => row.toolKey === undefined ? [] : [row.toolKey]))]
+  }
+
+  private toggleToolCard(key: string): void {
+    const expanded = toolCardExpanded({
+      tools: this.toolVisibility,
+      reasoning: this.reasoningVisible,
+      toolOutputLineLimit: this.toolOutputLineLimit,
+      diffContextLines: this.diffContextLines,
+      expandedTools: this.expandedTools,
+      collapsedTools: this.collapsedTools,
+    }, key)
+    if (expanded) {
+      this.expandedTools.delete(key)
+      if (this.toolVisibility === 'expanded') this.collapsedTools.add(key)
+    } else {
+      this.collapsedTools.delete(key)
+      this.expandedTools.add(key)
+    }
+  }
+
+  private emptySessionRows(): TranscriptRow[] {
+    this.exampleCursor = Math.max(0, Math.min(this.exampleCursor, EMPTY_SESSION_EXAMPLES.length - 1))
+    return [
+      {
+        format: 'plain',
+        text: `${color.brand('deepseek')}\n${color.muted(ui('探索未至之境', 'Explore beyond the known'))}\n${color.muted(ui('直接描述你想完成的事', 'Describe what you want to accomplish'))}`,
+      },
+      {
+        format: 'plain',
+        text: color.muted(ui('试试这些，Tab 后回车发送：', 'Try one of these; Tab then Enter to send:')),
+        gapBefore: true,
+      },
+      ...EMPTY_SESSION_EXAMPLES.map((example, index) => ({
+        format: 'plain' as const,
+        text: `${index === this.exampleCursor ? color.accent('› ') : '  '}${emptyExampleText(example)}`,
+        exampleId: example.id,
+      })),
+    ]
+  }
+
   private replace(rows: readonly TranscriptRow[]): void {
+    this.commit(rows, rows.map(row => this.component(row)))
+  }
+
+  private commit(rows: readonly TranscriptRow[], components: readonly Component[]): void {
     this.rows = rows
     this.turnCursor = undefined
-    this.components = rows.map(row => this.component(row))
+    this.components = [...components]
     this.syncPulseAnimation(rows.some(row => row.liveDurationSince !== undefined
       || (row.pulse !== undefined && terminalColorLevel() !== 0)))
   }
 
   private component(row: TranscriptRow): Component {
-    if (row.format === 'markdown') return new Markdown(escapeTerminalText(row.text), 0, 0, markdownTheme)
+    if (row.format === 'markdown') {
+      internals.markdownCreated += 1
+      return new Markdown(escapeTerminalText(row.text), 0, 0, markdownTheme)
+    }
     if (row.format === 'plain') {
       return row.pulse === undefined
         ? new Text(escapeTerminalText(row.text), 0, 0)
@@ -1407,7 +1887,22 @@ export class Transcript implements Component, Focusable {
     }).finally(() => {
       if (generation !== this.imageGeneration) return
       this.pendingImages.delete(cacheKey)
-      this.components = this.rows.map(current => this.component(current))
+      const image = this.imageComponents.get(cacheKey)
+      if (image === undefined) {
+        this.requestRender()
+        return
+      }
+      this.components = this.rows.map((current, index) =>
+        current.format === 'image' && `${this.sessionId ?? 'none'}:${current.key}` === cacheKey
+          ? image
+          : this.components[index] ?? this.component(current))
+      for (const entry of this.nodeCache.values()) {
+        for (const [index, current] of entry.rows.entries()) {
+          if (current.format === 'image' && `${this.sessionId ?? 'none'}:${current.key}` === cacheKey) {
+            entry.components[index] = image
+          }
+        }
+      }
       this.requestRender()
     })
     return fallback

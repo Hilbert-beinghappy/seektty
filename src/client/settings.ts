@@ -7,7 +7,11 @@ import {
   type SchemaNode,
 } from '@deepseek-ai/dsh-client-schema-form'
 import { LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
-import { TUI_APPEARANCE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-tui-protocol'
+import {
+  TUI_APPEARANCE_SETTINGS_NAMESPACE,
+  TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+  TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+} from '@deepseek-ai/dsh-tui-protocol'
 import { ui, uiLocale } from './locale.ts'
 import type { TuiSettingsDocument } from './management.ts'
 
@@ -89,7 +93,7 @@ function fieldOf(
   const description = descriptionOf(node)
   return {
     path,
-    label: path.length === 0 ? document.namespace : path.join('.'),
+    label: settingsFieldLabel(document.namespace, path),
     ...(description === undefined ? {} : { description }),
     schemaType: node.type,
     control: controlOf(node, secret !== undefined),
@@ -195,6 +199,118 @@ export function settingsSectionLabel(namespace: string): string {
   if (namespace === 'agent-presets') return ui('默认 Agent Preset', 'Default Agent Preset')
   if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return ui('模型与 Provider', 'Models and Providers')
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return ui('SeekTTY 主题', 'SeekTTY themes')
+  if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) return ui('SeekTTY 行为', 'SeekTTY behavior')
   if (namespace === 'tui-plugin-marketplace') return ui('插件市场来源', 'Plugin marketplace sources')
   return ui('通用设置', 'General settings')
+}
+
+const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: string }>> = {
+  'agent-presets.defaultPreset': { zh: '默认 Agent 模式', en: 'Default Agent preset' },
+  'permission.default': { zh: '默认权限', en: 'Default permission' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.theme`]: { zh: '界面主题', en: 'Interface theme' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.codeTheme`]: { zh: '代码块主题', en: 'Code theme' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.toolCards`]: { zh: '工具卡片默认形态', en: 'Default tool-card shape' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.showReasoning`]: { zh: '推理默认显示', en: 'Show reasoning by default' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.desktopNotifications`]: { zh: '完成/审批桌面通知', en: 'Desktop notifications' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.followTerminalTitle`]: { zh: '终端标题跟随', en: 'Follow the terminal title' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.composerHistoryLimit`]: { zh: '输入历史条数', en: 'Composer history size' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.statusElapsed`]: { zh: '状态栏实时耗时', en: 'Live status elapsed time' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.clipboardFallback`]: { zh: '剪贴板回退', en: 'Clipboard fallback' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.toolOutputLineLimit`]: { zh: '工具输出行数上限', en: 'Tool output line limit' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.diffContextLines`]: { zh: 'Diff 上下文行数', en: 'Diff context lines' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.dangerConfirmDefault`]: { zh: '危险确认默认焦点', en: 'Danger confirm default focus' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.keyBindings`]: { zh: '快捷键覆盖', en: 'Key binding overrides' },
+}
+
+/**
+ * Label a known high-frequency field while keeping unknown paths visible.
+ * Known labels match `namespace + path` only; unknown fields use the dotted path.
+ * @param namespace - registered Harness Settings namespace.
+ * @param path - schema path inside that namespace.
+ */
+export function settingsFieldLabel(namespace: string, path: readonly string[]): string {
+  if (path.length === 0) return namespace
+  const dotted = path.join('.')
+  const named = FIELD_LABELS[`${namespace}.${dotted}`]
+  return named === undefined ? dotted : ui(named.zh, named.en)
+}
+
+/** One flattened Settings field with its owning namespace. */
+export interface IndexedSettingsField {
+  readonly namespace: string
+  readonly section: string
+  readonly field: TuiSettingsField
+}
+
+/**
+ * Drop Host-internal Settings namespaces that are not user-editable.
+ * @param documents - redacted Settings descriptors.
+ */
+export function visibleSettingsDocuments(
+  documents: readonly TuiSettingsDocument[],
+): readonly TuiSettingsDocument[] {
+  return documents.filter(document => document.namespace !== TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE)
+}
+
+/**
+ * Flatten every registered Settings document into a cross-namespace field index.
+ * @param documents - redacted Settings descriptors.
+ */
+export function indexSettingsFields(
+  documents: readonly TuiSettingsDocument[],
+): readonly IndexedSettingsField[] {
+  return visibleSettingsDocuments(documents).flatMap(document => settingsFields(document).map(field => ({
+    namespace: document.namespace,
+    section: settingsSectionLabel(document.namespace),
+    field,
+  })))
+}
+
+/** One row in the searchable Settings root list. */
+export interface SettingsRootChoice {
+  readonly id: string
+  readonly label: string
+  readonly description: string
+}
+
+/**
+ * Build the searchable Settings root: namespaces first, then every field.
+ * @param documents - redacted Settings descriptors.
+ */
+export function settingsRootChoices(
+  documents: readonly TuiSettingsDocument[],
+): readonly SettingsRootChoice[] {
+  const visible = visibleSettingsDocuments(documents)
+  return [
+    ...visible.map(document => ({
+      id: document.namespace,
+      label: document.namespace,
+      description: `${settingsSectionLabel(document.namespace)} · ${document.applies === 'live' ? ui('立即生效', 'applies immediately') : ui('需重启', 'restart required')}`,
+    })),
+    ...indexSettingsFields(visible).map(item => ({
+      id: `field:${item.namespace}:${JSON.stringify(item.field.path)}`,
+      label: item.field.label,
+      description: `${item.namespace}.${item.field.path.join('.')} · ${item.section}`,
+    })),
+  ]
+}
+
+export function parseSettingsRootChoice(id: string): {
+  readonly namespace: string
+  readonly fieldPath?: readonly string[]
+} | undefined {
+  if (id.startsWith('field:')) {
+    const separator = id.indexOf(':', 'field:'.length)
+    if (separator === -1) return undefined
+    const namespace = id.slice('field:'.length, separator)
+    try {
+      const path = JSON.parse(id.slice(separator + 1)) as unknown
+      if (!Array.isArray(path) || path.some(part => typeof part !== 'string')) return undefined
+      return { namespace, fieldPath: path as readonly string[] }
+    } catch {
+      return undefined
+    }
+  }
+  if (id === '') return undefined
+  return { namespace: id }
 }

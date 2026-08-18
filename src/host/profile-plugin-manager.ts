@@ -31,9 +31,10 @@ import {
   writeProfileManifest,
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
+import { ui } from '../client/locale.ts'
+import { InstallerOutputRedactor, installerSecrets, redactInstallerText } from './installer-output.ts'
 
 const NAME = 'dsh'
-const MAX_CAPTURE_BYTES = 1024 * 1024
 const MAX_PATCH_BYTES = 2 * 1024 * 1024
 const SENSITIVE_QUERY_KEY = new RegExp(
   String.raw`(?:^|[-_])(?:access[-_]?token|api[-_]?key|auth|authorization|credential|password|secret|signature|token)(?:$|[-_])`,
@@ -154,6 +155,13 @@ interface InstalledManifest extends ProfileManifest {
   scripts?: Record<string, string>
 }
 
+interface InstalledFacts {
+  readonly packageDir?: string
+  readonly manifest?: InstalledManifest
+  readonly patchValid: boolean
+  readonly diagnostic?: string
+}
+
 function inferSource(spec: string): ProfilePluginSource {
   if (/^(?:git\+|github:|gitlab:|bitbucket:)|\.git(?:#|$)/i.test(spec)) return 'git'
   if (/^(?:https?:).*\.(?:tgz|tar\.gz)(?:[?#].*)?$/i.test(spec) || /\.(?:tgz|tar\.gz)$/i.test(spec)) return 'tarball'
@@ -203,13 +211,6 @@ function validPatch(packageDir: string, patch: string): boolean {
   }
 }
 
-function appendBounded(current: string, chunk: string): string {
-  const joined = current + chunk
-  return Buffer.byteLength(joined) <= MAX_CAPTURE_BYTES
-    ? joined
-    : joined.slice(Math.max(0, joined.length - MAX_CAPTURE_BYTES))
-}
-
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -251,6 +252,8 @@ export class ProfilePluginManager {
   private readonly installAnchor: string
   private readonly invokingCwd: string
   private readonly home: string | undefined
+  private snapshotCache: { stamp: string; snapshot: ProfilePluginSnapshot } | undefined
+  private readonly installedFactsCache = new Map<string, InstalledFacts>()
 
   /** @param options - target Profile, installation resolution anchor, and invoking directory. */
   constructor(options: ProfilePluginManagerOptions) {
@@ -277,18 +280,23 @@ export class ProfilePluginManager {
    */
   snapshot(): ProfilePluginSnapshot {
     this.ensureProfile()
+    const stamp = this.profileStamp()
+    if (this.snapshotCache?.stamp === stamp) return this.snapshotCache.snapshot
+    this.installedFactsCache.clear()
     const manifest = readProfileManifest(NAME, this.dir)
     const dependencies = { ...manifest.dependencies }
     const bundles = [...manifest.dsh?.profile?.bundles ?? []]
     const plugins = Object.entries(dependencies).map(([packageName, spec]) =>
       this.inspectInstalled(packageName, spec, bundles))
-    return Object.freeze({
+    const snapshot = Object.freeze({
       profile: this.profile,
       dir: this.dir,
       dependencies: Object.freeze(dependencies),
       bundles: Object.freeze(bundles),
       plugins: Object.freeze(plugins),
     })
+    this.snapshotCache = { stamp, snapshot }
+    return snapshot
   }
 
   /**
@@ -305,7 +313,19 @@ export class ProfilePluginManager {
     const command = args.map(argument => this.anchorPathSpec(argument))
     let stdout = ''
     let stderr = ''
-    const exitCode = await new Promise<number>((resolvePromise, reject) => {
+    const stdoutRedactor = new InstallerOutputRedactor()
+    const stderrRedactor = new InstallerOutputRedactor()
+    const flushVisible = (): void => {
+      const stdoutTail = stdoutRedactor.flush()
+      const stderrTail = stderrRedactor.flush()
+      if (stdoutTail !== '') options.onOutput?.('stdout', stdoutTail)
+      if (stderrTail !== '') options.onOutput?.('stderr', stderrTail)
+      stdout = stdoutRedactor.text()
+      stderr = stderrRedactor.text()
+    }
+    let exitCode: number
+    try {
+      exitCode = await new Promise<number>((resolvePromise, reject) => {
       const child = crossSpawn('pnpm', command, {
         cwd: this.dir,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -319,12 +339,12 @@ export class ProfilePluginManager {
       child.stdout.setEncoding('utf8')
       child.stderr.setEncoding('utf8')
       child.stdout.on('data', (chunk: string) => {
-        stdout = appendBounded(stdout, chunk)
-        options.onOutput?.('stdout', chunk)
+        const visible = stdoutRedactor.push(chunk)
+        if (visible !== '') options.onOutput?.('stdout', visible)
       })
       child.stderr.on('data', (chunk: string) => {
-        stderr = appendBounded(stderr, chunk)
-        options.onOutput?.('stderr', chunk)
+        const visible = stderrRedactor.push(chunk)
+        if (visible !== '') options.onOutput?.('stderr', visible)
       })
       child.once('error', (error) => {
         options.signal?.removeEventListener('abort', abort)
@@ -347,6 +367,10 @@ export class ProfilePluginManager {
       if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return 127
       throw error
     })
+    } finally {
+      flushVisible()
+    }
+    this.forgetInstalled()
     const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
     const snapshot = this.snapshot()
     const changed = initialized || !sameSnapshotState(beforeSnapshot, snapshot)
@@ -386,6 +410,7 @@ export class ProfilePluginManager {
       ? result.status ?? 1
       : (spawnError as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1
     if (spawnError !== undefined && (spawnError as NodeJS.ErrnoException).code !== 'ENOENT') throw spawnError
+    this.forgetInstalled()
     const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
     const snapshot = this.snapshot()
     const changed = initialized || !sameSnapshotState(beforeSnapshot, snapshot)
@@ -394,8 +419,8 @@ export class ProfilePluginManager {
       dir: this.dir,
       command: ['pnpm', ...command.map(safeDependencySpec)],
       exitCode,
-      stdout: typeof result.stdout === 'string' ? result.stdout : '',
-      stderr: typeof result.stderr === 'string' ? result.stderr : '',
+      stdout: typeof result.stdout === 'string' ? redactInstallerText(result.stdout, installerSecrets()) : '',
+      stderr: typeof result.stderr === 'string' ? redactInstallerText(result.stderr, installerSecrets()) : '',
       warnings,
       initialized,
       changed,
@@ -421,6 +446,7 @@ export class ProfilePluginManager {
       profile: { ...manifest.dsh?.profile, bundles: [...orderedBundles] },
     }
     writeProfileManifest(this.dir, manifest)
+    this.forgetInstalled()
     return this.snapshot()
   }
 
@@ -437,7 +463,7 @@ export class ProfilePluginManager {
     })
     const pnpm = version.status === 0 && typeof version.stdout === 'string' ? version.stdout.trim() : undefined
     diagnostics.push(pnpm === undefined
-      ? { level: 'error', message: 'pnpm 不可用；Profile 插件操作需要 PATH 中的 pnpm' }
+      ? { level: 'error', message: ui('pnpm 不可用；Profile 插件操作需要 PATH 中的 pnpm', 'pnpm is unavailable; Profile plugin operations require pnpm on PATH') }
       : { level: 'info', message: `pnpm ${pnpm}` })
     for (const plugin of snapshot.plugins) {
       for (const diagnostic of plugin.diagnostics) {
@@ -445,18 +471,30 @@ export class ProfilePluginManager {
       }
     }
     for (const bundle of snapshot.bundles) {
-      try {
-        const dir = resolveBundleDir(NAME, bundle, this.installAnchor, this.dir)
-        const manifest = readInstalledManifest(dir)
-        const patch = manifest.dsh?.bundle?.patch
-        if (patch === undefined) diagnostics.push({ level: 'error', message: `${bundle} 未声明 dsh.bundle.patch` })
-        else if (!validPatch(dir, patch)) diagnostics.push({ level: 'error', message: `${bundle} 的 Bundle patch 缺失或格式无效` })
-      } catch (error) {
-        diagnostics.push({ level: 'error', message: error instanceof Error ? error.message : String(error) })
+      const facts = this.installedFacts(bundle)
+      const patch = facts.manifest?.dsh?.bundle?.patch
+      if (facts.manifest === undefined) {
+        diagnostics.push({
+          level: 'error',
+          message: facts.diagnostic ?? ui(`${bundle} 无法读取已安装清单`, `${bundle} cannot read the installed manifest`),
+        })
+      } else if (patch === undefined) {
+        diagnostics.push({
+          level: 'error',
+          message: ui(`${bundle} 未声明 dsh.bundle.patch`, `${bundle} does not declare dsh.bundle.patch`),
+        })
+      } else if (!facts.patchValid) {
+        diagnostics.push({
+          level: 'error',
+          message: ui(`${bundle} 的 Bundle patch 缺失或格式无效`, `The Bundle patch of ${bundle} is missing or invalid`),
+        })
       }
     }
     if (diagnostics.every(item => item.level !== 'error')) {
-      diagnostics.push({ level: 'info', message: 'Profile Bundle 结构可解析' })
+      diagnostics.push({
+        level: 'info',
+        message: ui('Profile Bundle 结构可解析', 'Profile Bundle structure is valid'),
+      })
     }
     return { profile: this.profile, ...(pnpm === undefined ? {} : { pnpm }), diagnostics, snapshot }
   }
@@ -489,7 +527,12 @@ export class ProfilePluginManager {
    */
   createProfile(name: string, copyFrom?: string, options: ProfileCreateOptions = {}): ProfileSummary {
     const target = resolveProfileDir(name, this.home)
-    if (existsSync(join(target, 'package.json'))) throw new Error(`Profile ${JSON.stringify(name)} 已存在`)
+    if (existsSync(join(target, 'package.json'))) {
+      throw new Error(ui(
+        `Profile ${JSON.stringify(name)} 已存在`,
+        `Profile ${JSON.stringify(name)} already exists`,
+      ))
+    }
     if (copyFrom === undefined) {
       initProfile(target, convertedBundles(
         PROFILE_TEMPLATES[name] ?? PROFILE_TEMPLATES.tui ?? DEFAULT_PROFILE_BUNDLES,
@@ -549,30 +592,33 @@ export class ProfilePluginManager {
   }
 
   private inspectInstalled(packageName: string, spec: string, bundles: readonly string[]): ProfilePluginEntry {
+    const facts = this.installedFacts(packageName)
     const diagnostics: string[] = []
-    let manifest: InstalledManifest | undefined
-    let packageDir: string | undefined
-    try {
-      packageDir = resolveBundleDir(NAME, packageName, this.installAnchor, this.dir)
-      manifest = readInstalledManifest(packageDir)
-    } catch (error) {
-      diagnostics.push(error instanceof Error ? error.message : String(error))
+    if (facts.diagnostic !== undefined) diagnostics.push(facts.diagnostic)
+    const patch = facts.manifest?.dsh?.bundle?.patch
+    if (patch !== undefined && !facts.patchValid) {
+      diagnostics.push(ui(
+        `声明的 Bundle patch ${JSON.stringify(patch)} 缺失或格式无效`,
+        `Declared Bundle patch ${JSON.stringify(patch)} is missing or invalid`,
+      ))
     }
-    const patch = manifest?.dsh?.bundle?.patch
-    const patchValid = packageDir !== undefined && patch !== undefined && validPatch(packageDir, patch)
-    if (patch !== undefined && !patchValid) diagnostics.push(`声明的 Bundle patch ${JSON.stringify(patch)} 缺失或格式无效`)
-    if (bundles.includes(packageName) && patch === undefined) diagnostics.push('位于 Bundle 顺序中但未声明 dsh.bundle.patch')
+    if (bundles.includes(packageName) && patch === undefined) {
+      diagnostics.push(ui(
+        '位于 Bundle 顺序中但未声明 dsh.bundle.patch',
+        'Listed in Bundle order but does not declare dsh.bundle.patch',
+      ))
+    }
     return Object.freeze({
       name: packageName,
       spec: safeDependencySpec(spec),
-      ...(manifest?.version === undefined ? {} : { version: manifest.version }),
-      ...(manifest?.description === undefined ? {} : { description: manifest.description }),
+      ...(facts.manifest?.version === undefined ? {} : { version: facts.manifest.version }),
+      ...(facts.manifest?.description === undefined ? {} : { description: facts.manifest.description }),
       source: inferSource(spec),
       bundle: patch !== undefined,
       active: bundles.includes(packageName),
       ...(patch === undefined ? {} : { patch }),
-      patchValid,
-      scripts: Object.freeze(Object.keys(manifest?.scripts ?? {})),
+      patchValid: facts.patchValid,
+      scripts: Object.freeze(Object.keys(facts.manifest?.scripts ?? {})),
       diagnostics: Object.freeze(diagnostics),
     })
   }
@@ -590,7 +636,10 @@ export class ProfilePluginManager {
         bundles.push(packageName)
         changed = true
       } else if (!isBundle && !beforeDeps.has(packageName)) {
-        warnings.push(`${packageName} 未声明 dsh.bundle；它只是 Profile 依赖，不会成为 Harness Bundle`)
+        warnings.push(ui(
+          `${packageName} 未声明 dsh.bundle；它只是 Profile 依赖，不会成为 Harness Bundle`,
+          `${packageName} does not declare dsh.bundle; it is only a Profile dependency and will not become a Harness Bundle`,
+        ))
       }
     }
     const dependencySet = new Set(dependencies)
@@ -605,19 +654,58 @@ export class ProfilePluginManager {
     if (changed) {
       after.dsh = { ...after.dsh, profile: { ...after.dsh?.profile, bundles } }
       writeProfileManifest(this.dir, after)
+      this.forgetInstalled()
     }
     return warnings
   }
 
   private exportsPatch(packageName: string): boolean {
+    const facts = this.installedFacts(packageName)
+    return facts.manifest?.dsh?.bundle?.patch !== undefined && facts.patchValid
+  }
+
+  private installedFacts(packageName: string): InstalledFacts {
+    const cached = this.installedFactsCache.get(packageName)
+    if (cached !== undefined) return cached
+    let facts: InstalledFacts
     try {
-      const dir = resolveBundleDir(NAME, packageName, this.installAnchor, this.dir)
-      const manifest = readInstalledManifest(dir)
+      const packageDir = resolveBundleDir(NAME, packageName, this.installAnchor, this.dir)
+      const manifest = readInstalledManifest(packageDir)
       const patch = manifest.dsh?.bundle?.patch
-      return patch !== undefined && validPatch(dir, patch)
-    } catch {
-      return false
+      facts = {
+        packageDir,
+        manifest,
+        patchValid: patch !== undefined && validPatch(packageDir, patch),
+      }
+    } catch (error) {
+      facts = {
+        patchValid: false,
+        diagnostic: error instanceof Error ? error.message : String(error),
+      }
     }
+    this.installedFactsCache.set(packageName, facts)
+    return facts
+  }
+
+  private profileStamp(): string {
+    return [
+      join(this.dir, 'package.json'),
+      join(this.dir, 'pnpm-lock.yaml'),
+      join(this.dir, 'package-lock.json'),
+      join(this.dir, PROFILE_PATCH_FILENAME),
+      join(this.dir, 'node_modules'),
+    ].map(path => this.pathStamp(path)).join('|')
+  }
+
+  private pathStamp(path: string): string {
+    if (!existsSync(path)) return `${basename(path)}:missing`
+    const stat = statSync(path)
+    return `${basename(path)}:${stat.mtimeMs}:${stat.isFile() ? stat.size : 'dir'}`
+  }
+
+  private forgetInstalled(): void {
+    this.snapshotCache = undefined
+    this.installedFactsCache.clear()
   }
 
   private anchorPathSpec(argument: string): string {
@@ -627,10 +715,21 @@ export class ProfilePluginManager {
   }
 
   private failureWarnings(command: readonly string[], exitCode: number): readonly string[] {
-    if (exitCode === 127) return ['pnpm 不在 PATH 中；请安装 pnpm 后重试']
-    const warnings = [`pnpm 在 Profile 目录 ${this.dir} 中失败，退出码 ${exitCode}`]
+    if (exitCode === 127) {
+      return [({
+        zh: 'pnpm 不在 PATH 中；请安装 pnpm 后重试',
+        en: 'pnpm is not on PATH; install pnpm and retry',
+      }).zh]
+    }
+    const warnings = [ui(
+      `pnpm 在 Profile 目录 ${this.dir} 中失败，退出码 ${exitCode}`,
+      `pnpm failed in Profile directory ${this.dir} with exit code ${exitCode}`,
+    )]
     if (command.some(argument => /^git\+|^github:|\.git(?:#|$)/.test(argument))) {
-      warnings.push(`Git 插件的 prepare/install 脚本可能需要在 ${join(this.dir, 'pnpm-workspace.yaml')} 的 allowBuilds 中明确授权`)
+      warnings.push(ui(
+        `Git 插件的 prepare/install 脚本可能需要在 ${join(this.dir, 'pnpm-workspace.yaml')} 的 allowBuilds 中明确授权`,
+        `prepare/install scripts for a Git plugin may need an explicit allowBuilds entry in ${join(this.dir, 'pnpm-workspace.yaml')}`,
+      ))
     }
     return warnings
   }
