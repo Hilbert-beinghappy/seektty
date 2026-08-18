@@ -63,7 +63,7 @@ import {
 } from './desktop-notify.ts'
 import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
-import { applyKeyBindingOverrides, matchesBinding } from './keymap.ts'
+import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
 import { measureStartup } from '../startup-trace.ts'
 
@@ -723,6 +723,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
+      const interrupt = consumeRunningInterrupt(data, capabilities.active()?.session)
+      if (interrupt !== undefined) return interrupt
       if (overlays.hasActive()) return undefined
       const attachmentPath = pastedImagePath(data)
       if (!transcriptFocused && attachmentPath !== undefined) {
@@ -883,11 +885,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (!matchesBinding('interrupt', data)) return undefined
-      const current = capabilities.active()
-      if (current !== undefined && current.session.getSnapshot().running) {
-        void current.session.cancel()
-        return { consume: true }
-      }
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
         setNotice(clearIdleComposerDraft(
           editor,
