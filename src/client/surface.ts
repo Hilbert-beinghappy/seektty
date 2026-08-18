@@ -28,7 +28,7 @@ import {
   transcriptViewportRows,
 } from './chrome.ts'
 import { appearanceSettings, themeFromAppearance } from './appearance.ts'
-import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
+import { behaviorFromSettings, behaviorSettings, createLiveBehavior } from './behavior.ts'
 import {
   composerHistoryFromDocuments,
   rememberComposerHistory,
@@ -141,9 +141,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   let disposeConstructedSyntax = (): void => undefined
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
-    const initialBehavior = behaviorFromSettings(behaviorSettings(settingsDocuments))
-    applyKeyBindingOverrides(initialBehavior.keyBindings)
-    setDangerConfirmDefault(initialBehavior.dangerConfirmDefault)
+    const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
+    applyKeyBindingOverrides(liveBehavior.get().keyBindings)
+    setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     stopConstructedTui = () => {
@@ -155,13 +155,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
-    const historyLimit = initialBehavior.composerHistoryLimit
+    const historyLimit = liveBehavior.get().composerHistoryLimit
     let { entries: composerHistory, revision: composerHistoryRevision } =
       composerHistoryFromDocuments(settingsDocuments, historyLimit)
     for (const entry of [...composerHistory].reverse()) editor.addToHistory(entry)
     let historyPersist = Promise.resolve()
     const persistComposerHistory = (entries: readonly string[]): void => {
-      if (historyLimit <= 0) return
+      if (liveBehavior.get().composerHistoryLimit <= 0) return
       historyPersist = historyPersist.then(async () => {
         const settings = capabilities.managementBridge().settings
         const write = (revision: number, next: readonly string[]): Promise<number> => (
@@ -201,10 +201,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
     )
     transcript.applyPresentationDefaults(
-      initialBehavior.toolCards,
-      initialBehavior.showReasoning,
-      initialBehavior.toolOutputLineLimit,
-      initialBehavior.diffContextLines,
+      liveBehavior.get().toolCards,
+      liveBehavior.get().showReasoning,
+      liveBehavior.get().toolOutputLineLimit,
+      liveBehavior.get().diffContextLines,
     )
     let syntax: SyntaxHighlighter | undefined
     disposeConstructedSyntax = () => { syntax?.dispose() }
@@ -292,7 +292,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const applyTerminalTitle = (): void => {
       const snapshot = active?.session.getSnapshot()
       terminal.setTitle(sessionTerminalTitle({
-        follow: initialBehavior.followTerminalTitle,
+        follow: liveBehavior.get().followTerminalTitle,
         sessionTitle: active?.summary.displayTitle ?? '',
         running: snapshot?.running === true,
         pendingApproval: snapshot?.pending.some(wait => wait.kind === 'approval') === true,
@@ -306,7 +306,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const snapshot = active?.session.getSnapshot()
       if (snapshot?.running === true) {
         runningSince ??= Date.now()
-        if (elapsedTimer === undefined && initialBehavior.statusElapsed) {
+        if (elapsedTimer === undefined && liveBehavior.get().statusElapsed) {
           elapsedTimer = setInterval(() => {
             if (stopping !== undefined) return
             updateStatus()
@@ -331,7 +331,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         running: snapshot.running,
         pending: snapshot.pending.map(wait => ({ key: wait.key, kind: wait.kind })),
       }
-      if (initialBehavior.desktopNotifications) {
+      if (liveBehavior.get().desktopNotifications) {
         const kind = nextDesktopNotify(notifySnapshot, currentNotify, notifyPrimed)
         if (kind !== undefined) {
           terminal.write(desktopNotifySequence(desktopNotifyBody(kind)))
@@ -340,7 +340,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       notifySnapshot = currentNotify
       notifyPrimed = true
       const pendingCount = snapshot.pending.length
-      const generating = initialBehavior.statusElapsed && runningSince !== undefined
+      const generating = liveBehavior.get().statusElapsed && runningSince !== undefined
         ? ui(
           `生成中 · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C 停止`,
           `Generating · ${formatElapsed(Date.now() - runningSince)} · Ctrl+C to stop`,
@@ -391,7 +391,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         contextBar.setFacts({
           ...facts,
           ...(runningSince === undefined ? {} : { runningSince }),
-          statusElapsed: initialBehavior.statusElapsed,
+          statusElapsed: liveBehavior.get().statusElapsed,
         })
         editor.setFacts(facts)
         status.setPermission(facts.permission)
@@ -492,6 +492,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         tui.requestRender(true)
       },
       applyBehavior: (behavior) => {
+        liveBehavior.apply(behavior)
         applyKeyBindingOverrides(behavior.keyBindings)
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
         transcript.applyPresentationDefaults(
@@ -511,7 +512,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       copy: (text) => {
         writeClipboard(text, {
-          fallback: initialBehavior.clipboardFallback,
+          fallback: liveBehavior.get().clipboardFallback,
           platform: process.platform,
           writeOsc52: sequence => { terminal.write(sequence) },
         })

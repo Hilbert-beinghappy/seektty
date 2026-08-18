@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_TUI_BEHAVIOR,
@@ -7,6 +9,7 @@ import {
 import {
   behaviorFromSettings,
   behaviorSettings,
+  createLiveBehavior,
   normalizeBehavior,
 } from '../src/client/behavior.ts'
 import { Transcript } from '../src/client/transcript.ts'
@@ -79,5 +82,23 @@ describe('seektty-behavior settings', () => {
     transcript.applyPresentationDefaults(behavior.toolCards, behavior.showReasoning)
     expect(transcript.cycleToolVisibility()).toBe('collapsed')
     expect(transcript.toggleReasoning()).toBe(false)
+  })
+
+  it('replaces the whole live behavior object so Settings marked live actually apply', () => {
+    const live = createLiveBehavior(DEFAULT_TUI_BEHAVIOR)
+    expect(live.get().statusElapsed).toBe(true)
+    const next = normalizeBehavior({
+      ...DEFAULT_TUI_BEHAVIOR,
+      statusElapsed: false,
+      desktopNotifications: false,
+      followTerminalTitle: false,
+      clipboardFallback: 'off',
+      composerHistoryLimit: 0,
+    })
+    expect(live.apply(next)).toBe(live.get())
+    expect(live.get()).toEqual(next)
+    const source = readFileSync(resolve(import.meta.dirname, '../src/client/surface.ts'), 'utf8')
+    expect(source).toMatch(/createLiveBehavior\(/u)
+    expect(source).not.toMatch(/initialBehavior\.(statusElapsed|desktopNotifications|followTerminalTitle|clipboardFallback|composerHistoryLimit)/u)
   })
 })

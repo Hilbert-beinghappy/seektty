@@ -121,3 +121,24 @@ export function normalizeBehavior(value: unknown): TuiBehaviorSettings {
 export function behaviorFromSettings(document: TuiSettingsDocument): TuiBehaviorSettings {
   return normalizeBehavior(document.value)
 }
+
+/** Mutable current behavior; every live path must read {@link LiveBehavior.get}. */
+export interface LiveBehavior {
+  get(): TuiBehaviorSettings
+  apply(next: TuiBehaviorSettings): TuiBehaviorSettings
+}
+
+/**
+ * Hold one replaceable behavior snapshot for the running Surface.
+ * Settings marked `applies: live` replace the whole object.
+ */
+export function createLiveBehavior(initial: TuiBehaviorSettings): LiveBehavior {
+  let current = initial
+  return {
+    get: () => current,
+    apply: (next) => {
+      current = next
+      return current
+    },
+  }
+}
