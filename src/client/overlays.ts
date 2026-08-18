@@ -203,6 +203,26 @@ function modalOptions(options: OverlayOptions | undefined): OverlayOptions {
   }
 }
 
+const MULTILINE_VISIBLE_ROWS = 12
+
+/**
+ * Keep the cursor row inside a bounded multiline editor window.
+ * @param lines - rendered editor rows.
+ * @param cursorLine - 0-based cursor row in that array.
+ * @param maxVisible - maximum rows to keep on screen.
+ */
+export function visibleEditorWindow(
+  lines: readonly string[],
+  cursorLine: number,
+  maxVisible = MULTILINE_VISIBLE_ROWS,
+): readonly string[] {
+  if (lines.length <= maxVisible) return lines
+  const cursor = Math.max(0, Math.min(cursorLine, lines.length - 1))
+  const maxStart = lines.length - maxVisible
+  const start = Math.max(0, Math.min(cursor - Math.floor((maxVisible - 1) / 2), maxStart))
+  return lines.slice(start, start + maxVisible)
+}
+
 function wrappedDetail(detail: string, width: number, maxLines = 4): string[] {
   const lines = wrapTextWithAnsi(escapeTerminalText(translateUiText(detail)), Math.max(1, width))
   if (lines.length <= maxLines) return lines.map(line => color.muted(line))
@@ -383,7 +403,12 @@ class MultilineEditorOverlay implements Component {
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
     this.editor.focused = this.focused
-    const body = this.editor.render(Math.max(8, safeWidth)).slice(0, 12)
+    const rendered = this.editor.render(Math.max(8, safeWidth))
+    const cursorLine = rendered.findIndex(line => line.includes(CURSOR_MARKER))
+    const body = visibleEditorWindow(
+      rendered,
+      cursorLine === -1 ? this.editor.getCursor().line : cursorLine,
+    )
     return modalFrame(this.request.title, [
       ...(this.request.detail === undefined
         ? []
@@ -394,11 +419,11 @@ class MultilineEditorOverlay implements Component {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, Key.ctrl(Key.enter)) || data === '\n') {
+    if (matchesKey(data, Key.ctrl(Key.enter))) {
       this.submit(escapeTerminalText(this.editor.getExpandedText()))
       return
     }
-    if (matchesKey(data, Key.enter) || data === '\r') {
+    if (matchesKey(data, Key.enter) || data === '\r' || data === '\n') {
       this.editor.insertTextAtCursor('\n')
       return
     }

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
-import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
+import { OverlayQueue, visibleEditorWindow, type OverlayNavigation } from '../src/client/overlays.ts'
 
 const ESCAPE = '\u001B'
 const ENTER = '\r'
@@ -202,7 +202,7 @@ describe('overlay navigation', () => {
     expect(actions).toMatch(/\.catch\(/u)
   })
 
-  it('submits multiline overlay text with Ctrl+Enter and keeps Enter as a newline', async () => {
+  it('submits multiline overlay text only on Kitty Ctrl+Enter, not raw LF', async () => {
     const harness = overlayHarness()
     const submitted = harness.overlays.multilineInput({
       title: 'edit queued',
@@ -213,9 +213,19 @@ describe('overlay navigation', () => {
     })
     harness.component().handleInput(ENTER)
     harness.component().handleInput('x')
-    expect(plain(harness.component().render(80))).toContain('Ctrl+Enter')
     harness.component().handleInput('\n')
-    await expect(submitted).resolves.toBe('hello\nx')
+    expect(plain(harness.component().render(80))).toContain('Ctrl+Enter')
+    expect(plain(harness.component().render(80))).toContain('hello')
+    harness.component().handleInput('\u001B[13;5u')
+    await expect(submitted).resolves.toBe('hello\nx\n')
+  })
+
+  it('keeps the multiline cursor row inside the visible editor window', () => {
+    const lines = Array.from({ length: 20 }, (_, index) => `line-${String(index)}`)
+    expect(visibleEditorWindow(lines, 0, 12).at(0)).toBe('line-0')
+    expect(visibleEditorWindow(lines, 19, 12).at(-1)).toBe('line-19')
+    expect(visibleEditorWindow(lines, 10, 12)).toContain('line-10')
+    expect(visibleEditorWindow(lines, 10, 12)).toHaveLength(12)
   })
 
   it('aborts the navigation signal when Escape closes a busy session', async () => {
