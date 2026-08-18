@@ -76,6 +76,7 @@ interface TranscriptPreferences {
   readonly diffContextLines: number
   readonly expandedTools: ReadonlySet<string>
   readonly collapsedTools: ReadonlySet<string>
+  readonly focusedTool?: string
 }
 
 type TranscriptImageAttachment = Extract<AssistantBlock, { kind: 'image' }>['attachment']
@@ -677,6 +678,10 @@ function detailRow(detail: ToolDetail, depth: number): TranscriptRow {
   }
 }
 
+function toolFocusMark(preferences: TranscriptPreferences, key: string | undefined): string {
+  return key !== undefined && preferences.focusedTool === key ? color.accent('› ') : ''
+}
+
 function toolCardExpanded(preferences: TranscriptPreferences, key: string | undefined): boolean {
   if (preferences.tools === 'hidden') return false
   if (key !== undefined) {
@@ -707,7 +712,7 @@ function toolBlockRows(
     return [
       {
         format: 'plain',
-        text: `${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}`,
+        text: `${toolFocusMark(preferences, key)}${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}`,
         ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
       },
       ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
@@ -718,7 +723,7 @@ function toolBlockRows(
   return [
     {
       format: 'plain',
-      text: `${prefix}${color.accent(toolTitle(block))}`,
+      text: `${toolFocusMark(preferences, key)}${prefix}${color.accent(toolTitle(block))}`,
       pulse: 'marker',
       liveDurationSince: block.time,
       ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
@@ -872,6 +877,7 @@ function nodeFingerprint(
     diffContextLines: preferences.diffContextLines,
     expanded: preferences.expandedTools.has(node.key),
     collapsed: preferences.collapsedTools.has(node.key),
+    focusedTool: preferences.focusedTool,
   })
 }
 
@@ -1140,6 +1146,7 @@ export class Transcript implements Component, Focusable {
   private search: { query: string; composing: boolean; matchIndex: number } | undefined
   private exampleCursor = 0
   private toolCursor = 0
+  private toolFocus = false
   private readonly expandedTools = new Set<string>()
   private readonly collapsedTools = new Set<string>()
   private readonly nodeCache = new Map<string, {
@@ -1266,6 +1273,7 @@ export class Transcript implements Component, Focusable {
       diffContextLines: this.diffContextLines,
       expandedTools: this.expandedTools,
       collapsedTools: this.collapsedTools,
+      ...(this.toolFocus ? { focusedTool: this.toolKeys()[this.toolCursor] } : {}),
     }
     const visibleNodes = snapshot.chat.order.flatMap((key) => {
       const node = snapshot.chat.nodes.get(key)
@@ -1344,11 +1352,41 @@ export class Transcript implements Component, Focusable {
       const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
       return example === undefined ? undefined : { kind: 'example', text: emptyExampleText(example) }
     }
+    if (!this.toolFocus) {
+      this.enterToolFocus()
+      return undefined
+    }
     const key = this.toolKeys()[this.toolCursor]
     if (key === undefined || this.snapshot === undefined) return undefined
     this.toggleToolCard(key)
     this.update(this.snapshot, this.imageLoader)
     return { kind: 'tool', key }
+  }
+
+  /**
+   * Enter tool-card focus so ↑↓ move among cards instead of scrolling.
+   * @returns true when at least one tool card can be focused.
+   */
+  enterToolFocus(): boolean {
+    const keys = this.toolKeys()
+    if (keys.length === 0 || this.snapshot === undefined) return false
+    this.toolFocus = true
+    this.toolCursor = Math.min(this.toolCursor, keys.length - 1)
+    this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return true
+  }
+
+  /**
+   * Leave tool-card focus and restore ordinary transcript scrolling.
+   * @returns true when focus mode was active.
+   */
+  exitToolFocus(): boolean {
+    if (!this.toolFocus) return false
+    this.toolFocus = false
+    if (this.snapshot !== undefined) this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return true
   }
 
   /**
@@ -1548,17 +1586,16 @@ export class Transcript implements Component, Focusable {
         return
       }
     }
-    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
+    if (this.toolFocus && (matchesKey(data, Key.up) || matchesKey(data, Key.down))) {
       const keys = this.toolKeys()
-      if (keys.length > 0) {
-        const delta = matchesKey(data, Key.up) ? -1 : 1
-        const next = this.toolCursor + delta
-        if (next >= 0 && next < keys.length) {
-          this.toolCursor = next
-          this.requestRender()
-        }
-        return
+      const delta = matchesKey(data, Key.up) ? -1 : 1
+      const next = this.toolCursor + delta
+      if (next >= 0 && next < keys.length) {
+        this.toolCursor = next
+        if (this.snapshot !== undefined) this.update(this.snapshot, this.imageLoader)
+        this.requestRender()
       }
+      return
     }
     this.turnCursor = undefined
     const rows = Math.max(1, Math.floor(this.viewportRows()))

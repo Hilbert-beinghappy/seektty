@@ -102,15 +102,34 @@ describe('per-card tool expand', () => {
     expect(stripAnsi(transcript.render(80).join('\n'))).not.toContain('result-a')
     expect(stripAnsi(transcript.render(80).join('\n'))).not.toContain('result-b')
 
+    expect(transcript.enterToolFocus()).toBe(true)
+    expect(stripAnsi(transcript.render(80).join('\n'))).toMatch(/›.*First tool/u)
     expect(transcript.activateFocused()).toEqual({ kind: 'tool', key: 'a' })
     const first = stripAnsi(transcript.render(80).join('\n'))
     expect(first).toContain('result-a')
     expect(first).not.toContain('result-b')
 
     transcript.handleInput('\u001b[B')
+    expect(stripAnsi(transcript.render(80).join('\n'))).toMatch(/›.*Second tool/u)
     expect(transcript.activateFocused()).toEqual({ kind: 'tool', key: 'b' })
     const both = stripAnsi(transcript.render(80).join('\n'))
     expect(both).toContain('result-a')
     expect(both).toContain('result-b')
+  })
+
+  it('lets arrow keys scroll until tool-card focus mode is entered', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript()
+    transcript.update(snapshot([
+      tool('a', 'First tool', 'result-a'),
+      tool('b', 'Second tool', 'result-b'),
+    ]))
+    transcript.focused = true
+    transcript.handleInput('\u001b[B')
+    expect(stripAnsi(transcript.render(80).join('\n'))).not.toMatch(/›/u)
+    expect(transcript.activateFocused()).toBeUndefined()
+    expect(transcript.enterToolFocus()).toBe(true)
+    expect(transcript.exitToolFocus()).toBe(true)
+    expect(stripAnsi(transcript.render(80).join('\n'))).not.toMatch(/›/u)
   })
 })

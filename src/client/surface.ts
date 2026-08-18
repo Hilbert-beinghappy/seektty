@@ -726,6 +726,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (matchesBinding('focusToggle', data) && (transcriptFocused || editor.getText() === '')) {
         transcript.cancelSearch()
+        transcript.exitToolFocus()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
         setNotice(transcriptFocused
@@ -736,6 +737,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (transcriptFocused && matchesKey(data, Key.escape)) {
         if (transcript.cancelSearch()) {
           setNotice(ui('已取消查找', 'Search cancelled'), 'info')
+          return { consume: true }
+        }
+        if (transcript.exitToolFocus()) {
+          setNotice(ui('已退出工具卡焦点', 'Left tool-card focus'), 'info')
           return { consume: true }
         }
         focusEditor()
