@@ -2,8 +2,9 @@
 
 import { ui } from './locale.ts'
 
-/** Host timeout copy stays Chinese so matching does not follow the UI locale. */
-const TIMEOUT_MARK = { zh: '超时' }
+/** Stable Chinese machine mark for startup timeouts; matching must not follow the UI locale. */
+const STARTUP_TIMEOUT = { zh: '超时', en: 'timed out' } as const
+export const STARTUP_TIMEOUT_MARK = STARTUP_TIMEOUT.zh
 
 export interface PluginFailureOutput {
   readonly stderr: string
@@ -14,6 +15,14 @@ export interface PluginFailureOutput {
 function unwrapTransport(message: string): string | undefined {
   const match = /^transport failure for .+?: handler failure: ([\s\S]+)$/u.exec(message)
   return match === null ? undefined : match[1]?.trim()
+}
+
+/**
+ * Build the language-agnostic timeout Error thrown by snapshot waits.
+ * @param label - startup phase already chosen by the caller.
+ */
+export function startupTimeoutError(label: string): Error {
+  return new Error(`${label}${STARTUP_TIMEOUT_MARK}`)
 }
 
 /**
@@ -39,9 +48,9 @@ export function explainFailure(message: string): string {
       `An internal call failed: ${inner}\nNext: retry this action; if it keeps happening, run /doctor or /restart.`,
     )
   }
-  if (message.includes(TIMEOUT_MARK.zh) && message.includes('/doctor')) {
+  if (message.includes(STARTUP_TIMEOUT_MARK)) {
     return ui(
-      `${message.replace(/，请运行 \/doctor 检查 Harness 状态$/u, '')}。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek。`,
+      `${message.replace(/，请运行 \/doctor 检查 Harness 状态$/u, '').replace(/。下一步：.*$/u, '')}。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek。`,
       'Startup timed out. Next: confirm dsh is on PATH or DSH_BIN, check the Profile, then run deepseek again.',
     )
   }

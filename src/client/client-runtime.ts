@@ -31,6 +31,7 @@ import {
 } from '../dsh-compat.ts'
 import { measureStartup } from '../startup-trace.ts'
 import { ui } from './locale.ts'
+import { explainFailure, startupTimeoutError } from './error-advice.ts'
 
 const STARTUP_TIMEOUT_MS = 20_000
 
@@ -78,10 +79,7 @@ export function waitForSnapshot<T>(
       if (settled) return
       settled = true
       unsubscribe()
-      reject(new Error(ui(
-        `${label}超时。下一步：确认 dsh 在 PATH 或 DSH_BIN 中，检查 Profile 后重新运行 deepseek`,
-        `${label} timed out. Next: confirm dsh is on PATH or DSH_BIN, check the Profile, then run deepseek again`,
-      )))
+      reject(startupTimeoutError(label))
     }, STARTUP_TIMEOUT_MS)
     const registeredUnsubscribe = source.subscribe(() => {
       const snapshot = source.getSnapshot()
@@ -227,6 +225,7 @@ export async function startTuiClient(
     }
   } catch (error) {
     await ctx.fiber.dispose()
+    if (error instanceof Error) throw new Error(explainFailure(error.message), { cause: error })
     throw error
   }
 }
