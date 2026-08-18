@@ -116,6 +116,7 @@ export interface OverlayNavigation<TResult = void> extends OverlayPrompts {
     request: SelectOverlayRequest,
     onSelect: (choice: OverlayChoice) => void | Promise<void>,
   ): void
+  updateChoices(choices: readonly OverlayChoice[], notice?: string): void
   back(): void
   finish(value?: TResult): void
 }
@@ -221,12 +222,25 @@ class SearchSelectOverlay implements Component {
   private notice = ''
 
   constructor(
-    private readonly request: SelectOverlayRequest,
+    private request: SelectOverlayRequest,
     private readonly submit: (value: OverlayChoice) => void,
   ) {
     this.filtered = request.choices
     this.list = this.createList(this.filtered, request.initialChoiceId)
     this.input.onSubmit = () => { this.choose() }
+  }
+
+  /**
+   * Refresh rows without dropping the typed query or the selected stable id.
+   * @param choices - latest rows from Host.
+   * @param notice - optional in-page diagnostic; empty clears a previous one.
+   */
+  updateChoices(choices: readonly OverlayChoice[], notice = ''): void {
+    const selectedId = this.list.getSelectedItem()?.value
+    this.request = { ...this.request, choices }
+    this.filtered = this.filterChoices(this.input.getValue())
+    this.list = this.createList(this.filtered, selectedId)
+    this.notice = notice
   }
 
   invalidate(): void {
@@ -290,11 +304,15 @@ class SearchSelectOverlay implements Component {
     return list
   }
 
-  private applyFilter(query: string): void {
-    this.filtered = query === ''
+  private filterChoices(query: string): readonly OverlayChoice[] {
+    return query === ''
       ? this.request.choices
       : fuzzyFilter([...this.request.choices], query, choice =>
         `${choice.label} ${choice.description ?? ''} ${choice.id}`)
+  }
+
+  private applyFilter(query: string): void {
+    this.filtered = this.filterChoices(query)
     this.list = this.createList(this.filtered)
     this.notice = ''
   }
@@ -675,6 +693,16 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     entry.component = new SearchSelectOverlay(request, choice => {
       this.dispatch(entry, () => onSelect(choice))
     })
+    this.requestRender()
+  }
+
+  updateChoices(choices: readonly OverlayChoice[], notice?: string): void {
+    if (this.closed) return
+    const entry = this.current()
+    if (entry === undefined || !(entry.component instanceof SearchSelectOverlay)) {
+      throw new Error(ui('没有可更新的选择页', 'No select page to update'))
+    }
+    entry.component.updateChoices(choices, notice ?? '')
     this.requestRender()
   }
 

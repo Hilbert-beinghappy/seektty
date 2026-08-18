@@ -1679,7 +1679,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       }
       const paint = (): void => {
         if (!onList) return
-        nav.replaceSelectPage(this.queueListRequest(), onSelect)
+        nav.updateChoices(this.queueListRequest().choices)
       }
       const timer = setInterval(paint, 1_000)
       timer.unref()
@@ -3055,7 +3055,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       }
       const paint = (): void => {
         if (!onList) return
-        nav.replaceSelectPage(this.jobListRequest(currentId), onSelect)
+        nav.updateChoices(this.jobListRequest(currentId).choices)
       }
       const timer = setInterval(paint, 1_000)
       timer.unref()
@@ -3192,7 +3192,9 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           inflight = true
           void this.capabilities.subagents(true).then((next) => {
             rows = [...next]
-            if (onList) nav.replaceSelectPage(request(), onSelect)
+            if (onList) nav.updateChoices(request().choices)
+          }).catch((error: unknown) => {
+            if (onList) nav.updateChoices(request().choices, capabilityError(error))
           }).finally(() => {
             inflight = false
           })

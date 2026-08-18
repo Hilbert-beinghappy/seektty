@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
 import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
@@ -154,6 +156,50 @@ describe('overlay navigation', () => {
     expect(harness.hide).not.toHaveBeenCalled()
     harness.component().handleInput(ESCAPE)
     await expect(session).resolves.toBeUndefined()
+  })
+
+  it('updateChoices keeps the typed query and selected id across auto-refresh', async () => {
+    const harness = overlayHarness()
+    let navigation: OverlayNavigation | undefined
+    const session = harness.overlays.navigate(async (nav) => {
+      navigation = nav
+      await nav.selectPage({
+        title: 'jobs snapshot',
+        choices: [
+          { id: 'alpha', label: 'alpha job' },
+          { id: 'bravo', label: 'bravo job' },
+          { id: 'other', label: 'unrelated' },
+        ],
+      }, () => undefined)
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('alpha job')
+    })
+    harness.component().handleInput('job')
+    harness.component().handleInput('\u001B[B')
+    expect(plain(harness.component().render(80))).toContain('job')
+    expect(plain(harness.component().render(80))).toContain('bravo job')
+    navigation?.updateChoices([
+      { id: 'alpha', label: 'alpha job · running' },
+      { id: 'bravo', label: 'bravo job · idle' },
+      { id: 'other', label: 'unrelated' },
+    ])
+    const after = plain(harness.component().render(80))
+    expect(after).toContain('bravo job · idle')
+    expect(after).toContain('alpha job · running')
+    expect(after).not.toContain('unrelated')
+    expect(after).toMatch(/job/u)
+    navigation?.updateChoices(
+      [{ id: 'alpha', label: 'alpha job · running' }],
+      'refresh failed',
+    )
+    expect(plain(harness.component().render(80))).toContain('refresh failed')
+    expect(harness.hide).not.toHaveBeenCalled()
+    harness.component().handleInput(ESCAPE)
+    await expect(session).resolves.toBeUndefined()
+    const actions = readFileSync(resolve(import.meta.dirname, '../src/client/actions.ts'), 'utf8')
+    expect(actions).toMatch(/nav\.updateChoices\(/u)
+    expect(actions).toMatch(/\.catch\(/u)
   })
 
   it('submits multiline overlay text with Ctrl+Enter and keeps Enter as a newline', async () => {
