@@ -1,4 +1,4 @@
-/** Queue reorder helpers. Host QueueAction has no native move. */
+/** Queue order helpers. Host QueueAction has no atomic move; the TUI must not fake one. */
 
 /**
  * Return a new array with one item swapped toward `direction`.

@@ -39,7 +39,6 @@ import { pluginFailureDetail } from './error-advice.ts'
 import { SessionToolAllowlist } from './session-tool-allowlist.ts'
 import { trajectoryRequestDetail } from './trajectory-detail.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
-import { moveIndex } from './queue-order.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
 import type {
   TuiMarketplaceCandidate,
@@ -1751,29 +1750,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
     const row = rows.find(candidate => candidate.id === id)
     if (row === undefined || row.placement !== 'queued') return
-    const index = queued.findIndex(candidate => candidate.id === row.id)
-    const canReorder = queued.length > 1 && queued.every(item => item.text !== null)
     const action = await nav.select({
       title: ui('队列操作', "Queue action"),
       choices: [
         { id: 'steer', label: ui('转为引导', "Convert to steering"), description: ui('并入当前轮次', "Merge into current turn") },
         { id: 'edit', label: ui('编辑', "Edit"), ...(row.text === null ? { disabledReason: ui('含非文本内容，无法文本编辑', "Contains non-text content and cannot be edited as text") } : {}) },
-        {
-          id: 'up',
-          label: ui('上移', "Move up"),
-          description: ui('与上一条排队消息对调', "Swap with the previous queued message"),
-          ...(!canReorder || index <= 0
-            ? { disabledReason: !canReorder ? ui('含非文本内容或不足两条，无法重排', "Cannot reorder: a non-text item is present, or fewer than two items") : ui('已在队首', "Already first") }
-            : {}),
-        },
-        {
-          id: 'down',
-          label: ui('下移', "Move down"),
-          description: ui('与下一条排队消息对调', "Swap with the next queued message"),
-          ...(!canReorder || index >= queued.length - 1
-            ? { disabledReason: !canReorder ? ui('含非文本内容或不足两条，无法重排', "Cannot reorder: a non-text item is present, or fewer than two items") : ui('已在队尾', "Already last") }
-            : {}),
-        },
         { id: 'remove', label: ui('删除', "Delete"), description: ui('从待处理队列移除', "Remove from the pending queue") },
       ],
       searchable: false,
@@ -1785,30 +1766,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       const text = await nav.multilineInput({ title: ui('编辑排队消息', "Edit queued message"), initialValue: row.text })
       if (text !== undefined) await this.capabilities.updateQueue(row.id, { kind: 'edit', content: [{ type: 'text', text }] })
     }
-    if (action.id === 'up' || action.id === 'down') {
-      await this.reorderQueued(queued, index, action.id === 'up' ? -1 : 1)
-    }
     this.host.notice(ui('队列操作已提交', "Queue action submitted"), 'success')
-  }
-
-  private async reorderQueued(
-    queued: ConversationSnapshot['queue'],
-    index: number,
-    direction: -1 | 1,
-  ): Promise<void> {
-    const movable = queued.filter(row => row.placement === 'queued')
-    if (movable.some(row => row.text === null)) throw new Error(ui('含非文本内容，无法重排', "Cannot reorder a non-text item"))
-    const ordered = moveIndex(movable, index, direction)
-    if (ordered.every((row, position) => row.id === movable[position]?.id)) return
-    const active = this.capabilities.active()
-    if (active === undefined) return
-    for (const row of movable) await this.capabilities.updateQueue(row.id, { kind: 'remove' })
-    for (const row of ordered) {
-      const text = row.text
-      if (text === null) continue
-      const result = await active.session.prompt([{ type: 'text', text }], 'queue')
-      if (!result.ok) throw new Error(ui(`重排队列失败：${result.error.message}`, `Failed to reorder the queue: ${result.error.message}`))
-    }
   }
 
   private async steer(args: string): Promise<void> {
