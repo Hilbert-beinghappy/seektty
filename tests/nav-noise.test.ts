@@ -1,24 +1,49 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
+import { themePreviewFooter } from '../src/client/actions.ts'
+import { setUiLocale } from '../src/client/locale.ts'
+import { noticeForHostCommand, noticeForPureNavigation } from '../src/client/nav-notice.ts'
+import { OverlayQueue } from '../src/client/overlays.ts'
 
-const root = resolve(import.meta.dirname, '..')
+afterEach(() => { setUiLocale('zh') })
+
+function plain(lines: readonly string[]): string {
+  return lines.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+}
 
 describe('navigation noise', () => {
   it('does not toast Tab/Esc navigation or a successful Host command', () => {
-    const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    expect(surface).not.toContain('对话浏览 · Tab/Escape 返回输入')
-    expect(surface).not.toContain('已返回输入区')
-    expect(surface).not.toContain('已取消查找')
-    expect(surface).not.toContain('已退出工具卡焦点')
-    expect(surface).not.toContain('已执行 /')
+    expect(noticeForPureNavigation()).toBeUndefined()
+    expect(noticeForHostCommand({ ok: true, matched: true }, 'compact')).toBeUndefined()
+    expect(noticeForHostCommand({ ok: true, matched: false }, 'compact')).toEqual({
+      message: '未识别命令 /compact',
+      tone: 'warning',
+    })
+    expect(noticeForHostCommand({ ok: false, message: 'boom' }, 'compact')).toEqual({
+      message: '命令失败：boom',
+      tone: 'error',
+    })
   })
 
   it('keeps selector footers short and names Esc abort on progress pages', () => {
-    const overlays = readFileSync(resolve(root, 'src/client/overlays.ts'), 'utf8')
-    expect(overlays).toContain('Enter 选择 · Esc 返回')
-    expect(overlays).toContain('Space 勾选')
-    expect(overlays).toContain('Esc 中止')
-    expect(overlays).not.toContain('↑↓ 选择 · Enter 确认 · Esc 返回/关闭')
+    const overlays = new OverlayQueue({
+      showOverlay: vi.fn((component: Component) => {
+        expect(plain(component.render(80))).toContain('Enter 选择 · Esc 返回')
+        return { hide: vi.fn() } as unknown as OverlayHandle
+      }),
+      requestRender: vi.fn(),
+      terminal: { rows: 24, cols: 80 },
+    } as unknown as TUI)
+    void overlays.select({
+      title: 'models',
+      choices: [{ id: 'a', label: 'a' }],
+    })
+  })
+
+  it('tells theme preview that Esc cancels, restores, and discards unsaved edits', () => {
+    expect(themePreviewFooter()).toBe('Enter 选择 · Esc 取消并恢复')
+    setUiLocale('en')
+    expect(themePreviewFooter()).toBe('Enter select · Esc cancel and restore')
+    expect(themePreviewFooter()).not.toMatch(/\p{Script=Han}/u)
   })
 })

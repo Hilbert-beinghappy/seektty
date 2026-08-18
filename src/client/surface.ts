@@ -18,6 +18,7 @@ import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import { capabilityError, type TuiActiveSession } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
+import { noticeForHostCommand, noticeForPureNavigation } from './nav-notice.ts'
 import {
   BottomAnchoredLayout,
   ContextBar,
@@ -680,8 +681,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return
         }
         const result = await current.session.command(trimmed)
-        if (!result.ok) setNotice(ui(`命令失败：${result.error.message}`, `Command failed: ${result.error.message}`), 'error')
-        else if (!result.value.matched) setNotice(ui(`未识别命令 /${name}`, `Command /${name} was not recognized`), 'warning')
+        const hostNotice = noticeForHostCommand(
+          result.ok
+            ? { ok: true, matched: result.value.matched }
+            : { ok: false, message: result.error.message },
+          name,
+        )
+        if (hostNotice !== undefined) setNotice(hostNotice.message, hostNotice.tone)
       } catch (error) {
         setNotice(capabilityError(error), 'error')
       }
@@ -762,12 +768,24 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         transcript.exitToolFocus()
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
+        const tabNotice = noticeForPureNavigation()
+        if (tabNotice !== undefined) setNotice(tabNotice, 'info')
         return { consume: true }
       }
       if (transcriptFocused && matchesKey(data, Key.escape)) {
-        if (transcript.cancelSearch()) return { consume: true }
-        if (transcript.exitToolFocus()) return { consume: true }
+        if (transcript.cancelSearch()) {
+          const escNotice = noticeForPureNavigation()
+          if (escNotice !== undefined) setNotice(escNotice, 'info')
+          return { consume: true }
+        }
+        if (transcript.exitToolFocus()) {
+          const escNotice = noticeForPureNavigation()
+          if (escNotice !== undefined) setNotice(escNotice, 'info')
+          return { consume: true }
+        }
         focusEditor()
+        const escNotice = noticeForPureNavigation()
+        if (escNotice !== undefined) setNotice(escNotice, 'info')
         return { consume: true }
       }
       if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
