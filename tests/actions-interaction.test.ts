@@ -201,9 +201,16 @@ describe('pending interaction continuation', () => {
     } as unknown as ConversationSnapshot
     const followLatest = vi.fn()
     const answerApproval = vi.fn(async () => undefined)
-    const select = vi.fn(async (request: { detail?: string }) => {
+    const finish = vi.fn()
+    const detail = vi.fn(async () => undefined)
+    const selectPage = vi.fn(async (
+      request: { detail?: string; initialChoiceId?: string; choices: readonly { id: string }[] },
+      onSelect: (choice: { id: string; label: string }) => Promise<void>,
+    ) => {
       expect(request.detail).toContain('$ ls -la src')
-      return { id: 'reject', label: '拒绝' }
+      expect(request.initialChoiceId).toBe('reject')
+      expect(request.choices.map(choice => choice.id)).toEqual(['allow', 'reject'])
+      await onSelect({ id: 'reject', label: '拒绝' })
     })
     const active = {
       session: { getSnapshot: () => snapshot },
@@ -212,10 +219,58 @@ describe('pending interaction continuation', () => {
       active: () => active,
       answerApproval,
     } as unknown as HarnessTuiCapabilities
-    const actions = new TuiActions(capabilities, host({ select }, { followLatest }))
+    const actions = new TuiActions(capabilities, host({ selectPage, detail, finish }, { followLatest }))
 
     actions.syncPending(snapshot)
     await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(selectPage).toHaveBeenCalledOnce()
+    expect(detail).not.toHaveBeenCalled()
+    expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
+  })
+
+  it('opens full arguments as a child page and keeps the approval selector', async () => {
+    const approval = {
+      key: 'approval:long',
+      kind: 'approval',
+      sessionId: 'session' as SessionId,
+      payload: {
+        toolName: 'shell',
+        callId: 'call-long',
+        approvalId: 'appr-2',
+        reason: '需要执行命令',
+      },
+    } as unknown as PendingWait<'approval'>
+    const longCommand = `printf '${'x'.repeat(1_300)}'`
+    const snapshot = {
+      pending: [approval],
+      runningCalls: [{
+        callId: 'call-long',
+        name: 'shell',
+        argsRaw: JSON.stringify({ command: longCommand }),
+        callView: { card: 'terminal', title: longCommand },
+      }],
+    } as unknown as ConversationSnapshot
+    const answerApproval = vi.fn(async () => undefined)
+    const finish = vi.fn()
+    const detail = vi.fn(async () => undefined)
+    const selectPage = vi.fn(async (
+      request: { initialChoiceId?: string; choices: readonly { id: string }[] },
+      onSelect: (choice: { id: string; label: string }) => Promise<void>,
+    ) => {
+      expect(request.initialChoiceId).toBe('reject')
+      expect(request.choices.map(choice => choice.id)).toEqual(['allow', 'inspect', 'reject'])
+      await onSelect({ id: 'inspect', label: '查看完整参数' })
+      await onSelect({ id: 'reject', label: '拒绝' })
+    })
+    const actions = new TuiActions({
+      active: () => ({ session: { getSnapshot: () => snapshot } }) as unknown as TuiActiveSession,
+      answerApproval,
+    } as unknown as HarnessTuiCapabilities, host({ selectPage, detail, finish }, { followLatest: vi.fn() }))
+
+    actions.syncPending(snapshot as ConversationSnapshot)
+    await vi.waitFor(() => { expect(answerApproval).toHaveBeenCalledOnce() })
+    expect(selectPage).toHaveBeenCalledOnce()
+    expect(detail).toHaveBeenCalledOnce()
     expect(answerApproval).toHaveBeenCalledWith(approval, 'rejected')
   })
 
