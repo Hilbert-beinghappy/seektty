@@ -108,4 +108,36 @@ describe('transcript node cache (task 5.2)', () => {
     transcript.render(80)
     expect(internals.componentRenders).toBe(first)
   })
+
+  it('rebuilds when deliverables change even if node.data stays the same', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const data = {
+      kind: 'assistant',
+      seq: 2,
+      time: 2,
+      turn: 1,
+      step: 1,
+      blocks: [{ kind: 'text', text: 'done' }],
+    }
+    const node = (files: readonly string[]): ChatConversationViewNode => ({
+      ...assistant('a1', 'done'),
+      data,
+      location: {
+        kind: 'turn',
+        turn: {
+          turn: 1,
+          data: {
+            get: (key: string) => key === 'deliverables'
+              ? { produced: files.map(path => ({ seq: 1, path })) }
+              : undefined,
+          },
+        },
+      },
+    } as ChatConversationViewNode)
+    const transcript = new Transcript(() => Number.POSITIVE_INFINITY)
+    transcript.update(snapshot([node([])]))
+    expect(transcript.render(80).join('\n')).not.toContain('notes.md')
+    transcript.update(snapshot([node(['notes.md'])]))
+    expect(transcript.render(80).join('\n')).toContain('notes.md')
+  })
 })

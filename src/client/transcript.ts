@@ -864,6 +864,13 @@ function grouped(rows: readonly TranscriptRow[]): TranscriptRow[] {
   return rows.map((row, index) => index === 0 ? { ...row, gapBefore: true } : row)
 }
 
+function deliverablesFingerprint(node: ChatConversationViewNode): readonly string[] {
+  if (!isConversationNode(node.data) || node.data.kind !== 'assistant') return []
+  const location = node.location
+  if (location.kind !== 'turn' && location.kind !== 'step') return []
+  return producedForClosing(location.turn.data.get('deliverables'), node.data.seq)
+}
+
 function nodeFingerprint(
   node: ChatConversationViewNode,
   preferences: TranscriptPreferences,
@@ -871,6 +878,7 @@ function nodeFingerprint(
   return JSON.stringify({
     kind: node.kind,
     data: node.data,
+    deliverables: deliverablesFingerprint(node),
     tools: preferences.tools,
     reasoning: preferences.reasoning,
     toolOutputLineLimit: preferences.toolOutputLineLimit,
