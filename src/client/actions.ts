@@ -2563,7 +2563,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
     const plugin = snapshot.plugins.find(candidate => candidate.name === target)
     if (plugin === undefined) throw new Error(ui(`当前 Profile 未安装 ${JSON.stringify(target)}`, `${JSON.stringify(target)} is not installed in the current Profile`))
     const confirmed = await this.host.overlays.confirm(
-      ui(`从 ${snapshot.profile} 移除 ${target}？`, `Remove ${snapshot.profile} from ${target}?`),
+      ui(`从 ${snapshot.profile} 移除 ${target}？`, `Remove ${target} from ${snapshot.profile}?`),
       ui(`将执行：pnpm remove ${target}。Bundle 列表会由原生 Manager 对账。`, `This will run: pnpm remove ${target}. The Bundle list is reconciled by the native Manager.`),
       ui('移除', "Remove"),
     )
