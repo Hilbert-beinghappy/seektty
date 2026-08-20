@@ -98,13 +98,31 @@ describe('patched pi-tui render stability', () => {
   it('never blanks the whole screen on a forced full redraw', async () => {
     const { terminal, tui, lines } = await startedTui()
     lines[5] = 'row-05-restyled'
+    lines[25] = 'row-25-restyled'
     tui.requestRender(true)
     await nextFrame()
     const output = terminal.output()
     expect(output).not.toContain(CLEAR_SCREEN)
-    expect(output).toContain(CLEAR_SCROLLBACK)
+    expect(output).not.toContain(CLEAR_SCROLLBACK)
     expect(output).toContain(CLEAR_TO_END)
-    expect(output).toContain('row-05-restyled')
+    // Tall content: only the visible window is painted, so older turns stay
+    // in native scrollback instead of replaying through the viewport.
+    expect(output).not.toContain('row-05-restyled')
+    expect(output).toContain('row-25-restyled')
+    expect(output).toContain('row-29')
+    tui.stop()
+  })
+
+  it('does not replay early history when the terminal width changes', async () => {
+    const { terminal, tui } = await startedTui()
+    terminal.columns = 39
+    tui.requestRender()
+    await nextFrame()
+    const output = terminal.output()
+    expect(output).not.toContain(CLEAR_SCREEN)
+    expect(output).not.toContain(CLEAR_SCROLLBACK)
+    expect(output).not.toContain('row-00')
+    expect(output).toContain('row-29')
     tui.stop()
   })
 

@@ -376,15 +376,27 @@ function assistantBlockText(block: AssistantBlock, preferences: TranscriptPrefer
   }
 }
 
-function assistantBlockRows(block: AssistantBlock, preferences: TranscriptPreferences): TranscriptRow[] {
+function assistantBlockRows(
+  block: AssistantBlock,
+  preferences: TranscriptPreferences,
+  liveReasoning = false,
+): TranscriptRow[] {
   switch (block.kind) {
     case 'text': return block.text === '' ? [] : [{ format: 'markdown', text: block.text }]
-    case 'reasoning':
-      if (!preferences.reasoning || block.text === '') return []
+    case 'reasoning': {
+      if (block.text === '') return []
+      if (!preferences.reasoning && !liveReasoning) return []
+      if (liveReasoning && !preferences.reasoning) {
+        // Plain text keeps a stable wrapped prefix while tokens append, so
+        // earlier reasoning lines already in scrollback do not look changed.
+        return [{ format: 'plain', text: color.muted(block.text) }]
+      }
+      const quoted = block.text.split('\n').map(line => `> ${line}`).join('\n')
       return [{
         format: 'markdown',
-        text: `> **${ui('思考', 'Reasoning')}**\n>\n${block.text.split('\n').map(line => `> ${line}`).join('\n')}`,
+        text: `> **${ui('思考', 'Reasoning')}**\n>\n${quoted}`,
       }]
+    }
     case 'image': return [imageRow(block.attachment)]
     case 'tool-call':
       if (preferences.tools === 'hidden') return []
@@ -1002,15 +1014,16 @@ function assistantStepData(data: unknown): AssistantChatData | undefined {
 function assistantStepRows(data: unknown, preferences: TranscriptPreferences): TranscriptRow[] {
   const step = assistantStepData(data)
   if (step === undefined) return []
-  const content = step.blocks.flatMap(block => block.kind === 'tool-call' ? [] : assistantBlockRows(block, preferences))
   const hasFoldedReasoning = !preferences.reasoning
     && step.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
   const hasAnswer = step.blocks.some(block => block.kind === 'text' && block.text !== '')
+  const thinking = !hasAnswer && step.status === 'running'
+  const content = step.blocks.flatMap(block => block.kind === 'tool-call'
+    ? []
+    : assistantBlockRows(block, preferences, thinking && !preferences.reasoning))
   if (content.length === 0 && step.status === 'settled' && !hasFoldedReasoning) return []
   const rows: TranscriptRow[] = []
-  if (!hasAnswer && step.status === 'running' && (hasFoldedReasoning || content.length === 0)) {
-    rows.push(thinkingRow())
-  }
+  if (thinking) rows.push(thinkingRow())
   rows.push(...content)
   if (step.status === 'interrupted') rows.push({ format: 'plain', text: color.warning(ui('已停止', 'Stopped')) })
   return grouped(rows)
@@ -1325,9 +1338,11 @@ export class Transcript implements Component, Focusable {
         toolOutputLineLimit: preferences.toolOutputLineLimit,
         diffContextLines: preferences.diffContextLines,
       }), () => {
-        const partialRows = partial.blocks.flatMap(block => assistantBlockRows(block, preferences))
+        const thinking = !partial.blocks.some(block => block.kind === 'text' && block.text !== '')
+        const partialRows = partial.blocks.flatMap(block =>
+          assistantBlockRows(block, preferences, thinking && !preferences.reasoning))
         return grouped([
-          ...(partialRows.length === 0 ? [thinkingRow()] : []),
+          ...(thinking ? [thinkingRow()] : []),
           ...partialRows,
         ])
       })

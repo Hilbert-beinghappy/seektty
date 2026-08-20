@@ -200,6 +200,7 @@ describe('conversation viewport', () => {
     const dim = transcript.render(40).join('\n')
     expect(dim).toContain('\u001B[38;2;52;65;95m◆')
     expect(dim).toContain('正在思考…')
+    expect(dim).toContain('内部推理')
 
     vi.advanceTimersByTime(640)
     const bright = transcript.render(40).join('\n')
@@ -212,7 +213,10 @@ describe('conversation viewport', () => {
         { kind: 'text', text: '开始回答' },
       ]),
     ]))
-    expect(transcript.render(40).join('\n')).not.toContain('正在思考…')
+    const answered = transcript.render(40).join('\n')
+    expect(answered).not.toContain('正在思考…')
+    expect(answered).not.toContain('内部推理')
+    expect(answered).toContain('开始回答')
     const calls = requestRender.mock.calls.length
     vi.advanceTimersByTime(640)
     expect(requestRender).toHaveBeenCalledTimes(calls)
@@ -229,8 +233,35 @@ describe('conversation viewport', () => {
     ]))
 
     expect(transcript.render(40).join('\n')).toContain('◆ 正在思考…')
+    expect(transcript.render(40).join('\n')).toContain('内部推理')
     vi.advanceTimersByTime(640)
     expect(requestRender).not.toHaveBeenCalled()
+    transcript.dispose()
+  })
+
+  it('streams folded reasoning under the thinking marker until answer text begins', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      assistantStep('a1', 'running', [{ kind: 'reasoning', text: '先拆问题\n再核对边界' }]),
+    ]))
+    const thinking = transcript.render(40).join('\n')
+    expect(thinking).toContain('正在思考…')
+    expect(thinking).toContain('先拆问题')
+    expect(thinking).toContain('再核对边界')
+
+    transcript.toggleReasoning()
+    transcript.update(snapshot([
+      assistantStep('a1', 'settled', [
+        { kind: 'reasoning', text: '先拆问题\n再核对边界' },
+        { kind: 'text', text: '结论' },
+      ]),
+    ]))
+    const shown = transcript.render(40).join('\n')
+    expect(shown).not.toContain('正在思考…')
+    expect(shown).toContain('思考')
+    expect(shown).toContain('先拆问题')
+    expect(shown).toContain('结论')
     transcript.dispose()
   })
 
