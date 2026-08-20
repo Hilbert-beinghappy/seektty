@@ -68,7 +68,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved.
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
@@ -87,7 +87,7 @@ deepseek --update
 The native dsh entry remains available:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 dsh --profile tui
 ```
 
@@ -152,7 +152,7 @@ Replace the former global package once. The new `deepseek` launcher then uses na
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
@@ -160,7 +160,7 @@ Custom Profiles migrate independently on first launch, for example `deepseek --p
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 ## Plug and unplug
@@ -174,7 +174,7 @@ dsh plugin --profile tui remove seektty
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 Installation writes directly to the target Harness Profile dependencies, Bundle order, and pnpm lockfile. TUI `/plugin` and native `dsh plugin` operate on that same Profile state.
@@ -252,4 +252,4 @@ pnpm test:stock
 
 The tested compatibility baseline is official `0.1.0-rc.8`. The declared minimum host is official `0.1.0-rc.6`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. A scheduled workflow scans the official npm `latest` dist-tag, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
 
-The source repository and the stable `v1.1.0` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.
+The source repository and the stable `v1.0.2` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.

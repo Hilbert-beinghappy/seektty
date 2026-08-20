@@ -68,7 +68,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim。
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
@@ -87,7 +87,7 @@ deepseek --update
 也可以只使用 dsh 的原生入口：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 dsh --profile tui
 ```
 
@@ -152,7 +152,7 @@ dsh --profile tui
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
@@ -160,7 +160,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 ## 直接插拔
@@ -174,7 +174,7 @@ dsh plugin --profile tui remove seektty
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 安装结果直接写入目标 Harness Profile 的依赖、Bundle 顺序和 pnpm lockfile。TUI 的 `/plugin` 与原生 `dsh plugin` 操作同一份 Profile 状态。
@@ -252,4 +252,4 @@ pnpm test:stock
 
 已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
 
-源码仓库与稳定版 `v1.1.0` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。
+源码仓库与稳定版 `v1.0.2` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。
