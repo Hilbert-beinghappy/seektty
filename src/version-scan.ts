@@ -8,6 +8,7 @@
 import { compareDshVersion, launcherCopy } from './dsh-compat.ts'
 
 export const DSH_DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/@deepseek-ai/dsh/dist-tags'
+export const DSH_GITHUB_RELEASES_URL = 'https://api.github.com/repos/deepseek-ai/deepseek-harness/releases?per_page=5'
 export const SEEKTTY_LATEST_RELEASE_URL = 'https://api.github.com/repos/Hilbert-beinghappy/seektty/releases/latest'
 export const DEFAULT_SCAN_TIMEOUT_MS = 3_000
 
@@ -17,6 +18,8 @@ export interface VersionScan {
   readonly dshLatest?: string | undefined
   /** npm `next` dist-tag of `@deepseek-ai/dsh`, when published. */
   readonly dshNext?: string | undefined
+  /** Newest official dsh: max of npm tags and the GitHub harness release. */
+  readonly dshNewest?: string | undefined
   /** Tag name of the newest SeekTTY GitHub release, e.g. `v1.1.0`. */
   readonly seekttyLatestTag?: string | undefined
 }
@@ -63,8 +66,39 @@ function cleanVersion(value: unknown): string | undefined {
   return trimmed === '' ? undefined : trimmed
 }
 
+/** Strip `dsh-v` / `v` prefixes used by official harness release tags. */
+export function dshTagToVersion(tag: string): string {
+  return tag.replace(/^dsh-v/u, '').replace(/^v/u, '')
+}
+
 /**
- * Query npm and GitHub for the newest dsh and SeekTTY versions.
+ * Highest version among the given candidates. Undefined entries are ignored.
+ * @param versions - npm tags, GitHub tags, or already-normalized versions.
+ */
+export function pickNewestDsh(...versions: Array<string | undefined>): string | undefined {
+  let best: string | undefined
+  for (const raw of versions) {
+    const version = raw === undefined ? undefined : dshTagToVersion(raw)
+    if (version === undefined || version === '') continue
+    if (best === undefined) {
+      best = version
+      continue
+    }
+    const order = compareDshVersion(version, best)
+    if (order !== undefined && order > 0) best = version
+  }
+  return best
+}
+
+function githubDshVersion(payload: unknown): string | undefined {
+  if (!Array.isArray(payload) || payload.length === 0) return undefined
+  const first = payload[0] as { tag_name?: unknown }
+  const tag = cleanVersion(first.tag_name)
+  return tag === undefined ? undefined : dshTagToVersion(tag)
+}
+
+/**
+ * Query npm, the official harness GitHub releases, and SeekTTY GitHub releases.
  * Each source fails independently and silently; the result never rejects.
  * @param fetchImpl - injectable fetch used by tests.
  * @param timeoutMs - per-request abort timeout.
@@ -73,15 +107,20 @@ export async function scanLatestVersions(
   fetchImpl: FetchLike = fetch as unknown as FetchLike,
   timeoutMs: number = DEFAULT_SCAN_TIMEOUT_MS,
 ): Promise<VersionScan> {
-  const [distTags, release] = await Promise.all([
+  const [distTags, harnessReleases, release] = await Promise.all([
     fetchJson(fetchImpl, DSH_DIST_TAGS_URL, timeoutMs).catch(() => undefined),
+    fetchJson(fetchImpl, DSH_GITHUB_RELEASES_URL, timeoutMs).catch(() => undefined),
     fetchJson(fetchImpl, SEEKTTY_LATEST_RELEASE_URL, timeoutMs).catch(() => undefined),
   ])
   const tags = distTags as { latest?: unknown; next?: unknown } | undefined
   const rel = release as { tag_name?: unknown } | undefined
+  const dshLatest = cleanVersion(tags?.latest)
+  const dshNext = cleanVersion(tags?.next)
+  const dshGithub = githubDshVersion(harnessReleases)
   return {
-    dshLatest: cleanVersion(tags?.latest),
-    dshNext: cleanVersion(tags?.next),
+    dshLatest,
+    dshNext,
+    dshNewest: pickNewestDsh(dshLatest, dshNext, dshGithub),
     seekttyLatestTag: cleanVersion(rel?.tag_name),
   }
 }
@@ -91,9 +130,14 @@ export function tagToVersion(tag: string): string {
   return tag.startsWith('v') ? tag.slice(1) : tag
 }
 
+function newestDsh(scan: VersionScan): string | undefined {
+  return pickNewestDsh(scan.dshNewest, scan.dshLatest, scan.dshNext)
+}
+
 function dshIsNewer(scan: VersionScan, facts: InstalledFacts): boolean {
-  if (scan.dshLatest === undefined) return false
-  const order = compareDshVersion(scan.dshLatest, facts.dshTested)
+  const newest = newestDsh(scan)
+  if (newest === undefined) return false
+  const order = compareDshVersion(newest, facts.dshTested)
   return order !== undefined && order > 0
 }
 
@@ -105,14 +149,16 @@ function seekttyIsNewer(scan: VersionScan, facts: InstalledFacts): boolean {
 
 /**
  * Decide what `deepseek --update` should install.
- * dsh follows the npm `latest` dist-tag unless DSH_BIN pins the executable;
- * SeekTTY follows its newest GitHub release tag when it is newer than this
- * running copy.
+ * dsh follows the newest official published version (npm `latest`/`next` and
+ * the GitHub harness release, whichever is newer) unless DSH_BIN pins the
+ * executable. SeekTTY follows its newest GitHub release tag when it is newer
+ * than this running copy.
  */
 export function updatePlan(scan: VersionScan, facts: InstalledFacts): UpdatePlan {
+  const dsh = newestDsh(scan)
   return {
-    dshSpec: !facts.dshPinned && scan.dshLatest !== undefined
-      ? `@deepseek-ai/dsh@${scan.dshLatest}`
+    dshSpec: !facts.dshPinned && dsh !== undefined
+      ? `@deepseek-ai/dsh@${dsh}`
       : undefined,
     seekttySpec: seekttyIsNewer(scan, facts)
       ? `github:Hilbert-beinghappy/seektty#${scan.seekttyLatestTag}`
@@ -128,9 +174,10 @@ export function updatePlan(scan: VersionScan, facts: InstalledFacts): UpdatePlan
 export function updateAdvice(scan: VersionScan, facts: InstalledFacts, english: boolean): string[] {
   const lines: string[] = []
   if (dshIsNewer(scan, facts)) {
+    const newest = newestDsh(scan)
     lines.push(launcherCopy(
-      `dsh 有新版本 ${scan.dshLatest}（SeekTTY 当前已测 ${facts.dshTested}）。`,
-      `A newer dsh ${scan.dshLatest} is available (SeekTTY currently tested against ${facts.dshTested}).`,
+      `dsh 有新版本 ${newest}（SeekTTY 当前已测 ${facts.dshTested}）。`,
+      `A newer dsh ${newest} is available (SeekTTY currently tested against ${facts.dshTested}).`,
       english,
     ))
   }

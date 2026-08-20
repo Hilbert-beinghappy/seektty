@@ -1,9 +1,10 @@
 name: dsh version scan
 
-# 每日扫描官方 @deepseek-ai/dsh 的 npm latest dist-tag。发现比当前
-# dsh.compatibility.tested 更新的版本时：自动升级依赖与基线、跑完整
-# check、在隔离 DSH_HOME 下对新版 stock dsh 重跑插拔契约，全部通过后
-# 开一个升级 PR。任何一步失败则不产生 PR，只留下失败的运行记录。
+# 每日扫描官方 dsh 的 npm `latest`/`next` dist-tag 与 GitHub harness
+# 最新 Release（含 pre-release）。发现比当前 dsh.compatibility.tested 更新
+# 的版本时：自动升级依赖与基线、跑完整 check、在隔离 DSH_HOME 下对新版
+# stock dsh 重跑插拔契约，全部通过后开一个升级 PR。任何一步失败则不产生
+# PR，只留下失败的运行记录。
 
 on:
   schedule:
@@ -31,7 +32,7 @@ jobs:
           node-version: 22.x
           cache: 'pnpm'
 
-      - name: Check the npm latest dist-tag against the tested baseline
+      - name: Check the newest official dsh against the tested baseline
         id: check
         run: |
           RESULT=$(node scripts/bump-dsh.mjs --check)

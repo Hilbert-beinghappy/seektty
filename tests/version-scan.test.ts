@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   DSH_DIST_TAGS_URL,
+  DSH_GITHUB_RELEASES_URL,
   SEEKTTY_LATEST_RELEASE_URL,
+  pickNewestDsh,
   scanLatestVersions,
   tagToVersion,
   updateAdvice,
@@ -20,26 +22,38 @@ function fakeFetch(payloads: Record<string, unknown>) {
 }
 
 describe('live version scan', () => {
-  it('reads npm dist-tags and the newest GitHub release tag', async () => {
+  it('reads npm dist-tags, the official harness GitHub release, and SeekTTY', async () => {
     const scan = await scanLatestVersions(fakeFetch({
-      [DSH_DIST_TAGS_URL]: { latest: '0.1.0-rc.8', next: '0.2.0-rc.1' },
+      [DSH_DIST_TAGS_URL]: { latest: '0.1.0-rc.7', next: '0.1.0-rc.8' },
+      [DSH_GITHUB_RELEASES_URL]: [{ tag_name: 'dsh-v0.1.0-rc.8' }],
       [SEEKTTY_LATEST_RELEASE_URL]: { tag_name: 'v1.2.0' },
     }))
-    expect(scan).toEqual({ dshLatest: '0.1.0-rc.8', dshNext: '0.2.0-rc.1', seekttyLatestTag: 'v1.2.0' })
+    expect(scan).toEqual({
+      dshLatest: '0.1.0-rc.7',
+      dshNext: '0.1.0-rc.8',
+      dshNewest: '0.1.0-rc.8',
+      seekttyLatestTag: 'v1.2.0',
+    })
+    expect(pickNewestDsh('0.1.0-rc.7', '0.1.0-rc.8', 'dsh-v0.1.0-rc.8')).toBe('0.1.0-rc.8')
   })
 
   it('degrades every source silently instead of rejecting', async () => {
     const scan = await scanLatestVersions(() => Promise.reject(new Error('offline')))
-    expect(scan).toEqual({ dshLatest: undefined, dshNext: undefined, seekttyLatestTag: undefined })
+    expect(scan).toEqual({
+      dshLatest: undefined,
+      dshNext: undefined,
+      dshNewest: undefined,
+      seekttyLatestTag: undefined,
+    })
     const partial = await scanLatestVersions(fakeFetch({
-      [DSH_DIST_TAGS_URL]: { latest: '0.1.0-rc.8' },
+      [DSH_DIST_TAGS_URL]: { latest: '0.1.0-rc.7', next: '0.1.0-rc.8' },
     }))
-    expect(partial.dshLatest).toBe('0.1.0-rc.8')
+    expect(partial.dshNewest).toBe('0.1.0-rc.8')
     expect(partial.seekttyLatestTag).toBeUndefined()
   })
 
-  it('plans dsh from the latest dist-tag and SeekTTY from a newer release tag only', () => {
-    const scan = { dshLatest: '0.1.0-rc.8', seekttyLatestTag: 'v1.2.0' }
+  it('plans dsh from the newest published version, not only the latest dist-tag', () => {
+    const scan = { dshLatest: '0.1.0-rc.7', dshNext: '0.1.0-rc.8', seekttyLatestTag: 'v1.2.0' }
     expect(updatePlan(scan, facts)).toEqual({
       dshSpec: '@deepseek-ai/dsh@0.1.0-rc.8',
       seekttySpec: 'github:Hilbert-beinghappy/seektty#v1.2.0',
@@ -54,7 +68,7 @@ describe('live version scan', () => {
   it('advises only when something is actually newer', () => {
     expect(updateAdvice({}, facts, true)).toEqual([])
     expect(updateAdvice({ dshLatest: '0.1.0-rc.7', seekttyLatestTag: 'v1.1.0' }, facts, true)).toEqual([])
-    const lines = updateAdvice({ dshLatest: '0.1.0-rc.8', seekttyLatestTag: 'v1.2.0' }, facts, true)
+    const lines = updateAdvice({ dshLatest: '0.1.0-rc.7', dshNext: '0.1.0-rc.8', seekttyLatestTag: 'v1.2.0' }, facts, true)
     expect(lines.some(line => line.includes('0.1.0-rc.8'))).toBe(true)
     expect(lines.some(line => line.includes('v1.2.0'))).toBe(true)
     expect(lines.at(-1)).toContain('deepseek --update')
@@ -120,7 +134,7 @@ describe('launcher update flow', () => {
     await postSessionUpdateNotice(
       { LANG: 'en_US.UTF-8' },
       chunk => { chunks.push(chunk) },
-      () => Promise.resolve({ dshLatest: '0.1.0-rc.8', dshNext: undefined, seekttyLatestTag: undefined }),
+      () => Promise.resolve({ dshLatest: '0.1.0-rc.9', dshNext: undefined, seekttyLatestTag: undefined }),
     )
     expect(chunks.join('')).toContain('deepseek --update')
     chunks.length = 0

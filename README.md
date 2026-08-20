@@ -72,7 +72,7 @@ pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
 deepseek
 ```
 
-`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.7`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
+`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
 
 ```sh
 deepseek "check this project"
@@ -91,7 +91,7 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
 dsh --profile tui
 ```
 
-`deepseek --update` scans the official `@deepseek-ai/dsh` npm `latest` dist-tag and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle in the target Profile through native `dsh plugin add`. It does not run automatically. After a session, `deepseek` prints a one-line notice when either channel has a newer version; set `SEEKTTY_UPDATE_CHECK=0` to silence that notice.
+`deepseek --update` scans the newest official dsh (npm `latest`/`next` and the GitHub harness release, whichever is newer) and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle in the target Profile through native `dsh plugin add`. It does not run automatically. After a session, `deepseek` prints a one-line notice when either channel has a newer version; set `SEEKTTY_UPDATE_CHECK=0` to silence that notice.
 
 ## First-run API key setup
 
@@ -228,7 +228,7 @@ The interface selection, independent code selection, and named definitions live 
 
 ## Verified scope
 
-- Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.7`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
+- Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.8`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
 - `/doctor`: 95 Harness plugins running, 0 errors, 0 warnings.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
 - First-run Provider readiness, masked API-key setup, deferral and draft restoration, Harness credential persistence, and restart without another prompt under an isolated `DSH_HOME`.
@@ -250,6 +250,6 @@ pnpm test:stock
 
 ## Compatibility and upgrades
 
-The tested compatibility baseline is official `0.1.0-rc.7`. The declared minimum host is official `0.1.0-rc.6`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. A scheduled workflow scans the npm `latest` dist-tag, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request. Do not treat `next` as the tested baseline until that contract succeeds.
+The tested compatibility baseline is official `0.1.0-rc.8`. The declared minimum host is official `0.1.0-rc.6`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. A scheduled workflow scans npm `latest`/`next` and the official GitHub harness release, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request.
 
 The source repository and the stable `v1.1.0` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.

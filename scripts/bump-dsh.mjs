@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Scan the official dsh npm dist-tags and bump this Bundle to the newest
- * release. Used by the scheduled dsh-version-scan workflow and runnable
- * locally.
+ * Scan the official dsh channels and bump this Bundle to the newest published
+ * version. Newest means the higher of npm `latest`, npm `next`, and the first
+ * GitHub harness release (including pre-releases). Used by the scheduled
+ * dsh-version-scan workflow and runnable locally.
  *
  *   node scripts/bump-dsh.mjs --check   仅探测，输出 JSON，不改文件
- *   node scripts/bump-dsh.mjs           应用升级：package.json、src/dsh-compat.ts、README
- *   node scripts/bump-dsh.mjs 0.1.0-rc.9  升级到指定版本而非 latest
+ *   node scripts/bump-dsh.mjs           应用升级
+ *   node scripts/bump-dsh.mjs 0.1.0-rc.9  升级到指定版本
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -15,6 +16,7 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
 const DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/@deepseek-ai/dsh/dist-tags'
+const GITHUB_RELEASES_URL = 'https://api.github.com/repos/deepseek-ai/deepseek-harness/releases?per_page=5'
 
 const args = process.argv.slice(2)
 const checkOnly = args.includes('--check')
@@ -28,18 +30,75 @@ if (typeof tested !== 'string' || tested === '') {
   process.exit(2)
 }
 
-let target = requested
-if (target === undefined) {
-  const response = await fetch(DIST_TAGS_URL, {
+function parseVersion(value) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$/u.exec(value.trim())
+  if (match === null) return undefined
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    pre: (match[4] ?? '').split('.').filter(part => part !== ''),
+  }
+}
+
+function compare(left, right) {
+  const a = parseVersion(left)
+  const b = parseVersion(right)
+  if (a === undefined || b === undefined) return undefined
+  if (a.major !== b.major) return a.major - b.major
+  if (a.minor !== b.minor) return a.minor - b.minor
+  if (a.patch !== b.patch) return a.patch - b.patch
+  if (a.pre.length === 0 && b.pre.length === 0) return 0
+  if (a.pre.length === 0) return 1
+  if (b.pre.length === 0) return -1
+  const text = (part) => (/^(0|[1-9]\d*)$/u.test(part) ? Number(part) : part)
+  const length = Math.max(a.pre.length, b.pre.length)
+  for (let index = 0; index < length; index += 1) {
+    if (a.pre[index] === undefined) return -1
+    if (b.pre[index] === undefined) return 1
+    const x = text(a.pre[index])
+    const y = text(b.pre[index])
+    if (x === y) continue
+    if (typeof x === 'number' && typeof y === 'number') return x - y
+    if (typeof x === 'number') return -1
+    if (typeof y === 'number') return 1
+    return x < y ? -1 : 1
+  }
+  return 0
+}
+
+function pickNewest(...values) {
+  let best
+  for (const raw of values) {
+    if (typeof raw !== 'string' || raw.trim() === '') continue
+    const version = raw.replace(/^dsh-v/u, '').replace(/^v/u, '')
+    if (best === undefined) {
+      best = version
+      continue
+    }
+    const order = compare(version, best)
+    if (order !== undefined && order > 0) best = version
+  }
+  return best
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, {
     signal: AbortSignal.timeout(10_000),
     headers: { accept: 'application/json', 'user-agent': 'seektty-bump-dsh' },
   })
-  if (!response.ok) {
-    process.stderr.write(`npm Registry 响应 ${response.status}\n`)
-    process.exit(2)
-  }
-  const tags = await response.json()
-  target = tags.latest
+  if (!response.ok) return undefined
+  return await response.json()
+}
+
+let target = requested
+if (target === undefined) {
+  const [tags, releases] = await Promise.all([
+    fetchJson(DIST_TAGS_URL),
+    fetchJson(GITHUB_RELEASES_URL),
+  ])
+  const githubTag = Array.isArray(releases) ? releases[0]?.tag_name : undefined
+  target = pickNewest(tags?.latest, tags?.next, githubTag)
 }
 if (typeof target !== 'string' || target === '') {
   process.stderr.write('无法确定目标 dsh 版本\n')
@@ -56,16 +115,25 @@ if (!updateAvailable) {
   process.exit(0)
 }
 
-// package.json：所有官方 dsh 子包精确锁到目标版本，tested 跟进；minimum 不动。
+async function packageHasVersion(name, version) {
+  const json = await fetchJson(`https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`)
+  return json !== undefined && json.version === version
+}
+
 for (const name of Object.keys(manifest.dependencies ?? {})) {
-  if (name.startsWith('@deepseek-ai/dsh-') && manifest.dependencies[name] === tested) {
+  if (!name.startsWith('@deepseek-ai/dsh-')) continue
+  if (await packageHasVersion(name, target)) {
     manifest.dependencies[name] = target
+    continue
   }
+  if (manifest.dependencies[name] === target && await packageHasVersion(name, tested)) {
+    manifest.dependencies[name] = tested
+  }
+  process.stdout.write(`跳过 ${name}：registry 没有 ${target}，保持 ${manifest.dependencies[name]}\n`)
 }
 manifest.dsh.compatibility.tested = target
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
-// src/dsh-compat.ts：tested 常量跟进。
 const compatPath = resolve(root, 'src/dsh-compat.ts')
 const compatSource = readFileSync(compatPath, 'utf8')
 const bumped = compatSource.replace(`tested: '${tested}',`, `tested: '${target}',`)
@@ -75,8 +143,6 @@ if (bumped === compatSource) {
 }
 writeFileSync(compatPath, bumped)
 
-// README：把旧 tested 基线字符串替换为新版本（minimum 的提及不受影响，
-// 因为 minimum 与 tested 分离后字符串不同）。
 for (const readme of ['README.md', 'README.zh.md']) {
   const path = resolve(root, readme)
   const text = readFileSync(path, 'utf8')
