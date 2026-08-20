@@ -44,6 +44,7 @@ export default defineConfig({
     startup: 'src/host/startup.ts',
     'marketplace-provider': 'src/host/marketplace-provider.ts',
     'in-process': 'src/host/in-process.ts',
+    'attachment-compat': 'src/host/attachment-compat.ts',
     bin: 'src/bin.ts',
   },
   outDir: 'lib',

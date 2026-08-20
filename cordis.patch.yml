@@ -146,6 +146,13 @@
     - id: tui-marketplace-providers
       name: 'seektty/marketplace-provider'
 
+    # Official rc.6/rc.7 attachments publish a frozen ImageAttachmentLimits
+    # without maxImageDimension. This SeekTTY-owned adapter must run after
+    # that store exists and immediately before api-gateway so the rc.8
+    # host-apiproxy projection reads a capability-normalized object.
+    - id: attachment-compat
+      name: 'seektty/attachment-compat'
+
     - id: api-gateway
       name: '@deepseek-ai/dsh-host-apiproxy'
 

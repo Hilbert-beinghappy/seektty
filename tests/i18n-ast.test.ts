@@ -38,6 +38,7 @@ const GATED = [
   'client/pending-status.ts',
   'client/surface.ts',
   'client/capabilities.ts',
+  'client/clarify-shell.ts',
   'client/transcript.ts',
   'client/actions.ts',
   'client/error-advice.ts',
