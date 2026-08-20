@@ -43,6 +43,8 @@ import { flattenProducedFiles, type ProducedFileGroup } from './produced-files.t
 import { explainFailure, withRunningRetry } from './error-advice.ts'
 import { ui, uiLocale } from './locale.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
+import { mergeClarifyCatalog } from './clarify-shell.ts'
+import { probeClarifyRemote } from './clarify-remote.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -622,6 +624,29 @@ export class HarnessTuiCapabilities {
       signal.throwIfAborted()
       return catalog
     })
+  }
+
+  /**
+   * Public Connection RPC face used by optional plugin shells.
+   * @returns the mounted caller, when the Client Connection handle exists.
+   */
+  connectionRpc(): ConnectionHandle['rpc'] | undefined {
+    return this.connectionHandle()?.rpc
+  }
+
+  /**
+   * State-free probe for the Clarify Remote receiver.
+   * @param signal - optional cancellation for the probe RPC.
+   * @returns true only when the impossible-processId probe gets PROCESS_NOT_FOUND.
+   */
+  async clarifyRemotePresent(signal?: AbortSignal): Promise<boolean> {
+    const rpc = this.connectionRpc()
+    if (rpc === undefined) return false
+    return probeClarifyRemote((channel, endpoint, payload, inner) => rpc.call(channel, endpoint, payload, inner), signal)
+  }
+
+  private connectionHandle(): ConnectionHandle | undefined {
+    return (this.ctx as TuiClientContext & { readonly connection?: ConnectionHandle }).connection
   }
 
   /** Invalidate the current command/Skill snapshot and repull on next use. */
@@ -1644,8 +1669,11 @@ export class HarnessTuiCapabilities {
         `Failed to load Skills: ${skillResponse.result.error.message}`,
       ))
     }
-    const commands = tuiCommands()
-    const reserved = reservedTuiCatalogNames()
+    const present = await this.clarifyRemotePresent().catch(() => false)
+    const commands = mergeClarifyCatalog(tuiCommands(), present)
+    const reserved = present
+      ? new Set<string>([...reservedTuiCatalogNames(), 'clarify'])
+      : reservedTuiCatalogNames()
     const merged = [...commands]
     const names = new Set(reserved)
     for (const command of hostResult.value as readonly HostCommandDescriptor[]) {

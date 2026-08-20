@@ -543,6 +543,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         focusEditor()
         renderWhileOpen()
       },
+      composerText: () => editor.getText(),
       copy: (text) => {
         void writeClipboard(text, {
           fallback: liveBehavior.get().clipboardFallback,

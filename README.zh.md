@@ -68,7 +68,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim。
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
 deepseek
 ```
 
@@ -87,7 +87,7 @@ deepseek --update
 也可以只使用 dsh 的原生入口：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
 dsh --profile tui
 ```
 
@@ -124,7 +124,7 @@ dsh --profile tui
 | 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart` |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
-`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。
+`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。`/clarify` 不是常驻命令：仅当探测到 Clarify Remote 接收端时才会进入本地 `/` 目录，把返回的 draft 写入常规输入区，并且不会自动发送。命令面板执行会保留当前输入区作为 seed；键入 `/clarify some text` 后提交会清空输入区，因此 seed 来自参数；单独键入 `/clarify` 没有可保留的正文。
 
 ## 常用交互
 
@@ -152,7 +152,7 @@ dsh --profile tui
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
 deepseek
 ```
 
@@ -160,7 +160,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
 ```
 
 ## 直接插拔
@@ -174,7 +174,7 @@ dsh plugin --profile tui remove seektty
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
 ```
 
 安装结果直接写入目标 Harness Profile 的依赖、Bundle 顺序和 pnpm lockfile。TUI 的 `/plugin` 与原生 `dsh plugin` 操作同一份 Profile 状态。
@@ -229,7 +229,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.8` 隔离安装、配置装配和 PTY 启动；并对声明的最低版本 `@deepseek-ai/dsh@0.1.0-rc.6` 完成 add／boot／remove／re-add 插拔契约。
-- `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
+- 通过官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7`、`0.1.0-rc.8` 各自的 CLI 安装打包后的 SeekTTY `1.1.0` 与 Clarify `0.1.0`：三种 with-plugin Profile 的本地 `/doctor` 均为 98 个 Harness 插件运行、0 error、0 warning，`/clarify` 均进入首个问题；三种 bare Profile 的 `/clarify` 均保持“未知命令”。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
 - 隔离 `DSH_HOME` 下的首次 Provider 就绪检查、API Key 掩码输入、跳过后的草稿恢复、Harness 凭证持久化，以及重启后不再提示。
 - 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
@@ -248,8 +248,15 @@ SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
 ```
 
+可复用的跨包 doctor 检查：
+
+```sh
+CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
+pnpm test:clarify-doctor
+```
+
 ## 兼容和升级
 
-已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
+已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。已测 Host 为官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7` 与 `0.1.0-rc.8`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。官方 rc.6/rc.7 基图解析 `@deepseek-ai/dsh-attachment@0.1.0-rc.7`，其 `ImageAttachmentLimits` 含 `maxImageBytes`、`maxImagesPerMessage`、`maxMessageImageBytes`、`maxImagePixels`、`mediaTypes`，但没有 `maxImageDimension`。SeekTTY 随后插入 rc.8 的 `@deepseek-ai/dsh-host-apiproxy`，其 `imageLimits` 投影要求该字段。Host 插件 `seektty/attachment-compat` 紧挨在 `api-gateway` 之前运行：仅当现场能力正好是这份合法遗留形状时，才从 `maxImagePixels` 推导保守的 `maxImageDimension`（单边不能超过像素总数）。原生 rc.8 对象保持同一引用。其他残缺或未知形状一律不改，让 rc.8 校验继续闭包失败。未来 Host 按能力匹配，不做版本分支。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
 
-源码仓库与稳定版 `v1.0.2` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。
+源码仓库与 GitHub Releases 均公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用对应 Release 附带的 tarball。

@@ -57,6 +57,7 @@ import type {
   SelectOverlayRequest,
 } from './overlays.ts'
 import { OverlayQueue } from './overlays.ts'
+import { clarifySeedText, runClarifyShell } from './clarify-shell.ts'
 import {
   formatSettingsValue,
   hasDedicatedSettingsEditor,
@@ -126,6 +127,7 @@ export interface TuiActionHost {
   applyLocale(locale: LocaleId): void
   applyBehavior?(behavior: TuiBehaviorSettings): void
   setEditor(text: string): void
+  composerText?(): string
   copy(text: string): void
   close(code: number): void
   restart(profile: string, notice: string): void
@@ -446,6 +448,7 @@ export class TuiActions {
         case 'plugin':
         case 'plugins': await this.plugin(args); break
         case 'doctor': await this.doctor(); break
+        case 'clarify': await this.clarify(args); break
         case 'restart': await this.restart(); break
         case 'tools': await this.tools(args); break
         case 'files': await this.files(); break
@@ -3011,6 +3014,32 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     if (secret === undefined || secret === '') return
     await bridge.setCredential(ref, secret)
     this.host.notice(ui(`Credential ${ref} 已配置`, `Credential ${ref} configured`), 'success')
+  }
+
+  private async clarify(rawArgs: string): Promise<void> {
+    if (await this.capabilities.clarifyRemotePresent().catch(() => false) !== true) {
+      throw new Error(ui('Clarify Remote 当前不可用', 'Clarify Remote is not currently available'))
+    }
+    const rpc = this.capabilities.connectionRpc()
+    if (rpc === undefined) {
+      throw new Error(ui('Clarify Remote 当前不可用', 'Clarify Remote is not currently available'))
+    }
+    const active = this.capabilities.active()
+    if (active === undefined) throw new Error(ui('当前没有打开的会话', 'No session is open'))
+    const composer = this.host.composerText?.() ?? ''
+    await this.overlayFlow(this.host.overlays, async (navigation) => {
+      const outcome = await runClarifyShell({
+        sessionId: String(active.sessionId),
+        seedText: clarifySeedText(composer, rawArgs),
+        composerText: composer,
+        overlays: navigation,
+        writeComposer: (draft) => { this.host.setEditor(draft) },
+        call: (channel, endpoint, payload, signal) => rpc.call(channel, endpoint, payload, signal),
+      })
+      if (outcome.kind === 'applied') {
+        this.host.notice(ui('已将 Clarify 草稿填入输入区', 'Clarify draft inserted into the composer'), 'success')
+      }
+    })
   }
 
   private async doctor(overlays: OverlayPrompts = this.host.overlays): Promise<void> {

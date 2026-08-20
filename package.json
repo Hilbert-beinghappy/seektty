@@ -1,6 +1,6 @@
 {
   "name": "seektty",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [
@@ -34,6 +34,7 @@
     "./startup": "./lib/startup.js",
     "./marketplace-provider": "./lib/marketplace-provider.js",
     "./in-process": "./lib/in-process.js",
+    "./attachment-compat": "./lib/attachment-compat.js",
     "./package.json": "./package.json"
   },
   "bin": {
@@ -67,6 +68,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:stock": "node scripts/stock-dsh-cycle.mjs",
+    "test:clarify-doctor": "node scripts/clarify-doctor-acceptance.mjs",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm pack --dry-run"
   },
   "dependencies": {

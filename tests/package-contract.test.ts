@@ -39,9 +39,14 @@ describe('out-of-tree Bundle contract', () => {
     expect(Array.isArray(patch)).toBe(true)
     expect(patchText).toContain("name: 'seektty/marketplace-provider'")
     expect(patchText).toContain("name: '@deepseek-ai/dsh-client-locale'")
+    expect(patchText).toContain("name: 'seektty/attachment-compat'")
     expect(patchText).toContain("name: 'seektty/in-process'")
     expect(patchText).toContain("name: 'seektty/startup'")
     expect(patchText).toContain("name: 'seektty'")
+    const insert = (patch as { insert?: { name?: string }[] }[]).find(row => Array.isArray(row.insert))
+    const names = (insert?.insert ?? []).map(row => row.name)
+    expect(names.indexOf('seektty/attachment-compat')).toBe(names.indexOf('@deepseek-ai/dsh-host-apiproxy') - 1)
+    expect(manifest.exports).toMatchObject({ './attachment-compat': './lib/attachment-compat.js' })
   })
 
   it('pins official dsh packages to the tested Harness baseline when that version exists', () => {
@@ -109,7 +114,7 @@ describe('out-of-tree Bundle contract', () => {
     expect(candidate.bundle).toBe(true)
     expect(candidate.patchValid).toBe(true)
     expect(candidate.diagnostics).toEqual([
-      '安装包声明脚本：build、typecheck、test、test:stock、check',
+      '安装包声明脚本：build、typecheck、test、test:stock、test:clarify-doctor、check',
     ])
   })
 })
