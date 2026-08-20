@@ -1,4 +1,5 @@
 diff --git a/dist/components/editor.js b/dist/components/editor.js
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..579d81846fc4284babe2f69cf0efc1b6e49e351a 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -1204,6 +1204,7 @@ export class Editor {
@@ -10,9 +11,10 @@ diff --git a/dist/components/editor.js b/dist/components/editor.js
          const currentLine = this.state.lines[this.state.cursorLine] || "";
          if (this.state.cursorCol > 0) {
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..fc274db16b9779ecb525c0ebb921042ceeeb46ad 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
-@@ -231,28 +231,35 @@
+@@ -231,28 +231,35 @@ export class Markdown {
              }
              case "code": {
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -53,7 +55,7 @@ diff --git a/dist/components/markdown.js b/dist/components/markdown.js
                  lines.push(...listLines);
                  // Don't add spacing after lists if a space token follows
                  // (the space token will handle it)
-@@ -417,7 +424,7 @@
+@@ -417,7 +424,7 @@ export class Markdown {
      /**
       * Render a list with proper nesting support
       */
@@ -62,7 +64,7 @@ diff --git a/dist/components/markdown.js b/dist/components/markdown.js
          const lines = [];
          const indent = "  ".repeat(depth);
          // Use the list's start property (defaults to 1 for ordered lists)
-@@ -426,7 +433,8 @@
+@@ -426,7 +433,8 @@ export class Markdown {
              const item = token.items[i];
              const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
              // Process item tokens to handle nested lists
@@ -72,7 +74,7 @@ diff --git a/dist/components/markdown.js b/dist/components/markdown.js
              if (itemLines.length > 0) {
                  // First line - check if it's a nested list
                  // A nested list will start with indent (spaces) followed by cyan bullet
-@@ -449,8 +457,8 @@
+@@ -449,8 +457,8 @@ export class Markdown {
                          lines.push(line);
                      }
                      else {
@@ -83,7 +85,7 @@ diff --git a/dist/components/markdown.js b/dist/components/markdown.js
                      }
                  }
              }
-@@ -464,13 +472,13 @@
+@@ -464,13 +472,13 @@ export class Markdown {
       * Render list item tokens, handling nested lists
       * Returns lines WITHOUT the parent indent (renderList will add it)
       */
@@ -99,7 +101,7 @@ diff --git a/dist/components/markdown.js b/dist/components/markdown.js
                  lines.push(...nestedLines);
              }
              else if (token.type === "text") {
-@@ -488,20 +496,27 @@
+@@ -488,20 +496,27 @@ export class Markdown {
              else if (token.type === "code") {
                  // Code block in list item
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -132,7 +134,7 @@ diff --git a/dist/components/markdown.js b/dist/components/markdown.js
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/terminal.js b/dist/terminal.js
-index 6bf1397..ec9f8bd 100644
+index 3545b284ce2da594cc728803feb607a34cea5ca0..9d56c55f99ecca559be9d12ced4ec38d4852ca73 100644
 --- a/dist/terminal.js
 +++ b/dist/terminal.js
 @@ -130,7 +130,7 @@ export class ProcessTerminal {
@@ -144,3 +146,69 @@ index 6bf1397..ec9f8bd 100644
                  process.stdout.write("\x1b[>4;2m");
                  this._modifyOtherKeysActive = true;
              }
+diff --git a/dist/tui.js b/dist/tui.js
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..91a57291be51cedb15398dc51c58050e0b8b60e3 100644
+--- a/dist/tui.js
++++ b/dist/tui.js
+@@ -761,13 +761,22 @@ export class TUI extends Container {
+             let buffer = "\x1b[?2026h"; // Begin synchronized output
+             if (clear) {
+                 buffer += this.deleteKittyImages(this.previousKittyImageIds);
+-                buffer += "\x1b[2J\x1b[H\x1b[3J"; // Clear screen, home, then clear scrollback
++                // Home + wipe scrollback, but keep the current frame on screen and
++                // overwrite it row-by-row instead of blanking everything with 2J
++                // first. Terminals without synchronized-output support would
++                // otherwise flash a default-background frame between the clear
++                // and the repaint.
++                buffer += "\x1b[H\x1b[3J";
+             }
+             for (let i = 0; i < newLines.length; i++) {
+                 if (i > 0)
+                     buffer += "\r\n";
++                if (clear)
++                    buffer += "\x1b[2K"; // Clear residue of the previous frame on this row
+                 buffer += newLines[i];
+             }
++            if (clear)
++                buffer += "\x1b[0J"; // Clear any leftover rows below the new content
+             buffer += "\x1b[?2026l"; // End synchronized output
+             this.terminal.write(buffer);
+             this.cursorRow = Math.max(0, newLines.length - 1);
+@@ -844,6 +853,37 @@ export class TUI extends Container {
+             }
+             lastChanged = newLines.length - 1;
+         }
++        // Changes above the previous viewport top already live in terminal
++        // scrollback. Repainting them would require clearing the screen and
++        // rewriting the entire history, which flashes on terminals without
++        // synchronized-output support and yanks the viewport through old
++        // content. Keep scrollback as-is and repaint only from the first
++        // change that is actually visible.
++        if (firstChanged !== -1 && firstChanged < prevViewportTop && newLines.length >= height) {
++            let visibleFirstChanged = -1;
++            for (let i = prevViewportTop; i < maxLines; i++) {
++                const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
++                const newLine = i < newLines.length ? newLines[i] : "";
++                if (oldLine !== newLine) {
++                    visibleFirstChanged = i;
++                    break;
++                }
++            }
++            if (visibleFirstChanged === -1) {
++                // Every change is hidden in scrollback; record the new content
++                // without touching the screen.
++                logRedraw(`suppressed scrollback-only change (firstChanged=${firstChanged} < viewportTop=${prevViewportTop})`);
++                this.positionHardwareCursor(cursorPos, newLines.length);
++                this.previousLines = newLines;
++                this.previousKittyImageIds = this.collectKittyImageIds(newLines);
++                this.previousWidth = width;
++                this.previousHeight = height;
++                this.previousViewportTop = prevViewportTop;
++                return;
++            }
++            logRedraw(`clamped firstChanged ${firstChanged} -> ${visibleFirstChanged} (viewportTop=${prevViewportTop})`);
++            firstChanged = visibleFirstChanged;
++        }
+         if (firstChanged !== -1) {
+             lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
+         }
