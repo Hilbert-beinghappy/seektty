@@ -256,7 +256,7 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'theme', description: ui('切换界面或独立代码主题', 'Switch interface or code theme'), argumentHint: '[dark|light|code|use|edit|palette|import|export|delete]', source: 'TUI', behavior: 'local' },
     { name: 'queue', description: ui('管理排队消息', 'Manage queued messages'), source: 'TUI', behavior: 'local' },
     { name: 'steer', description: ui('发送引导消息', 'Send steering message'), argumentHint: ui('<消息>', '<message>'), source: 'TUI', behavior: 'local' },
-    { name: 'attach', description: ui('添加图片', 'Attach image'), argumentHint: ui('<图片路径>', '<image-path>'), source: 'TUI', behavior: 'local' },
+    { name: 'attach', description: ui('添加图片', 'Attach image'), argumentHint: ui('[图片路径]', '[image-path]'), source: 'TUI', behavior: 'local' },
     { name: 'attachments', description: ui('管理待发送图片', 'Manage pending images'), source: 'TUI', behavior: 'local' },
     { name: 'pending', description: ui('处理待审批或待回答事项', 'Handle pending approvals or questions'), source: 'TUI', behavior: 'local' },
     { name: 'settings', description: ui('打开设置', 'Open Settings'), argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },

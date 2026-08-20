@@ -97,4 +97,22 @@ describe('clipboard image capture', () => {
       readFile: () => Buffer.alloc(0),
     })).resolves.toBeUndefined()
   })
+
+  it('falls back to osascript on macOS when pngpaste is missing', async () => {
+    const commands: string[] = []
+    await expect(captureClipboardImage({
+      platform: 'darwin',
+      dest: '/tmp/seektty-paste.png',
+      spawn: (command, args) => {
+        commands.push(command)
+        if (command === 'pngpaste') return { status: null, stdout: Buffer.alloc(0) }
+        expect(command).toBe('osascript')
+        expect(args.join(' ')).toContain('/tmp/seektty-paste.png')
+        return { status: 0, stdout: Buffer.alloc(0) }
+      },
+      writeFile: () => undefined,
+      readFile: () => png,
+    })).resolves.toBe('/tmp/seektty-paste.png')
+    expect(commands).toEqual(['pngpaste', 'osascript'])
+  })
 })

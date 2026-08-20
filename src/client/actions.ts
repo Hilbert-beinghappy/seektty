@@ -1,6 +1,7 @@
 /** Product command and pending-interaction orchestration for the TUI Surface. */
 
 import { visibleWidth, type OverlayOptions } from '@mariozechner/pi-tui'
+import { chmodSync } from 'node:fs'
 import {
   LOCALE_SETTINGS_NAMESPACE,
   type LocaleId,
@@ -23,7 +24,7 @@ import {
   type TuiCustomTheme,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
-import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
+import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiDraftAttachment, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { queueListChoiceOrder } from './queue-order.ts'
@@ -93,6 +94,11 @@ import {
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
+import {
+  captureClipboardImage,
+  cleanupClipboardImageWorkspace,
+  createClipboardImageWorkspace,
+} from './clipboard-image.ts'
 import {
   languageSelection,
   localeFromSettings,
@@ -1874,8 +1880,28 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async attach(args: string): Promise<void> {
-    if (args === '') throw new Error(ui('用法：/attach <图片路径>', "Usage: /attach <image-path>"))
-    const attachment = await this.capabilities.addAttachment(args)
+    const path = args.trim()
+    if (path !== '') {
+      await this.noticeAttachment(await this.capabilities.addAttachment(path))
+      return
+    }
+    const workspace = createClipboardImageWorkspace()
+    try {
+      const captured = await captureClipboardImage({ platform: process.platform, dest: workspace.dest })
+      if (captured === undefined) {
+        throw new Error(ui(
+          '用法：/attach <图片路径>；也可以先复制图片再执行 /attach',
+          'Usage: /attach <image-path>; or copy an image first, then run /attach',
+        ))
+      }
+      chmodSync(workspace.dest, 0o600)
+      await this.noticeAttachment(await this.capabilities.addAttachment(captured))
+    } finally {
+      cleanupClipboardImageWorkspace(workspace)
+    }
+  }
+
+  private noticeAttachment(attachment: TuiDraftAttachment): void {
     const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
     this.host.notice(ui(`已加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`, `Added ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`), 'success')
   }

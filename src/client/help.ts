@@ -20,6 +20,7 @@ export function helpSectionText(id: HelpSectionId): string {
       [
         '输入：在底部输入区写消息，Enter 发送。',
         '换行：Shift+Enter 在输入区插入换行。',
+        '图片：直接粘贴图片或图片路径；也可以 /attach。待发送图片显示在输入框下方。',
         '停止：Ctrl+C 停止当前轮次；再按一次退出。',
         '会话：Ctrl+S 打开会话列表，新建或切换会话。',
         '审批：弹窗里查看命令或 diff，再选仅本次允许或拒绝。',
@@ -28,6 +29,7 @@ export function helpSectionText(id: HelpSectionId): string {
       [
         'Input: type in the composer and press Enter to send.',
         'Newline: Shift+Enter inserts a newline in the composer.',
+        'Images: paste an image or image path, or use /attach. Pending images appear under the composer.',
         'Stop: Ctrl+C stops the active turn; press again to exit.',
         'Sessions: Ctrl+S opens the session list to create or switch sessions.',
         'Approvals: inspect the command or diff in the overlay, then allow once or reject.',
