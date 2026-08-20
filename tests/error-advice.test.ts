@@ -58,6 +58,19 @@ describe('actionable failure text', () => {
     expect(cases[5]).toMatch(/^Check the current permission/)
   })
 
+  it('turns a Host text-only model rejection into one action-first line', () => {
+    expect(explainFailure('Model "deepseek-v4-flash" does not support image input.')).toBe(
+      '当前模型 deepseek-v4-flash 不支持图片输入',
+    )
+    expect(explainFailure('attachment-error: Model "deepseek-v4-pro" does not support image input.')).toContain('deepseek-v4-pro')
+    expect(explainFailure('DeepSeek model "deepseek-v4-flash" does not accept image input.')).toContain('不支持图片')
+    setUiLocale('en')
+    expect(explainFailure('Model "deepseek-v4-flash" does not support image input.')).toBe(
+      'Model deepseek-v4-flash does not accept image input',
+    )
+    expect(explainFailure('Model "deepseek-v4-flash" does not support image input.')).not.toMatch(/\p{Script=Han}/u)
+  })
+
   it('keeps a still-running turn visible after a stop or send failure', () => {
     expect(withRunningRetry('停止失败：boom', false)).toBe('停止失败：boom')
     expect(withRunningRetry('停止失败：boom', true)).toBe('停止失败：boom · 仍在生成 · Ctrl+C 重试')

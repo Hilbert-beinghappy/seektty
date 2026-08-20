@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Scan the official dsh channels and bump this Bundle to the newest published
- * version. Newest means the higher of npm `latest`, npm `next`, and the first
- * GitHub harness release (including pre-releases). Used by the scheduled
- * dsh-version-scan workflow and runnable locally.
+ * Scan the official dsh npm `latest` dist-tag and bump this Bundle to that
+ * stable version. npm `next` and GitHub harness pre-releases are ignored.
+ * Used by the scheduled dsh-version-scan workflow and runnable locally.
  *
  *   node scripts/bump-dsh.mjs --check   仅探测，输出 JSON，不改文件
  *   node scripts/bump-dsh.mjs           应用升级
@@ -16,7 +15,6 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
 const DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/@deepseek-ai/dsh/dist-tags'
-const GITHUB_RELEASES_URL = 'https://api.github.com/repos/deepseek-ai/deepseek-harness/releases?per_page=5'
 
 const args = process.argv.slice(2)
 const checkOnly = args.includes('--check')
@@ -67,21 +65,6 @@ function compare(left, right) {
   return 0
 }
 
-function pickNewest(...values) {
-  let best
-  for (const raw of values) {
-    if (typeof raw !== 'string' || raw.trim() === '') continue
-    const version = raw.replace(/^dsh-v/u, '').replace(/^v/u, '')
-    if (best === undefined) {
-      best = version
-      continue
-    }
-    const order = compare(version, best)
-    if (order !== undefined && order > 0) best = version
-  }
-  return best
-}
-
 async function fetchJson(url) {
   const response = await fetch(url, {
     signal: AbortSignal.timeout(10_000),
@@ -93,25 +76,22 @@ async function fetchJson(url) {
 
 let target = requested
 if (target === undefined) {
-  const [tags, releases] = await Promise.all([
-    fetchJson(DIST_TAGS_URL),
-    fetchJson(GITHUB_RELEASES_URL),
-  ])
-  const githubTag = Array.isArray(releases) ? releases[0]?.tag_name : undefined
-  target = pickNewest(tags?.latest, tags?.next, githubTag)
+  const tags = await fetchJson(DIST_TAGS_URL)
+  target = typeof tags?.latest === 'string' ? tags.latest.trim() : undefined
 }
 if (typeof target !== 'string' || target === '') {
-  process.stderr.write('无法确定目标 dsh 版本\n')
+  process.stderr.write('无法确定目标 dsh 版本：npm latest 不可用\n')
   process.exit(2)
 }
 
-const updateAvailable = target !== tested
+const order = compare(target, tested)
+const updateAvailable = order !== undefined && order > 0
 if (checkOnly) {
   process.stdout.write(`${JSON.stringify({ tested, target, updateAvailable })}\n`)
   process.exit(0)
 }
 if (!updateAvailable) {
-  process.stdout.write(`已是最新：tested ${tested} == ${target}\n`)
+  process.stdout.write(`无需升级：tested ${tested}，npm latest ${target}\n`)
   process.exit(0)
 }
 

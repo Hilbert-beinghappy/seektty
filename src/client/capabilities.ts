@@ -278,7 +278,17 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Readonly<Record<string, unknown>>
+    const message = record.message
+    if (typeof message === 'string' && message !== '') {
+      const code = record.code
+      return typeof code === 'string' && code !== '' ? `${code}: ${message}` : message
+    }
+  }
+  return String(error)
 }
 
 function projectionRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {

@@ -17,6 +17,16 @@ function unwrapTransport(message: string): string | undefined {
   return match === null ? undefined : match[1]?.trim()
 }
 
+function imageModelRejection(message: string): string | undefined {
+  const match = /(?:^|:\s)(?:DeepSeek )?model "([^"]+)" does not (?:support|accept) image input\.?/iu.exec(message)
+  if (match === null) return undefined
+  const model = match[1] ?? ''
+  return ui(
+    `当前模型 ${model} 不支持图片输入`,
+    `Model ${model} does not accept image input`,
+  )
+}
+
 /** Collapse Host text so StatusBar never receives an embedded newline. */
 function oneLine(text: string): string {
   return text.replace(/[\r\n]+/gu, ' ').replace(/[ \t]+/gu, ' ').trim()
@@ -46,6 +56,8 @@ export function pluginFailureDetail(result: PluginFailureOutput): string {
  * @param message - original Error.message or stringified failure.
  */
 export function explainFailure(message: string): string {
+  const imageRejection = imageModelRejection(message)
+  if (imageRejection !== undefined) return imageRejection
   if (unwrapTransport(message) !== undefined) {
     return ui(
       '重试当前操作，再次失败运行 /doctor',

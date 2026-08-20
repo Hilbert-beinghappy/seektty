@@ -91,7 +91,7 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
 dsh --profile tui
 ```
 
-`deepseek --update` 会扫描官方 dsh 的最新发布（npm `latest`/`next` 与 GitHub harness Release 中较新的那个）和 SeekTTY 最新 GitHub Release，然后更新全局 dsh（`DSH_BIN` 固定可执行文件时跳过），并用原生 `dsh plugin add` 更新目标 Profile 中的 SeekTTY Bundle。该命令不会自动执行。会话结束后，如果任一渠道有新版本，`deepseek` 会打印一行提示；设置 `SEEKTTY_UPDATE_CHECK=0` 可关闭该提示。
+`deepseek --update` 仍可强制扫描并安装。默认 `SEEKTTY_UPDATE=auto`：每次启动会拉取官方 dsh 的 npm `latest`（不跟 `next` 或 GitHub 预发布）和 SeekTTY 最新 GitHub Release，然后更新全局 dsh（`DSH_BIN` 固定可执行文件时跳过），并用原生 `dsh plugin add` 更新 SeekTTY Bundle。本地 `link:`/`file:` 安装和 `SEEKTTY_SPEC` 覆盖不会被改写。网络或安装失败不会挡住启动。设 `SEEKTTY_UPDATE=check` 可改回会话后提示，设 `SEEKTTY_UPDATE=0` 可关闭。
 
 ## 首次配置 API Key
 
@@ -250,6 +250,6 @@ pnpm test:stock
 
 ## 兼容和升级
 
-已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。定时工作流会扫描 npm `latest`/`next` 与官方 GitHub harness Release，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。
+已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
 
 源码仓库与稳定版 `v1.1.0` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。

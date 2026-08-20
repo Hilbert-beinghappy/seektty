@@ -64,4 +64,26 @@ describe('send, steer, Host command, and catch failures', () => {
       running: false,
     })).not.toContain('仍在生成')
   })
+
+  it('unwraps Host RpcError objects instead of showing [object Object]', async () => {
+    const notice = await noticeAfterFailedPrompt(
+      {
+        prompt: async () => ({
+          ok: false as const,
+          error: {
+            code: 'attachment-error',
+            message: 'Model "deepseek-v4-flash" does not support image input.',
+            details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+          },
+        }),
+        getSnapshot: () => ({ running: false }),
+      },
+      [{ type: 'image' as const, mediaType: 'image/png' as const, data: 'AA==', name: 'shot.png' }],
+      'queue',
+    )
+    expect(notice).not.toContain('[object Object]')
+    expect(notice).toContain('deepseek-v4-flash')
+    expect(notice).toContain('不支持图片')
+    expect(notice).not.toContain('/model')
+  })
 })

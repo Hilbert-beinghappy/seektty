@@ -91,7 +91,7 @@ dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
 dsh --profile tui
 ```
 
-`deepseek --update` scans the newest official dsh (npm `latest`/`next` and the GitHub harness release, whichever is newer) and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle in the target Profile through native `dsh plugin add`. It does not run automatically. After a session, `deepseek` prints a one-line notice when either channel has a newer version; set `SEEKTTY_UPDATE_CHECK=0` to silence that notice.
+`deepseek --update` still force-scans and installs. By default `deepseek` itself is `SEEKTTY_UPDATE=auto`: on launch it fetches official dsh npm `latest` (not `next` or GitHub pre-releases) and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle through native `dsh plugin add`. Local `link:`/`file:` installs and `SEEKTTY_SPEC` overrides are left alone. Network or install failures never block boot. Set `SEEKTTY_UPDATE=check` to restore a post-session notice, or `SEEKTTY_UPDATE=0` to disable.
 
 ## First-run API key setup
 
@@ -250,6 +250,6 @@ pnpm test:stock
 
 ## Compatibility and upgrades
 
-The tested compatibility baseline is official `0.1.0-rc.8`. The declared minimum host is official `0.1.0-rc.6`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. A scheduled workflow scans npm `latest`/`next` and the official GitHub harness release, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request.
+The tested compatibility baseline is official `0.1.0-rc.8`. The declared minimum host is official `0.1.0-rc.6`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. A scheduled workflow scans the official npm `latest` dist-tag, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
 
 The source repository and the stable `v1.1.0` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.
