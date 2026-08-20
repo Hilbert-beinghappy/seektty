@@ -236,9 +236,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let syntax: SyntaxHighlighter | undefined
     disposeConstructedSyntax = () => { syntax?.dispose() }
     void SyntaxHighlighter.create(initialTheme, () => {
+      // Non-forced render: a forced full redraw clears the screen and replays
+      // the whole history, which flashes mid-session whenever a lazy grammar
+      // finishes loading. The differential render repaints the visible rows.
       transcript.refreshPresentation()
       tui.invalidate()
-      tui.requestRender(true)
+      tui.requestRender()
     }).then(created => {
       if (stopping !== undefined) {
         created.dispose()
@@ -255,9 +258,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setCodeHighlighter(undefined)
         return
       }
+      // Same as the lazy-grammar callback above: avoid a full clear-and-replay
+      // right after startup once the highlighter becomes ready.
       transcript.refreshPresentation()
       tui.invalidate()
-      tui.requestRender(true)
+      tui.requestRender()
     }).catch(() => {
       /* first frame already shown; highlighting stays off */
     })
