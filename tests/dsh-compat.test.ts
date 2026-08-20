@@ -3,6 +3,7 @@ import {
   compareDshVersion,
   defaultPluginSpec,
   dshCompatibilityError,
+  dshCompatibilityNotice,
   isVersionRequest,
   launcherCopy,
   versionMessage,
@@ -31,11 +32,15 @@ describe('dsh version and compatibility', () => {
       .toBeUndefined()
   })
 
-  it('rejects dsh newer than the tested upper bound', () => {
+  it('boots on dsh newer than the tested upper bound and only advises', () => {
     const range = { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' }
-    expect(dshCompatibilityError('0.2.0', range, true)).toContain('0.2.0')
-    expect(dshCompatibilityError('0.2.0', range, true)).toMatch(/tested 0\.1\.0-rc\.6/u)
-    expect(dshCompatibilityError('0.1.0-rc.6', range, true)).toBeUndefined()
+    expect(dshCompatibilityError('0.2.0', range, true)).toBeUndefined()
+    expect(dshCompatibilityNotice('0.2.0', range, true)).toContain('0.2.0')
+    expect(dshCompatibilityNotice('0.2.0', range, true)).toMatch(/tested 0\.1\.0-rc\.6/u)
+    expect(dshCompatibilityNotice('0.1.0-rc.6', range, true)).toBeUndefined()
+    expect(dshCompatibilityNotice('0.1.0-rc.5', range, false)).toBeUndefined()
+    expect(dshCompatibilityNotice('0.0.1', range, false)).toBeUndefined()
+    expect(dshCompatibilityNotice(undefined, range, false)).toBeUndefined()
   })
 
   it('does not treat the official host.describe placeholder as a real dsh version', () => {

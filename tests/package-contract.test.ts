@@ -14,7 +14,7 @@ describe('out-of-tree Bundle contract', () => {
   it('declares the native dsh Bundle patch and exact tested baseline', () => {
     expect(manifest.dsh).toEqual({
       bundle: { patch: './cordis.patch.yml' },
-      compatibility: { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' },
+      compatibility: { minimum: '0.1.0-rc.6', tested: DSH_COMPATIBILITY.tested },
     })
     expect(manifest.bin).toEqual({ deepseek: './lib/bin.js' })
     expect(PACKAGE_VERSION).toBe(manifest.version)
@@ -44,9 +44,13 @@ describe('out-of-tree Bundle contract', () => {
     expect(patchText).toContain("name: 'seektty'")
   })
 
-  it('uses the exact official locale plugin from the tested Harness baseline', () => {
-    expect((manifest.dependencies as Record<string, string>)['@deepseek-ai/dsh-client-locale'])
-      .toBe('0.1.0-rc.6')
+  it('pins every official dsh package exactly to the tested Harness baseline', () => {
+    const dependencies = manifest.dependencies as Record<string, string>
+    const dshPackages = Object.keys(dependencies).filter(name => name.startsWith('@deepseek-ai/dsh-'))
+    expect(dshPackages).toContain('@deepseek-ai/dsh-client-locale')
+    for (const name of dshPackages) {
+      expect(dependencies[name], name).toBe(DSH_COMPATIBILITY.tested)
+    }
   })
 
   it('does not retain the in-tree TUI Bundle identity', () => {
@@ -66,6 +70,7 @@ describe('out-of-tree Bundle contract', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')
     expect(workflow).toContain('pnpm run check')
     expect(workflow).toContain('git diff --exit-code lib/')
+    expect(workflow).toContain("'release/**'")
   })
 
   it('tracks every packaged path so GitHub ref installs cannot omit files', () => {
