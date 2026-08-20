@@ -17,11 +17,61 @@ import {
   launcherPrefersEnglish,
   versionMessage,
 } from './dsh-compat.ts'
+import {
+  type InstalledFacts,
+  type UpdatePlan,
+  scanLatestVersions,
+  updateAdvice,
+  updatePlan,
+} from './version-scan.ts'
 import { measureStartupSync } from './startup-trace.ts'
 
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
 const DEFAULT_SPEC = defaultPluginSpec(PACKAGE_VERSION)
 const DSH_INSTALL_SPEC = `@deepseek-ai/dsh@${DSH_COMPATIBILITY.tested}`
+
+/** True when the launcher should run the update flow instead of booting. */
+export function isUpdateRequest(args: readonly string[]): boolean {
+  return args.includes('--update')
+}
+
+/** How the launcher follows official dsh `latest` and SeekTTY GitHub Releases. */
+export type UpdateMode = 'auto' | 'check' | 'off'
+
+/**
+ * Resolve the update policy. Default is auto. `SEEKTTY_UPDATE` wins over the
+ * legacy `SEEKTTY_UPDATE_CHECK=0` off switch.
+ */
+export function updateMode(environment: NodeJS.ProcessEnv = process.env): UpdateMode {
+  const explicit = environment.SEEKTTY_UPDATE?.trim().toLowerCase()
+  if (explicit !== undefined && explicit !== '') {
+    if (explicit === '0' || explicit === 'off' || explicit === 'false' || explicit === 'manual') return 'off'
+    if (explicit === 'check' || explicit === 'notice') return 'check'
+    return 'auto'
+  }
+  return environment.SEEKTTY_UPDATE_CHECK?.trim() === '0' ? 'off' : 'auto'
+}
+
+/** True when a plugin spec is a local path, file URL, or link, not a release. */
+export function isLocalPluginSpec(spec: string | undefined): boolean {
+  if (spec === undefined) return false
+  const value = spec.trim()
+  if (value === '') return false
+  if (/^(?:file:|link:)/iu.test(value)) return true
+  if (/^(?:git\+|github:|gitlab:|bitbucket:|https?:|npm:)/iu.test(value)) return false
+  return value.startsWith('.') || value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
+}
+
+function installedFacts(environment: NodeJS.ProcessEnv, profile = 'tui'): InstalledFacts {
+  const override = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || ''
+  const installedSpec = profileManifest(profile, environment)?.dependencies?.[PACKAGE_NAME]
+  return {
+    dshTested: DSH_COMPATIBILITY.tested,
+    seekttyVersion: PACKAGE_VERSION,
+    dshPinned: (environment.DSH_BIN?.trim() ?? '') !== '',
+    seekttyPinned: override !== '' || isLocalPluginSpec(installedSpec),
+  }
+}
 
 interface ProfileManifest {
   readonly dependencies?: Readonly<Record<string, string>>
@@ -190,6 +240,132 @@ export function launch(
   return execute(dsh, ['--profile', profile, ...inner])
 }
 
+async function applyUpdatePlan(
+  plan: UpdatePlan,
+  profile: string,
+  facts: InstalledFacts,
+  english: boolean,
+  environment: NodeJS.ProcessEnv,
+  execute: (command: string, args: readonly string[]) => number,
+  write: (chunk: string) => void,
+  options: { readonly announcePinnedDsh: boolean; readonly announceCurrentSeektty: boolean },
+): Promise<number> {
+  if (options.announcePinnedDsh && facts.dshPinned) {
+    write(launcherCopy(
+      'DSH_BIN 已固定 dsh 可执行文件，跳过 dsh 更新。\n',
+      'DSH_BIN pins the dsh executable; skipping the dsh update.\n',
+      english,
+    ))
+  }
+  if (plan.dshSpec !== undefined) {
+    write(launcherCopy(`更新 dsh：pnpm add --global ${plan.dshSpec}\n`, `Updating dsh: pnpm add --global ${plan.dshSpec}\n`, english))
+    let status: number
+    try {
+      status = execute('pnpm', ['add', '--global', plan.dshSpec])
+    } catch {
+      write(launcherCopy(
+        `pnpm 不可用。请手动运行：pnpm add --global ${plan.dshSpec}\n`,
+        `pnpm is unavailable. Run manually: pnpm add --global ${plan.dshSpec}\n`,
+        english,
+      ))
+      return 1
+    }
+    if (status !== 0) return status
+  }
+  if (plan.seekttySpec !== undefined) {
+    const dsh = environment.DSH_BIN?.trim() || 'dsh'
+    write(launcherCopy(`更新 SeekTTY：dsh plugin --profile ${profile} add ${plan.seekttySpec}\n`, `Updating SeekTTY: dsh plugin --profile ${profile} add ${plan.seekttySpec}\n`, english))
+    const status = execute(dsh, ['plugin', '--profile', profile, 'add', plan.seekttySpec])
+    if (status !== 0) return status
+  } else if (options.announceCurrentSeektty) {
+    write(launcherCopy(
+      `SeekTTY 已是最新版本（${PACKAGE_VERSION}）。\n`,
+      `SeekTTY is already the latest version (${PACKAGE_VERSION}).\n`,
+      english,
+    ))
+  }
+  return 0
+}
+
+/**
+ * `deepseek --update`: scan npm `latest` and the SeekTTY GitHub release, then
+ * update the global dsh install (unless DSH_BIN pins it) and the SeekTTY
+ * Bundle inside the target Profile through native `dsh plugin add`.
+ */
+export async function runUpdate(
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv = process.env,
+  execute: (command: string, args: readonly string[]) => number = run,
+  write: (chunk: string) => void = chunk => { process.stdout.write(chunk) },
+  scan: typeof scanLatestVersions = scanLatestVersions,
+): Promise<number> {
+  const english = launcherPrefersEnglish(environment)
+  const { profile } = launcherArgs(args.filter(argument => argument !== '--update'), environment)
+  write(launcherCopy('正在检查 dsh 与 SeekTTY 的最新版本…\n', 'Checking the latest dsh and SeekTTY versions…\n', english))
+  const facts = installedFacts(environment, profile)
+  const result = await scan()
+  if (result.dshLatest === undefined && result.seekttyLatestTag === undefined) {
+    write(launcherCopy(
+      '无法访问 npm Registry 或 GitHub Releases，请检查网络后重试。\n',
+      'Could not reach the npm Registry or GitHub Releases. Check the network and retry.\n',
+      english,
+    ))
+    return 1
+  }
+  return applyUpdatePlan(updatePlan(result, facts), profile, facts, english, environment, execute, write, {
+    announcePinnedDsh: true,
+    announceCurrentSeektty: true,
+  })
+}
+
+/**
+ * Default launch policy: fetch official dsh `latest` and the SeekTTY GitHub
+ * Release, then apply them. Offline and install failures never block boot.
+ */
+export async function maybeAutoUpdate(
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv = process.env,
+  execute: (command: string, args: readonly string[]) => number = run,
+  write: (chunk: string) => void = chunk => { process.stderr.write(chunk) },
+  scan: typeof scanLatestVersions = scanLatestVersions,
+): Promise<void> {
+  if (updateMode(environment) !== 'auto') return
+  if (isVersionRequest(args) || isUpdateRequest(args)) return
+  try {
+    const english = launcherPrefersEnglish(environment)
+    const { profile } = launcherArgs(args, environment)
+    const facts = installedFacts(environment, profile)
+    const result = await scan()
+    const plan = updatePlan(result, facts)
+    if (plan.dshSpec === undefined && plan.seekttySpec === undefined) return
+    await applyUpdatePlan(plan, profile, facts, english, environment, execute, write, {
+      announcePinnedDsh: false,
+      announceCurrentSeektty: false,
+    })
+  } catch {
+    // 静默：自动更新绝不能挡住启动。
+  }
+}
+
+/**
+ * Passive post-session check used by `SEEKTTY_UPDATE=check`.
+ * Network failures are silent.
+ */
+export async function postSessionUpdateNotice(
+  environment: NodeJS.ProcessEnv = process.env,
+  write: (chunk: string) => void = chunk => { process.stderr.write(chunk) },
+  scan: typeof scanLatestVersions = scanLatestVersions,
+): Promise<void> {
+  if (updateMode(environment) !== 'check') return
+  try {
+    const result = await scan()
+    const lines = updateAdvice(result, installedFacts(environment), launcherPrefersEnglish(environment))
+    if (lines.length > 0) write(`${lines.join('\n')}\n`)
+  } catch {
+    // 静默：更新提示绝不能影响正常退出。
+  }
+}
+
 function directInvocation(): boolean {
   const entry = process.argv[1]
   if (entry === undefined) return false
@@ -201,8 +377,17 @@ function directInvocation(): boolean {
 }
 
 if (directInvocation()) {
+  const args = process.argv.slice(2)
   try {
-    process.exitCode = launch(process.argv.slice(2))
+    if (isUpdateRequest(args)) {
+      process.exitCode = await runUpdate(args)
+    } else {
+      await maybeAutoUpdate(args)
+      process.exitCode = launch(args)
+      if (!isVersionRequest(args) && process.stderr.isTTY === true) {
+        await postSessionUpdateNotice()
+      }
+    }
   } catch (error) {
     process.stderr.write(`deepseek: ${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1

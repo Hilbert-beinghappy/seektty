@@ -67,6 +67,12 @@ import {
   createClipboardImageWorkspace,
 } from './clipboard-image.ts'
 import {
+  BRACKETED_PASTE,
+  imagePathFromPasteText,
+  isSlashCommandLine,
+  splitLeadingImagePath,
+} from './pasted-image.ts'
+import {
   desktopNotifyBody,
   desktopNotifySequence,
   nextDesktopNotify,
@@ -100,38 +106,6 @@ export const internals: {
 }
 
 type NoticeTone = 'info' | 'success' | 'warning' | 'error'
-
-const BRACKETED_PASTE = /^\u001B\[200~([\s\S]*)\u001B\[201~$/u
-const IMAGE_PATH_SUFFIX = /\.(?:gif|jpe?g|png|webp)$/iu
-
-function pastedImagePath(data: string): string | undefined {
-  const match = BRACKETED_PASTE.exec(data)
-  if (match === null) return undefined
-  let candidate = (match[1] ?? '').trim()
-  if (candidate === '' || candidate.includes('\n') || candidate.includes('\r') || candidate.includes('\0')) {
-    return undefined
-  }
-  const quoted = (candidate.startsWith('"') && candidate.endsWith('"'))
-    || (candidate.startsWith("'") && candidate.endsWith("'"))
-  if (quoted) candidate = candidate.slice(1, -1)
-  const pathLike = quoted
-    || candidate.startsWith('/')
-    || candidate.startsWith('./')
-    || candidate.startsWith('../')
-    || candidate.startsWith('~/')
-    || candidate.startsWith('~\\')
-    || candidate.startsWith('file://')
-    || /^[A-Za-z]:[\\/]/u.test(candidate)
-    || candidate.startsWith('\\\\')
-    || !/\s/u.test(candidate)
-  if (!pathLike) return undefined
-  const suffixTarget = candidate.startsWith('file://')
-    ? (() => {
-      try { return new URL(candidate).pathname } catch { return '' }
-    })()
-    : candidate
-  return IMAGE_PATH_SUFFIX.test(suffixTarget) ? candidate : undefined
-}
 
 function noticeText(message: string, tone: NoticeTone): string {
   const text = translateUiText(message)
@@ -351,6 +325,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const updateStatus = (): void => {
       if (stopping !== undefined) return
+      editor.setDraftAttachments(capabilities.draftAttachments())
       const chrome = sessionChrome.of(latestSessionId)
       const snapshot = active?.session.getSnapshot()
       if (snapshot?.running === true) {
@@ -727,12 +702,33 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         persistComposerHistory(composerHistory)
       }
       editor.setText('')
-      if (text.startsWith('/')) void dispatchCommand(text)
-      else void sendPrompt(text)
+      if (isSlashCommandLine(text)) {
+        void dispatchCommand(text)
+        return
+      }
+      const leading = splitLeadingImagePath(text)
+      if (leading !== undefined) {
+        void (async () => {
+          try {
+            await capabilities.addAttachment(leading.path)
+          } catch (error: unknown) {
+            setNotice(ui(
+              `粘贴图片未加入：${capabilityError(error)}`,
+              `Pasted image was not attached: ${capabilityError(error)}`,
+            ), 'warning')
+            restoreDeferredPrompt(text)
+            return
+          }
+          await sendPrompt(leading.rest)
+        })()
+        return
+      }
+      void sendPrompt(text)
     }
 
-    const attachPastedImage = (path: string, fallbackText: string): { consume: true } => {
+    const attachPastedImage = (path: string, fallbackText: string, rest = ''): { consume: true } => {
       void capabilities.addAttachment(path).then((attachment) => {
+        if (rest !== '') editor.insertTextAtCursor(escapeTerminalText(rest))
         const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
         setNotice(ui(
           `已从粘贴加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`,
@@ -752,9 +748,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const interrupt = consumeRunningInterrupt(data, capabilities.active()?.session)
       if (interrupt !== undefined) return interrupt
       if (overlays.hasActive()) return undefined
-      const attachmentPath = pastedImagePath(data)
-      if (!transcriptFocused && attachmentPath !== undefined) {
-        return attachPastedImage(attachmentPath, BRACKETED_PASTE.exec(data)?.[1] ?? attachmentPath)
+      const pasted = imagePathFromPasteText(data)
+      if (!transcriptFocused && pasted !== undefined) {
+        return attachPastedImage(pasted.path, pasted.raw, pasted.rest)
       }
       const paste = BRACKETED_PASTE.exec(data)
       if (!transcriptFocused && paste !== null) {
@@ -763,7 +759,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           const workspace = createClipboardImageWorkspace()
           void captureClipboardImage({ platform: process.platform, dest: workspace.dest })
             .then(async (captured) => {
-              if (captured === undefined) return
+              if (captured === undefined) {
+                setNotice(ui(
+                  '剪贴板里没有可用图片。可粘贴图片文件路径，或先复制图片再粘贴。',
+                  'No image on the clipboard. Paste an image file path, or copy an image and paste again.',
+                ), 'warning')
+                return
+              }
               chmodSync(workspace.dest, 0o600)
               const attachment = await capabilities.addAttachment(captured)
               const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`

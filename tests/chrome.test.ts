@@ -192,6 +192,20 @@ describe('composer chrome', () => {
 
     expect(composer.render(60).at(-1)).toMatch(/v4-pro · 最大推理 · 标准$/u)
   })
+
+  it('shows pending image drafts on a dedicated composer row', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const composer = editor()
+    composer.setDraftAttachments([
+      { name: 'thumb.png', bytes: 2048, width: 120, height: 80 },
+    ])
+
+    const rendered = composer.render(60)
+    expect(rendered).toHaveLength(4)
+    expect(rendered[2]).toContain('thumb.png')
+    expect(rendered[2]).toContain('120×80')
+    expect(rendered[1]).toContain('输入消息，/ 打开命令')
+  })
 })
 
 describe('context bar running indicator', () => {

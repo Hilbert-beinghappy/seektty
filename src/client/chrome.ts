@@ -9,9 +9,18 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
+import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
 import { color, editorTheme } from './theme.ts'
+
+/** Pending composer image shown above the model rule. */
+export interface ComposerDraftAttachment {
+  readonly name: string
+  readonly bytes: number
+  readonly width?: number
+  readonly height?: number
+}
 
 function fit(text: string, width: number): string {
   return truncateToWidth(text, Math.max(1, width), '…')
@@ -86,6 +95,15 @@ function horizontalRule(
   const safeLabel = labelWidth === 0 ? '' : truncateToWidth(label, labelWidth, '…')
   const suffix = safeLabel === '' ? '' : ` ${safeLabel}`
   return paint(`${'─'.repeat(Math.max(1, width - visibleWidth(suffix)))}${suffix}`)
+}
+
+function draftAttachmentLine(items: readonly ComposerDraftAttachment[]): string {
+  return items.map((item) => {
+    const dimensions = item.width === undefined || item.height === undefined
+      ? ''
+      : ` · ${item.width}×${item.height}`
+    return `${item.name}${dimensions} · ${formatByteSize(item.bytes)}`
+  }).join(ui('；', '; '))
 }
 
 function compactFacts(label: string, width: number): string {
@@ -281,6 +299,7 @@ export class StatusBar implements Component {
 /** Open Grok-style composer with live model facts aligned to its lower rule. */
 export class PromptEditor extends Editor {
   private facts: TuiHeaderFacts | undefined
+  private drafts: readonly ComposerDraftAttachment[] = []
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -294,9 +313,18 @@ export class PromptEditor extends Editor {
     this.facts = facts
   }
 
+  /**
+   * Show pending next-prompt images under the composer text.
+   * @param items - transient attachments waiting to be sent.
+   */
+  setDraftAttachments(items: readonly ComposerDraftAttachment[]): void {
+    this.drafts = items
+  }
+
   /** Return the composer to its connected blank-session facts. */
   setEmpty(): void {
     this.facts = undefined
+    this.drafts = []
   }
 
   override setText(text: string): void {
@@ -329,7 +357,13 @@ export class PromptEditor extends Editor {
       editorRows[0] = `${color.brand('❯')} ${editorRows[0]?.slice(2) ?? ''}`
     }
 
-    const body = [...editorRows, ...autocompleteRows].map(row => padded(row, frameWidth))
+    const attachmentRows = this.drafts.length === 0
+      ? []
+      : [color.accent(fit(
+        ui(`待发送 ${draftAttachmentLine(this.drafts)}`, `Pending ${draftAttachmentLine(this.drafts)}`),
+        frameWidth,
+      ))]
+    const body = [...editorRows, ...attachmentRows, ...autocompleteRows].map(row => padded(row, frameWidth))
     const facts = this.facts === undefined
       ? ui('deepseek · 标准', 'deepseek · Standard')
       : [

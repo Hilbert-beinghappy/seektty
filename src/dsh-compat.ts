@@ -6,16 +6,16 @@ export interface DshCompatibility {
 }
 
 export const PACKAGE_NAME = 'seektty'
-export const PACKAGE_VERSION = '1.0.1'
+export const PACKAGE_VERSION = '1.0.2'
 export const DSH_COMPATIBILITY: DshCompatibility = {
   minimum: '0.1.0-rc.6',
-  tested: '0.1.0-rc.6',
+  tested: '0.1.0-rc.8',
 }
 
 /**
  * Value returned by official `@deepseek-ai/dsh-host-apiproxy` `host.describe`.
  * The gateway still hardcodes `version: '0.0.1'` as a TODO placeholder
- * (present in 0.1.0-rc.6 and 0.1.0-rc.7) instead of reading `apps/cli`
+ * (present in 0.1.0-rc.6 through 0.1.0-rc.8) instead of reading `apps/cli`
  * package.json. Treat it as "version unknown", not as a real 0.0.1 CLI.
  */
 export const HOST_DESCRIBE_VERSION_PLACEHOLDER = '0.0.1'
@@ -104,11 +104,30 @@ export function dshCompatibilityError(
       ? `dsh ${hostVersion} is too old. SeekTTY needs dsh >= ${compatibility.minimum} (tested ${compatibility.tested}).`
       : `dsh ${hostVersion} 过旧。SeekTTY 需要 dsh >= ${compatibility.minimum}（已测试 ${compatibility.tested}）。`
   }
+  return undefined
+}
+
+/**
+ * Advisory notice when the running dsh is newer than the tested upper bound.
+ * Newer hosts are allowed to boot; the notice keeps the tested range honest
+ * without blocking forward compatibility.
+ * @param hostVersion - Host-reported version; the `host.describe` placeholder
+ *   and unreadable values produce no notice (they are handled by
+ *   `dshCompatibilityError`).
+ * @param compatibility - package.json `dsh.compatibility`.
+ * @param english - launcher-safe language choice (no locale.ts).
+ */
+export function dshCompatibilityNotice(
+  hostVersion: string | undefined,
+  compatibility: DshCompatibility,
+  english: boolean,
+): string | undefined {
+  if (hostVersion === undefined || hostVersion === HOST_DESCRIBE_VERSION_PLACEHOLDER) return undefined
   const newest = compareDshVersion(hostVersion, compatibility.tested)
   if (newest !== undefined && newest > 0) {
     return english
-      ? `dsh ${hostVersion} is newer than the tested range. SeekTTY needs dsh ${compatibility.minimum}–${compatibility.tested} (tested ${compatibility.tested}).`
-      : `dsh ${hostVersion} 新于已测范围。SeekTTY 需要 dsh ${compatibility.minimum}–${compatibility.tested}（已测试 ${compatibility.tested}）。`
+      ? `dsh ${hostVersion} is newer than the tested ${compatibility.tested}. SeekTTY continues; report issues if anything misbehaves.`
+      : `dsh ${hostVersion} 新于已测试的 ${compatibility.tested}。SeekTTY 将继续运行；如有异常请反馈。`
   }
   return undefined
 }

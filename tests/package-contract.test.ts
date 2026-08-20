@@ -5,7 +5,7 @@ import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { load } from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import { PluginMarketplace } from '../src/host/plugin-marketplace.ts'
-import { DSH_COMPATIBILITY, PACKAGE_VERSION } from '../src/dsh-compat.ts'
+import { DSH_COMPATIBILITY, PACKAGE_VERSION, compareDshVersion } from '../src/dsh-compat.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as Record<string, unknown>
@@ -14,7 +14,7 @@ describe('out-of-tree Bundle contract', () => {
   it('declares the native dsh Bundle patch and exact tested baseline', () => {
     expect(manifest.dsh).toEqual({
       bundle: { patch: './cordis.patch.yml' },
-      compatibility: { minimum: '0.1.0-rc.6', tested: '0.1.0-rc.6' },
+      compatibility: { minimum: '0.1.0-rc.6', tested: DSH_COMPATIBILITY.tested },
     })
     expect(manifest.bin).toEqual({ deepseek: './lib/bin.js' })
     expect(PACKAGE_VERSION).toBe(manifest.version)
@@ -44,9 +44,20 @@ describe('out-of-tree Bundle contract', () => {
     expect(patchText).toContain("name: 'seektty'")
   })
 
-  it('uses the exact official locale plugin from the tested Harness baseline', () => {
-    expect((manifest.dependencies as Record<string, string>)['@deepseek-ai/dsh-client-locale'])
-      .toBe('0.1.0-rc.6')
+  it('pins official dsh packages to the tested Harness baseline when that version exists', () => {
+    const dependencies = manifest.dependencies as Record<string, string>
+    const dshPackages = Object.keys(dependencies).filter(name => name.startsWith('@deepseek-ai/dsh-'))
+    expect(dshPackages).toContain('@deepseek-ai/dsh-client-locale')
+    const exact = dshPackages.filter(name => dependencies[name] === DSH_COMPATIBILITY.tested)
+    expect(exact.length).toBeGreaterThan(dshPackages.length / 2)
+    for (const name of dshPackages) {
+      const version = dependencies[name]
+      expect(version, name).toBeDefined()
+      if (version === undefined) continue
+      const order = compareDshVersion(version, DSH_COMPATIBILITY.tested)
+      expect(order, `${name}@${version}`).toBeDefined()
+      expect(order, `${name}@${version}`).toBeLessThanOrEqual(0)
+    }
   })
 
   it('does not retain the in-tree TUI Bundle identity', () => {
@@ -66,6 +77,7 @@ describe('out-of-tree Bundle contract', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')
     expect(workflow).toContain('pnpm run check')
     expect(workflow).toContain('git diff --exit-code lib/')
+    expect(workflow).toContain("'release/**'")
   })
 
   it('tracks every packaged path so GitHub ref installs cannot omit files', () => {

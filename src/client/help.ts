@@ -20,6 +20,7 @@ export function helpSectionText(id: HelpSectionId): string {
       [
         '输入：在底部输入区写消息，Enter 发送。',
         '换行：Shift+Enter 在输入区插入换行。',
+        '图片：直接粘贴图片或图片路径；也可以 /attach。待发送图片显示在输入框下方。默认 v4-flash / v4-pro 目前不接受图片输入。',
         '停止：Ctrl+C 停止当前轮次；再按一次退出。',
         '会话：Ctrl+S 打开会话列表，新建或切换会话。',
         '审批：弹窗里查看命令或 diff，再选仅本次允许或拒绝。',
@@ -28,6 +29,7 @@ export function helpSectionText(id: HelpSectionId): string {
       [
         'Input: type in the composer and press Enter to send.',
         'Newline: Shift+Enter inserts a newline in the composer.',
+        'Images: paste an image or image path, or use /attach. Pending images appear under the composer. Default v4-flash / v4-pro currently reject image input.',
         'Stop: Ctrl+C stops the active turn; press again to exit.',
         'Sessions: Ctrl+S opens the session list to create or switch sessions.',
         'Approvals: inspect the command or diff in the overlay, then allow once or reject.',
@@ -39,14 +41,14 @@ export function helpSectionText(id: HelpSectionId): string {
     [
       '输入 /doctor 检查 pnpm、Profile 插件和 Bundle 兼容性。',
       '启动前需要 Node、pnpm 和官方 dsh，且 dsh 需在 PATH 或 DSH_BIN 中。',
-      '安装：pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.1',
+      '安装：pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2',
       '然后运行 deepseek。版本与兼容范围见 deepseek --version。',
       '更多步骤见仓库 QUICKSTART 与 README。',
     ].join('\n'),
     [
       'Run /doctor to check pnpm, Profile plugins, and Bundle compatibility.',
       'Before launch you need Node, pnpm, and official dsh on PATH or DSH_BIN.',
-      'Install: pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.1',
+      'Install: pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2',
       'Then run deepseek. See deepseek --version for the version and compatibility range.',
       'More steps are in the repository QUICKSTART and README.',
     ].join('\n'),

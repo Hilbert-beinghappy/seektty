@@ -27,6 +27,7 @@ import type { TuiClientContext } from './context.ts'
 import {
   DSH_COMPATIBILITY,
   dshCompatibilityError,
+  dshCompatibilityNotice,
   launcherPrefersEnglish,
 } from '../dsh-compat.ts'
 import { measureStartup } from '../startup-trace.ts'
@@ -184,6 +185,12 @@ export async function startTuiClient(
       launcherPrefersEnglish(process.env),
     )
     if (mismatch !== undefined) throw new Error(mismatch)
+    const newerNotice = dshCompatibilityNotice(
+      description?.version,
+      DSH_COMPATIBILITY,
+      launcherPrefersEnglish(process.env),
+    )
+    if (newerNotice !== undefined) process.stderr.write(`${newerNotice}\n`)
     registerConversationNodes(ctx)
     registerGoalProjection(ctx)
     registerWorkflowRunProjection(ctx)

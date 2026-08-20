@@ -46,7 +46,7 @@ The current release covers these capabilities:
 | Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, allow one tool call, skip further prompts for a tool in this session, or reject |
 | Input queue and steering | Queue prompts while the Agent runs, inspect/edit/remove entries, steer one entry or the entire queue into the active turn, and send `/steer` directly |
 | Human interaction | Single choice, multi-select, custom answers, skip, cancel, and plan review; submitting an interaction returns to the latest output while the blocked turn resumes, with `/pending` recovery when retrying is needed |
-| Image attachments | Add PNG, JPEG, GIF, or WebP by path or by pasting a file path or clipboard bitmap (`pngpaste` / `wl-paste` / `xclip` / PowerShell); enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
+| Image attachments | Add PNG, JPEG, GIF, or WebP by pasting an image or file path, or with `/attach`; macOS reads the clipboard via `osascript` (optional `pngpaste`), Linux via `wl-paste`/`xclip`, Windows via PowerShell; pending images appear under the composer; enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
 | Plan, Goal, Todo, and compaction | Native `/plan`, `/goal`, and `/compact` commands with plan review, goal state, Todo counts, and compaction records in the transcript |
 | Tools and produced files | `◆ action · duration` headers with live elapsed time and connected invocation code, dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted Shell/JSON/Diff views, safe native terminal ANSI, generic fallback cards, session-wide produced-file listing grouped by turn, in-TUI view, path copy, and confirmed external open |
 | Subagents | Inspect direct children, activity, tree state, token use, and duration; open continuable or read-only sessions and stop an active child turn |
@@ -68,11 +68,11 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved.
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.1
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
-`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.6`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
+`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
 
 ```sh
 deepseek "check this project"
@@ -81,14 +81,17 @@ deepseek --resume
 deepseek --resume <sessionId>
 deepseek --profile team-tui
 deepseek --version
+deepseek --update
 ```
 
 The native dsh entry remains available:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.1
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 dsh --profile tui
 ```
+
+`deepseek --update` still force-scans and installs. By default `deepseek` itself is `SEEKTTY_UPDATE=auto`: on launch it fetches official dsh npm `latest` (not `next` or GitHub pre-releases) and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle through native `dsh plugin add`. Local `link:`/`file:` installs and `SEEKTTY_SPEC` overrides are left alone. Network or install failures never block boot. Set `SEEKTTY_UPDATE=check` to restore a post-session notice, or `SEEKTTY_UPDATE=0` to disable.
 
 ## First-run API key setup
 
@@ -149,7 +152,7 @@ Replace the former global package once. The new `deepseek` launcher then uses na
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.1
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
@@ -157,7 +160,7 @@ Custom Profiles migrate independently on first launch, for example `deepseek --p
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.1
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 ## Plug and unplug
@@ -171,7 +174,7 @@ dsh plugin --profile tui remove seektty
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.1
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 Installation writes directly to the target Harness Profile dependencies, Bundle order, and pnpm lockfile. TUI `/plugin` and native `dsh plugin` operate on that same Profile state.
@@ -225,7 +228,7 @@ The interface selection, independent code selection, and named definitions live 
 
 ## Verified scope
 
-- Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.6`.
+- Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.8`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
 - `/doctor`: 95 Harness plugins running, 0 errors, 0 warnings.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
 - First-run Provider readiness, masked API-key setup, deferral and draft restoration, Harness credential persistence, and restart without another prompt under an isolated `DSH_HOME`.
@@ -247,6 +250,6 @@ pnpm test:stock
 
 ## Compatibility and upgrades
 
-The current compatibility baseline is official `0.1.0-rc.6`. For each new dsh release, update the exact dependencies and compatibility snapshots here, then complete the add/boot/remove/re-add contract before publishing the expanded range.
+The tested compatibility baseline is official `0.1.0-rc.8`. The declared minimum host is official `0.1.0-rc.6`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. A scheduled workflow scans the official npm `latest` dist-tag, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
 
-The source repository and the stable `v1.0.1` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.
+The source repository and the stable `v1.0.2` GitHub Release are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the Release.

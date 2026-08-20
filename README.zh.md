@@ -46,7 +46,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 | 权限与审批 | 查看和切换只读、工作区、完全访问等 Host 权限；Shift+Tab 快速循环；进入高风险权限前确认；工具调用支持仅本次允许、本会话不再询问或拒绝 |
 | 输入队列与 Steer | Agent 运行时继续排队消息，查看、编辑、删除队列项，将单条或整队消息转为当前轮次引导，并可直接发送 `/steer` |
 | 人机交互 | 处理单选、多选、自定义回答、跳过、取消和计划审查；提交后自动回到最新输出并展示原轮次续答，失败时可通过 `/pending` 重试 |
-| 图片附件 | 通过路径、粘贴图片路径或剪贴板位图（pngpaste / wl-paste / xclip / PowerShell）加入 PNG、JPEG、GIF、WebP，按 Harness 限制检查数量和大小；终端支持时内联显示，否则显示文件名、尺寸、类型和大小 |
+| 图片附件 | 直接粘贴图片或图片路径，或用 `/attach` 加入 PNG、JPEG、GIF、WebP；macOS 用系统剪贴板（osascript，可选 pngpaste），Linux 用 wl-paste/xclip，Windows 用 PowerShell；待发送图片显示在输入框下方；按 Harness 限制检查数量和大小；终端支持时内联显示，否则显示文件名、尺寸、类型和大小 |
 | Plan、Goal、Todo 与压缩 | 使用 Harness 原生 `/plan`、`/goal`、`/compact` 命令，显示计划审查、目标状态、Todo 数量和上下文压缩记录 |
 | 工具与产出文件 | `◆ 操作 · 耗时` 标题、运行中同步计时及带连接符的调用代码、动态工具目录、工具参数与安全边界说明、带原文件行号的高亮读取、Shell／JSON／Diff 高亮、安全保留的终端 ANSI、通用降级卡片；按轮次查看本会话生成文件、在 TUI 内查看、复制绝对路径，并在确认后交给外部程序打开 |
 | 子 Agent | 查看直接子 Agent、运行状态、树结构、Token 和耗时；打开可继续会话或只读会话，并在运行时停止当前子 Agent 轮次 |
@@ -68,11 +68,11 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim。
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.1
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
-`deepseek` 需要 PATH 上的 DeepSeek Harness（`dsh`），或用 `DSH_BIN` 指向可执行文件（`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.6`）。`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
+`deepseek` 需要 PATH 上的 DeepSeek Harness（`dsh`），或用 `DSH_BIN` 指向可执行文件（`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8`）。`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
 
 ```sh
 deepseek "检查这个项目"
@@ -81,14 +81,17 @@ deepseek --resume
 deepseek --resume <sessionId>
 deepseek --profile team-tui
 deepseek --version
+deepseek --update
 ```
 
 也可以只使用 dsh 的原生入口：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.1
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 dsh --profile tui
 ```
+
+`deepseek --update` 仍可强制扫描并安装。默认 `SEEKTTY_UPDATE=auto`：每次启动会拉取官方 dsh 的 npm `latest`（不跟 `next` 或 GitHub 预发布）和 SeekTTY 最新 GitHub Release，然后更新全局 dsh（`DSH_BIN` 固定可执行文件时跳过），并用原生 `dsh plugin add` 更新 SeekTTY Bundle。本地 `link:`/`file:` 安装和 `SEEKTTY_SPEC` 覆盖不会被改写。网络或安装失败不会挡住启动。设 `SEEKTTY_UPDATE=check` 可改回会话后提示，设 `SEEKTTY_UPDATE=0` 可关闭。
 
 ## 首次配置 API Key
 
@@ -149,7 +152,7 @@ dsh --profile tui
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.1
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.0.2
 deepseek
 ```
 
@@ -157,7 +160,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.1
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 ## 直接插拔
@@ -171,7 +174,7 @@ dsh plugin --profile tui remove seektty
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.1
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.0.2
 ```
 
 安装结果直接写入目标 Harness Profile 的依赖、Bundle 顺序和 pnpm lockfile。TUI 的 `/plugin` 与原生 `dsh plugin` 操作同一份 Profile 状态。
@@ -225,7 +228,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 
 ## 已验证范围
 
-- 官方 stock `@deepseek-ai/dsh@0.1.0-rc.6` 隔离安装、配置装配和 PTY 启动。
+- 官方 stock `@deepseek-ai/dsh@0.1.0-rc.8` 隔离安装、配置装配和 PTY 启动；并对声明的最低版本 `@deepseek-ai/dsh@0.1.0-rc.6` 完成 add／boot／remove／re-add 插拔契约。
 - `/doctor`：95 个 Harness 插件运行，0 error，0 warning。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
 - 隔离 `DSH_HOME` 下的首次 Provider 就绪检查、API Key 掩码输入、跳过后的草稿恢复、Harness 凭证持久化，以及重启后不再提示。
@@ -247,6 +250,6 @@ pnpm test:stock
 
 ## 兼容和升级
 
-当前兼容基线是官方 `0.1.0-rc.6`。dsh 发布新版本后，在本仓库更新精确依赖和兼容快照，并完成 add／boot／remove／re-add 契约验证，即可发布新的兼容范围。
+已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
 
-源码仓库与稳定版 `v1.0.1` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。
+源码仓库与稳定版 `v1.0.2` GitHub Release 均已公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用 Release 附带的 tarball。

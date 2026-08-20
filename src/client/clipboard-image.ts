@@ -49,9 +49,34 @@ interface ImagePasteCommand {
   readonly stdoutToFile: boolean
 }
 
+function appleScriptWriteClipboardPng(dest: string): ImagePasteCommand {
+  const escaped = dest.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
+  return {
+    command: 'osascript',
+    args: [
+      '-e', 'try',
+      '-e', 'set pngData to (the clipboard as «class PNGf»)',
+      '-e', 'on error',
+      '-e', 'error number 1',
+      '-e', 'end try',
+      '-e', `set outFile to POSIX file "${escaped}"`,
+      '-e', 'set fh to open for access outFile with write permission',
+      '-e', 'try',
+      '-e', 'set eof of fh to 0',
+      '-e', 'write pngData to fh',
+      '-e', 'end try',
+      '-e', 'close access fh',
+    ],
+    stdoutToFile: false,
+  }
+}
+
 function commandsFor(platform: NodeJS.Platform, dest: string): readonly ImagePasteCommand[] {
   if (platform === 'darwin') {
-    return [{ command: 'pngpaste', args: [dest], stdoutToFile: false }]
+    return [
+      { command: 'pngpaste', args: [dest], stdoutToFile: false },
+      appleScriptWriteClipboardPng(dest),
+    ]
   }
   if (platform === 'linux') {
     return [

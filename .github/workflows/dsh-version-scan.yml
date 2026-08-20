@@ -1,0 +1,92 @@
+name: dsh version scan
+
+# 每日扫描官方 dsh 的 npm `latest` dist-tag（稳定线）。不跟 npm `next` 或
+# GitHub harness 预发布。发现比当前 dsh.compatibility.tested 更新的 latest
+# 时：自动升级依赖与基线、跑完整 check、在隔离 DSH_HOME 下对新版 stock dsh
+# 重跑插拔契约，全部通过后开一个升级 PR。任何一步失败则不产生 PR。
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'pnpm'
+
+      - name: Check the npm latest dsh against the tested baseline
+        id: check
+        run: |
+          RESULT=$(node scripts/bump-dsh.mjs --check)
+          echo "$RESULT"
+          echo "target=$(echo "$RESULT" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).target')" >> "$GITHUB_OUTPUT"
+          echo "update=$(echo "$RESULT" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).updateAvailable')" >> "$GITHUB_OUTPUT"
+
+      - name: Skip when an upgrade branch or PR already exists
+        id: guard
+        if: steps.check.outputs.update == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="auto/dsh-${{ steps.check.outputs.target }}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump to the npm latest dsh
+        if: steps.check.outputs.update == 'true' && steps.guard.outputs.exists == 'false'
+        run: |
+          node scripts/bump-dsh.mjs
+          pnpm install --no-frozen-lockfile
+
+      - name: Typecheck, test, build, and pack dry-run
+        if: steps.check.outputs.update == 'true' && steps.guard.outputs.exists == 'false'
+        run: pnpm run check
+
+      - name: Stock dsh add/boot/remove/re-add contract under an isolated DSH_HOME
+        if: steps.check.outputs.update == 'true' && steps.guard.outputs.exists == 'false'
+        run: |
+          TARGET="${{ steps.check.outputs.target }}"
+          npm install --prefix "$RUNNER_TEMP/dsh-global" "@deepseek-ai/dsh@$TARGET"
+          TARBALL=$(pnpm pack | tail -1)
+          DSH_BIN="$RUNNER_TEMP/dsh-global/node_modules/.bin/dsh" \
+          SEEKTTY_SPEC="$PWD/$TARBALL" \
+            node scripts/stock-dsh-cycle.mjs
+          rm -f "$TARBALL"
+
+      - name: Open the upgrade pull request
+        if: steps.check.outputs.update == 'true' && steps.guard.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TARGET="${{ steps.check.outputs.target }}"
+          BRANCH="${{ steps.guard.outputs.branch }}"
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git add package.json pnpm-lock.yaml src/dsh-compat.ts lib/ README.md README.zh.md
+          git commit -m "chore(compat): adapt to official dsh $TARGET"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "chore(compat): adapt to official dsh $TARGET" \
+            --body "$(printf '自动扫描发现官方 dsh 稳定版 %s（npm latest）。\n\n- 全部 @deepseek-ai/dsh-* 依赖与 dsh.compatibility.tested 升级到 %s\n- pnpm run check 通过\n- 隔离 DSH_HOME 下对 stock dsh %s 的 add/boot/remove/re-add 插拔契约通过\n\n合并前请人工确认 README 兼容性描述与 CHANGELOG。' "$TARGET" "$TARGET" "$TARGET")"
