@@ -36,7 +36,9 @@
 
 Run `deepseek` from a project directory to use the native Agent, Session, model, permission, Settings, Profile, plugin, and persistence services of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) from one terminal workspace. Prompts, code changes, tool calls, sessions, model routes, permissions, plugins, subagents, and diagnostics all operate on the same Harness state.
 
-When an idea still needs definition, `/clarify` reads the active Session and composer draft, follows the real model route, and generates Socratic questions, contextual options, and a live draft preview that evolves after every answer. Accepting the preview places a complete Draft back in the ordinary composer for review and manual submission. Harness native `/plan` can then turn the clarified requirement into an implementation plan.
+When an idea still needs definition, the optional plugin-backed `/clarify` workflow reads the active Session and composer draft, follows the real model route, and generates Socratic questions, contextual options, and a live draft preview that evolves after every answer. Accepting the preview places a complete Draft back in the ordinary composer for review and manual submission. Harness native `/plan` can then turn the clarified requirement into an implementation plan.
+
+The [Clarify Host plugin](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) owns the Session-bound clarification process, model-generated questions, options, previews, and six-method Remote. When that compatible plugin capability is active, SeekTTY detects it and adds the local `/clarify` command plus its keyboard-first TUI surface. SeekTTY passes the current Session and draft to the plugin, then writes an accepted Draft back into the composer.
 
 Clarify model calls run through [Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) and are recorded in its dedicated `auxiliary_runtime` ledger. Official Agent-loop usage remains in `tokenUsage`; SeekTTY `/status` shows separately sourced Official, Auxiliary, and derived Combined totals while the snapshot contract is healthy.
 
@@ -54,19 +56,29 @@ The live view fills the terminal and keeps the composer and status at the bottom
 
 ## Clarify and Plan
 
-[Clarify](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) and Plan cover consecutive parts of one workflow.
+[Clarify](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) is an optional DeepSeek Harness Host plugin, and SeekTTY is its keyboard-first terminal consumer. Plugin-backed Clarify and Harness-native Plan cover consecutive parts of one workflow.
 
 Clarify handles the stage where the desired outcome still needs definition. It uses the current Session and draft to ask one focused question at a time, carries accepted decisions forward, and updates a reviewable Draft after every answer. Accepting returns that Draft to the composer. You can edit it and press Enter when it represents what you want.
 
 Plan handles the stage where the requirement is ready for implementation. Harness native `/plan` turns the submitted requirement into an implementation proposal and opens the normal plan-review flow.
+
+### Where `/clarify` comes from
+
+| Component | Responsibility |
+| --- | --- |
+| **SeekTTY** | Probes the Clarify Remote, dynamically adds `/clarify` to the local command catalog, renders the terminal interaction, supplies the current Session and composer seed, and returns an accepted Draft to the composer. |
+| **dsh-plugin-clarify** | Publishes `start`, `answer`, `accept`, `refine`, `cancel`, and `fetchDraft` over `clarify.wire/1`; owns the temporary clarification process and generates questions, options, and evolving Draft previews. |
+| **dsh-plugin-auxiliary-runtime** | Provides Clarify's same-process model execution, limits, cancellation, and separately sourced auxiliary usage. |
+
+The standalone SeekTTY shell presents its core command catalog. Activating the two Host plugins in the same Profile expands that catalog with the complete `/clarify` workflow.
 
 ```text
 [Active Session + composer draft]
               |
               v
      +------------------+      clarify Remote      +------------------+
-     | SeekTTY          | -----------------------> | Clarify          |
-     | /clarify surface | <----------------------- | question/options |
+     | SeekTTY consumer | -----------------------> | Clarify plugin   |
+     | /clarify adapter | <----------------------- | process / model  |
      +--------+---------+   live Draft preview     +--------+---------+
               |                                            |
               |                                            | same-process run
@@ -105,9 +117,9 @@ Questions, options, preview revisions, and refine feedback live in a temporary c
 
 Each Clarify model call is recorded by Auxiliary Runtime in the official `storageDomain` under `auxiliary_runtime`. Official `tokenUsage` continues to represent Agent-loop calls. Auxiliary derives Combined values from the four disjoint buckets—`uncachedInputTokens`, `outputTokens`, `cacheReadTokens`, and `cacheWriteTokens`—at read time, and SeekTTY `/status` validates and displays the snapshot. The auxiliary ledger stores call identity, purpose, status, token buckets, normalized failures, and timestamps; prompts, message text, model output, custom answers, credentials, and filesystem paths stay outside the ledger.
 
-### Start Clarify from the composer
+### Start plugin-backed Clarify from the composer
 
-SeekTTY adds `/clarify` to its local command catalog while a compatible six-method Clarify Remote with `clarify.wire/1` is active. The current recommended installation is Clarify `0.2.1`; `0.2.0` remains an available rollback artifact.
+SeekTTY adds `/clarify` to its local command catalog while the `dsh-plugin-clarify` Host plugin exposes a compatible six-method Remote with `clarify.wire/1`. The current recommended installation is Clarify `0.2.1`; `0.2.0` remains an available rollback artifact.
 
 - Run it from the command palette to keep the whole composer as the seed.
 - Type `/clarify some text` to use the argument as the seed.
@@ -174,7 +186,7 @@ dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-cl
 dsh --profile tui
 ```
 
-This path consumes packed artifacts and avoids Git-source `prepare` / `allowBuilds`. Installing only the first Bundle gives you the standalone SeekTTY shell; Clarify appears when the two optional Host plugins are active in the same Profile.
+This path consumes packed artifacts and avoids Git-source `prepare` / `allowBuilds`. The first package installs the standalone SeekTTY shell, the second provides Auxiliary model execution, and the third provides the Clarify Host service and Remote. Once both Host plugins are active in the same Profile, SeekTTY discovers the Remote and adds `/clarify` to the terminal command catalog.
 
 ### Bare `deepseek` launcher
 
@@ -236,10 +248,11 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Runtime interaction | `/queue`, `/steer`, `/attach`, `/attachments`, `/pending` |
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
+| Plugin-backed workflow | `/clarify` appears when `dsh-plugin-clarify` and its Auxiliary Runtime dependency are active in the current Profile |
 | Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when `dsh-plugin-auxiliary-runtime@0.1.0` is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
-`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions and stay within the command surface. A compatible six-method Clarify Remote with `clarify.wire/1` contributes `/clarify` to the local `/` catalog. Its model-generated questions, contextual options, and evolving preview lead to a reviewed Draft in the ordinary composer; you decide when to submit it. See [Clarify and Plan](#clarify-and-plan) for the full journey.
+`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions and stay within the command surface. SeekTTY detects the Clarify plugin's compatible six-method Remote with `clarify.wire/1` and dynamically adds `/clarify` to the local `/` catalog. The plugin's model-generated questions, contextual options, and evolving preview lead to a reviewed Draft in the ordinary composer; you decide when to submit it. See [Clarify and Plan](#clarify-and-plan) for the full journey.
 
 ## Common controls
 
