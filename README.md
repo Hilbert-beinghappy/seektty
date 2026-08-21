@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/seektty-logo.png" alt="SeekTTY logo" width="200">
+
 <h1>SeekTTY</h1>
 
 <p>A keyboard-first terminal workspace for DeepSeek Harness, from an early idea to an executable plan.</p>

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/seektty-logo.png" alt="SeekTTY logo" width="200">
+
 <h1>SeekTTY</h1>
 
 <p>DeepSeek Harness 的键盘优先终端工作台，陪你把一个想法推进到可执行方案。</p>
