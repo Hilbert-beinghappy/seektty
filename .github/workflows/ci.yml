@@ -34,6 +34,15 @@ jobs:
           git diff --exit-code lib/
           test -z "$(git status --porcelain -- lib/)"
 
+      - name: Pack and boot without workspace dev dependencies
+        run: |
+          TARGET=$(node -p "require('./package.json').dsh.compatibility.tested")
+          npm install --prefix "$RUNNER_TEMP/dsh-global" "@deepseek-ai/dsh@$TARGET"
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          DSH_BIN="$RUNNER_TEMP/dsh-global/node_modules/.bin/dsh" \
+          SEEKTTY_SPEC="$RUNNER_TEMP/seektty-1.2.0.tgz" \
+          node scripts/stock-dsh-cycle.mjs
+
   launcher-windows:
     name: Windows launcher
     runs-on: windows-latest

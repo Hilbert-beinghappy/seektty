@@ -235,7 +235,8 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 - 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
 - 中英文语言解析、带 revision 保护的共享偏好写入、终端实时切换，以及未知外部内容保持原样。
 - 原生 remove 后依赖、Bundle 和配置条目全部消失；re-add 后再次启动成功。
-- 全新全局安装的裸 `deepseek` 自动创建并启动 `tui` Profile。
+- 全新打包后的全局安装在没有工作区开发依赖、也没有重复 `@deepseek-ai/*` 包的情况下，依然能暴露裸 `deepseek`，自动创建 `tui` Profile，并通过官方 dsh 模块回退完成启动。
+- 安装后已完成真实原生 `todo_write` 用户旅程；打包门禁还会拒绝 Profile 内出现官方身份型 Host 包的副本，并验证 Cordis、API proxy、Session 和工具运行时都解析到官方回退实例。
 - macOS、Linux 和 Windows 均支持安装、启动、键盘导航与终端交互。
 
 已在隔离 `DSH_HOME` 中把有效 DeepSeek 凭据粘贴进真实掩码引导并完成在线多轮验收：`v4-flash` 首轮返回 `REALCHECK_58597`，下一轮引用该结果后返回 `REALCHECK_58598`。同一 Profile 重启后没有再次弹出引导，Harness 凭证文件权限为 `0600`，凭据没有进入终端输出、截图或仓库；验收结束后已删除隔离凭证存储。
@@ -257,6 +258,6 @@ pnpm test:clarify-doctor
 
 ## 兼容和升级
 
-已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。已测 Host 为官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7` 与 `0.1.0-rc.8`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。官方 rc.6/rc.7 基图解析 `@deepseek-ai/dsh-attachment@0.1.0-rc.7`，其 `ImageAttachmentLimits` 含 `maxImageBytes`、`maxImagesPerMessage`、`maxMessageImageBytes`、`maxImagePixels`、`mediaTypes`，但没有 `maxImageDimension`。SeekTTY 随后插入 rc.8 的 `@deepseek-ai/dsh-host-apiproxy`，其 `imageLimits` 投影要求该字段。Host 插件 `seektty/attachment-compat` 紧挨在 `api-gateway` 之前运行：仅当现场能力正好是这份合法遗留形状时，才从 `maxImagePixels` 推导保守的 `maxImageDimension`（单边不能超过像素总数）。原生 rc.8 对象保持同一引用。其他残缺或未知形状一律不改，让 rc.8 校验继续闭包失败。未来 Host 按能力匹配，不做版本分支。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check` 和隔离 stock-dsh 插拔契约通过后升级精确的 `@deepseek-ai/dsh-*` 钉死版本并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
+已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。已测 Host 为官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7` 与 `0.1.0-rc.8`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。发布的 Bundle 不会再把 Cordis 或任何 `@deepseek-ai/dsh-*` Host 包的第二份副本安装进 Profile：optional peer 只描述 Host 合同，运行时 import 统一通过官方 `$DSH_HOME/profiles/node_modules` 回退解析，从而保持原生工具调度器等身份型 Symbol 的唯一性。官方回退不提供的纯客户端辅助包则会被打进 Bundle。Host 插件 `seektty/attachment-compat` 仍紧挨在 `api-gateway` 之前，且只适配精确的合法遗留 image-limit 能力形状；其他形状继续闭包失败。未来 Host 按能力匹配，不做版本分支。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check`、隔离打包启动器和 stock-dsh 契约全部通过后，升级精确开发基线和 optional peer 范围并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
 
 源码仓库与 GitHub Releases 均公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用对应 Release 附带的 tarball。

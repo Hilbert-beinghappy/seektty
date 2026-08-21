@@ -23,8 +23,13 @@ const requested = args.find(argument => !argument.startsWith('--'))
 const manifestPath = resolve(root, 'package.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const tested = manifest.dsh?.compatibility?.tested
+const minimum = manifest.dsh?.compatibility?.minimum
 if (typeof tested !== 'string' || tested === '') {
   process.stderr.write('package.json 缺少 dsh.compatibility.tested\n')
+  process.exit(2)
+}
+if (typeof minimum !== 'string' || minimum === '') {
+  process.stderr.write('package.json 缺少 dsh.compatibility.minimum\n')
   process.exit(2)
 }
 
@@ -100,16 +105,27 @@ async function packageHasVersion(name, version) {
   return json !== undefined && json.version === version
 }
 
-for (const name of Object.keys(manifest.dependencies ?? {})) {
+function testedPeerRange(minimumVersion, testedVersion) {
+  const rc = /^(.*-rc\.)(\d+)$/u.exec(testedVersion)
+  return rc === null
+    ? `>=${minimumVersion} <=${testedVersion}`
+    : `>=${minimumVersion} <${rc[1]}${Number(rc[2]) + 1}`
+}
+
+for (const name of Object.keys(manifest.devDependencies ?? {})) {
   if (!name.startsWith('@deepseek-ai/dsh-')) continue
   if (await packageHasVersion(name, target)) {
-    manifest.dependencies[name] = target
+    manifest.devDependencies[name] = target
     continue
   }
-  if (manifest.dependencies[name] === target && await packageHasVersion(name, tested)) {
-    manifest.dependencies[name] = tested
+  if (manifest.devDependencies[name] === target && await packageHasVersion(name, tested)) {
+    manifest.devDependencies[name] = tested
   }
-  process.stdout.write(`跳过 ${name}：registry 没有 ${target}，保持 ${manifest.dependencies[name]}\n`)
+  process.stdout.write(`跳过 ${name}：registry 没有 ${target}，保持 ${manifest.devDependencies[name]}\n`)
+}
+for (const name of Object.keys(manifest.peerDependencies ?? {})) {
+  if (!name.startsWith('@deepseek-ai/dsh-')) continue
+  manifest.peerDependencies[name] = testedPeerRange(minimum, target)
 }
 manifest.dsh.compatibility.tested = target
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
