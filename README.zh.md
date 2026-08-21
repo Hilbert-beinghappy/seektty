@@ -121,7 +121,7 @@ dsh --profile tui
 | 运行交互 | `/queue`、`/steer`、`/attach`、`/attachments`、`/pending` |
 | 运行内容 | `/tools`、`/files`、`/jobs`、`/subagents`、`/trajectory` |
 | 扩展 | `/plugin`、`/plugins`、`/skills`、`/mcp` |
-| 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart` |
+| 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart`；当 `dsh-plugin-auxiliary-runtime@0.1.0` 健康可用时，`/status` 分别显示标明来源的官方、辅助和组合（派生）会话总用量，且不修改官方 `tokenUsage` 投影 |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
 `/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。`/clarify` 不是常驻命令：只有探测到兼容的 Clarify `0.2.0` 六方法 Remote 时才会进入本地 `/` 目录。它会根据当前 Session 和输入草稿动态生成问题与选项，每次回答都演进一版可审阅 preview，并允许继续回答、直接 refine、采用或放弃；不会常驻显示灰色建议行，也绝不会自动发送。你可以从命令面板执行以保留整个输入区作为 seed，也可以输入 `/clarify some text`，或在现有草稿末尾单独加一个 `/clarify` token／一行。采用后只会把完整审阅过的 draft 写回常规输入区；是否按 Enter 发送仍由你决定。

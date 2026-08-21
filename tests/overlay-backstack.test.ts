@@ -64,7 +64,7 @@ function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
   } as unknown as TuiManagementBridge
   const defaults = {
     managementBridge: () => management,
-    active: () => ({ workspaceId: 'w1', workspacePath: '/tmp/demo' }),
+    active: () => ({ sessionId: 's1', workspaceId: 'w1', workspacePath: '/tmp/demo' }),
     listWorkspaces: () => [{
       workspaceId: 'w1',
       title: 'Demo',
@@ -108,6 +108,7 @@ function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
       runningCalls: [],
     }),
     sessionStatistics: () => ({ lines: ['tokens 12'] }),
+    auxiliaryUsageStatistics: async () => undefined,
     projectionEntries: () => [['todos', [{ id: '1' }]]],
     exportSession: async () => ({ path: '/tmp/session.zip', bytes: 12 }),
   }
@@ -320,5 +321,81 @@ describe('nested overlay back stack', () => {
     harness.component().handleInput(ESCAPE)
     await execution
     expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
+  it('shows provenance-preserving auxiliary usage only when the optional snapshot is healthy', async () => {
+    const sessionStatistics = vi.fn(() => ({ lines: ['official fallback'] }))
+    const auxiliaryUsageStatistics = vi.fn(async () => ({
+      lines: [
+        'Token · Official · input 12 · output 3',
+        'Token · Auxiliary · input 4 · output 5',
+        'Token · Combined (derived) · input 16 · output 8',
+      ] as const,
+    }))
+    const harness = actionHarness({
+      sessionStatistics,
+      auxiliaryUsageStatistics,
+    })
+    const execution = harness.actions.execute('status', '')
+
+    await expectPage(harness, /用量来源|Usage provenance/)
+    harness.component().handleInput(ENTER)
+    await expectPage(harness, /Combined \(derived\)/)
+    const page = plain(harness.component().render(90))
+    expect(page).toContain('Token · Official')
+    expect(page).toContain('Token · Auxiliary')
+    expect(page).not.toContain('official fallback')
+    expect(sessionStatistics).toHaveBeenCalledWith({ includeTokenUsage: false })
+    expect(auxiliaryUsageStatistics).toHaveBeenCalledWith({ sessionId: 's1' })
+
+    harness.component().handleInput(ESCAPE)
+    await expectPage(harness, /状态与统计|Status and statistics/)
+    harness.component().handleInput(ESCAPE)
+    await execution
+  })
+
+  it('keeps stock official status silent when the auxiliary Remote is absent', async () => {
+    const sessionStatistics = vi.fn(() => ({ lines: ['official fallback'] }))
+    const harness = actionHarness({
+      sessionStatistics,
+      auxiliaryUsageStatistics: async () => undefined,
+    })
+    const execution = harness.actions.execute('status', '')
+
+    await expectPage(harness, /状态与统计|Status and statistics/)
+    const page = plain(harness.component().render(90))
+    expect(page).not.toMatch(/Usage provenance|Auxiliary|Combined \(derived\)/)
+    expect(sessionStatistics).toHaveBeenCalledWith({ includeTokenUsage: true })
+
+    harness.component().handleInput(ESCAPE)
+    await execution
+  })
+
+  it('discards an auxiliary snapshot when the active Session changes during the RPC', async () => {
+    let sessionId = 's1'
+    const sessionStatistics = vi.fn(() => ({ lines: ['official fallback'] }))
+    const harness = actionHarness({
+      active: () => ({ sessionId } as ReturnType<HarnessTuiCapabilities['active']>),
+      sessionStatistics,
+      auxiliaryUsageStatistics: async () => {
+        sessionId = 's2'
+        return {
+          lines: [
+            'Token · Official · input 12 · output 3',
+            'Token · Auxiliary · input 4 · output 5',
+            'Token · Combined (derived) · input 16 · output 8',
+          ],
+        }
+      },
+    })
+    const execution = harness.actions.execute('status', '')
+
+    await expectPage(harness, /状态与统计|Status and statistics/)
+    const page = plain(harness.component().render(90))
+    expect(page).not.toMatch(/Usage provenance|Auxiliary|Combined \(derived\)/)
+    expect(sessionStatistics).toHaveBeenCalledWith({ includeTokenUsage: true })
+
+    harness.component().handleInput(ESCAPE)
+    await execution
   })
 })

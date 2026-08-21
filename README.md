@@ -121,7 +121,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Runtime interaction | `/queue`, `/steer`, `/attach`, `/attachments`, `/pending` |
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
-| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
+| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when `dsh-plugin-auxiliary-runtime@0.1.0` is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
 `/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts. `/clarify` is not a stock command: it is added to the local `/` catalog only while a compatible Clarify `0.2.0` six-method Remote is present. It asks context-specific questions generated from the active Session and current draft, evolves a reviewed preview after every answer, and lets you answer, refine, accept, or cancel. It never shows a permanent grey suggestion line and never auto-sends. Run it from the palette to keep the whole composer as the seed, type `/clarify some text`, or end an existing draft with a final `/clarify` token or line. Accepting writes the complete reviewed draft back into the ordinary composer; press Enter yourself only if you want to send it.

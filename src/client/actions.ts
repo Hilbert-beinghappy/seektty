@@ -3699,10 +3699,32 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
   }
 
   private async status(): Promise<void> {
-    const status = await this.capabilities.headerFacts(true)
-    const statistics = this.capabilities.sessionStatistics()
+    const openedSessionId = this.capabilities.active()?.sessionId
+    const [status, fetchedAuxiliaryUsage] = await Promise.all([
+      this.capabilities.headerFacts(true),
+      this.capabilities.auxiliaryUsageStatistics?.(
+        openedSessionId === undefined ? {} : { sessionId: openedSessionId },
+      ).catch(() => undefined),
+    ])
+    const auxiliaryUsage = this.capabilities.active()?.sessionId === openedSessionId
+      ? fetchedAuxiliaryUsage
+      : undefined
+    const statistics = this.capabilities.sessionStatistics({ includeTokenUsage: auxiliaryUsage === undefined })
     const projections = this.capabilities.projectionEntries()
     const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    const auxiliaryUsageChoice = auxiliaryUsage === undefined
+      ? []
+      : [{
+          id: '__seektty_auxiliary_usage__',
+          label: ui('用量来源 · 官方 / 辅助 / 组合（派生）', 'Usage provenance · Official / Auxiliary / Combined (derived)'),
+          description: auxiliaryUsage.lines[2],
+        }]
+    const projectionChoices = projections.map(([key, value]) => ({
+      id: key,
+      label: key,
+      description: detailText(value).replace(/\s+/gu, ' ').slice(0, 240),
+    }))
+    const choices = [...auxiliaryUsageChoice, ...projectionChoices]
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('状态与统计', "Status and statistics"),
@@ -3712,17 +3734,22 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           status.workspace,
           `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
           ...statistics.lines,
+          ...(auxiliaryUsage?.lines ?? []),
         ].join('\n'),
-        choices: projections.length === 0
+        choices: choices.length === 0
           ? [{ id: 'none', label: ui('当前没有会话数据', "No session data"), description: ui('暂无可显示内容', "Nothing to display") }]
-          : projections.map(([key, value]) => ({
-            id: key,
-            label: key,
-            description: detailText(value).replace(/\s+/gu, ' ').slice(0, 240),
-          })),
+          : choices,
         options,
       }, async (selected) => {
         if (selected.id === 'none') return
+        if (selected.id === '__seektty_auxiliary_usage__' && auxiliaryUsage !== undefined) {
+          await navigation.detail({
+            title: ui('用量来源', 'Usage provenance'),
+            content: auxiliaryUsage.lines.join('\n'),
+            options,
+          })
+          return
+        }
         const projection = projections.find(([key]) => key === selected.id)
         if (projection === undefined) return
         await navigation.detail({
