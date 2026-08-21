@@ -20,6 +20,9 @@ import {
 import {
   type InstalledFacts,
   type UpdatePlan,
+  DEFAULT_SCAN_TIMEOUT_MS,
+  exclusiveUpdatePlan,
+  parseDshCliVersion,
   scanLatestVersions,
   updateAdvice,
   updatePlan,
@@ -92,10 +95,12 @@ export function isLocalPluginSpec(spec: string | undefined): boolean {
 function installedFacts(environment: NodeJS.ProcessEnv, profile = 'tui'): InstalledFacts {
   const override = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || ''
   const installedSpec = profileManifest(profile, environment)?.dependencies?.[PACKAGE_NAME]
+  const dshPinned = (environment.DSH_BIN?.trim() ?? '') !== ''
   return {
     dshTested: DSH_COMPATIBILITY.tested,
+    dshInstalled: dshPinned ? undefined : internals.readInstalledDshVersion('dsh', environment),
     seekttyVersion: PACKAGE_VERSION,
-    dshPinned: (environment.DSH_BIN?.trim() ?? '') !== '',
+    dshPinned,
     seekttyPinned: override !== '' || isLocalPluginSpec(installedSpec),
   }
 }
@@ -180,6 +185,17 @@ export function installed(profile: string): boolean {
 /** Spawn options that resolve PATHEXT shims on Windows and hide extra consoles. */
 export const DSH_SPAWN_OPTIONS = { stdio: 'inherit' as const, windowsHide: true }
 
+/**
+ * Env for `dsh --version`. Keep a normal subprocess environment so wrappers
+ * that need HOME or NODE_OPTIONS still work. SeekTTY omits the caller's
+ * explicit DSH_HOME; DSH_BIN is pinned and is not probed.
+ */
+export function dshVersionProbeEnv(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...environment }
+  delete env.DSH_HOME
+  return env
+}
+
 /** Replaceable spawn seam used by launcher tests. */
 export const internals: {
   spawnSync: (
@@ -187,8 +203,28 @@ export const internals: {
     args: readonly string[],
     options: typeof DSH_SPAWN_OPTIONS,
   ) => { error?: Error | null; signal: NodeJS.Signals | null; status: number | null }
+  /**
+   * Read the installed Host version from PATH `dsh --version`.
+   * DSH_BIN is pinned and is not probed. SeekTTY only captures the command's
+   * version output; it does not inspect Profile or Session files itself.
+   */
+  readInstalledDshVersion: (command: string, environment: NodeJS.ProcessEnv) => string | undefined
 } = {
   spawnSync: (command, args, options) => crossSpawn.sync(command, [...args], options),
+  readInstalledDshVersion: (command, environment) => {
+    try {
+      const result = crossSpawn.sync(command, ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: DEFAULT_SCAN_TIMEOUT_MS,
+        env: dshVersionProbeEnv(environment),
+      })
+      if (result.error != null || result.status !== 0 || result.signal != null) return undefined
+      return parseDshCliVersion(`${result.stdout ?? ''}\n${result.stderr ?? ''}`)
+    } catch {
+      return undefined
+    }
+  },
 }
 
 function missingDshMessage(command: string, english: boolean): string {
@@ -277,6 +313,7 @@ async function applyUpdatePlan(
   write: (chunk: string) => void,
   options: { readonly announcePinnedDsh: boolean; readonly announceCurrentSeektty: boolean },
 ): Promise<number> {
+  const exclusive = exclusiveUpdatePlan(plan)
   if (options.announcePinnedDsh && facts.dshPinned) {
     write(launcherCopy(
       'DSH_BIN 已固定 dsh 可执行文件，跳过 dsh 更新。\n',
@@ -284,40 +321,45 @@ async function applyUpdatePlan(
       english,
     ))
   }
-  if (plan.dshSpec !== undefined) {
-    write(launcherCopy(`更新 dsh：pnpm add --global ${plan.dshSpec}\n`, `Updating dsh: pnpm add --global ${plan.dshSpec}\n`, english))
+  if (exclusive.dshSpec !== undefined) {
+    write(launcherCopy(`更新 dsh：pnpm add --global ${exclusive.dshSpec}\n`, `Updating dsh: pnpm add --global ${exclusive.dshSpec}\n`, english))
     let status: number
     try {
-      status = execute('pnpm', ['add', '--global', plan.dshSpec])
+      status = execute('pnpm', ['add', '--global', exclusive.dshSpec])
     } catch {
       write(launcherCopy(
-        `pnpm 不可用。请手动运行：pnpm add --global ${plan.dshSpec}\n`,
-        `pnpm is unavailable. Run manually: pnpm add --global ${plan.dshSpec}\n`,
+        `pnpm 不可用。请手动运行：pnpm add --global ${exclusive.dshSpec}\n`,
+        `pnpm is unavailable. Run manually: pnpm add --global ${exclusive.dshSpec}\n`,
         english,
       ))
       return 1
     }
     if (status !== 0) return status
   }
-  if (plan.seekttySpec !== undefined) {
+  if (exclusive.seekttySpec !== undefined) {
     const dsh = environment.DSH_BIN?.trim() || 'dsh'
-    write(launcherCopy(`更新 SeekTTY：dsh plugin --profile ${profile} add ${plan.seekttySpec}\n`, `Updating SeekTTY: dsh plugin --profile ${profile} add ${plan.seekttySpec}\n`, english))
-    const status = execute(dsh, ['plugin', '--profile', profile, 'add', plan.seekttySpec])
+    write(launcherCopy(`更新 SeekTTY：dsh plugin --profile ${profile} add ${exclusive.seekttySpec}\n`, `Updating SeekTTY: dsh plugin --profile ${profile} add ${exclusive.seekttySpec}\n`, english))
+    const status = execute(dsh, ['plugin', '--profile', profile, 'add', exclusive.seekttySpec])
     if (status !== 0) return status
   } else if (options.announceCurrentSeektty) {
-    write(launcherCopy(
-      `SeekTTY 已是最新版本（${PACKAGE_VERSION}）。\n`,
-      `SeekTTY is already the latest version (${PACKAGE_VERSION}).\n`,
-      english,
-    ))
+    write(facts.seekttyPinned
+      ? launcherCopy(
+        'SeekTTY 已由本地路径、link 或 SEEKTTY_SPEC 固定，跳过 SeekTTY 更新。\n',
+        'SeekTTY is pinned by a local path, link, or SEEKTTY_SPEC; skipping the SeekTTY update.\n',
+        english,
+      )
+      : launcherCopy(
+        `SeekTTY 已是最新版本（${PACKAGE_VERSION}）。\n`,
+        `SeekTTY is already the latest version (${PACKAGE_VERSION}).\n`,
+        english,
+      ))
   }
   return 0
 }
 
 /**
- * `deepseek --update`: scan npm `latest` and the SeekTTY GitHub release, then
- * update the global dsh install (unless DSH_BIN pins it) and the SeekTTY
- * Bundle inside the target Profile through native `dsh plugin add`.
+ * `deepseek --update`: same permit gate as auto. At most one component.
+ * Future/gap Hosts are printed and never installed.
  */
 export async function runUpdate(
   args: readonly string[],
@@ -339,7 +381,12 @@ export async function runUpdate(
     ))
     return 1
   }
-  return applyUpdatePlan(updatePlan(result, facts), profile, facts, english, environment, execute, write, {
+  const plan = updatePlan(result, facts)
+  if (plan.dshSpec === undefined && plan.seekttySpec === undefined) {
+    const lines = updateAdvice(result, facts, english)
+    if (lines.length > 0) write(`${lines.join('\n')}\n`)
+  }
+  return applyUpdatePlan(plan, profile, facts, english, environment, execute, write, {
     announcePinnedDsh: true,
     announceCurrentSeektty: true,
   })

@@ -714,6 +714,7 @@ const ENGLISH_TEXT = new Map<string, string>([
   ['TUI 重启交接草稿无效', 'TUI restart handoff has an invalid draft'],
   ['TUI 重启交接提示无效', 'TUI restart handoff has an invalid notice'],
   ['TUI 重启交接与 launcher 参数不一致', 'TUI restart handoff does not match the launcher arguments'],
+  ['尚未配置可用模型；发送消息时会再次提示。', 'No usable model is configured; setup will open again when you send a message.'],
 ])
 
 /** Frozen first catalog rule. New ENGLISH_PATTERNS entries must append after this. */
@@ -869,6 +870,7 @@ const ENGLISH_PATTERNS: readonly {
   { pattern: /^等待 (\d+) 项交互$/u, replace: count => `Waiting for ${count} interaction(s)` },
   { pattern: /^当前模型 (.+) 不支持图片输入$/u, replace: model => `Model ${model} does not accept image input` },
   { pattern: /^(.+) · 仍在生成 · Ctrl\+C 重试$/u, replace: value => `${value} · Still generating · Ctrl+C to retry` },
+  { pattern: /^部分附件未恢复：(.+)$/u, replace: items => `Some attachments were not restored: ${items}` },
 ]
 
 function requestedEnvironmentLocale(env: NodeJS.ProcessEnv): LocaleId {

@@ -214,6 +214,7 @@ interface ImageLimits {
   readonly maxImagesPerMessage: number
   readonly maxMessageImageBytes: number
   readonly maxImagePixels: number
+  readonly maxImageDimension?: number
   readonly mediaTypes: readonly string[]
 }
 
@@ -430,6 +431,10 @@ function isPermissionSelect(value: unknown): value is PermissionSelectValue {
   })
 }
 
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+}
+
 function isImageLimits(value: unknown): value is ImageLimits {
   if (typeof value !== 'object' || value === null) return false
   const row = value as Record<string, unknown>
@@ -437,6 +442,7 @@ function isImageLimits(value: unknown): value is ImageLimits {
     && typeof row.maxImagesPerMessage === 'number'
     && typeof row.maxMessageImageBytes === 'number'
     && typeof row.maxImagePixels === 'number'
+    && (row.maxImageDimension === undefined || isPositiveInt(row.maxImageDimension))
     && Array.isArray(row.mediaTypes)
     && row.mediaTypes.every(item => typeof item === 'string')
 }
@@ -1107,6 +1113,16 @@ export class HarnessTuiCapabilities {
       }
       if (dimensions !== null && dimensions.widthPx * dimensions.heightPx > limits.maxImagePixels) {
         throw new Error(ui(`图片像素超过 ${limits.maxImagePixels}`, `Image pixels exceed ${limits.maxImagePixels}`))
+      }
+      if (
+        typeof limits.maxImageDimension === 'number'
+        && dimensions !== null
+        && Math.max(dimensions.widthPx, dimensions.heightPx) > limits.maxImageDimension
+      ) {
+        throw new Error(ui(
+          `图片边长超过 ${limits.maxImageDimension}`,
+          `Image side exceeds ${limits.maxImageDimension}`,
+        ))
       }
     }
     const attachment: TuiDraftAttachment = {

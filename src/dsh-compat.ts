@@ -6,16 +6,16 @@ export interface DshCompatibility {
 }
 
 export const PACKAGE_NAME = 'seektty'
-export const PACKAGE_VERSION = '1.2.0'
+export const PACKAGE_VERSION = '1.2.1'
 export const DSH_COMPATIBILITY: DshCompatibility = {
   minimum: '0.1.0-rc.6',
-  tested: '0.1.0-rc.8',
+  tested: '0.1.1-rc.2',
 }
 
 /**
  * Value returned by official `@deepseek-ai/dsh-host-apiproxy` `host.describe`.
  * The gateway still hardcodes `version: '0.0.1'` as a TODO placeholder
- * (present in 0.1.0-rc.6 through 0.1.0-rc.8) instead of reading `apps/cli`
+ * (present in 0.1.0-rc.6 through 0.1.1-rc.2) instead of reading `apps/cli`
  * package.json. Treat it as "version unknown", not as a real 0.0.1 CLI.
  */
 export const HOST_DESCRIBE_VERSION_PLACEHOLDER = '0.0.1'

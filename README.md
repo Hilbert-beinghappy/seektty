@@ -7,8 +7,8 @@
 <p>A keyboard-first terminal workspace for DeepSeek Harness, from an early idea to an executable plan.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/Version-1.2.0-orange" alt="Version 1.2.0"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.0--rc.8-5B5BD6" alt="DeepSeek Harness 0.1.0-rc.8">
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.1-orange" alt="Version 1.2.1"></a>
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
@@ -119,7 +119,7 @@ Each Clarify model call is recorded by Auxiliary Runtime in the official `storag
 
 ### Start plugin-backed Clarify from the composer
 
-SeekTTY adds `/clarify` to its local command catalog while the `dsh-plugin-clarify` Host plugin exposes a compatible six-method Remote with `clarify.wire/1`. The current recommended installation is Clarify `0.2.1`; `0.2.0` remains an available rollback artifact.
+SeekTTY adds `/clarify` to its local command catalog while the `dsh-plugin-clarify` Host plugin exposes a compatible six-method Remote with `clarify.wire/1`. The last jointly accepted Release still installs Clarify `0.2.1`; `0.2.0` remains an available rollback artifact. The unpublished trio SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2` has Lane A no-key PTY evidence; live-provider Lane B is still blocked. This is not a Release or complete joint acceptance.
 
 - Run it from the command palette to keep the whole composer as the seed.
 - Type `/clarify some text` to use the argument as the seed.
@@ -155,7 +155,7 @@ The current release covers these capabilities:
 | Permissions and approvals | Inspect and switch Host permission presets, cycle with Shift+Tab, confirm risky upgrades, allow one tool call, skip further prompts for a tool in this session, or reject |
 | Input queue and steering | Queue prompts while the Agent runs, inspect/edit/remove entries, steer one entry or the entire queue into the active turn, and send `/steer` directly |
 | Human interaction | Single choice, multi-select, custom answers, skip, cancel, and plan review; submitting an interaction returns to the latest output while the blocked turn resumes, with `/pending` recovery when retrying is needed |
-| Image attachments | Add PNG, JPEG, GIF, or WebP by pasting an image or file path, or with `/attach`; macOS reads the clipboard via `osascript` (optional `pngpaste`), Linux via `wl-paste`/`xclip`, Windows via PowerShell; pending images appear under the composer; enforce Harness count/size limits; render inline when supported and fall back to file metadata otherwise |
+| Image attachments | Add PNG, JPEG, GIF, or WebP by pasting an image or file path, or with `/attach`; macOS reads the clipboard via `osascript` (optional `pngpaste`), Linux via `wl-paste`/`xclip`, Windows via PowerShell; pending images appear under the composer; enforce the live Host `imageLimits` catalog (count, bytes, pixels, optional side length); render inline when supported and fall back to file metadata otherwise. Image-capable models come from that same live catalog. Official dsh `0.1.1-rc.2` Vision-Exp must be selected explicitly in `/model`. Lane A observed it listed and selectable; PNG/JPEG visual understanding is Lane B and has not been run |
 | Plan, Goal, Todo, and compaction | Native `/plan`, `/goal`, and `/compact` commands with plan review, goal state, Todo counts, and compaction records in the transcript |
 | Tools and produced files | `◆ action · duration` headers with live elapsed time and connected invocation code, dynamic tool catalog, parameters, execution-boundary guidance, line-numbered highlighted file reads, highlighted Shell/JSON/Diff views, safe native terminal ANSI, generic fallback cards, session-wide produced-file listing grouped by turn, in-TUI view, path copy, and confirmed external open |
 | Subagents | Inspect direct children, activity, tree state, token use, and duration; open continuable or read-only sessions and stop an active child turn |
@@ -174,7 +174,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 
 ## Quick start
 
-The repositories and Release assets are public. The complete Clarify workflow has been jointly verified with official DeepSeek Harness `0.1.0-rc.8`. Install the prebuilt Release tarballs through the native `dsh plugin` command:
+The repositories and GitHub Releases are public. The last jointly accepted Clarify workflow remains official DeepSeek Harness `0.1.0-rc.8` with SeekTTY `1.2.0`, Auxiliary Runtime `0.1.0`, and Clarify `0.2.1`. Install those published tarballs through the native `dsh plugin` command:
 
 ```sh
 pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
@@ -187,6 +187,8 @@ dsh --profile tui
 ```
 
 This path consumes packed artifacts and avoids Git-source `prepare` / `allowBuilds`. The first package installs the standalone SeekTTY shell, the second provides Auxiliary model execution, and the third provides the Clarify Host service and Remote. Once both Host plugins are active in the same Profile, SeekTTY discovers the Remote and adds `/clarify` to the terminal command catalog.
+
+SeekTTY `1.2.1` currently tests official `0.1.1-rc.2`. The unpublished trio SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2` has Lane A no-key PTY evidence; live-provider Lane B is still blocked. This is not a Release or complete joint acceptance. There is no `v1.2.1` Release asset yet; install this candidate from a locally packed tarball, or from a future GitHub Release listed at https://github.com/Hilbert-beinghappy/seektty/releases. Do not invent a download URL.
 
 ### Bare `deepseek` launcher
 
@@ -206,7 +208,7 @@ $env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/downlo
 deepseek
 ```
 
-`deepseek` requires `dsh` on `PATH`, or `DSH_BIN` pointing at the executable. `SEEKTTY_SPEC` pins Profile reconciliation to the same prebuilt tarball. Without that override, the current launcher uses its tagged `github:Hilbert-beinghappy/seektty#v1.2.0` default. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
+`deepseek` requires `dsh` on `PATH`, or `DSH_BIN` pointing at the executable. `SEEKTTY_SPEC` pins Profile reconciliation to the same prebuilt tarball. Without that override, this source tree's default spec is `github:Hilbert-beinghappy/seektty#v1.2.1`; that Git tag exists only after the Release is created. Until then, pack `seektty-1.2.1.tgz` and set `SEEKTTY_SPEC` to that file. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
 
 ```sh
 deepseek "check this project"
@@ -218,7 +220,7 @@ deepseek --version
 deepseek --update
 ```
 
-`deepseek --update` still force-scans and installs. By default `deepseek` itself is `SEEKTTY_UPDATE=auto`: on launch it fetches official dsh npm `latest` (not `next` or GitHub pre-releases) and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle through native `dsh plugin add`. Local `link:`/`file:` installs and `SEEKTTY_SPEC` overrides are left alone. Network or install failures never block boot. Set `SEEKTTY_UPDATE=check` to restore a post-session notice, or `SEEKTTY_UPDATE=0` to disable.
+`deepseek --update` force-scans and installs at most one permitted component. Default `SEEKTTY_UPDATE=auto`: on launch it fetches official dsh npm `latest` (discovery only; not `next` or GitHub pre-releases) and the newest SeekTTY GitHub Release. SeekTTY is self-first: a SeekTTY update wins the round and skips dsh. Otherwise dsh installs only when `latest` is in the peer-aligned auto range (legacy rc.6–rc.8 or the exact current tested Host) and is newer than the installed `dsh --version`. Future or gap Hosts such as `0.1.1-rc.1` are mentioned but never installed. `DSH_BIN` pins skip dsh. Local `link:`/`file:` installs and `SEEKTTY_SPEC` overrides are left alone. Network or install failures never block boot. Set `SEEKTTY_UPDATE=check` to restore a post-session notice, or `SEEKTTY_UPDATE=0` to disable.
 
 ## First-run API key setup
 
@@ -249,7 +251,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
 | Plugin-backed workflow | `/clarify` appears when `dsh-plugin-clarify` and its Auxiliary Runtime dependency are active in the current Profile |
-| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when `dsh-plugin-auxiliary-runtime@0.1.0` is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
+| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when last-accepted Auxiliary Runtime `0.1.0` or the current `0.1.1` candidate is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
 `/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions and stay within the command surface. SeekTTY detects the Clarify plugin's compatible six-method Remote with `clarify.wire/1` and dynamically adds `/clarify` to the local `/` catalog. The plugin's model-generated questions, contextual options, and evolving preview lead to a reviewed Draft in the ordinary composer; you decide when to submit it. See [Clarify and Plan](#clarify-and-plan) for the full journey.
@@ -358,7 +360,8 @@ The interface selection, independent code selection, and named definitions live 
 ## Verified scope
 
 - Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.8`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
-- Recommended installation: Clarify `0.2.1` with SeekTTY `1.2.0`, Auxiliary Runtime `0.1.0`, and official dsh `0.1.0-rc.8`. Clarify `0.2.1` preserves the six-method Remote, `clarify.wire/1`, and exact rc.8 compatibility boundary of `0.2.0`.
+- SeekTTY `1.2.1` currently tests official `@deepseek-ai/dsh@0.1.1-rc.2` at the shell, unit, and typecheck layer. Lane A (2026-08-21, unmodified stock `0.1.1-rc.2`, isolated `DSH_HOME`, real PTY, unpublished SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`): `/doctor` 0 error / 0 warning, 99 plugins running; `/status` healthy; `/clarify` routed through Auxiliary, returned `MISSING_CREDENTIAL` without a key, and kept the composer; Vision-Exp was visible and selectable; a PNG attachment restored after `/restart`. Missing-source restore: unit tests keep the failure copy to a basename, cover both notice orders, and keep absolute paths out of the text; a real-PTY hardcopy/visible scan found only the ASCII basename `vision-logo.png` and none of `private/tmp`, `/tmp`, `Users`, or `Volumes`. That does not prove the restore error stayed visible after dismissing the no-key onboarding modal (Esc also clears notices). Lane B is blocked without `DEEPSEEK_API_KEY` (live Clarify multi-round success, accept into the composer without auto-send, PNG/JPEG visual understanding, clear attachments after send). Not a Release or complete joint acceptance.
+- Last jointly accepted Release installation: Clarify `0.2.1` with SeekTTY `1.2.0`, Auxiliary Runtime `0.1.0`, and official dsh `0.1.0-rc.8`. Clarify `0.2.1` preserves the six-method Remote, `clarify.wire/1`, and exact rc.8 compatibility boundary of `0.2.0`.
 - Clarify `0.2.0` live-provider acceptance covered model-generated questions/options/previews, multi-round preview evolution, review-and-accept into the composer without automatic submission, interruption recovery, usage provenance, and privacy.
 - Clarify `0.2.1` post-release no-key acceptance re-downloaded and verified all three Release assets, passed stock add/boot/remove/re-add and `/doctor` with 0 errors, 0 warnings, and 99 plugins, then reached `running`, routed through Auxiliary, and returned the expected isolated-environment `MISSING_CREDENTIAL` result. Version `0.2.1` has not rerun live-provider multi-round acceptance or a cache/cost A/B.
 - Historical standalone Clarify lifecycle evidence covers official dsh rc.6/rc.7/rc.8; the complete dynamic production boundary remains exact rc.8 with Auxiliary Runtime `0.1.0`.
@@ -391,6 +394,6 @@ pnpm test:clarify-doctor
 
 ## Compatibility and upgrades
 
-The tested SeekTTY baseline is official `0.1.0-rc.8`; the shell's declared minimum remains official `0.1.0-rc.6`, with shell lifecycle coverage on rc.6/rc.7/rc.8. The optional Clarify + Auxiliary production combination is narrower and is verified only on exact rc.8. A newer dsh than `tested` still boots the shell with a notice, but the auxiliary runtime rejects known versions outside its published range; older than the shell minimum is rejected. The published Bundle does not install a second copy of Cordis or any `@deepseek-ai/dsh-*` Host package into a Profile: optional peers describe the host contract, while runtime imports resolve through the official `$DSH_HOME/profiles/node_modules` fallback. This preserves identity-bearing symbols such as the native tool scheduler. Pure client helpers that the official fallback does not ship are bundled instead. The Host plugin `seektty/attachment-compat` still runs immediately before `api-gateway` and adapts only the exact valid legacy image-limit capability shape; all other shapes fail closed. Future hosts are matched by capability and unsupported optional features degrade safely. A scheduled workflow scans the official npm `latest` dist-tag, upgrades development baselines only after `pnpm run check`, packed-launcher isolation, and the stock-dsh contract pass, then opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
+The current tested Host is official `0.1.1-rc.2`. The shell's declared minimum remains official `0.1.0-rc.6`, with shell lifecycle coverage on the legacy rc.6/rc.7/rc.8 line. The last jointly accepted Clarify + Auxiliary production combination is still exact `0.1.0-rc.8` with SeekTTY `1.2.0`, Auxiliary Runtime `0.1.0`, and Clarify `0.2.1`. The unpublished trio SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2` has Lane A no-key PTY evidence; live-provider Lane B is still blocked. A newer dsh than `tested` still boots the shell with a notice; older than the shell minimum is rejected. The updater judges the actually installed `dsh --version`, prefers a SeekTTY self-first update, installs at most one component per round, and never installs a future or gap Host. The published Bundle does not install a second copy of Cordis or any `@deepseek-ai/dsh-*` Host package into a Profile: optional peers describe the host contract, while runtime imports resolve through the official `$DSH_HOME/profiles/node_modules` fallback. This preserves identity-bearing symbols such as the native tool scheduler. Pure client helpers that the official fallback does not ship are bundled instead. The Host plugin `seektty/attachment-compat` still runs immediately before `api-gateway` and adapts only the exact valid legacy image-limit capability shape; all other shapes fail closed. Future hosts are matched by capability and unsupported optional features degrade safely. A scheduled workflow scans the official npm `latest` dist-tag, upgrades development baselines only after `pnpm run check`, packed-launcher isolation, and the stock-dsh contract pass, then opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
 
 The source repository and its GitHub Releases are public. User packages come from the prebuilt tarball attached to the matching Release; there is currently no npm Registry release.

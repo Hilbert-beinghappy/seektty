@@ -1,5 +1,7 @@
 /** Public Clarify Remote contract consumed through ConnectionHandle.rpc.call. */
 
+import { PACKAGE_VERSION } from '../dsh-compat.ts'
+
 export const CLARIFY_API_CHANNEL = '/api'
 export const CLARIFY_NAMESPACE = 'clarify'
 export const CLARIFY_WIRE_PROTOCOL = 'clarify.wire/1' as const
@@ -254,11 +256,11 @@ export async function probeClarifyRemote(rpc: ClarifyRpcCaller, signal?: AbortSi
 }
 
 export function clarifySixMethodHostRefusedMessage(): string {
-  return `SeekTTY 1.2.0 requires ${CLARIFY_REQUIRED_PACKAGE} six-method Host (${CLARIFY_REQUIRED_METHODS.join(', ')}); five-method Hosts are refused`
+  return `SeekTTY ${PACKAGE_VERSION} requires ${CLARIFY_REQUIRED_PACKAGE} six-method Host (${CLARIFY_REQUIRED_METHODS.join(', ')}); five-method Hosts are refused`
 }
 
 export function clarifyCompatibleHostRefusedMessage(): string {
-  return `SeekTTY 1.2.0 requires ${CLARIFY_REQUIRED_PACKAGE} six-method Host with ${CLARIFY_WIRE_PROTOCOL}; old six-method or no-v1 Hosts are refused`
+  return `SeekTTY ${PACKAGE_VERSION} requires ${CLARIFY_REQUIRED_PACKAGE} six-method Host with ${CLARIFY_WIRE_PROTOCOL}; old six-method or no-v1 Hosts are refused`
 }
 
 async function probeMethod(

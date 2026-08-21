@@ -10,6 +10,7 @@ import {
   launcherArgs,
   run,
 } from '../src/bin.ts'
+import { PACKAGE_VERSION, defaultPluginSpec } from '../src/dsh-compat.ts'
 
 const temporaryHomes: string[] = []
 
@@ -80,7 +81,7 @@ describe('launcher provisioning', () => {
     temporaryHome()
     const suppliedHome = mkdtempSync(join(tmpdir(), 'seektty-launcher-supplied-'))
     temporaryHomes.push(suppliedHome)
-    writeProfile(suppliedHome, 'tui', { seektty: '1.2.0' })
+    writeProfile(suppliedHome, 'tui', { seektty: PACKAGE_VERSION })
     const execute = vi.fn(() => 0)
 
     expect(launch([], { DSH_HOME: suppliedHome, DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
@@ -139,7 +140,7 @@ describe('launcher provisioning', () => {
     expect(launch([], { DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
     expect(calls.map(call => call.args)).toEqual([
       ['plugin', '--profile', 'tui', 'remove', 'deepseek-tui'],
-      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty#v1.2.0'],
+      ['plugin', '--profile', 'tui', 'add', defaultPluginSpec(PACKAGE_VERSION)],
       ['--profile', 'tui'],
     ])
   })
@@ -164,7 +165,7 @@ describe('launcher provisioning', () => {
     const chunks: string[] = []
     expect(launch(['--version'], { LANG: 'en_US.UTF-8' }, execute, chunk => { chunks.push(chunk) })).toBe(0)
     expect(execute).not.toHaveBeenCalled()
-    expect(chunks.join('')).toContain('seektty 1.2.0')
+    expect(chunks.join('')).toContain(`seektty ${PACKAGE_VERSION}`)
     expect(chunks.join('')).toContain('Requires dsh >= 0.1.0-rc.6')
   })
 })

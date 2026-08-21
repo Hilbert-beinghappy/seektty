@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck, test, build, and pack dry-run
+      - name: Typecheck, test, build, and pack-check
         run: pnpm run check
 
       - name: Keep committed lib/ in sync with source
@@ -37,10 +37,11 @@ jobs:
       - name: Pack and boot without workspace dev dependencies
         run: |
           TARGET=$(node -p "require('./package.json').dsh.compatibility.tested")
+          VERSION=$(node -p "require('./package.json').version")
           npm install --prefix "$RUNNER_TEMP/dsh-global" "@deepseek-ai/dsh@$TARGET"
           pnpm pack --pack-destination "$RUNNER_TEMP"
           DSH_BIN="$RUNNER_TEMP/dsh-global/node_modules/.bin/dsh" \
-          SEEKTTY_SPEC="$RUNNER_TEMP/seektty-1.2.0.tgz" \
+          SEEKTTY_SPEC="$RUNNER_TEMP/seektty-$VERSION.tgz" \
           node scripts/stock-dsh-cycle.mjs
 
   launcher-windows:
