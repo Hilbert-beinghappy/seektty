@@ -77,6 +77,8 @@ export interface SelectOverlayRequest {
   readonly options?: OverlayOptions
   /** When set, Escape runs this instead of Back/close so a child page can open. */
   readonly onEscape?: () => void | Promise<void>
+  /** When true, Enter with no selection stays open and shows a localized notice. */
+  readonly requireSelection?: boolean
 }
 
 /** Text input request. */
@@ -89,6 +91,8 @@ export interface InputOverlayRequest {
   readonly options?: OverlayOptions
   /** When set, Escape runs this instead of Back/close so a child page can open. */
   readonly onEscape?: () => void | Promise<void>
+  /** When true, blank Enter stays open and shows a localized notice. */
+  readonly requireText?: boolean
 }
 
 /** Scrollable read-only detail request. */
@@ -367,13 +371,21 @@ class SearchSelectOverlay implements Component {
 class TextInputOverlay implements Component {
   focused = false
   private readonly input = new Input()
+  private notice = ''
 
   constructor(
     private readonly request: InputOverlayRequest,
     private readonly submit: (value: string) => void,
   ) {
     this.input.setValue(escapeTerminalText(request.initialValue ?? ''))
-    this.input.onSubmit = (value) => { submit(escapeTerminalText(value)) }
+    this.input.onSubmit = (value) => {
+      const safe = escapeTerminalText(value)
+      if (request.requireText === true && safe.trim() === '') {
+        this.notice = ui('请输入内容', 'Enter a value')
+        return
+      }
+      submit(safe)
+    }
   }
 
   invalidate(): void { this.input.invalidate() }
@@ -386,6 +398,7 @@ class TextInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       this.input.render(safeWidth)[0] ?? color.muted(translateUiText(this.request.placeholder ?? '')),
+      ...(this.notice === '' ? [] : [color.warning(truncateToWidth(this.notice, safeWidth, '…'))]),
       color.muted(this.request.footer === undefined
         ? ui('Enter 确认 · Esc 返回/关闭', 'Enter confirm · Esc back/close')
         : translateUiText(this.request.footer)),
@@ -393,7 +406,9 @@ class TextInputOverlay implements Component {
   }
 
   handleInput(data: string): void {
+    const before = this.input.getValue()
     this.input.handleInput(data)
+    if (this.input.getValue() !== before) this.notice = ''
   }
 }
 
@@ -500,6 +515,7 @@ class MultiSelectOverlay implements Component {
   private list: SelectList
   private readonly selected = new Set<string>()
   private descriptionWidth = 36
+  private notice = ''
 
   constructor(
     private readonly request: SelectOverlayRequest,
@@ -529,6 +545,7 @@ class MultiSelectOverlay implements Component {
         : wrappedDetail(this.request.detail, safeWidth)),
       `${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
       ...this.list.render(safeWidth),
+      ...(this.notice === '' ? [] : [color.warning(truncateToWidth(this.notice, safeWidth, '…'))]),
       color.muted(translateUiText(this.request.footer ?? ui(
         'Space 勾选 · Enter 选择 · Esc 返回',
         'Space toggle · Enter select · Esc back',
@@ -540,13 +557,19 @@ class MultiSelectOverlay implements Component {
     if (matchesKey(data, Key.space)) {
       const item = this.list.getSelectedItem()
       if (item === null) return
+      this.notice = ''
       if (this.selected.has(item.value)) this.selected.delete(item.value)
       else this.selected.add(item.value)
       this.list = this.createList(item.value)
       return
     }
     if (matchesKey(data, Key.enter)) {
-      this.submit(this.request.choices.filter(choice => this.selected.has(choice.id)))
+      const selected = this.request.choices.filter(choice => this.selected.has(choice.id))
+      if (this.request.requireSelection === true && selected.length === 0) {
+        this.notice = ui('请至少选择一项', 'Select at least one option')
+        return
+      }
+      this.submit(selected)
       return
     }
     if (matchesKey(data, Key.home)) {

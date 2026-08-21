@@ -68,7 +68,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved.
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
 deepseek
 ```
 
@@ -87,7 +87,7 @@ deepseek --update
 The native dsh entry remains available:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 dsh --profile tui
 ```
 
@@ -124,7 +124,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
-`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts. `/clarify` is not a stock command: it is added to the local `/` catalog only while the Clarify Remote receiver is present, writes the returned draft into the regular composer, and never auto-sends. Palette execution keeps the current composer as the seed. Typing `/clarify some text` uses that text as args after submit clears the composer; typing `/clarify` alone has no leftover body to preserve.
+`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts. `/clarify` is not a stock command: it is added to the local `/` catalog only while a compatible Clarify `0.2.0` six-method Remote is present. It asks context-specific questions generated from the active Session and current draft, evolves a reviewed preview after every answer, and lets you answer, refine, accept, or cancel. It never shows a permanent grey suggestion line and never auto-sends. Run it from the palette to keep the whole composer as the seed, type `/clarify some text`, or end an existing draft with a final `/clarify` token or line. Accepting writes the complete reviewed draft back into the ordinary composer; press Enter yourself only if you want to send it.
 
 ## Common controls
 
@@ -152,7 +152,7 @@ Replace the former global package once. The new `deepseek` launcher then uses na
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
 deepseek
 ```
 
@@ -160,7 +160,7 @@ Custom Profiles migrate independently on first launch, for example `deepseek --p
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 ```
 
 ## Plug and unplug
@@ -174,7 +174,7 @@ dsh plugin --profile tui remove seektty
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 ```
 
 Installation writes directly to the target Harness Profile dependencies, Bundle order, and pnpm lockfile. TUI `/plugin` and native `dsh plugin` operate on that same Profile state.
@@ -229,7 +229,7 @@ The interface selection, independent code selection, and named definitions live 
 ## Verified scope
 
 - Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.8`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
-- Packaged SeekTTY `1.1.0` and Clarify `0.1.0` were installed through each official dsh `0.1.0-rc.6`, `0.1.0-rc.7`, and `0.1.0-rc.8` CLI. In every with-plugin Profile, local `/doctor` reported 98 Harness plugins running, 0 errors, and 0 warnings, and `/clarify` opened the first question. In every bare Profile, `/clarify` remained an unknown command.
+- Unreleased Clarify `0.2.0` passes add/boot/remove/re-add on official dsh `0.1.0-rc.6`, `0.1.0-rc.7`, and `0.1.0-rc.8`. Its packed tarball also installs cleanly through SeekTTY `1.2.0`'s unchanged doctor receiver. The dynamic composition/CLI journeys pass, but they are not official dsh Provider/accounting evidence: production Release remains blocked until dsh exposes a public off-transcript usage writer or the governing contract changes explicitly.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
 - First-run Provider readiness, masked API-key setup, deferral and draft restoration, Harness credential persistence, and restart without another prompt under an isolated `DSH_HOME`.
 - Real dark, light, and palette-generated PTY rendering, independent live interface/code switching, 80/120/160-column layouts, and persistence after restarting the same Profile.

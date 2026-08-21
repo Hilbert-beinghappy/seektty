@@ -68,7 +68,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim。
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
 deepseek
 ```
 
@@ -87,7 +87,7 @@ deepseek --update
 也可以只使用 dsh 的原生入口：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 dsh --profile tui
 ```
 
@@ -124,7 +124,7 @@ dsh --profile tui
 | 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart` |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
-`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。`/clarify` 不是常驻命令：仅当探测到 Clarify Remote 接收端时才会进入本地 `/` 目录，把返回的 draft 写入常规输入区，并且不会自动发送。命令面板执行会保留当前输入区作为 seed；键入 `/clarify some text` 后提交会清空输入区，因此 seed 来自参数；单独键入 `/clarify` 没有可保留的正文。
+`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。`/clarify` 不是常驻命令：只有探测到兼容的 Clarify `0.2.0` 六方法 Remote 时才会进入本地 `/` 目录。它会根据当前 Session 和输入草稿动态生成问题与选项，每次回答都演进一版可审阅 preview，并允许继续回答、直接 refine、采用或放弃；不会常驻显示灰色建议行，也绝不会自动发送。你可以从命令面板执行以保留整个输入区作为 seed，也可以输入 `/clarify some text`，或在现有草稿末尾单独加一个 `/clarify` token／一行。采用后只会把完整审阅过的 draft 写回常规输入区；是否按 Enter 发送仍由你决定。
 
 ## 常用交互
 
@@ -152,7 +152,7 @@ dsh --profile tui
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
 deepseek
 ```
 
@@ -160,7 +160,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 ```
 
 ## 直接插拔
@@ -174,7 +174,7 @@ dsh plugin --profile tui remove seektty
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 ```
 
 安装结果直接写入目标 Harness Profile 的依赖、Bundle 顺序和 pnpm lockfile。TUI 的 `/plugin` 与原生 `dsh plugin` 操作同一份 Profile 状态。
@@ -229,7 +229,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.8` 隔离安装、配置装配和 PTY 启动；并对声明的最低版本 `@deepseek-ai/dsh@0.1.0-rc.6` 完成 add／boot／remove／re-add 插拔契约。
-- 通过官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7`、`0.1.0-rc.8` 各自的 CLI 安装打包后的 SeekTTY `1.1.0` 与 Clarify `0.1.0`：三种 with-plugin Profile 的本地 `/doctor` 均为 98 个 Harness 插件运行、0 error、0 warning，`/clarify` 均进入首个问题；三种 bare Profile 的 `/clarify` 均保持“未知命令”。
+- 未发布的 Clarify `0.2.0` 已在官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7`、`0.1.0-rc.8` 上通过 add／boot／remove／re-add；其打包产物也能由 SeekTTY `1.2.0` 未改动的 doctor 接收端正常安装。动态 composition／Cursor CLI 用户旅程已通过，但不能冒充官方 dsh Provider／usage 证据：在 dsh 提供公开的 off-transcript 用量写入口，或任务合同被明确修改前，生产 Release 仍保持阻塞。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
 - 隔离 `DSH_HOME` 下的首次 Provider 就绪检查、API Key 掩码输入、跳过后的草稿恢复、Harness 凭证持久化，以及重启后不再提示。
 - 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
