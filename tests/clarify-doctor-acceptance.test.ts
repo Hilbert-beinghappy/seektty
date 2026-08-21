@@ -1,7 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { parseClarifyEcho } from '../src/client/clarify-remote.ts'
 import { ProfilePluginManager, type ProfileDoctorResult } from '../src/host/profile-plugin-manager.ts'
 
 const clarifySpec = process.env.CLARIFY_SPEC?.trim()
@@ -84,7 +86,7 @@ describe('unchanged SeekTTY doctor receiver for Clarify', () => {
     async () => {
       const home = mkdtempSync(join(tmpdir(), 'seektty-clarify-install-'))
       try {
-        writeEmptyTuiProfile(home)
+        const profileDir = writeEmptyTuiProfile(home)
         const manager = new ProfilePluginManager({
           profile: 'tui',
           installAnchor: home,
@@ -94,6 +96,41 @@ describe('unchanged SeekTTY doctor receiver for Clarify', () => {
         const result = await manager.run(['add', resolve(clarifySpec as string)])
         expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0)
         assertClarifyDoctorHealthy(manager.doctor())
+
+        const installedEntry = join(profileDir, 'node_modules', 'dsh-plugin-clarify', 'lib', 'index.js')
+        const installed = await import(pathToFileURL(installedEntry).href)
+        const service = new installed.ClarifyService({
+          resolveBinding: (sessionId: string) => ({
+            sessionId,
+            contextVersion: 'cross-context-1',
+            modelRouteId: 'cross-route-1',
+          }),
+          inference: {
+            async infer() {
+              return {
+                kind: 'ask',
+                question: 'Which user outcome matters most?',
+                options: ['Correctness', 'Speed'],
+                multiple: false,
+                allowCustom: true,
+                draftPreview: 'Cross-package live model preview',
+                materialChanges: ['Published a recoverable running state'],
+              }
+            },
+          },
+        })
+        const started = await service.start({ sessionId: 'cross-session-1' })
+        const fetched = await service.fetchDraft({ processId: started.processId })
+        const parsed = parseClarifyEcho(fetched)
+        expect(parsed).toMatchObject({
+          status: 'running',
+          kind: 'ask',
+          previewVersion: started.previewVersion,
+          draftPreview: 'Cross-package live model preview',
+          materialChanges: ['Published a recoverable running state'],
+          question: { questionId: started.question.questionId },
+        })
+        expect(parsed).not.toHaveProperty('draft')
       } finally {
         rmSync(home, { recursive: true, force: true })
       }

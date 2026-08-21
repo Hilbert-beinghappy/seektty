@@ -39,6 +39,7 @@ const GATED = [
   'client/surface.ts',
   'client/capabilities.ts',
   'client/clarify-shell.ts',
+  'client/clarify-composer.ts',
   'client/transcript.ts',
   'client/actions.ts',
   'client/error-advice.ts',

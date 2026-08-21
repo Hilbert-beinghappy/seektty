@@ -68,7 +68,7 @@ Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, S
 The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved.
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
 deepseek
 ```
 
@@ -87,7 +87,7 @@ deepseek --update
 The native dsh entry remains available:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 dsh --profile tui
 ```
 
@@ -121,10 +121,10 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Runtime interaction | `/queue`, `/steer`, `/attach`, `/attachments`, `/pending` |
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
-| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
+| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when `dsh-plugin-auxiliary-runtime@0.1.0` is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
-`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts. `/clarify` is not a stock command: it is added to the local `/` catalog only while the Clarify Remote receiver is present, writes the returned draft into the regular composer, and never auto-sends. Palette execution keeps the current composer as the seed. Typing `/clarify some text` uses that text as args after submit clears the composer; typing `/clarify` alone has no leftover body to preserve.
+`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts. `/clarify` is not a stock command: it is added to the local `/` catalog only while a compatible Clarify `0.2.0` six-method Remote is present. It asks context-specific questions generated from the active Session and current draft, evolves a reviewed preview after every answer, and lets you answer, refine, accept, or cancel. It never shows a permanent grey suggestion line and never auto-sends. Run it from the palette to keep the whole composer as the seed, type `/clarify some text`, or end an existing draft with a final `/clarify` token or line. Accepting writes the complete reviewed draft back into the ordinary composer; press Enter yourself only if you want to send it.
 
 ## Common controls
 
@@ -152,7 +152,7 @@ Replace the former global package once. The new `deepseek` launcher then uses na
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.1.0
+pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
 deepseek
 ```
 
@@ -160,7 +160,7 @@ Custom Profiles migrate independently on first launch, for example `deepseek --p
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 ```
 
 ## Plug and unplug
@@ -174,7 +174,7 @@ dsh plugin --profile tui remove seektty
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.1.0
+dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
 ```
 
 Installation writes directly to the target Harness Profile dependencies, Bundle order, and pnpm lockfile. TUI `/plugin` and native `dsh plugin` operate on that same Profile state.
@@ -229,13 +229,15 @@ The interface selection, independent code selection, and named definitions live 
 ## Verified scope
 
 - Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.8`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
-- Packaged SeekTTY `1.1.0` and Clarify `0.1.0` were installed through each official dsh `0.1.0-rc.6`, `0.1.0-rc.7`, and `0.1.0-rc.8` CLI. In every with-plugin Profile, local `/doctor` reported 98 Harness plugins running, 0 errors, and 0 warnings, and `/clarify` opened the first question. In every bare Profile, `/clarify` remained an unknown command.
+- Clarify `0.2.0` retains historical standalone lifecycle evidence for official dsh rc.6/rc.7/rc.8; the complete dynamic production stack is claimed only for exact `0.1.0-rc.8` with `dsh-plugin-auxiliary-runtime@0.1.0`. The three packed tarballs pass native add/boot/remove/re-add, `/doctor` 0 errors/0 warnings, live model-generated questions/options/previews, multi-round preview evolution, review-and-accept into the composer without auto-send, interruption recovery, and privacy checks.
+- Auxiliary calls persist usage/limits/cancel only in the `auxiliary_runtime` storage domain. Official Agent `tokenUsage` remains unchanged, while `/status` displays validated `Official`, `Auxiliary`, and derived `Combined` buckets only when the optional snapshot contract is healthy.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
 - First-run Provider readiness, masked API-key setup, deferral and draft restoration, Harness credential persistence, and restart without another prompt under an isolated `DSH_HOME`.
 - Real dark, light, and palette-generated PTY rendering, independent live interface/code switching, 80/120/160-column layouts, and persistence after restarting the same Profile.
 - Chinese/English locale resolution, revision-protected shared preference writes, live terminal switching, and preservation of unknown external content.
 - Native removal clears the dependency, Bundle, and config entries; re-add boots again.
-- A fresh global install exposes bare `deepseek`, which provisions and boots the `tui` Profile.
+- A fresh packed global install, with no workspace development dependencies or duplicate `@deepseek-ai/*` packages, exposes bare `deepseek`, provisions the `tui` Profile, and boots through the official dsh module fallback.
+- A real native `todo_write` journey passes after installation; the package gate also rejects Profile-local copies of official identity-bearing Host packages and verifies that Cordis, API proxy, Session, and tool runtime resolve to the official fallback instance.
 - Installation, startup, keyboard navigation, and terminal interaction are supported on macOS, Linux, and Windows.
 
 A real first-run session was verified with a valid DeepSeek credential pasted into the masked overlay under an isolated `DSH_HOME`: `v4-flash` returned `REALCHECK_58597`, then used that answer in the next turn to return `REALCHECK_58598`. Restarting the same Profile did not reopen setup, the Harness credential file was mode `0600`, and the credential never appeared in terminal output, screenshots, or the repository. The isolated credential store was removed after verification.
@@ -257,6 +259,6 @@ pnpm test:clarify-doctor
 
 ## Compatibility and upgrades
 
-The tested compatibility baseline is official `0.1.0-rc.8`. The declared minimum host is official `0.1.0-rc.6`. Tested hosts are official dsh `0.1.0-rc.6`, `0.1.0-rc.7`, and `0.1.0-rc.8`. A newer dsh than `tested` still boots, with a notice; older than `minimum` is rejected. Official rc.6/rc.7 graphs resolve `@deepseek-ai/dsh-attachment@0.1.0-rc.7`, whose `ImageAttachmentLimits` has `maxImageBytes`, `maxImagesPerMessage`, `maxMessageImageBytes`, `maxImagePixels`, and `mediaTypes`, but not `maxImageDimension`. SeekTTY inserts rc.8 `@deepseek-ai/dsh-host-apiproxy`, whose `imageLimits` projection requires that field. The Host plugin `seektty/attachment-compat` runs immediately before `api-gateway` and, only when the live capability is that exact valid legacy shape, derives a conservative `maxImageDimension` from `maxImagePixels` (one side cannot exceed the pixel count). Native rc.8 objects keep identity. Any other shape is left unchanged so rc.8 validation still fails closed. Future hosts are matched by that capability, not by version branching. A scheduled workflow scans the official npm `latest` dist-tag, upgrades the exact `@deepseek-ai/dsh-*` pins after `pnpm run check` and the isolated stock-dsh contract pass, and opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
+The tested SeekTTY baseline is official `0.1.0-rc.8`; the shell's declared minimum remains official `0.1.0-rc.6`, with shell lifecycle coverage on rc.6/rc.7/rc.8. The optional Clarify + Auxiliary production combination is narrower and is verified only on exact rc.8. A newer dsh than `tested` still boots the shell with a notice, but the auxiliary runtime rejects known versions outside its published range; older than the shell minimum is rejected. The published Bundle does not install a second copy of Cordis or any `@deepseek-ai/dsh-*` Host package into a Profile: optional peers describe the host contract, while runtime imports resolve through the official `$DSH_HOME/profiles/node_modules` fallback. This preserves identity-bearing symbols such as the native tool scheduler. Pure client helpers that the official fallback does not ship are bundled instead. The Host plugin `seektty/attachment-compat` still runs immediately before `api-gateway` and adapts only the exact valid legacy image-limit capability shape; all other shapes fail closed. Future hosts are matched by capability and unsupported optional features degrade safely. A scheduled workflow scans the official npm `latest` dist-tag, upgrades development baselines only after `pnpm run check`, packed-launcher isolation, and the stock-dsh contract pass, then opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
 
 The source repository and its GitHub Releases are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the matching Release.

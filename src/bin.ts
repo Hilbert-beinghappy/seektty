@@ -3,9 +3,9 @@
 /** Product launcher that provisions and boots the native dsh Profile. */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 import crossSpawn from 'cross-spawn'
 import {
   DSH_COMPATIBILITY,
@@ -29,6 +29,33 @@ import { measureStartupSync } from './startup-trace.ts'
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
 const DEFAULT_SPEC = defaultPluginSpec(PACKAGE_VERSION)
 const DSH_INSTALL_SPEC = `@deepseek-ai/dsh@${DSH_COMPATIBILITY.tested}`
+
+function resolveProfileDir(
+  name: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  if (
+    name === ''
+    || name === '.'
+    || name === '..'
+    || name === 'node_modules'
+    || name.includes('/')
+    || name.includes('\\')
+  ) {
+    throw new Error(`dsh: invalid profile name ${JSON.stringify(name)}`)
+  }
+  const configuredValue = Object.hasOwn(environment, 'DSH_HOME')
+    ? environment.DSH_HOME
+    : process.env.DSH_HOME
+  const configured = configuredValue?.trim()
+  const rawHome = configured === undefined || configured === '' ? join(homedir(), '.dsh') : configured
+  const expandedHome = rawHome === '~'
+    ? homedir()
+    : rawHome.startsWith('~/') || rawHome.startsWith('~\\')
+      ? join(homedir(), rawHome.slice(2))
+      : rawHome
+  return join(resolve(expandedHome), 'profiles', name)
+}
 
 /** True when the launcher should run the update flow instead of booting. */
 export function isUpdateRequest(args: readonly string[]): boolean {
@@ -119,7 +146,7 @@ function profileManifest(
   profile: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): ProfileManifest | undefined {
-  const manifestPath = join(resolveProfileDir(profile), 'package.json')
+  const manifestPath = join(resolveProfileDir(profile, environment), 'package.json')
   if (!existsSync(manifestPath)) return undefined
   const raw = readFileSync(manifestPath, 'utf8')
   try {

@@ -300,6 +300,7 @@ export class StatusBar implements Component {
 export class PromptEditor extends Editor {
   private facts: TuiHeaderFacts | undefined
   private drafts: readonly ComposerDraftAttachment[] = []
+  private submitSnapshot: string | undefined
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -332,9 +333,22 @@ export class PromptEditor extends Editor {
   }
 
   override handleInput(data: string): void {
-    super.handleInput(data)
-    const text = this.getText()
-    if (isBlankMultiline(text)) super.setText('')
+    this.submitSnapshot = this.getExpandedText()
+    try {
+      super.handleInput(data)
+      const text = this.getText()
+      if (isBlankMultiline(text)) super.setText('')
+    } finally {
+      this.submitSnapshot = undefined
+    }
+  }
+
+  /**
+   * Return the expanded composer captured before pi-tui trims and clears it.
+   * This is valid only from the synchronous inherited `onSubmit` callback.
+   */
+  losslessSubmitText(fallback: string): string {
+    return this.submitSnapshot ?? fallback
   }
 
   override render(width: number): string[] {

@@ -25,6 +25,7 @@ import {
 } from './capabilities.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
+import { dispatchComposerSubmit } from './clarify-composer.ts'
 import {
   applyTranscriptEscape,
   applyTranscriptFocusToggle,
@@ -69,8 +70,6 @@ import {
 import {
   BRACKETED_PASTE,
   imagePathFromPasteText,
-  isSlashCommandLine,
-  splitLeadingImagePath,
 } from './pasted-image.ts'
 import {
   desktopNotifyBody,
@@ -691,40 +690,39 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     editor.onSubmit = (raw): void => {
-      // pi-tui expands large-paste markers before invoking onSubmit and clears
-      // its editor state before this callback returns. The callback value is
-      // therefore the only lossless submission payload.
-      const text = raw.trim()
-      if (text === '' && capabilities.draftAttachments().length === 0) return
-      transcript.followLatest()
-      if (text !== '') {
-        editor.addToHistory(text)
-        composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
-        persistComposerHistory(composerHistory)
-      }
-      editor.setText('')
-      if (isSlashCommandLine(text)) {
-        void dispatchCommand(text)
-        return
-      }
-      const leading = splitLeadingImagePath(text)
-      if (leading !== undefined) {
-        void (async () => {
-          try {
-            await capabilities.addAttachment(leading.path)
-          } catch (error: unknown) {
-            setNotice(ui(
-              `粘贴图片未加入：${capabilityError(error)}`,
-              `Pasted image was not attached: ${capabilityError(error)}`,
-            ), 'warning')
-            restoreDeferredPrompt(text)
-            return
-          }
-          await sendPrompt(leading.rest)
-        })()
-        return
-      }
-      void sendPrompt(text)
+      // PromptEditor snapshots the expanded composer before pi-tui trims and
+      // clears it. Classify Clarify from that snapshot before history or send
+      // so a local invocation cannot leak and failures restore exact text.
+      // Ordinary slash lines still use isSlashCommandLine and splitLeadingImagePath
+      // inside dispatchComposerSubmit after that classify step.
+      dispatchComposerSubmit(editor.losslessSubmitText(raw), {
+        followLatest: () => { transcript.followLatest() },
+        draftAttachmentCount: () => capabilities.draftAttachments().length,
+        addToHistory: (text) => {
+          editor.addToHistory(text)
+          composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
+          persistComposerHistory(composerHistory)
+        },
+        clearEditor: () => { editor.setText('') },
+        dispatchCommand: (line) => { void dispatchCommand(line) },
+        attachLeadingImage: (path, rawText, rest) => {
+          void (async () => {
+            try {
+              await capabilities.addAttachment(path)
+            } catch (error: unknown) {
+              setNotice(ui(
+                `粘贴图片未加入：${capabilityError(error)}`,
+                `Pasted image was not attached: ${capabilityError(error)}`,
+              ), 'warning')
+              restoreDeferredPrompt(rawText)
+              return
+            }
+            await sendPrompt(rest)
+          })()
+        },
+        sendPrompt: (text) => { void sendPrompt(text) },
+        runClarify: (transaction) => { void actions.clarifyComposer(transaction) },
+      })
     }
 
     const attachPastedImage = (path: string, fallbackText: string, rest = ''): { consume: true } => {

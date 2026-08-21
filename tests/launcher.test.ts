@@ -76,6 +76,18 @@ describe('launcher arguments', () => {
 })
 
 describe('launcher provisioning', () => {
+  it('uses the supplied DSH_HOME instead of the process environment', () => {
+    temporaryHome()
+    const suppliedHome = mkdtempSync(join(tmpdir(), 'seektty-launcher-supplied-'))
+    temporaryHomes.push(suppliedHome)
+    writeProfile(suppliedHome, 'tui', { seektty: '1.2.0' })
+    const execute = vi.fn(() => 0)
+
+    expect(launch([], { DSH_HOME: suppliedHome, DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(execute).toHaveBeenCalledWith('/stock/dsh', ['--profile', 'tui'])
+  })
+
   it('recognizes only a Profile that already contains seektty', () => {
     const home = temporaryHome()
     expect(installed('tui')).toBe(false)
@@ -127,7 +139,7 @@ describe('launcher provisioning', () => {
     expect(launch([], { DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
     expect(calls.map(call => call.args)).toEqual([
       ['plugin', '--profile', 'tui', 'remove', 'deepseek-tui'],
-      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty#v1.1.0'],
+      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty#v1.2.0'],
       ['--profile', 'tui'],
     ])
   })
@@ -152,7 +164,7 @@ describe('launcher provisioning', () => {
     const chunks: string[] = []
     expect(launch(['--version'], { LANG: 'en_US.UTF-8' }, execute, chunk => { chunks.push(chunk) })).toBe(0)
     expect(execute).not.toHaveBeenCalled()
-    expect(chunks.join('')).toContain('seektty 1.1.0')
+    expect(chunks.join('')).toContain('seektty 1.2.0')
     expect(chunks.join('')).toContain('Requires dsh >= 0.1.0-rc.6')
   })
 })

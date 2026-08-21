@@ -17,6 +17,8 @@ describe('out-of-tree Bundle contract', () => {
       compatibility: { minimum: '0.1.0-rc.6', tested: DSH_COMPATIBILITY.tested },
     })
     expect(manifest.bin).toEqual({ deepseek: './lib/bin.js' })
+    const launcher = readFileSync(resolve(root, 'src/bin.ts'), 'utf8')
+    expect(launcher).not.toMatch(/from ['"]@deepseek-ai\//u)
     expect(PACKAGE_VERSION).toBe(manifest.version)
     expect(DSH_COMPATIBILITY).toEqual((manifest.dsh as { compatibility: unknown }).compatibility)
   })
@@ -49,14 +51,24 @@ describe('out-of-tree Bundle contract', () => {
     expect(manifest.exports).toMatchObject({ './attachment-compat': './lib/attachment-compat.js' })
   })
 
-  it('pins official dsh packages to the tested Harness baseline when that version exists', () => {
+  it('never installs a second official Host identity graph into a Profile', () => {
     const dependencies = manifest.dependencies as Record<string, string>
-    const dshPackages = Object.keys(dependencies).filter(name => name.startsWith('@deepseek-ai/dsh-'))
-    expect(dshPackages).toContain('@deepseek-ai/dsh-client-locale')
-    const exact = dshPackages.filter(name => dependencies[name] === DSH_COMPATIBILITY.tested)
-    expect(exact.length).toBeGreaterThan(dshPackages.length / 2)
-    for (const name of dshPackages) {
-      const version = dependencies[name]
+    expect(Object.keys(dependencies).filter(name => name.startsWith('@deepseek-ai/'))).toEqual([])
+
+    const peers = manifest.peerDependencies as Record<string, string>
+    const peerMeta = manifest.peerDependenciesMeta as Record<string, { optional?: boolean }>
+    const devDependencies = manifest.devDependencies as Record<string, string>
+    const hostPeers = Object.keys(peers).filter(name => name.startsWith('@deepseek-ai/'))
+    expect(hostPeers).toContain('@deepseek-ai/dsh-client-locale')
+    expect(hostPeers).toContain('@deepseek-ai/dsh-tools')
+    for (const name of hostPeers) {
+      expect(peerMeta[name], name).toEqual({ optional: true })
+      expect(devDependencies[name], name).toBeDefined()
+    }
+
+    const testedDevPackages = Object.keys(devDependencies).filter(name => name.startsWith('@deepseek-ai/dsh-'))
+    for (const name of testedDevPackages) {
+      const version = devDependencies[name]
       expect(version, name).toBeDefined()
       if (version === undefined) continue
       const order = compareDshVersion(version, DSH_COMPATIBILITY.tested)

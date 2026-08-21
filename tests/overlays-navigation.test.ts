@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
+import { visibleWidth, type Component, type OverlayHandle, type TUI } from '@mariozechner/pi-tui'
 import { OverlayQueue, visibleEditorWindow, type OverlayNavigation } from '../src/client/overlays.ts'
 
 const ESCAPE = '\u001B'
@@ -354,5 +354,40 @@ describe('overlay navigation', () => {
     expect(seenSignal?.aborted).toBe(true)
     await expect(session).resolves.toBeUndefined()
     expect(harness.hide).toHaveBeenCalledOnce()
+  })
+})
+
+describe('Clarify OverlayQueue wrapping', () => {
+  it('renders a long ask overlay inside 40 and 80 columns via OverlayQueue.component.render', async () => {
+    const harness = overlayHarness()
+    const preview = 'Implement email-password login, admin-only audit logs, and failed-login events without inventing extra product copy.'
+    const pending = harness.overlays.select({
+      title: 'Clarify · Which independent delivery constraints remain?',
+      detail: [
+        'Status: running',
+        'Current draft preview:',
+        preview,
+        'Changes this round: recorded the custom checklist',
+      ].join('\n'),
+      searchable: false,
+      choices: [
+        { id: 'o-login', label: 'Keep email+password and add audit logs' },
+        { id: '__accept_preview__', label: 'Review and accept current preview' },
+        { id: '__refine_preview__', label: 'Refine current preview…' },
+      ],
+    })
+    const at40 = harness.component().render(40)
+    const at80 = harness.component().render(80)
+    expect(at40.length).toBeGreaterThan(0)
+    expect(at80.length).toBeGreaterThan(0)
+    for (const line of at40) expect(visibleWidth(line)).toBeLessThanOrEqual(40)
+    for (const line of at80) expect(visibleWidth(line)).toBeLessThanOrEqual(80)
+    expect(plain(at40)).toMatch(/Review and accept current preview|Refine current preview/)
+    const compact80 = plain(at80).replace(/[\s│╭╮╰╯─]+/gu, ' ')
+    expect(compact80).toContain('Implement email-password login')
+    expect(compact80).toContain('failed-login events')
+    expect(plain(at40)).toMatch(/Implement email-password login|email-password/)
+    harness.component().handleInput(ESCAPE)
+    await expect(pending).resolves.toBeUndefined()
   })
 })

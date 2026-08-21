@@ -45,6 +45,10 @@ import { ui, uiLocale } from './locale.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
 import { mergeClarifyCatalog } from './clarify-shell.ts'
 import { probeClarifyRemote } from './clarify-remote.ts'
+import {
+  readAuxiliaryUsageSnapshot,
+  type AuxiliaryUsageBuckets,
+} from './auxiliary-runtime-remote.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -148,6 +152,11 @@ export interface TuiHeaderFacts {
 export interface TuiSessionStatistics {
   readonly lines: readonly string[]
   readonly context?: string
+}
+
+/** Optional whole-Session usage with explicit provenance from auxiliary-runtime. */
+export interface TuiAuxiliaryUsageStatistics {
+  readonly lines: readonly [string, string, string]
 }
 
 /** Temporary image bytes waiting for the next Harness prompt admission. */
@@ -311,6 +320,15 @@ function compactNumber(value: number): string {
   if (value < 1_000) return String(Math.round(value))
   if (value < 1_000_000) return `${scaled(value / 1_000)}K`
   return `${scaled(value / 1_000_000)}M`
+}
+
+function usageSourceLine(label: string, usage: AuxiliaryUsageBuckets): string {
+  const input = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+  const cache = input === 0 ? undefined : Math.round(usage.cacheReadTokens / input * 100)
+  return ui(
+    `Token · ${label} · 输入 ${compactNumber(input)} · 输出 ${compactNumber(usage.outputTokens)}${cache === undefined ? '' : ` · 缓存命中 ${cache}%`}`,
+    `Token · ${label} · input ${compactNumber(input)} · output ${compactNumber(usage.outputTokens)}${cache === undefined ? '' : ` · cache hit ${cache}%`}`,
+  )
 }
 
 function durationText(milliseconds: number): string {
@@ -1159,7 +1177,7 @@ export class HarnessTuiCapabilities {
    * assuming that every Profile mounts every projection unit.
    * @returns available statistics lines and an optional compact context label.
    */
-  sessionStatistics(): TuiSessionStatistics {
+  sessionStatistics(options: { readonly includeTokenUsage?: boolean } = {}): TuiSessionStatistics {
     const usage = projectionRecord(this.projection('tokenUsage'))
     const stats = projectionRecord(this.projection('sessionStats'))
     const pressure = projectionRecord(this.projection('contextPressure'))
@@ -1199,7 +1217,13 @@ export class HarnessTuiCapabilities {
     const cacheRead = nonnegativeNumber(usage, 'cacheReadTokens')
     const cacheWrite = nonnegativeNumber(usage, 'cacheWriteTokens')
     const output = nonnegativeNumber(usage, 'outputTokens')
-    if (uncached !== undefined && cacheRead !== undefined && cacheWrite !== undefined && output !== undefined) {
+    if (
+      options.includeTokenUsage !== false
+      && uncached !== undefined
+      && cacheRead !== undefined
+      && cacheWrite !== undefined
+      && output !== undefined
+    ) {
       const input = uncached + cacheRead + cacheWrite
       const cache = input === 0 ? undefined : Math.round(cacheRead / input * 100)
       lines.push(ui(
@@ -1226,6 +1250,42 @@ export class HarnessTuiCapabilities {
       ))
     }
     return { lines, ...(context === undefined ? {} : { context }) }
+  }
+
+  /**
+   * Read optional whole-Session usage without altering official projections.
+   * Only a complete, healthy snapshot can produce a combined display.
+   */
+  async auxiliaryUsageStatistics(options: {
+    readonly sessionId?: SessionId
+    readonly signal?: AbortSignal
+  } = {}): Promise<TuiAuxiliaryUsageStatistics | undefined> {
+    const active = this.active()
+    const rpc = this.connectionRpc()
+    if (
+      active === undefined
+      || rpc === undefined
+      || (options.sessionId !== undefined && active.sessionId !== options.sessionId)
+    ) return undefined
+    const sessionId = options.sessionId ?? active.sessionId
+    const snapshot = await readAuxiliaryUsageSnapshot(
+      (channel, endpoint, payload, inner) => rpc.call(channel, endpoint, payload, inner),
+      String(sessionId),
+      options.signal,
+    )
+    if (
+      snapshot === undefined
+      || !snapshot.capability.ok
+      || !snapshot.capability.officialProjection
+      || !snapshot.capability.domain
+    ) return undefined
+    return {
+      lines: [
+        usageSourceLine(ui('官方', 'Official'), snapshot.official),
+        usageSourceLine(ui('辅助', 'Auxiliary'), snapshot.auxiliary),
+        usageSourceLine(ui('组合（派生）', 'Combined (derived)'), snapshot.combined),
+      ],
+    }
   }
 
   /**

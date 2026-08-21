@@ -31,6 +31,7 @@ const internalClient = [
   /^@deepseek-ai\/dsh-api-remotes\/(?:node-client|client)$/,
   /^@deepseek-ai\/dsh-client-connection\/(?:node-client|client)$/,
   /^@deepseek-ai\/dsh-client-runtime\/(?:node-client|projection|client(?:\/.*)?)$/,
+  /^@deepseek-ai\/dsh-client-schema-form$/,
   /^@deepseek-ai\/dsh-client-ui-slots$/,
   /^@deepseek-ai\/dsh-client-ui-(?:conversation|deliverables|goal|trajectory|workflow-run)\/projection$/,
   /^@deepseek-ai\/dsh-typert-registry\/(?:node-client|client)$/,
