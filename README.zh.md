@@ -1,10 +1,42 @@
-# SeekTTY
+<div align="center">
 
-[English](README.md) | 中文
+<h1>SeekTTY</h1>
 
-SeekTTY 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 带进终端。进入项目目录运行 `deepseek`，就能在一个键盘优先的工作台里完成提问、代码修改、工具调用、会话管理、模型与权限切换、插件安装、子 Agent 协作和运行诊断。
+<p>DeepSeek Harness 的键盘优先终端工作台，陪你把一个想法推进到可执行方案。</p>
 
-SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Session、模型、权限、Settings、Profile、插件与持久化能力。终端中的每个操作都落在同一套 Harness 状态上，升级时只需要更新兼容基线和适配层。
+<p>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/Version-1.2.0-orange" alt="Version 1.2.0"></a>
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.0--rc.8-5B5BD6" alt="DeepSeek Harness 0.1.0-rc.8">
+  <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
+  <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
+</p>
+
+<p>
+  <a href="#项目概览">项目概览</a>
+  ·
+  <a href="#clarify-与-plan">Clarify 与 Plan</a>
+  ·
+  <a href="#已经接入的-harness-能力">终端能力</a>
+  ·
+  <a href="#快速开始">快速开始</a>
+  ·
+  <a href="#已验证范围">验证</a>
+</p>
+
+<p><a href="README.md">English</a> · 中文</p>
+
+</div>
+
+---
+
+## 项目概览
+
+进入项目目录运行 `deepseek`，就能在一个终端工作台里使用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 原生的 Agent、Session、模型、权限、Settings、Profile、插件与持久化能力。提问、代码修改、工具调用、会话管理、模型路由、权限切换、插件、子 Agent 和运行诊断都落在同一套 Harness 状态上。
+
+想法还没有写完整时，运行 `/clarify`：Clarify 读取当前 Session 与输入区草稿，沿真实模型路由逐题生成苏格拉底式问题、上下文选项和 live Draft preview。每回答一题，预览稿都会吸收新的决定。采用后，完整 Draft 回到普通输入框，等你审阅、修改并自行发送。需求明确之后，再用 Harness 原生 `/plan` 把它写成实施方案。
+
+Clarify 的模型调用由 [Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) 承接，用量写入独立的 `auxiliary_runtime` 账本。官方 Agent 循环继续使用 `tokenUsage`；快照合同健康时，SeekTTY `/status` 分别展示来源清楚的 Official、Auxiliary 和派生 Combined 总量。
 
 ## DeepSeek 亮色与暗色界面
 
@@ -17,6 +49,69 @@ SeekTTY 以 Profile Bundle 方式接入 Harness，直接使用原生 Agent、Ses
 ![SeekTTY DeepSeek 暗色首屏](assets/seektty-tui-dark.png)
 
 最新视图会铺满终端，并让输入框与状态栏始终沉在底部。未使用的行属于中间的对话视口，会随着输出增长逐行收缩；更长的对话继续进入终端原生滚动记录。
+
+## Clarify 与 Plan
+
+[Clarify](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) 和 Plan 位于同一条工作流的前后两段。
+
+Clarify 处理“要做什么还需要问清”的阶段。它根据当前 Session 和草稿一次提出一个聚焦问题，把已经确认的决定带入后续问题，并在每一答之后更新可审阅的 Draft。采用后，这份 Draft 回到输入框；你可以继续改字，在它准确表达真实意图时按 Enter 发送。
+
+Plan 处理“需求已经明确、需要决定怎么做”的阶段。Harness 原生 `/plan` 把已经提交的需求整理为实施方案，并进入正常的计划审查流程。
+
+```text
+[当前 Session + 输入草稿]
+              |
+              v
+     +------------------+      clarify Remote      +------------------+
+     | SeekTTY          | -----------------------> | Clarify          |
+     | /clarify 界面    | <----------------------- | 问题 / 选项      |
+     +--------+---------+   live Draft preview     +--------+---------+
+              |                                            |
+              |                                            | 同进程 run
+              |                                            v
+              |                                   +-------------------+
+              |                                   | Auxiliary Runtime |
+              |                                   | 限额 / 取消       |
+              |                                   | 独立用量账本      |
+              |                                   +---------+---------+
+              |                                             |
+              |                                             v
+              |                                   [官方模型路由]
+              |                                   transcript 外、无工具
+              |
+              | 采用：Draft 回到输入框
+              v
+          [审阅与修改]
+              |
+              | 按 Enter
+              v
+       [正式 Session 消息]
+              |
+              | 需要实施方案时运行 /plan
+              v
+       [计划审查 -> Agent 执行]
+
+Auxiliary snapshot ---------------------> SeekTTY /status
+                                          Official | Auxiliary | Combined
+```
+
+### 主 Session 对话记录
+
+问题、选项、预览稿变化和 refine 反馈保留在 Host 内存中的临时澄清进程里，默认 15 分钟无交互后进入 `stale`，并返回 `staleReason=ttl-expired`。主 Session transcript 在你正式发送采用后的 Draft 时才写入这条用户消息。澄清状态与 input queue、pending、Plan、Goal、Profile 文件和 SeekTTY 本地文件相互分离。
+
+### 辅助模型用量
+
+每一次 Clarify 模型调用都由 Auxiliary Runtime 记入官方 `storageDomain` 下的 `auxiliary_runtime` 域。官方 `tokenUsage` 继续表示 Agent 循环调用。Combined 在读取时按四个互不重叠的 Token 桶相加。辅助账本保存调用标识、purpose、状态、Token 桶、规范化失败和时间戳；prompt、消息正文、模型输出、自定义回答、凭据和文件路径不会进入账本。
+
+### 从输入框启动 Clarify
+
+兼容的 Clarify `0.2.0` 六方法 Remote 与 `clarify.wire/1` 激活后，SeekTTY 会把 `/clarify` 加入本地命令目录。
+
+- 从命令面板执行：保留整个输入区作为 seed。
+- 输入 `/clarify some text`：以参数文本作为 seed。
+- 在现有草稿末尾单独加入 `/clarify` token 或一行：以前面的草稿作为 seed。
+
+每次回答都会刷新 live Draft preview。提问数量跟随当前 Session 中尚未确认的关键决定：Clarify 通常一次只追问一个聚焦问题，预览已经可发送时直接进入审阅。你可以继续回答、直接 refine 当前预览、采用或放弃。采用会把审阅后的 Draft 写入普通输入框，按 Enter 仍是明确的发送动作。
 
 ## 界面与代码主题自定义，并可导入 VS Code 主题
 
@@ -63,16 +158,41 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 
 模型、Provider、Agent Preset、权限、Host 命令、工具、Settings、Skills、MCP 和插件来源都从当前 Harness 运行时读取。上游或第三方 Bundle 注册新能力后，SeekTTY 会将它加入动态目录；需要专用界面的能力也保留 Schema、结构化详情和错误诊断入口。
 
-## 安装并使用裸命令
+## 快速开始
 
-仓库公开，可直接从 GitHub 安装，无需配置私有仓库访问权限。SeekTTY 支持 macOS、Linux 和 Windows。Windows 请用下方的 `pnpm add --global` 安装，以便解析 PATHEXT 的 `dsh.cmd` shim。
+三个仓库与 Release 资产均已公开。完整 Clarify 工作流的联合验收基线是官方 DeepSeek Harness `0.1.0-rc.8`。先通过原生 `dsh plugin` 安装已经构建好的 Release tarball：
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
+pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
+
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.0/dsh-plugin-clarify-0.2.0.tgz
+
+dsh --profile tui
+```
+
+这条路径直接使用打包产物，可以避开 Git 源的 `prepare` / `allowBuilds`。只安装第一项 Bundle 就能单独使用 SeekTTY；后两个 Host 插件在同一 Profile 激活后，终端会自动出现 Clarify 工作流。
+
+### 裸 `deepseek` 启动器
+
+SeekTTY 支持 macOS、Linux 和 Windows。全局安装同一份 Release tarball；Windows 使用 `pnpm add --global` 后可以解析 PATHEXT 下的 `dsh.cmd` shim。
+
+```sh
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 deepseek
 ```
 
-`deepseek` 需要 PATH 上的 DeepSeek Harness（`dsh`），或用 `DSH_BIN` 指向可执行文件（`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8`）。`deepseek` 首次运行会通过原生 `dsh plugin` 命令创建默认 `tui` Profile 并安装本 Bundle，以后直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
+PowerShell 使用同一 URL：
+
+```powershell
+pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+deepseek
+```
+
+`deepseek` 需要 PATH 上的 `dsh`，也可以用 `DSH_BIN` 指向可执行文件。`SEEKTTY_SPEC` 会让 Profile 始终使用同一份预构建 tarball；没有这项覆盖时，当前启动器使用带版本 Tag 的 `github:Hilbert-beinghappy/seektty#v1.2.0` 默认规格。后续运行直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
 
 ```sh
 deepseek "检查这个项目"
@@ -82,13 +202,6 @@ deepseek --resume <sessionId>
 deepseek --profile team-tui
 deepseek --version
 deepseek --update
-```
-
-也可以只使用 dsh 的原生入口：
-
-```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
-dsh --profile tui
 ```
 
 `deepseek --update` 仍可强制扫描并安装。默认 `SEEKTTY_UPDATE=auto`：每次启动会拉取官方 dsh 的 npm `latest`（不跟 `next` 或 GitHub 预发布）和 SeekTTY 最新 GitHub Release，然后更新全局 dsh（`DSH_BIN` 固定可执行文件时跳过），并用原生 `dsh plugin add` 更新 SeekTTY Bundle。本地 `link:`/`file:` 安装和 `SEEKTTY_SPEC` 覆盖不会被改写。网络或安装失败不会挡住启动。设 `SEEKTTY_UPDATE=check` 可改回会话后提示，设 `SEEKTTY_UPDATE=0` 可关闭。
@@ -107,7 +220,7 @@ dsh --profile tui
 
 这里只粘贴 API Key 本身。输入内容始终显示为掩码；按 Enter 后，规范化后的值会直接交给 Harness `credentials.set`。SeekTTY 不会读回密钥，也不会自行写凭证文件，更不会把它放进 Settings、日志、截图或 Session 数据。保存时不会主动发起可能计费的在线验证请求；Key 是否有效由第一次真实模型请求通过 Harness Provider 的原生错误路径报告。
 
-按 Esc 可以稍后配置，同时继续进入 `/settings`、`/plugin` 等本地界面。之后发送普通消息、Skill 命令或带附件消息时会再次打开同一引导。`deepseek "初始任务"`、已经提交的文字和草稿附件都不会丢失：保存成功后自动继续原请求，再次跳过则恢复到输入框。如果 Provider 检查不可用、官方适配器不存在或凭证层只读，SeekTTY 不会显示无法完成的输入框，而是提示使用 `/settings` 与 `/doctor`，并保留 Harness 原有行为。
+按 Esc 可以稍后配置，同时继续进入 `/settings`、`/plugin` 等本地界面。之后发送普通消息、Skill 命令或带附件消息时会再次打开同一引导。`deepseek "初始任务"`、已经提交的文字和草稿附件都不会丢失：保存成功后自动继续原请求，再次跳过则恢复到输入框。Provider 检查不可用、官方适配器缺席或凭证层只读时，SeekTTY 直接提示使用 `/settings` 与 `/doctor`，并保留 Harness 原有行为。
 
 ## 斜杠命令
 
@@ -124,7 +237,7 @@ dsh --profile tui
 | 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart`；当 `dsh-plugin-auxiliary-runtime@0.1.0` 健康可用时，`/status` 分别显示标明来源的官方、辅助和组合（派生）会话总用量，且不修改官方 `tokenUsage` 投影 |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
-`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。`/clarify` 不是常驻命令：只有探测到兼容的 Clarify `0.2.0` 六方法 Remote 时才会进入本地 `/` 目录。它会根据当前 Session 和输入草稿动态生成问题与选项，每次回答都演进一版可审阅 preview，并允许继续回答、直接 refine、采用或放弃；不会常驻显示灰色建议行，也绝不会自动发送。你可以从命令面板执行以保留整个输入区作为 seed，也可以输入 `/clarify some text`，或在现有草稿末尾单独加一个 `/clarify` token／一行。采用后只会把完整审阅过的 draft 写回常规输入区；是否按 Enter 发送仍由你决定。
+`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。兼容的 Clarify `0.2.0` Remote 会把 `/clarify` 加入本地 `/` 目录，用模型生成的问题、上下文选项和持续演进的预览稿，引导你得到一份进入普通输入框的 Draft；何时发送由你决定。完整旅程见 [Clarify 与 Plan](#clarify-与-plan)。
 
 ## 常用交互
 
@@ -152,7 +265,8 @@ dsh --profile tui
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 deepseek
 ```
 
@@ -160,7 +274,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 ```
 
 ## 直接插拔
@@ -174,7 +288,7 @@ dsh plugin --profile tui remove seektty
 重新安装使用相同命令：
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 ```
 
 安装结果直接写入目标 Harness Profile 的依赖、Bundle 顺序和 pnpm lockfile。TUI 的 `/plugin` 与原生 `dsh plugin` 操作同一份 Profile 状态。
@@ -229,7 +343,8 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.8` 隔离安装、配置装配和 PTY 启动；并对声明的最低版本 `@deepseek-ai/dsh@0.1.0-rc.6` 完成 add／boot／remove／re-add 插拔契约。
-- 未发布的 Clarify `0.2.0` 已在官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7`、`0.1.0-rc.8` 上通过 add／boot／remove／re-add；其打包产物也能由 SeekTTY `1.2.0` 未改动的 doctor 接收端正常安装。动态 composition／Cursor CLI 用户旅程已通过，但不能冒充官方 dsh Provider／usage 证据：在 dsh 提供公开的 off-transcript 用量写入口，或任务合同被明确修改前，生产 Release 仍保持阻塞。
+- Clarify `0.2.0` 在官方 dsh rc.6／rc.7／rc.8 上保留独立 lifecycle 证据；完整动态组合只对精确 `0.1.0-rc.8` 加 Auxiliary Runtime `0.1.0` 主张。三个 Release tarball 已通过原生 add／boot／remove／re-add、`/doctor` 0 错误／0 警告、真实模型动态生成问题／选项／preview、多轮 preview 演进、审阅采用后只写回输入框并由用户自行发送、中断恢复和隐私检查。
+- Auxiliary 调用的 usage／limits／cancel 持久化在 `auxiliary_runtime` 存储域。官方 Agent `tokenUsage` 保持原有归属；可选快照合同健康时，`/status` 展示经过校验的 Official、Auxiliary 和派生 Combined 桶。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
 - 隔离 `DSH_HOME` 下的首次 Provider 就绪检查、API Key 掩码输入、跳过后的草稿恢复、Harness 凭证持久化，以及重启后不再提示。
 - 暗色、亮色及配色生成主题的真实 PTY 渲染，界面／代码主题独立即时切换，80／120／160 列布局，以及同一 Profile 重启后的主题恢复。
@@ -258,6 +373,6 @@ pnpm test:clarify-doctor
 
 ## 兼容和升级
 
-已测兼容基线是官方 `0.1.0-rc.8`，声明的最低 Host 是官方 `0.1.0-rc.6`。已测 Host 为官方 dsh `0.1.0-rc.6`、`0.1.0-rc.7` 与 `0.1.0-rc.8`。新于 `tested` 的 dsh 仍可启动并给出提示；旧于 `minimum` 会被拒绝。发布的 Bundle 不会再把 Cordis 或任何 `@deepseek-ai/dsh-*` Host 包的第二份副本安装进 Profile：optional peer 只描述 Host 合同，运行时 import 统一通过官方 `$DSH_HOME/profiles/node_modules` 回退解析，从而保持原生工具调度器等身份型 Symbol 的唯一性。官方回退不提供的纯客户端辅助包则会被打进 Bundle。Host 插件 `seektty/attachment-compat` 仍紧挨在 `api-gateway` 之前，且只适配精确的合法遗留 image-limit 能力形状；其他形状继续闭包失败。未来 Host 按能力匹配，不做版本分支。定时工作流会扫描官方 npm `latest` dist-tag，在 `pnpm run check`、隔离打包启动器和 stock-dsh 契约全部通过后，升级精确开发基线和 optional peer 范围并开 pull request。不跟 npm `next` 或 GitHub harness 预发布。
+SeekTTY 壳声明的最低 Host 是官方 `0.1.0-rc.6`，已测基线是官方 `0.1.0-rc.8`，壳的 lifecycle 覆盖 rc.6／rc.7／rc.8。可选 Clarify + Auxiliary 生产组合只在精确 `0.1.0-rc.8` 上验证。新于 `tested` 的 dsh 仍可启动 SeekTTY 并给出提示；Auxiliary Runtime 会拒绝已发布范围之外的已知版本；旧于 SeekTTY `minimum` 的 Host 会被拒绝。发布的 Bundle 通过 optional peer 描述 Host 合同，运行时 import 统一从官方 `$DSH_HOME/profiles/node_modules` 回退解析，让原生工具调度器等身份型 Symbol 保持唯一。官方回退缺少的纯客户端辅助包会进入 Bundle。Host 插件 `seektty/attachment-compat` 紧挨在 `api-gateway` 之前，只适配精确的合法遗留 image-limit 能力形状；其他形状闭包失败。未来 Host 按能力匹配。定时工作流扫描官方 npm `latest` dist-tag，在 `pnpm run check`、隔离打包启动器和 stock-dsh 契约通过后，升级精确开发基线和 optional peer 范围并开 pull request；npm `next` 与 GitHub Harness 预发布留在发现轨道之外。
 
-源码仓库与 GitHub Releases 均公开。当前不发布 npm Registry 包；可安装上方已锁定 Tag 的 GitHub 源码，也可使用对应 Release 附带的 tarball。
+源码仓库与 GitHub Releases 均公开。用户包通过对应 Release 附带的预构建 tarball 分发，当前没有 npm Registry 发布。

@@ -1,10 +1,42 @@
-# SeekTTY
+<div align="center">
 
-English | [中文](README.zh.md)
+<h1>SeekTTY</h1>
 
-SeekTTY brings [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) into the terminal. Run `deepseek` from a project directory to work in a keyboard-first interface for prompting, code changes, tool calls, session management, model and permission switching, plugin installation, subagent coordination, and runtime diagnostics.
+<p>A keyboard-first terminal workspace for DeepSeek Harness, from an early idea to an executable plan.</p>
 
-SeekTTY joins Harness as a Profile Bundle and uses its native Agent, Session, model, permission, Settings, Profile, plugin, and persistence services. Every terminal action uses the same Harness state, so upgrades stay focused on the compatibility baseline and adapters.
+<p>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/Version-1.2.0-orange" alt="Version 1.2.0"></a>
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.0--rc.8-5B5BD6" alt="DeepSeek Harness 0.1.0-rc.8">
+  <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
+  <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
+</p>
+
+<p>
+  <a href="#project-overview">Project overview</a>
+  ·
+  <a href="#clarify-and-plan">Clarify and Plan</a>
+  ·
+  <a href="#harness-capabilities-available-in-the-tui">Terminal capabilities</a>
+  ·
+  <a href="#quick-start">Quick start</a>
+  ·
+  <a href="#verified-scope">Verification</a>
+</p>
+
+<p>English · <a href="README.zh.md">中文</a></p>
+
+</div>
+
+---
+
+## Project overview
+
+Run `deepseek` from a project directory to use the native Agent, Session, model, permission, Settings, Profile, plugin, and persistence services of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) from one terminal workspace. Prompts, code changes, tool calls, sessions, model routes, permissions, plugins, subagents, and diagnostics all operate on the same Harness state.
+
+When an idea still needs definition, `/clarify` reads the active Session and composer draft, follows the real model route, and generates Socratic questions, contextual options, and a live draft preview that evolves after every answer. Accepting the preview places a complete Draft back in the ordinary composer for review and manual submission. Harness native `/plan` can then turn the clarified requirement into an implementation plan.
+
+Clarify model calls run through [Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) and are recorded in its dedicated `auxiliary_runtime` ledger. Official Agent-loop usage remains in `tokenUsage`; SeekTTY `/status` shows separately sourced Official, Auxiliary, and derived Combined totals while the snapshot contract is healthy.
 
 ## DeepSeek light and dark interfaces
 
@@ -18,6 +50,69 @@ SeekTTY joins Harness as a Profile Bundle and uses its native Agent, Session, mo
 
 The live view fills the terminal and keeps the composer and status at the bottom. Unused rows remain inside the conversation viewport and disappear as output grows; longer conversations continue into native terminal scrollback.
 
+## Clarify and Plan
+
+[Clarify](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) and Plan cover consecutive parts of one workflow.
+
+Clarify handles the stage where the desired outcome still needs definition. It uses the current Session and draft to ask one focused question at a time, carries accepted decisions forward, and updates a reviewable Draft after every answer. Accepting returns that Draft to the composer. You can edit it and press Enter when it represents what you want.
+
+Plan handles the stage where the requirement is ready for implementation. Harness native `/plan` turns the submitted requirement into an implementation proposal and opens the normal plan-review flow.
+
+```text
+[Active Session + composer draft]
+              |
+              v
+     +------------------+      clarify Remote      +------------------+
+     | SeekTTY          | -----------------------> | Clarify          |
+     | /clarify surface | <----------------------- | question/options |
+     +--------+---------+   live Draft preview     +--------+---------+
+              |                                            |
+              |                                            | same-process run
+              |                                            v
+              |                                   +-------------------+
+              |                                   | Auxiliary Runtime |
+              |                                   | limits / cancel   |
+              |                                   | usage ledger      |
+              |                                   +---------+---------+
+              |                                             |
+              |                                             v
+              |                                   [official model route]
+              |                                   off-transcript, no-tools
+              |
+              | accept: Draft returns to the composer
+              v
+        [review and edit]
+              |
+              | press Enter
+              v
+     [formal Session message]
+              |
+              | /plan when an implementation plan is useful
+              v
+     [plan review -> Agent execution]
+
+Auxiliary snapshot ---------------------> SeekTTY /status
+                                          Official | Auxiliary | Combined
+```
+
+### Main Session transcript
+
+Questions, options, preview revisions, and refine feedback live in a temporary clarification process held in Host memory. It enters `stale` after 15 minutes without interaction by default and reports `staleReason=ttl-expired`. The main Session transcript receives the formal user message only after you submit the accepted Draft. Clarification state stays out of the input queue, pending interactions, Plan, Goal, Profile files, and SeekTTY local files.
+
+### Auxiliary model usage
+
+Each Clarify model call is recorded by Auxiliary Runtime in the official `storageDomain` under `auxiliary_runtime`. Official `tokenUsage` continues to represent Agent-loop calls. Auxiliary derives Combined values from the four disjoint buckets—`uncachedInputTokens`, `outputTokens`, `cacheReadTokens`, and `cacheWriteTokens`—at read time, and SeekTTY `/status` validates and displays the snapshot. The auxiliary ledger stores call identity, purpose, status, token buckets, normalized failures, and timestamps; prompts, message text, model output, custom answers, credentials, and filesystem paths stay outside the ledger.
+
+### Start Clarify from the composer
+
+SeekTTY adds `/clarify` to its local command catalog while a compatible Clarify `0.2.0` six-method Remote with `clarify.wire/1` is active.
+
+- Run it from the command palette to keep the whole composer as the seed.
+- Type `/clarify some text` to use the argument as the seed.
+- End an existing draft with a standalone `/clarify` token or line to use the preceding draft as the seed.
+
+Every answer refreshes the live Draft preview. The number of questions follows the unresolved decisions in the current Session: Clarify usually asks one focused question at a time and moves directly to review when the preview is ready to send. You can answer, refine the preview directly, accept it, or cancel. Accepting writes the reviewed Draft into the ordinary composer; Enter remains the explicit send action.
+
 ## Custom interface and code themes, including VS Code imports
 
 Theme customization is a first-class SeekTTY feature: interface background and text colors are editable, code-block colors and syntax styles are independently editable, and `/theme import` accepts local VS Code JSON/JSONC themes with portable TextMate token colors. A palette of 3–16 colors can also generate a complete light or dark theme for preview and further adjustment.
@@ -30,7 +125,7 @@ Theme customization is a first-class SeekTTY feature: interface background and t
 
 ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png)
 
-Markdown fences disappear into continuous code surfaces. Assistant code, Shell commands, structured tool parameters, file reads, JSON, and Diff use the same active code theme; ordinary conversation text keeps the interface style. Every code background occupies continuous terminal cells instead of producing disconnected per-line stripes.
+Markdown fences disappear into continuous code surfaces. Assistant code, Shell commands, structured tool parameters, file reads, JSON, and Diff use the same active code theme; ordinary conversation text keeps the interface style. Every code background occupies continuous terminal cells and forms one uninterrupted surface.
 
 ## Harness capabilities available in the TUI
 
@@ -63,16 +158,41 @@ The current release covers these capabilities:
 
 Models, Providers, Agent Presets, permissions, Host commands, tools, Settings, Skills, MCP, and marketplace sources are discovered from the running Harness. New capabilities registered by upstream or third-party Bundles enter the dynamic catalogs, with Schema controls, structured details, and actionable diagnostics available while dedicated views evolve.
 
-## Install the bare command
+## Quick start
 
-The repository is public and can be installed directly from GitHub without private-repository authentication. SeekTTY supports macOS, Linux, and Windows. On Windows, install with `pnpm add --global` as shown below so PATHEXT-aware shims (`dsh.cmd`) can be resolved.
+The repositories and Release assets are public. The complete Clarify workflow has been jointly verified with official DeepSeek Harness `0.1.0-rc.8`. Install the prebuilt Release tarballs through the native `dsh plugin` command:
 
 ```sh
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
+pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
+
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.0/dsh-plugin-clarify-0.2.0.tgz
+
+dsh --profile tui
+```
+
+This path consumes packed artifacts and avoids Git-source `prepare` / `allowBuilds`. Installing only the first Bundle gives you the standalone SeekTTY shell; Clarify appears when the two optional Host plugins are active in the same Profile.
+
+### Bare `deepseek` launcher
+
+SeekTTY supports macOS, Linux, and Windows. Install the same Release tarball globally; on Windows, `pnpm add --global` creates PATHEXT-aware shims for `dsh.cmd`.
+
+```sh
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 deepseek
 ```
 
-`deepseek` requires DeepSeek Harness (`dsh`) on `PATH`, or `DSH_BIN` pointing at the executable (`pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8`). On first run, `deepseek` uses the native `dsh plugin` command to create the default `tui` Profile and install this Bundle. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
+PowerShell uses the same URL:
+
+```powershell
+pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+deepseek
+```
+
+`deepseek` requires `dsh` on `PATH`, or `DSH_BIN` pointing at the executable. `SEEKTTY_SPEC` pins Profile reconciliation to the same prebuilt tarball. Without that override, the current launcher uses its tagged `github:Hilbert-beinghappy/seektty#v1.2.0` default. Later runs boot the same Profile. Initial tasks, workspaces, Session resume, and custom Profiles are supported:
 
 ```sh
 deepseek "check this project"
@@ -82,13 +202,6 @@ deepseek --resume <sessionId>
 deepseek --profile team-tui
 deepseek --version
 deepseek --update
-```
-
-The native dsh entry remains available:
-
-```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
-dsh --profile tui
 ```
 
 `deepseek --update` still force-scans and installs. By default `deepseek` itself is `SEEKTTY_UPDATE=auto`: on launch it fetches official dsh npm `latest` (not `next` or GitHub pre-releases) and the newest SeekTTY GitHub Release, then updates the global dsh install (skipped when `DSH_BIN` pins the executable) and the SeekTTY Bundle through native `dsh plugin add`. Local `link:`/`file:` installs and `SEEKTTY_SPEC` overrides are left alone. Network or install failures never block boot. Set `SEEKTTY_UPDATE=check` to restore a post-session notice, or `SEEKTTY_UPDATE=0` to disable.
@@ -124,7 +237,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when `dsh-plugin-auxiliary-runtime@0.1.0` is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
-`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions instead of being sent to the model as ordinary prompts. `/clarify` is not a stock command: it is added to the local `/` catalog only while a compatible Clarify `0.2.0` six-method Remote is present. It asks context-specific questions generated from the active Session and current draft, evolves a reviewed preview after every answer, and lets you answer, refine, accept, or cancel. It never shows a permanent grey suggestion line and never auto-sends. Run it from the palette to keep the whole composer as the seed, type `/clarify some text`, or end an existing draft with a final `/clarify` token or line. Accepting writes the complete reviewed draft back into the ordinary composer; press Enter yourself only if you want to send it.
+`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions and stay within the command surface. A compatible Clarify `0.2.0` Remote contributes `/clarify` to the local `/` catalog. Its model-generated questions, contextual options, and evolving preview lead to a reviewed Draft in the ordinary composer; you decide when to submit it. See [Clarify and Plan](#clarify-and-plan) for the full journey.
 
 ## Common controls
 
@@ -152,7 +265,8 @@ Replace the former global package once. The new `deepseek` launcher then uses na
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global github:Hilbert-beinghappy/seektty#v1.2.0
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 deepseek
 ```
 
@@ -160,7 +274,7 @@ Custom Profiles migrate independently on first launch, for example `deepseek --p
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 ```
 
 ## Plug and unplug
@@ -174,7 +288,7 @@ dsh plugin --profile tui remove seektty
 Reinstall with the same native command:
 
 ```sh
-dsh plugin --profile tui add github:Hilbert-beinghappy/seektty#v1.2.0
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 ```
 
 Installation writes directly to the target Harness Profile dependencies, Bundle order, and pnpm lockfile. TUI `/plugin` and native `dsh plugin` operate on that same Profile state.
@@ -261,4 +375,4 @@ pnpm test:clarify-doctor
 
 The tested SeekTTY baseline is official `0.1.0-rc.8`; the shell's declared minimum remains official `0.1.0-rc.6`, with shell lifecycle coverage on rc.6/rc.7/rc.8. The optional Clarify + Auxiliary production combination is narrower and is verified only on exact rc.8. A newer dsh than `tested` still boots the shell with a notice, but the auxiliary runtime rejects known versions outside its published range; older than the shell minimum is rejected. The published Bundle does not install a second copy of Cordis or any `@deepseek-ai/dsh-*` Host package into a Profile: optional peers describe the host contract, while runtime imports resolve through the official `$DSH_HOME/profiles/node_modules` fallback. This preserves identity-bearing symbols such as the native tool scheduler. Pure client helpers that the official fallback does not ship are bundled instead. The Host plugin `seektty/attachment-compat` still runs immediately before `api-gateway` and adapts only the exact valid legacy image-limit capability shape; all other shapes fail closed. Future hosts are matched by capability and unsupported optional features degrade safely. A scheduled workflow scans the official npm `latest` dist-tag, upgrades development baselines only after `pnpm run check`, packed-launcher isolation, and the stock-dsh contract pass, then opens a pull request. npm `next` and GitHub harness pre-releases are not followed.
 
-The source repository and its GitHub Releases are public. No npm-registry package is published; install the tagged GitHub source above or use the tarball attached to the matching Release.
+The source repository and its GitHub Releases are public. User packages come from the prebuilt tarball attached to the matching Release; there is currently no npm Registry release.
