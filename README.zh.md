@@ -36,7 +36,9 @@
 
 进入项目目录运行 `deepseek`，就能在一个终端工作台里使用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 原生的 Agent、Session、模型、权限、Settings、Profile、插件与持久化能力。提问、代码修改、工具调用、会话管理、模型路由、权限切换、插件、子 Agent 和运行诊断都落在同一套 Harness 状态上。
 
-想法还没有写完整时，运行 `/clarify`：Clarify 读取当前 Session 与输入区草稿，沿真实模型路由逐题生成苏格拉底式问题、上下文选项和 live Draft preview。每回答一题，预览稿都会吸收新的决定。采用后，完整 Draft 回到普通输入框，等你审阅、修改并自行发送。需求明确之后，再用 Harness 原生 `/plan` 把它写成实施方案。
+想法还没有写完整时，可以进入由插件提供的 `/clarify` 工作流：Clarify 读取当前 Session 与输入区草稿，沿真实模型路由逐题生成苏格拉底式问题、上下文选项和 live Draft preview。每回答一题，预览稿都会吸收新的决定。采用后，完整 Draft 回到普通输入框，等你审阅、修改并自行发送。需求明确之后，再用 Harness 原生 `/plan` 把它写成实施方案。
+
+[Clarify Host 插件](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) 持有绑定 Session 的澄清进程、模型生成的问题、选项、预览稿和六方法 Remote。兼容的插件能力激活后，SeekTTY 会自动探测它，并加入本地 `/clarify` 命令与键盘优先的 TUI 界面。SeekTTY 把当前 Session 和草稿交给插件，再把用户采用的 Draft 写回输入框。
 
 Clarify 的模型调用由 [Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) 承接，用量写入独立的 `auxiliary_runtime` 账本。官方 Agent 循环继续使用 `tokenUsage`；快照合同健康时，SeekTTY `/status` 分别展示来源清楚的 Official、Auxiliary 和派生 Combined 总量。
 
@@ -54,19 +56,29 @@ Clarify 的模型调用由 [Auxiliary Runtime](https://github.com/Hilbert-beingh
 
 ## Clarify 与 Plan
 
-[Clarify](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) 和 Plan 位于同一条工作流的前后两段。
+[Clarify](https://github.com/Hilbert-beinghappy/dsh-plugin-clarify) 是可选的 DeepSeek Harness Host 插件，SeekTTY 是它的键盘优先终端消费者。插件提供的 Clarify 与 Harness 原生 Plan 位于同一条工作流的前后两段。
 
 Clarify 处理“要做什么还需要问清”的阶段。它根据当前 Session 和草稿一次提出一个聚焦问题，把已经确认的决定带入后续问题，并在每一答之后更新可审阅的 Draft。采用后，这份 Draft 回到输入框；你可以继续改字，在它准确表达真实意图时按 Enter 发送。
 
 Plan 处理“需求已经明确、需要决定怎么做”的阶段。Harness 原生 `/plan` 把已经提交的需求整理为实施方案，并进入正常的计划审查流程。
+
+### `/clarify` 来自哪里
+
+| 组件 | 职责 |
+| --- | --- |
+| **SeekTTY** | 探测 Clarify Remote，动态把 `/clarify` 加入本地命令目录，渲染终端交互，提供当前 Session 与输入草稿，并把采用后的 Draft 写回输入框。 |
+| **dsh-plugin-clarify** | 通过 `clarify.wire/1` 发布 `start`、`answer`、`accept`、`refine`、`cancel` 和 `fetchDraft`，持有临时澄清进程，生成问题、选项与持续演进的 Draft preview。 |
+| **dsh-plugin-auxiliary-runtime** | 为 Clarify 提供同进程模型执行、限额、取消和来源独立的辅助用量。 |
+
+SeekTTY 单独运行时展示核心命令目录；两个 Host 插件在同一 Profile 激活后，命令目录会扩展出完整的 `/clarify` 工作流。
 
 ```text
 [当前 Session + 输入草稿]
               |
               v
      +------------------+      clarify Remote      +------------------+
-     | SeekTTY          | -----------------------> | Clarify          |
-     | /clarify 界面    | <----------------------- | 问题 / 选项      |
+     | SeekTTY 消费端   | -----------------------> | Clarify 插件     |
+     | /clarify 适配器  | <----------------------- | 进程 / 模型生成  |
      +--------+---------+   live Draft preview     +--------+---------+
               |                                            |
               |                                            | 同进程 run
@@ -105,9 +117,9 @@ Auxiliary snapshot ---------------------> SeekTTY /status
 
 每一次 Clarify 模型调用都由 Auxiliary Runtime 记入官方 `storageDomain` 下的 `auxiliary_runtime` 域。官方 `tokenUsage` 继续表示 Agent 循环调用。Combined 在读取时按四个互不重叠的 Token 桶相加。辅助账本保存调用标识、purpose、状态、Token 桶、规范化失败和时间戳；prompt、消息正文、模型输出、自定义回答、凭据和文件路径不会进入账本。
 
-### 从输入框启动 Clarify
+### 从输入框启动插件提供的 Clarify
 
-兼容的 Clarify 六方法 Remote 与 `clarify.wire/1` 激活后，SeekTTY 会把 `/clarify` 加入本地命令目录。当前推荐安装 Clarify `0.2.1`；`0.2.0` 保留为已发布回滚工件。
+`dsh-plugin-clarify` Host 插件暴露兼容的六方法 Remote 与 `clarify.wire/1` 后，SeekTTY 会把 `/clarify` 加入本地命令目录。当前推荐安装 Clarify `0.2.1`；`0.2.0` 保留为已发布回滚工件。
 
 - 从命令面板执行：保留整个输入区作为 seed。
 - 输入 `/clarify some text`：以参数文本作为 seed。
@@ -174,7 +186,7 @@ dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-cl
 dsh --profile tui
 ```
 
-这条路径直接使用打包产物，可以避开 Git 源的 `prepare` / `allowBuilds`。只安装第一项 Bundle 就能单独使用 SeekTTY；后两个 Host 插件在同一 Profile 激活后，终端会自动出现 Clarify 工作流。
+这条路径直接使用打包产物，可以避开 Git 源的 `prepare` / `allowBuilds`。第一项安装 SeekTTY 终端壳，第二项提供 Auxiliary 模型执行，第三项提供 Clarify Host 服务与 Remote。两个 Host 插件在同一 Profile 激活后，SeekTTY 会发现 Remote，并把 `/clarify` 加入终端命令目录。
 
 ### 裸 `deepseek` 启动器
 
@@ -236,10 +248,11 @@ deepseek --update
 | 运行交互 | `/queue`、`/steer`、`/attach`、`/attachments`、`/pending` |
 | 运行内容 | `/tools`、`/files`、`/jobs`、`/subagents`、`/trajectory` |
 | 扩展 | `/plugin`、`/plugins`、`/skills`、`/mcp` |
+| 插件工作流 | 当前 Profile 中的 `dsh-plugin-clarify` 及其 Auxiliary Runtime 依赖激活后出现 `/clarify` |
 | 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart`；当 `dsh-plugin-auxiliary-runtime@0.1.0` 健康可用时，`/status` 分别显示标明来源的官方、辅助和组合（派生）会话总用量，且不修改官方 `tokenUsage` 投影 |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
-`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。兼容的 Clarify 六方法 Remote 与 `clarify.wire/1` 会把 `/clarify` 加入本地 `/` 目录，用模型生成的问题、上下文选项和持续演进的预览稿，引导你得到一份进入普通输入框的 Draft；何时发送由你决定。完整旅程见 [Clarify 与 Plan](#clarify-与-plan)。
+`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。SeekTTY 探测 Clarify 插件兼容的六方法 Remote 与 `clarify.wire/1`，再把 `/clarify` 动态加入本地 `/` 目录。插件生成的问题、上下文选项和持续演进的预览稿会引导你得到一份进入普通输入框的 Draft；何时发送由你决定。完整旅程见 [Clarify 与 Plan](#clarify-与-plan)。
 
 ## 常用交互
 
