@@ -105,7 +105,7 @@ Each Clarify model call is recorded by Auxiliary Runtime in the official `storag
 
 ### Start Clarify from the composer
 
-SeekTTY adds `/clarify` to its local command catalog while a compatible Clarify `0.2.0` six-method Remote with `clarify.wire/1` is active.
+SeekTTY adds `/clarify` to its local command catalog while a compatible six-method Clarify Remote with `clarify.wire/1` is active. The current recommended installation is Clarify `0.2.1`; `0.2.0` remains an available rollback artifact.
 
 - Run it from the command palette to keep the whole composer as the seed.
 - Type `/clarify some text` to use the argument as the seed.
@@ -167,7 +167,7 @@ pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
 
 dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.0/dsh-plugin-clarify-0.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.1/dsh-plugin-clarify-0.2.1.tgz
 
 dsh --profile tui
 ```
@@ -237,7 +237,7 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 | Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart`; when `dsh-plugin-auxiliary-runtime@0.1.0` is healthy, `/status` shows separately labeled Official, Auxiliary, and Combined (derived) whole-Session usage without changing the official `tokenUsage` projection |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
-`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions and stay within the command surface. A compatible Clarify `0.2.0` Remote contributes `/clarify` to the local `/` catalog. Its model-generated questions, contextual options, and evolving preview lead to a reviewed Draft in the ordinary composer; you decide when to submit it. See [Clarify and Plan](#clarify-and-plan) for the full journey.
+`/plugin`, `/workspace`, and `/profile` provide both complete interactive centers and direct subcommands. Unknown commands produce nearby suggestions and stay within the command surface. A compatible six-method Clarify Remote with `clarify.wire/1` contributes `/clarify` to the local `/` catalog. Its model-generated questions, contextual options, and evolving preview lead to a reviewed Draft in the ordinary composer; you decide when to submit it. See [Clarify and Plan](#clarify-and-plan) for the full journey.
 
 ## Common controls
 
@@ -343,7 +343,10 @@ The interface selection, independent code selection, and named definitions live 
 ## Verified scope
 
 - Isolated install, configuration composition, and PTY boot against official stock `@deepseek-ai/dsh@0.1.0-rc.8`, plus the add/boot/remove/re-add contract against the declared minimum `@deepseek-ai/dsh@0.1.0-rc.6`.
-- Clarify `0.2.0` retains historical standalone lifecycle evidence for official dsh rc.6/rc.7/rc.8; the complete dynamic production stack is claimed only for exact `0.1.0-rc.8` with `dsh-plugin-auxiliary-runtime@0.1.0`. The three packed tarballs pass native add/boot/remove/re-add, `/doctor` 0 errors/0 warnings, live model-generated questions/options/previews, multi-round preview evolution, review-and-accept into the composer without auto-send, interruption recovery, and privacy checks.
+- Recommended installation: Clarify `0.2.1` with SeekTTY `1.2.0`, Auxiliary Runtime `0.1.0`, and official dsh `0.1.0-rc.8`. Clarify `0.2.1` preserves the six-method Remote, `clarify.wire/1`, and exact rc.8 compatibility boundary of `0.2.0`.
+- Clarify `0.2.0` live-provider acceptance covered model-generated questions/options/previews, multi-round preview evolution, review-and-accept into the composer without automatic submission, interruption recovery, usage provenance, and privacy.
+- Clarify `0.2.1` post-release no-key acceptance re-downloaded and verified all three Release assets, passed stock add/boot/remove/re-add and `/doctor` with 0 errors, 0 warnings, and 99 plugins, then reached `running`, routed through Auxiliary, and returned the expected isolated-environment `MISSING_CREDENTIAL` result. Version `0.2.1` has not rerun live-provider multi-round acceptance or a cache/cost A/B.
+- Historical standalone Clarify lifecycle evidence covers official dsh rc.6/rc.7/rc.8; the complete dynamic production boundary remains exact rc.8 with Auxiliary Runtime `0.1.0`.
 - Auxiliary calls persist usage/limits/cancel only in the `auxiliary_runtime` storage domain. Official Agent `tokenUsage` remains unchanged, while `/status` displays validated `Official`, `Auxiliary`, and derived `Combined` buckets only when the optional snapshot contract is healthy.
 - Model listing, Provider/model/reasoning selection, request submission, and Harness error propagation.
 - First-run Provider readiness, masked API-key setup, deferral and draft restoration, Harness credential persistence, and restart without another prompt under an isolated `DSH_HOME`.

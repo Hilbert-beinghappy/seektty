@@ -105,7 +105,7 @@ Auxiliary snapshot ---------------------> SeekTTY /status
 
 ### 从输入框启动 Clarify
 
-兼容的 Clarify `0.2.0` 六方法 Remote 与 `clarify.wire/1` 激活后，SeekTTY 会把 `/clarify` 加入本地命令目录。
+兼容的 Clarify 六方法 Remote 与 `clarify.wire/1` 激活后，SeekTTY 会把 `/clarify` 加入本地命令目录。当前推荐安装 Clarify `0.2.1`；`0.2.0` 保留为已发布回滚工件。
 
 - 从命令面板执行：保留整个输入区作为 seed。
 - 输入 `/clarify some text`：以参数文本作为 seed。
@@ -167,7 +167,7 @@ pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
 
 dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
 dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.0/dsh-plugin-clarify-0.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.1/dsh-plugin-clarify-0.2.1.tgz
 
 dsh --profile tui
 ```
@@ -237,7 +237,7 @@ deepseek --update
 | 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart`；当 `dsh-plugin-auxiliary-runtime@0.1.0` 健康可用时，`/status` 分别显示标明来源的官方、辅助和组合（派生）会话总用量，且不修改官方 `tokenUsage` 投影 |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
-`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。兼容的 Clarify `0.2.0` Remote 会把 `/clarify` 加入本地 `/` 目录，用模型生成的问题、上下文选项和持续演进的预览稿，引导你得到一份进入普通输入框的 Draft；何时发送由你决定。完整旅程见 [Clarify 与 Plan](#clarify-与-plan)。
+`/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。兼容的 Clarify 六方法 Remote 与 `clarify.wire/1` 会把 `/clarify` 加入本地 `/` 目录，用模型生成的问题、上下文选项和持续演进的预览稿，引导你得到一份进入普通输入框的 Draft；何时发送由你决定。完整旅程见 [Clarify 与 Plan](#clarify-与-plan)。
 
 ## 常用交互
 
@@ -343,7 +343,10 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.8` 隔离安装、配置装配和 PTY 启动；并对声明的最低版本 `@deepseek-ai/dsh@0.1.0-rc.6` 完成 add／boot／remove／re-add 插拔契约。
-- Clarify `0.2.0` 在官方 dsh rc.6／rc.7／rc.8 上保留独立 lifecycle 证据；完整动态组合只对精确 `0.1.0-rc.8` 加 Auxiliary Runtime `0.1.0` 主张。三个 Release tarball 已通过原生 add／boot／remove／re-add、`/doctor` 0 错误／0 警告、真实模型动态生成问题／选项／preview、多轮 preview 演进、审阅采用后只写回输入框并由用户自行发送、中断恢复和隐私检查。
+- 推荐安装组合：Clarify `0.2.1`、SeekTTY `1.2.0`、Auxiliary Runtime `0.1.0` 与官方 dsh `0.1.0-rc.8`。Clarify `0.2.1` 保持 `0.2.0` 的六方法 Remote、`clarify.wire/1` 和精确 rc.8 兼容边界。
+- Clarify `0.2.0` live-provider 联合验收覆盖真实模型动态生成问题／选项／preview、多轮 preview 演进、审阅采用后只写回输入框并由用户自行发送、中断恢复、用量来源和隐私检查。
+- Clarify `0.2.1` 发布后无 Key 验收重新下载并核对三包 Release 资产，在 stock rc.8 Profile 完成 add／boot／remove／re-add，`/doctor` 为 0 错误／0 警告、99 个插件运行，随后进入 `running`、路由到 Auxiliary，并按隔离环境预期返回 `MISSING_CREDENTIAL`。`0.2.1` 尚未重跑 live-provider 动态多轮，也没有 cache／cost A/B。
+- 历史独立 Clarify lifecycle 证据覆盖官方 dsh rc.6／rc.7／rc.8；完整动态生产边界仍是精确 rc.8 与 Auxiliary Runtime `0.1.0`。
 - Auxiliary 调用的 usage／limits／cancel 持久化在 `auxiliary_runtime` 存储域。官方 Agent `tokenUsage` 保持原有归属；可选快照合同健康时，`/status` 展示经过校验的 Official、Auxiliary 和派生 Combined 桶。
 - 模型列表、Provider／模型／推理强度切换、请求提交和 Harness 错误透传。
 - 隔离 `DSH_HOME` 下的首次 Provider 就绪检查、API Key 掩码输入、跳过后的草稿恢复、Harness 凭证持久化，以及重启后不再提示。
