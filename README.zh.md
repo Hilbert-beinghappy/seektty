@@ -7,8 +7,8 @@
 <p>DeepSeek Harness 的键盘优先终端工作台，陪你把一个想法推进到可执行方案。</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/Version-1.2.0-orange" alt="Version 1.2.0"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.0--rc.8-5B5BD6" alt="DeepSeek Harness 0.1.0-rc.8">
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.1-orange" alt="Version 1.2.1"></a>
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
@@ -119,7 +119,7 @@ Auxiliary snapshot ---------------------> SeekTTY /status
 
 ### 从输入框启动插件提供的 Clarify
 
-`dsh-plugin-clarify` Host 插件暴露兼容的六方法 Remote 与 `clarify.wire/1` 后，SeekTTY 会把 `/clarify` 加入本地命令目录。当前推荐安装 Clarify `0.2.1`；`0.2.0` 保留为已发布回滚工件。
+`dsh-plugin-clarify` Host 插件暴露兼容的六方法 Remote 与 `clarify.wire/1` 后，SeekTTY 会把 `/clarify` 加入本地命令目录。最近一次联合验收 Release 仍安装 Clarify `0.2.1`；`0.2.0` 保留为已发布回滚工件。未发布三件套 SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2` 已有 Lane A 无 key PTY 证据，以及 2026-08-22 在 `candidate4` 上的 Lane B live-provider 观察。这不是 Release，也不是完整联合验收。详见 [已验证范围](#已验证范围)。
 
 - 从命令面板执行：保留整个输入区作为 seed。
 - 输入 `/clarify some text`：以参数文本作为 seed。
@@ -155,7 +155,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 | 权限与审批 | 查看和切换只读、工作区、完全访问等 Host 权限；Shift+Tab 快速循环；进入高风险权限前确认；工具调用支持仅本次允许、本会话不再询问或拒绝 |
 | 输入队列与 Steer | Agent 运行时继续排队消息，查看、编辑、删除队列项，将单条或整队消息转为当前轮次引导，并可直接发送 `/steer` |
 | 人机交互 | 处理单选、多选、自定义回答、跳过、取消和计划审查；提交后自动回到最新输出并展示原轮次续答，失败时可通过 `/pending` 重试 |
-| 图片附件 | 直接粘贴图片或图片路径，或用 `/attach` 加入 PNG、JPEG、GIF、WebP；macOS 用系统剪贴板（osascript，可选 pngpaste），Linux 用 wl-paste/xclip，Windows 用 PowerShell；待发送图片显示在输入框下方；按 Harness 限制检查数量和大小；终端支持时内联显示，否则显示文件名、尺寸、类型和大小 |
+| 图片附件 | 直接粘贴图片或图片路径，或用 `/attach` 加入 PNG、JPEG、GIF、WebP；macOS 用系统剪贴板（osascript，可选 pngpaste），Linux 用 wl-paste/xclip，Windows 用 PowerShell；待发送图片显示在输入框下方；按当前 Host 动态 `imageLimits` 目录检查数量、字节、像素和可选边长；终端支持时内联显示，否则显示文件名、尺寸、类型和大小。能否理解图片由同一份动态模型目录决定。官方 dsh `0.1.1-rc.2` 的 Vision-Exp 必须在 `/model` 里显式选择。Lane A 已观察到目录可见且可选择；Lane B 在 `candidate4` 上已观察 PNG 发送即清附件，以及经官方 Host 转 PNG variant 的 JFIF。详见 [已验证范围](#已验证范围) |
 | Plan、Goal、Todo 与压缩 | 使用 Harness 原生 `/plan`、`/goal`、`/compact` 命令，显示计划审查、目标状态、Todo 数量和上下文压缩记录 |
 | 工具与产出文件 | `◆ 操作 · 耗时` 标题、运行中同步计时及带连接符的调用代码、动态工具目录、工具参数与安全边界说明、带原文件行号的高亮读取、Shell／JSON／Diff 高亮、安全保留的终端 ANSI、通用降级卡片；按轮次查看本会话生成文件、在 TUI 内查看、复制绝对路径，并在确认后交给外部程序打开 |
 | 子 Agent | 查看直接子 Agent、运行状态、树结构、Token 和耗时；打开可继续会话或只读会话，并在运行时停止当前子 Agent 轮次 |
@@ -174,7 +174,7 @@ Markdown 围栏会直接渲染成连续代码色块。助手代码、Shell 指�
 
 ## 快速开始
 
-三个仓库与 Release 资产均已公开。完整 Clarify 工作流的联合验收基线是官方 DeepSeek Harness `0.1.0-rc.8`。先通过原生 `dsh plugin` 安装已经构建好的 Release tarball：
+三个仓库与 GitHub Releases 均已公开。最近一次联合验收的 Clarify 工作流仍是官方 DeepSeek Harness `0.1.0-rc.8`，搭配 SeekTTY `1.2.0`、Auxiliary Runtime `0.1.0` 和 Clarify `0.2.1`。先通过原生 `dsh plugin` 安装这些已经发布的 tarball：
 
 ```sh
 pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
@@ -187,6 +187,8 @@ dsh --profile tui
 ```
 
 这条路径直接使用打包产物，可以避开 Git 源的 `prepare` / `allowBuilds`。第一项安装 SeekTTY 终端壳，第二项提供 Auxiliary 模型执行，第三项提供 Clarify Host 服务与 Remote。两个 Host 插件在同一 Profile 激活后，SeekTTY 会发现 Remote，并把 `/clarify` 加入终端命令目录。
+
+SeekTTY `1.2.1` 当前已测官方 `0.1.1-rc.2`。未发布三件套 SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2` 已有 Lane A 无 key PTY 证据，以及 2026-08-22 在 `candidate4` 上的 Lane B live-provider 观察。这不是 Release，也不是完整联合验收。详见 [已验证范围](#已验证范围)。现在还没有 `v1.2.1` Release 资产；请用本地 `pnpm pack` 的 tarball 安装这个候选，或等到 https://github.com/Hilbert-beinghappy/seektty/releases 列出未来 Release。不要编造下载 URL。
 
 ### 裸 `deepseek` 启动器
 
@@ -206,7 +208,7 @@ $env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/downlo
 deepseek
 ```
 
-`deepseek` 需要 PATH 上的 `dsh`，也可以用 `DSH_BIN` 指向可执行文件。`SEEKTTY_SPEC` 会让 Profile 始终使用同一份预构建 tarball；没有这项覆盖时，当前启动器使用带版本 Tag 的 `github:Hilbert-beinghappy/seektty#v1.2.0` 默认规格。后续运行直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
+`deepseek` 需要 PATH 上的 `dsh`，也可以用 `DSH_BIN` 指向可执行文件。`SEEKTTY_SPEC` 会让 Profile 始终使用同一份预构建 tarball；没有这项覆盖时，本源码树的默认规格是 `github:Hilbert-beinghappy/seektty#v1.2.1`，该 Git tag 只在 Release 打出后才存在。在此之前请先 `pnpm pack` 得到 `seektty-1.2.1.tgz`，并把 `SEEKTTY_SPEC` 指到该文件。后续运行直接启动同一 Profile。它支持初始任务、工作区、会话恢复和自定义 Profile：
 
 ```sh
 deepseek "检查这个项目"
@@ -218,7 +220,7 @@ deepseek --version
 deepseek --update
 ```
 
-`deepseek --update` 仍可强制扫描并安装。默认 `SEEKTTY_UPDATE=auto`：每次启动会拉取官方 dsh 的 npm `latest`（不跟 `next` 或 GitHub 预发布）和 SeekTTY 最新 GitHub Release，然后更新全局 dsh（`DSH_BIN` 固定可执行文件时跳过），并用原生 `dsh plugin add` 更新 SeekTTY Bundle。本地 `link:`/`file:` 安装和 `SEEKTTY_SPEC` 覆盖不会被改写。网络或安装失败不会挡住启动。设 `SEEKTTY_UPDATE=check` 可改回会话后提示，设 `SEEKTTY_UPDATE=0` 可关闭。
+`deepseek --update` 会强制扫描，但每轮只安装一个许可组件。默认 `SEEKTTY_UPDATE=auto`：启动时拉取官方 dsh 的 npm `latest`（只用于发现，不跟 `next` 或 GitHub 预发布）和 SeekTTY 最新 GitHub Release。SeekTTY 自更新优先，本轮不再装 dsh。否则仅当 `latest` 落在 peer 对齐的自动范围（legacy rc.6–rc.8，或当前精确已测 Host）且新于**已安装**的 `dsh --version` 时才安装 dsh。future / gap Host（例如 `0.1.1-rc.1`）只提示、不安装。`DSH_BIN` 固定可执行文件时跳过 dsh。本地 `link:`/`file:` 安装和 `SEEKTTY_SPEC` 覆盖不会被改写。网络或安装失败不会挡住启动。设 `SEEKTTY_UPDATE=check` 可改回会话后提示，设 `SEEKTTY_UPDATE=0` 可关闭。
 
 ## 首次配置 API Key
 
@@ -249,7 +251,7 @@ deepseek --update
 | 运行内容 | `/tools`、`/files`、`/jobs`、`/subagents`、`/trajectory` |
 | 扩展 | `/plugin`、`/plugins`、`/skills`、`/mcp` |
 | 插件工作流 | 当前 Profile 中的 `dsh-plugin-clarify` 及其 Auxiliary Runtime 依赖激活后出现 `/clarify` |
-| 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart`；当 `dsh-plugin-auxiliary-runtime@0.1.0` 健康可用时，`/status` 分别显示标明来源的官方、辅助和组合（派生）会话总用量，且不修改官方 `tokenUsage` 投影 |
+| 配置与诊断 | `/settings`、`/language`、`/theme`、`/status`、`/doctor`、`/feedback`、`/restart`；当最近一次联合验收的 Auxiliary Runtime `0.1.0` 或当前 `0.1.1` 候选健康可用时，`/status` 分别显示标明来源的官方、辅助和组合（派生）会话总用量，且不修改官方 `tokenUsage` 投影 |
 | 帮助与退出 | `/help`、`/quit`、`/exit` |
 
 `/plugin`、`/workspace` 和 `/profile` 既有完整的交互中心，也支持直接子命令。未知命令会给出相近候选，不会被当成普通消息发给模型。SeekTTY 探测 Clarify 插件兼容的六方法 Remote 与 `clarify.wire/1`，再把 `/clarify` 动态加入本地 `/` 目录。插件生成的问题、上下文选项和持续演进的预览稿会引导你得到一份进入普通输入框的 Draft；何时发送由你决定。完整旅程见 [Clarify 与 Plan](#clarify-与-plan)。
@@ -358,7 +360,8 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 打开完整主题中心�
 ## 已验证范围
 
 - 官方 stock `@deepseek-ai/dsh@0.1.0-rc.8` 隔离安装、配置装配和 PTY 启动；并对声明的最低版本 `@deepseek-ai/dsh@0.1.0-rc.6` 完成 add／boot／remove／re-add 插拔契约。
-- 推荐安装组合：Clarify `0.2.1`、SeekTTY `1.2.0`、Auxiliary Runtime `0.1.0` 与官方 dsh `0.1.0-rc.8`。Clarify `0.2.1` 保持 `0.2.0` 的六方法 Remote、`clarify.wire/1` 和精确 rc.8 兼容边界。
+- SeekTTY `1.2.1` 当前在壳、单测和 typecheck 层面对官方 `@deepseek-ai/dsh@0.1.1-rc.2`。Lane A（2026-08-21，未修改 stock `0.1.1-rc.2`、隔离 `DSH_HOME`、真实 PTY、未发布 SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`）：`/doctor` 0 error / 0 warning、99 plugins running；`/status` 健康；`/clarify` 路由到 Auxiliary 后无 key 返回 `MISSING_CREDENTIAL` 且保留 composer；Vision-Exp 可见且可选择；PNG 附件 `/restart` 成功恢复。丢失源文件恢复：单测保证失败文案只用 basename、覆盖两种通知顺序、绝对路径不进文案；真实 PTY hardcopy/可见区扫描只检出 ASCII basename `vision-logo.png`，未检出 `private/tmp`、`/tmp`、`Users`、`Volumes`。不能证明关闭无 key onboarding modal 后该 restore error 仍持续显示（Esc 也会清 notice）。Lane B（2026-08-22，未修改 stock `0.1.1-rc.2`、隔离 `DSH_HOME`、`candidate4`）：已显式选择 Vision-Exp；PNG image-only 发送成功、发送即清附件并识别 logo，但纯图无问题导致模型又调用 `read_image`；真实 JFIF JPEG 经 SeekTTY 入队、官方 Host 正常转 PNG variant 后，无工具 OCR 成功；Clarify 经 Auxiliary 完成 6 轮动态问答、41 行完整审阅、二次确认 accept 回 composer 且不自动发送；`/status` 显示官方／辅助／组合用量；895 文件扫描 secret literal 为 0。这不是 Release，也不是完整联合验收。未证明 Web UI、GIF/WebP、超限拒绝、JPEG 原字节直通、PNG 完全不靠工具、本轮中断恢复、成本／缓存 A/B。
+- 最近一次联合验收 Release 组合：Clarify `0.2.1`、SeekTTY `1.2.0`、Auxiliary Runtime `0.1.0` 与官方 dsh `0.1.0-rc.8`。Clarify `0.2.1` 保持 `0.2.0` 的六方法 Remote、`clarify.wire/1` 和精确 rc.8 兼容边界。
 - Clarify `0.2.0` live-provider 联合验收覆盖真实模型动态生成问题／选项／preview、多轮 preview 演进、审阅采用后只写回输入框并由用户自行发送、中断恢复、用量来源和隐私检查。
 - Clarify `0.2.1` 发布后无 Key 验收重新下载并核对三包 Release 资产，在 stock rc.8 Profile 完成 add／boot／remove／re-add，`/doctor` 为 0 错误／0 警告、99 个插件运行，随后进入 `running`、路由到 Auxiliary，并按隔离环境预期返回 `MISSING_CREDENTIAL`。`0.2.1` 尚未重跑 live-provider 动态多轮，也没有 cache／cost A/B。
 - 历史独立 Clarify lifecycle 证据覆盖官方 dsh rc.6／rc.7／rc.8；完整动态生产边界仍是精确 rc.8 与 Auxiliary Runtime `0.1.0`。
@@ -391,6 +394,6 @@ pnpm test:clarify-doctor
 
 ## 兼容和升级
 
-SeekTTY 壳声明的最低 Host 是官方 `0.1.0-rc.6`，已测基线是官方 `0.1.0-rc.8`，壳的 lifecycle 覆盖 rc.6／rc.7／rc.8。可选 Clarify + Auxiliary 生产组合只在精确 `0.1.0-rc.8` 上验证。新于 `tested` 的 dsh 仍可启动 SeekTTY 并给出提示；Auxiliary Runtime 会拒绝已发布范围之外的已知版本；旧于 SeekTTY `minimum` 的 Host 会被拒绝。发布的 Bundle 通过 optional peer 描述 Host 合同，运行时 import 统一从官方 `$DSH_HOME/profiles/node_modules` 回退解析，让原生工具调度器等身份型 Symbol 保持唯一。官方回退缺少的纯客户端辅助包会进入 Bundle。Host 插件 `seektty/attachment-compat` 紧挨在 `api-gateway` 之前，只适配精确的合法遗留 image-limit 能力形状；其他形状闭包失败。未来 Host 按能力匹配。定时工作流扫描官方 npm `latest` dist-tag，在 `pnpm run check`、隔离打包启动器和 stock-dsh 契约通过后，升级精确开发基线和 optional peer 范围并开 pull request；npm `next` 与 GitHub Harness 预发布留在发现轨道之外。
+当前已测 Host 是官方 `0.1.1-rc.2`。壳声明的最低 Host 仍是官方 `0.1.0-rc.6`，legacy lifecycle 覆盖 rc.6／rc.7／rc.8。最近一次联合验收的 Clarify + Auxiliary 生产组合仍是精确 `0.1.0-rc.8`，搭配 SeekTTY `1.2.0`、Auxiliary Runtime `0.1.0` 和 Clarify `0.2.1`。未发布三件套 SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2` 已有 Lane A 无 key PTY 证据，以及 2026-08-22 在 `candidate4` 上的 Lane B live-provider 观察；这不是 Release，也不是完整联合验收（详见 [已验证范围](#已验证范围)）。新于 `tested` 的 dsh 仍可启动 SeekTTY 并给出提示；旧于 SeekTTY `minimum` 的 Host 会被拒绝。updater 以实际已装的 `dsh --version` 判断，SeekTTY 自更新优先，每轮只安装一个组件，future / gap Host 不装。发布的 Bundle 通过 optional peer 描述 Host 合同，运行时 import 统一从官方 `$DSH_HOME/profiles/node_modules` 回退解析，让原生工具调度器等身份型 Symbol 保持唯一。官方回退缺少的纯客户端辅助包会进入 Bundle。Host 插件 `seektty/attachment-compat` 紧挨在 `api-gateway` 之前，只适配精确的合法遗留 image-limit 能力形状；其他形状闭包失败。未来 Host 按能力匹配。定时工作流扫描官方 npm `latest` dist-tag，在 `pnpm run check`、隔离打包启动器和 stock-dsh 契约通过后，升级精确开发基线和 optional peer 范围并开 pull request；npm `next` 与 GitHub Harness 预发布留在发现轨道之外。
 
 源码仓库与 GitHub Releases 均公开。用户包通过对应 Release 附带的预构建 tarball 分发，当前没有 npm Registry 发布。

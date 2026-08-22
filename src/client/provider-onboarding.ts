@@ -188,6 +188,14 @@ export function providerUnavailableNotice(reason: ProviderOnboardingUnavailableR
   }
 }
 
+/** Status-bar copy after the user defers first-run credential setup. */
+export function onboardingDeferredNotice(): string {
+  return ui(
+    '尚未配置可用模型；发送消息时会再次提示。',
+    'No usable model is configured; setup will open again when you send a message.',
+  )
+}
+
 function credentialSaveFailure(): string {
   return ui(
     '保存失败；请重试，或按 Esc 后使用 /doctor 检查。',
@@ -265,10 +273,7 @@ export class ProviderOnboardingGate {
 
       const raw = await this.overlays.secretInput(promptRequest(readiness, failure))
       if (raw === undefined) {
-        this.notice(ui(
-          '尚未配置可用模型；发送消息时会再次提示。',
-          'No usable model is configured; setup will open again when you send a message.',
-        ), 'warning')
+        this.notice(onboardingDeferredNotice(), 'warning')
         return 'deferred'
       }
       const checked = normalizeOnboardingApiKey(raw)

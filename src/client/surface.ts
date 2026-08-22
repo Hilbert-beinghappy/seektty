@@ -23,6 +23,10 @@ import {
   noticeAfterPromptError,
   type TuiActiveSession,
 } from './capabilities.ts'
+import {
+  applyHandoffAttachmentRestoreNotice,
+  attachmentRestoreFailureItem,
+} from './attachment-restore.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
 import { dispatchComposerSubmit } from './clarify-composer.ts'
@@ -943,17 +947,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const attachmentsReady = options.attachmentPaths !== undefined && options.attachmentPaths.length > 0
       ? (async () => {
         const failures: string[] = []
-        for (const path of options.attachmentPaths ?? []) {
-          try { await capabilities.addAttachment(path) } catch (error) { failures.push(`${path}: ${capabilityError(error)}`) }
+        const paths = options.attachmentPaths ?? []
+        for (const [index, path] of paths.entries()) {
+          try { await capabilities.addAttachment(path) } catch (error) {
+            failures.push(attachmentRestoreFailureItem(path, error, index))
+          }
         }
-        if (failures.length === 0) {
-          setNotice(ui(
-            `已恢复 ${options.attachmentPaths?.length ?? 0} 个附件`,
-            `Restored ${options.attachmentPaths?.length ?? 0} attachment(s)`,
-          ), 'success')
-        } else {
-          setNotice(ui(`部分附件未恢复：${failures.join('；')}`, `Some attachments were not restored: ${failures.join('; ')}`), 'warning')
-        }
+        applyHandoffAttachmentRestoreNotice(setNotice, failures, paths.length)
         refresh()
       })()
       : Promise.resolve()
