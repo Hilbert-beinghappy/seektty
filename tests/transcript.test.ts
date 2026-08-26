@@ -375,7 +375,7 @@ describe('conversation viewport', () => {
     ]))
 
     const rendered = transcript.render(40).join('\n')
-    expect(rendered).toContain('行更早内容 · 滚轮上翻')
+    expect(rendered).toContain('更早内容 · 滚轮上翻')
     expect(rendered).not.toContain('思考完成')
     expect(rendered).toContain('最新回答')
   })
@@ -391,7 +391,7 @@ describe('conversation viewport', () => {
     ]))
 
     const rendered = transcript.render(40).join('\n')
-    expect(rendered).toContain('行更早内容 · 滚轮上翻')
+    expect(rendered).toContain('更早内容 · 滚轮上翻')
     expect(rendered).not.toContain('不应悬在顶部的尾行')
     expect(rendered).toContain('> 最新问题')
     expect(rendered).toContain('最新回答第二行')
@@ -419,7 +419,7 @@ describe('conversation viewport', () => {
     const previousPage = transcript.render(40).join('\n')
     expect(requestRender).toHaveBeenCalledTimes(1)
     expect(previousPage).not.toBe(latest)
-    expect(previousPage).toContain('行更新内容 · PgDn/End')
+    expect(previousPage).toContain('有更新内容 · PgDn/End')
 
     transcript.handleInput('\u001B[H')
     expect(transcript.render(40).join('\n')).toContain('第一个问题')
@@ -427,7 +427,7 @@ describe('conversation viewport', () => {
     transcript.handleInput('\u001B[F')
     const returned = transcript.render(40).join('\n')
     expect(returned).toContain('最新回答')
-    expect(returned).toContain('行更早内容 · PgUp/Home')
+    expect(returned).toContain('更早内容 · PgUp/Home')
     expect(requestRender).toHaveBeenCalledTimes(3)
   })
 

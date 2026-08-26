@@ -91,8 +91,24 @@ const enabled = process.env.SEEKTTY_PERF_RUN === '1'
 
 describe('TUI performance harness', () => {
   if (!enabled) {
-    it('stays opt-in during the ordinary test suite', () => {
-      expect(process.env.SEEKTTY_PERF_RUN).not.toBe('1')
+    it('proves editor-only render operations stay bounded at 100k lines', () => {
+      vi.stubEnv('NO_COLOR', '1')
+      const nodes = Array.from({ length: 1_000 }, (_, index) => assistant(
+        `operation-${String(index)}`,
+        Array.from({ length: 100 }, (_, line) => `operation-${String(index)}-${String(line)}`).join('\n'),
+      ))
+      const transcript = new Transcript(() => 24)
+      transcript.update(snapshot(nodes))
+      transcript.render(80)
+      internals.blocksVisited = 0
+      internals.linesEscaped = 0
+      internals.lastFullLinesCopied = 0
+
+      expect(transcript.render(80)).toHaveLength(24)
+      expect(internals.blocksVisited).toBeLessThanOrEqual(2)
+      expect(internals.linesEscaped).toBe(0)
+      expect(internals.lastFullLinesCopied).toBe(0)
+      transcript.dispose()
     })
     return
   }
@@ -124,12 +140,21 @@ describe('TUI performance harness', () => {
 
         const cachedRenderMs: number[] = []
         const cachedRenderComponents: number[] = []
+        const cachedBlocksVisited: number[] = []
+        const cachedLinesEscaped: number[] = []
+        const cachedFullLinesCopied: number[] = []
         for (let sample = 0; sample < 25; sample += 1) {
           const beforeComponents = internals.componentRenders
+          const beforeBlocks = internals.blocksVisited
+          const beforeEscaped = internals.linesEscaped
+          const beforeCopied = internals.lastFullLinesCopied
           const started = performance.now()
           const visible = transcript.render(width)
           cachedRenderMs.push(performance.now() - started)
           cachedRenderComponents.push(internals.componentRenders - beforeComponents)
+          cachedBlocksVisited.push(internals.blocksVisited - beforeBlocks)
+          cachedLinesEscaped.push(internals.linesEscaped - beforeEscaped)
+          cachedFullLinesCopied.push(internals.lastFullLinesCopied - beforeCopied)
           expect(visible.length).toBe(rows)
         }
 
@@ -161,6 +186,11 @@ describe('TUI performance harness', () => {
           cachedRenderComponentCalls: {
             max: Math.max(...cachedRenderComponents),
             total: cachedRenderComponents.reduce((sum, value) => sum + value, 0),
+          },
+          cachedRenderOperations: {
+            blocksVisitedMax: Math.max(...cachedBlocksVisited),
+            linesEscapedMax: Math.max(...cachedLinesEscaped),
+            fullLinesCopiedMax: Math.max(...cachedFullLinesCopied),
           },
           memoryMiB: {
             heapUsed: toMiB(memoryAfter.heapUsed),
