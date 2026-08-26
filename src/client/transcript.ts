@@ -1369,8 +1369,7 @@ export class Transcript implements Component, Focusable {
     }
     this.imageLoader = imageLoader
     this.blockGeneration += 1
-    this.searchIndex = undefined
-    if (this.search !== undefined) this.lastFullLines = []
+    if (this.search === undefined) this.searchIndex = undefined
     this.hasMore = snapshot.hasMore
     this.loadingOlder = snapshot.loadingOlder
     const preferences: TranscriptPreferences = {
@@ -1733,6 +1732,19 @@ export class Transcript implements Component, Focusable {
     if (current !== undefined
       && current.width === contentWidth
       && current.generation === this.blockGeneration) return current
+    const viewportRows = this.viewportRows()
+    const rows = Number.isFinite(viewportRows)
+      ? Math.max(1, Math.floor(viewportRows) - 1)
+      : undefined
+    const previousTop = current !== undefined && rows !== undefined && this.scrollOffset > 0
+      ? (() => {
+          const top = Math.max(0, current.lines.length - this.scrollOffset - rows)
+          const span = current.spans.find(candidate => candidate.start <= top && top < candidate.end)
+          return span === undefined
+            ? undefined
+            : { blockKey: span.blockKey, lineOffset: top - span.start }
+        })()
+      : undefined
     const lines: string[] = []
     const spans: Array<{ blockKey: string; start: number; end: number }> = []
     for (const [blockIndex, block] of this.blocks.entries()) {
@@ -1747,6 +1759,15 @@ export class Transcript implements Component, Focusable {
       spans,
     }
     this.searchIndex = index
+    if (previousTop !== undefined && rows !== undefined) {
+      const span = spans.find(candidate => candidate.blockKey === previousTop.blockKey)
+      if (span !== undefined) {
+        const lineOffset = Math.min(previousTop.lineOffset, Math.max(0, span.end - span.start - 1))
+        const top = span.start + lineOffset
+        const maxOffset = Math.max(0, lines.length - rows)
+        this.scrollOffset = Math.max(0, Math.min(maxOffset, lines.length - top - rows))
+      }
+    }
     this.lastFullLines = lines
     return index
   }
@@ -1977,7 +1998,7 @@ export class Transcript implements Component, Focusable {
    */
   cancelSearch(): boolean {
     if (this.search === undefined) return false
-    const index = this.searchIndex
+    const index = this.activeSearchIndex()
     if (index !== undefined && Number.isFinite(this.viewportRows())) {
       const rows = Math.max(1, Math.floor(this.viewportRows()) - 1)
       const top = Math.max(0, index.lines.length - this.scrollOffset - rows)
@@ -2001,7 +2022,9 @@ export class Transcript implements Component, Focusable {
     if (viewport !== undefined) {
       const index = this.ensureSearchIndex(viewport.contentWidth)
       const span = index.spans.find(candidate => candidate.blockKey === viewport.start.blockKey)
-      if (span !== undefined) {
+      if (this.viewportAnchor.followLatest) {
+        this.scrollOffset = 0
+      } else if (span !== undefined) {
         const rows = Math.max(1, viewport.rows - 1)
         const top = span.start + viewport.start.lineOffset
         this.scrollOffset = Math.max(0, Math.min(
@@ -2095,7 +2118,9 @@ export class Transcript implements Component, Focusable {
 
   private stepSearch(direction: 1 | -1): void {
     if (this.search === undefined) return
-    const matches = findLineMatches(this.lastFullLines, this.search.query)
+    const index = this.activeSearchIndex()
+    if (index === undefined) return
+    const matches = findLineMatches(index.lines, this.search.query)
     const current = matches[this.search.matchIndex] ?? -1
     const next = nextMatchIndex(matches, current, direction)
     if (next < 0) return
@@ -2106,18 +2131,26 @@ export class Transcript implements Component, Focusable {
 
   private revealCurrentMatch(): void {
     if (this.search === undefined) return
-    const matches = findLineMatches(this.lastFullLines, this.search.query)
+    const index = this.activeSearchIndex()
+    if (index === undefined) return
+    const matches = findLineMatches(index.lines, this.search.query)
     const lineIndex = matches[this.search.matchIndex]
     if (lineIndex === undefined) return
     this.scrollOffset = scrollOffsetToReveal(
-      this.lastFullLines.length,
+      index.lines.length,
       Math.max(1, this.viewportRows() - 1),
       lineIndex,
     )
   }
 
+  private activeSearchIndex(): TranscriptSearchIndex | undefined {
+    if (this.search === undefined) return undefined
+    const contentWidth = this.viewportState?.contentWidth
+    return contentWidth === undefined ? undefined : this.ensureSearchIndex(contentWidth)
+  }
+
   private scrollSearchBy(lines: number, rows: number): boolean {
-    const index = this.searchIndex
+    const index = this.activeSearchIndex()
     if (index === undefined) return false
     const maxOffset = Math.max(0, index.lines.length - rows)
     const nextOffset = Math.max(0, Math.min(maxOffset, this.scrollOffset + Math.trunc(lines)))
@@ -2128,7 +2161,7 @@ export class Transcript implements Component, Focusable {
   }
 
   private scrollSearchTo(edge: 'start' | 'end', rows: number): boolean {
-    const index = this.searchIndex
+    const index = this.activeSearchIndex()
     if (index === undefined) return false
     const nextOffset = edge === 'start' ? Math.max(0, index.lines.length - rows) : 0
     if (nextOffset === this.scrollOffset) return false

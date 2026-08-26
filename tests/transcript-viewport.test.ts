@@ -324,6 +324,114 @@ describe('transcript block viewport', () => {
     transcript.dispose()
   })
 
+  it('keeps the latest line visible when search opens and closes at the tail', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 6)
+    transcript.update(snapshot(Array.from({ length: 30 }, (_, index) =>
+      assistant(`search-tail-${String(index)}`, `search-tail-${String(index)}`))))
+
+    expect(plain(transcript.render(80))).toContain('search-tail-29')
+    transcript.handleInput('/')
+    const searching = plain(transcript.render(80))
+    expect(searching).toContain('search-tail-29')
+    expect(searching).not.toContain('Newer content')
+
+    expect(transcript.cancelSearch()).toBe(true)
+    expect(plain(transcript.render(80))).toContain('search-tail-29')
+    transcript.dispose()
+  })
+
+  it('rebuilds search navigation immediately after a streaming snapshot update', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 6)
+    const nodes = Array.from({ length: 20 }, (_, index) =>
+      assistant(`search-stream-${String(index)}`, `search-stream-${String(index)}`))
+    transcript.update(snapshot(nodes))
+    transcript.render(80)
+    transcript.handleInput('/')
+    for (const character of 'zzz-update-match') transcript.handleInput(character)
+
+    transcript.update(snapshot([
+      assistant('search-stream-0', 'zzz-update-match'),
+      ...nodes.slice(1),
+    ]))
+    transcript.handleInput('\r')
+
+    const rendered = plain(transcript.render(80))
+    expect(rendered.split('\n').filter(line => line.trim() === 'zzz-update-match')).toHaveLength(1)
+    transcript.dispose()
+  })
+
+  it('keeps a searched historical viewport anchored while the tail grows', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 6)
+    const nodes = Array.from({ length: 20 }, (_, index) =>
+      assistant(`search-anchor-${String(index)}`, `search-anchor-${String(index)}`))
+    transcript.update(snapshot(nodes))
+    transcript.render(80)
+    transcript.handleInput('/')
+    transcript.render(80)
+    transcript.handleInput('\u001B[H')
+    expect(plain(transcript.render(80))).toContain('search-anchor-0')
+
+    transcript.update(snapshot([
+      ...nodes,
+      assistant('search-anchor-new', 'search-anchor-new'),
+    ]))
+
+    expect(plain(transcript.render(80))).toContain('search-anchor-0')
+    transcript.dispose()
+  })
+
+  it('keeps a searched historical block anchored while its width changes', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 7)
+    transcript.update(snapshot(Array.from({ length: 40 }, (_, index) => assistant(
+      `search-resize-${String(index)}`,
+      `search-resize-${String(index)} ${'wrapped '.repeat(12)}`,
+    ))))
+    transcript.render(80)
+    transcript.handleInput('/')
+    transcript.render(80)
+    transcript.handleInput('\u001B[H')
+    transcript.handleInput('\u001B[6~')
+    transcript.handleInput('\u001B[6~')
+    const before = plain(transcript.render(80))
+    const anchor = before.match(/search-resize-\d+/u)?.[0]
+
+    const resized = plain(transcript.render(40))
+
+    expect(anchor).toBeDefined()
+    expect(resized).toContain(anchor)
+    transcript.dispose()
+  })
+
+  it('keeps a searched historical block anchored while an earlier block grows', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const nodes = Array.from({ length: 40 }, (_, index) =>
+      assistant(`search-shift-${String(index)}`, `search-shift-${String(index)}`))
+    const transcript = new Transcript(() => 7)
+    transcript.update(snapshot(nodes))
+    transcript.render(80)
+    transcript.handleInput('/')
+    transcript.render(80)
+    transcript.handleInput('\u001B[H')
+    transcript.handleInput('\u001B[6~')
+    transcript.handleInput('\u001B[6~')
+    const before = plain(transcript.render(80))
+    const anchor = before.match(/search-shift-\d+/u)?.[0]
+
+    transcript.update(snapshot([
+      assistant('search-shift-0', `search-shift-0\n${'expanded earlier line\n'.repeat(20)}`),
+      ...nodes.slice(1),
+    ]))
+    const updated = plain(transcript.render(80))
+
+    expect(anchor).toBeDefined()
+    expect(updated).toContain(anchor)
+    transcript.dispose()
+  })
+
   it('keeps resize work local to the latest viewport blocks', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 10)
