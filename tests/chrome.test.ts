@@ -82,7 +82,7 @@ describe('composer chrome', () => {
     ])
   })
 
-  it('keeps all long output and leaves the composer at the end', () => {
+  it('bounds long output to the viewport while keeping context and composer chrome', () => {
     let viewportRows = 8
     const layout = new BottomAnchoredLayout(
       () => viewportRows,
@@ -93,7 +93,10 @@ describe('composer chrome', () => {
     )
 
     const long = layout.render(80)
-    expect(long).toHaveLength(11)
+    expect(long).toHaveLength(8)
+    expect(long[0]).toBe('context')
+    expect(long).toContain('four')
+    expect(long).not.toContain('one')
     expect(long.slice(-4)).toEqual(['editor top', 'editor body', 'editor bottom', 'status'])
 
     viewportRows = 14

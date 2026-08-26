@@ -111,11 +111,14 @@ describe('out-of-tree Bundle contract', () => {
     expect(management).not.toContain('@deepseek-ai/dsh-tui-app')
   })
 
-  it('leaves text selection, copying, and scrollback under terminal control', () => {
+  it('keeps transcript scrolling inside a managed fixed terminal viewport', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    expect(surface).not.toContain("from './mouse.ts'")
-    expect(surface).not.toMatch(/\\u001B\[\?100[0-6]h/u)
-    expect(surface).toContain('Number.POSITIVE_INFINITY')
+    const session = readFileSync(resolve(root, 'src/client/terminal-session.ts'), 'utf8')
+    expect(surface).toContain('createTerminalSession')
+    expect(surface).toContain('terminalMouseDelta')
+    expect(surface).not.toContain('Number.POSITIVE_INFINITY')
+    expect(session).toContain('\\u001B[?1049h')
+    expect(session).toContain('\\u001B[?1000h\\u001B[?1006h')
   })
 
   it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {

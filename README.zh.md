@@ -52,7 +52,7 @@ Clarify 的模型调用由 [Auxiliary Runtime](https://github.com/Hilbert-beingh
 
 ![SeekTTY DeepSeek 暗色首屏](assets/seektty-tui-dark.png)
 
-最新视图会铺满终端，并让输入框与状态栏始终沉在底部。未使用的行属于中间的对话视口，会随着输出增长逐行收缩；更长的对话继续进入终端原生滚动记录。
+最新视图使用固定高度的 alternate screen，并让输入框与状态栏始终沉在底部。鼠标滚轮和 Transcript 导航键只在 SeekTTY 内部浏览对话历史；退出后会恢复原主屏幕及其滚动记录。
 
 ## Clarify 与 Plan
 
@@ -260,8 +260,8 @@ deepseek --update
 
 | 输入 | 操作 |
 | --- | --- |
-| 鼠标左键拖动，再按终端复制快捷键 | 使用终端原生选区复制当前可见的任意 TUI 文字（macOS 使用 `Command+C`；Linux 和 Windows 终端通常使用 `Ctrl+Shift+C`） |
-| 鼠标滚轮 / 触控板 | 输入框保持激活时浏览终端原生滚动记录 |
+| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键 |
+| 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
 | `/` | 打开命令与 Skill 候选 |
 | Enter / Shift+Enter | 发送或确认 / 输入换行 |
 | Tab / Escape | 在输入区与 Transcript 间切换 / 返回输入区或关闭当前弹窗 |

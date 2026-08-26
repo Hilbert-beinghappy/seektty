@@ -9,6 +9,11 @@ export interface RestorableStdin {
 
 export interface RestorableTerminal {
   showCursor(): void
+  restoreRawModeSync?(): void
+}
+
+export interface RestorableTerminalSession {
+  restore(): void
 }
 
 /**
@@ -20,9 +25,28 @@ export function restoreTerminalSync(
   write: (chunk: string) => void = chunk => { process.stdout.write(chunk) },
   terminal?: RestorableTerminal,
 ): void {
-  try { stdin.setRawMode?.(false) } catch { /* cooked restore is best-effort */ }
+  let restoredOriginalRawMode = false
+  try {
+    if (terminal?.restoreRawModeSync !== undefined) {
+      terminal.restoreRawModeSync()
+      restoredOriginalRawMode = true
+    }
+  } catch { /* fall back to cooked mode below */ }
+  if (!restoredOriginalRawMode) {
+    try { stdin.setRawMode?.(false) } catch { /* cooked restore is best-effort */ }
+  }
   try { terminal?.showCursor() } catch { /* prefer the explicit cursor write below */ }
   try { write(SHOW_CURSOR) } catch { /* cursor restore is best-effort */ }
+}
+
+/** Restore managed private modes before raw/cursor state on every Surface exit path. */
+export function restoreSurfaceTerminalSync(
+  session: RestorableTerminalSession,
+  stdin: RestorableStdin = process.stdin,
+  write: (chunk: string) => void = chunk => { process.stdout.write(chunk) },
+  terminal?: RestorableTerminal,
+): void {
+  try { session.restore() } finally { restoreTerminalSync(stdin, write, terminal) }
 }
 
 /**

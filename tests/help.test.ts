@@ -32,6 +32,8 @@ describe('in-app help keymap', () => {
     expect(flows.toLowerCase()).toMatch(/session/)
     expect(flows.toLowerCase()).toMatch(/approv/)
     expect(flows.toLowerCase()).toMatch(/brows/)
+    expect(flows).toContain('Terminal.app')
+    expect(flows).toContain('Option')
 
     const description = helpSectionChoices().find(choice => choice.id === 'flows')?.description ?? ''
     expect(description.toLowerCase()).not.toMatch(/export|shortcut/)

@@ -21,6 +21,7 @@ class RecordingTerminal implements Terminal {
   columns = 40
   rows = 10
   kittyProtocolActive = false
+  __seekttyManagedAlternateScreen?: boolean
   start(): void {}
   stop(): void {}
   drainInput(): Promise<void> { return Promise.resolve() }
@@ -45,6 +46,7 @@ interface Harness {
   terminal: RecordingTerminal
   tui: TUI
   lines: string[]
+  initialOutput: string
 }
 
 /** Start a TUI whose single component renders 30 unique lines into a 10-row terminal. */
@@ -56,11 +58,21 @@ async function startedTui(): Promise<Harness> {
   tui.start()
   await nextFrame()
   expect(terminal.output()).toContain('row-29')
+  const initialOutput = terminal.output()
   terminal.reset()
-  return { terminal, tui, lines }
+  return { terminal, tui, lines, initialOutput }
 }
 
 describe('patched pi-tui render stability', () => {
+  it('clamps a tall first frame to the physical viewport', async () => {
+    const { terminal, tui, initialOutput: output } = await startedTui()
+    expect(output).not.toContain('row-00')
+    expect(output).toContain('row-20')
+    expect(output).toContain('row-29')
+    expect(output.match(/\r\n/gu)?.length ?? 0).toBeLessThan(terminal.rows)
+    tui.stop()
+  })
+
   it('repaints only visible rows when a scrollback row changes alongside a visible row', async () => {
     const { terminal, tui, lines } = await startedTui()
     // Rows 0-19 are scrollback (30 lines into a 10-row terminal); row 25 is visible.
@@ -126,7 +138,7 @@ describe('patched pi-tui render stability', () => {
     tui.stop()
   })
 
-  it('still fully redraws when content shrinks below one screen', async () => {
+  it('clears removed viewport rows without a full-screen redraw', async () => {
     const { terminal, tui, lines } = await startedTui()
     lines.length = 0
     lines.push('only-row')
@@ -134,7 +146,37 @@ describe('patched pi-tui render stability', () => {
     await nextFrame()
     const output = terminal.output()
     expect(output).toContain('only-row')
-    expect(tui.fullRedraws).toBe(2)
+    expect(output).not.toContain(CLEAR_SCREEN)
+    expect(output).not.toContain(CLEAR_SCROLLBACK)
+    expect(tui.fullRedraws).toBe(1)
     tui.stop()
+  })
+
+  it('does not append a main-screen newline after a managed alternate-screen restore', async () => {
+    const { terminal, tui } = await startedTui()
+    terminal.__seekttyManagedAlternateScreen = true
+    terminal.reset()
+    tui.stop()
+    expect(terminal.output()).not.toContain('\r\n')
+    expect(terminal.output()).not.toMatch(/\u001B\[\d+[AB]/u)
+  })
+
+  it('discards queued frames before alternate-screen restoration', async () => {
+    const { terminal, tui, lines } = await startedTui()
+    const managed = tui as TUI & { stopRenderingSync(): void }
+    terminal.reset()
+    lines[29] = 'must-not-reach-main-screen'
+    tui.requestRender()
+    managed.stopRenderingSync()
+    await nextFrame()
+    expect(terminal.output()).not.toContain('must-not-reach-main-screen')
+    tui.stop()
+  })
+
+  it('preserves the upstream stop newline outside a managed alternate screen', async () => {
+    const { terminal, tui } = await startedTui()
+    terminal.reset()
+    tui.stop()
+    expect(terminal.output()).toContain('\r\n')
   })
 })

@@ -85,9 +85,16 @@ import { createSessionChromeStore, nextTitleWrite } from './session-chrome.ts'
 import { NoticeBoard, pickStatusLine } from './status-priority.ts'
 import { restartRequiredFact, restartRequiredNotice } from './restart-copy.ts'
 import { sessionTerminalTitle } from './terminal-title.ts'
+import {
+  createTerminalSession,
+  type ManagedTui,
+  supportsManagedTerminal,
+  terminalMouseDelta,
+  type ManagedTerminal,
+} from './terminal-session.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
-import { attachFatalGuards, fatalLogHint, restoreTerminalSync, withCleanupTimeout } from '../process-guards.ts'
+import { attachFatalGuards, fatalLogHint, restoreSurfaceTerminalSync, withCleanupTimeout } from '../process-guards.ts'
 import { measureStartup } from '../startup-trace.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
@@ -126,13 +133,15 @@ function noticeText(message: string, tone: NoticeTone): string {
  * @returns idempotent lifecycle handle.
  */
 export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurfaceHandle> {
-  if (!internals.isInteractive()) {
+  if (!supportsManagedTerminal(internals.isInteractive(), process.env.TERM)) {
     throw new Error(ui(
-      '需要交互式 TTY；非交互任务请使用 dsh --profile headless',
-      'An interactive TTY is required; use dsh --profile headless for non-interactive tasks',
+      '需要支持终端私有模式的交互式 TTY；非交互任务请使用 dsh --profile headless',
+      'An interactive TTY with private-mode support is required; use dsh --profile headless for non-interactive tasks',
     ))
   }
-  const terminal = internals.createTerminal()
+  const terminal = internals.createTerminal() as Terminal & ManagedTerminal
+  let stopTuiRenderingSync = (): void => undefined
+  const terminalSession = createTerminalSession(terminal, true, () => { stopTuiRenderingSync() })
   const [settingsDocuments, client, initialProviderReadiness] = await measureStartup('settings+client', () => Promise.all([
     options.management.settings.describe(),
     internals.startClient(options),
@@ -150,6 +159,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
+    stopTuiRenderingSync = () => {
+      (tui as TUI & ManagedTui).stopRenderingSync?.()
+    }
     stopConstructedTui = () => {
       tui.stop()
     }
@@ -191,11 +203,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     let transcriptFocused = false
     const transcript = new Transcript(
-      // The default full transcript becomes normal terminal scrollback, which keeps
-      // native drag selection, Command+C, and wheel scrolling under terminal control.
-      () => transcriptFocused
-        ? transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length)
-        : Number.POSITIVE_INFINITY,
+      () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
       () => {
         const current = active
@@ -213,6 +221,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let syntax: SyntaxHighlighter | undefined
     disposeConstructedSyntax = () => { syntax?.dispose() }
     void SyntaxHighlighter.create(initialTheme, () => {
+      if (stopping !== undefined) return
       // Non-forced render: a forced full redraw clears the screen and replays
       // the whole history, which flashes mid-session whenever a lazy grammar
       // finishes loading. The differential render repaints the visible rows.
@@ -465,7 +474,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       detachFatalGuards()
       detachFatalGuards = () => undefined
       if (stopping !== undefined) return stopping
-      restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+      restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
       stopping = (async () => {
         const failures: unknown[] = []
         if (elapsedTimer !== undefined) {
@@ -748,6 +757,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
+      const wheelDelta = terminalMouseDelta(data)
+      if (wheelDelta !== undefined) {
+        if (wheelDelta !== null) transcript.scrollBy(wheelDelta)
+        return { consume: true }
+      }
       const interrupt = consumeRunningInterrupt(data, capabilities.active()?.session)
       if (interrupt !== undefined) return interrupt
       if (overlays.hasActive()) return undefined
@@ -927,7 +941,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const startupOnboarding = onboarding.ensure()
     applyTerminalTitle()
     detachFatalGuards = attachFatalGuards({
-      restore: () => { restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal) },
+      restore: () => {
+        restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+      },
       cleanup: () => close({ kind: 'exit', code: 1 }),
       writeError: (message) => { process.stderr.write(`${escapeTerminalText(message)}\n`) },
       formatError: (error) => {
@@ -940,6 +956,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       exit: (code) => { process.exit(code) },
     })
+    terminalSession.enter()
     tui.start()
     refreshHeader(true)
     refresh()
@@ -975,7 +992,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
     detachFatalGuards()
-    restoreTerminalSync(process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+    restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
     setCodeHighlighter(undefined)
     try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }
     try { stopConstructedTui() } catch { /* preserve the setup failure */ }

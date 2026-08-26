@@ -52,7 +52,7 @@ Clarify model calls run through [Auxiliary Runtime](https://github.com/Hilbert-b
 
 ![SeekTTY DeepSeek dark start screen](assets/seektty-tui-dark.png)
 
-The live view fills the terminal and keeps the composer and status at the bottom. Unused rows remain inside the conversation viewport and disappear as output grows; longer conversations continue into native terminal scrollback.
+The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. The mouse wheel and transcript navigation keys browse conversation history inside SeekTTY; exiting restores the previous main screen and its scrollback.
 
 ## Clarify and Plan
 
@@ -260,8 +260,8 @@ Typing `/` opens a searchable command and Skill menu. It merges SeekTTY commands
 
 | Input | Action |
 | --- | --- |
-| Left-button drag, then the terminal copy shortcut | Use the terminal's native selection and copy for any visible TUI text (`Command+C` on macOS; normally `Ctrl+Shift+C` on Linux and Windows terminals) |
-| Mouse wheel / trackpad | Browse the native terminal scrollback while the composer remains active |
+| Hold the terminal selection modifier while dragging, then copy | Use native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+| Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
 | Tab / Escape | Switch between composer and transcript / return or close the active overlay |

@@ -1504,7 +1504,14 @@ export class Transcript implements Component, Focusable {
         lines[index] = `${' '.repeat(Math.max(0, Math.floor((contentWidth - visibleWidth(content)) / 2)))}${content}`
       }
     }
+    const previousRenderedLineCount = this.renderedLineCount
     this.lastFullLines = [...lines]
+    if (this.scrollOffset > 0 && previousRenderedLineCount > 0) {
+      this.scrollOffset = Math.max(
+        0,
+        this.scrollOffset + lines.length - previousRenderedLineCount,
+      )
+    }
     this.renderedLineCount = lines.length
     this.turnAnchors = anchors
     if (this.search !== undefined) {

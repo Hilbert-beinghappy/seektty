@@ -740,6 +740,32 @@ describe('conversation viewport', () => {
     expect(requestRender).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps an explicitly scrolled viewport anchored while the tail grows', () => {
+    const transcript = new Transcript(() => 7)
+    const history = [
+      user('u1', '较早问题'),
+      assistant('a1', '锚点回答一\n锚点回答二\n锚点回答三'),
+      user('u2', '当前问题'),
+      assistant('a2', '当前回答一\n当前回答二\n当前回答三'),
+    ]
+    transcript.update(snapshot(history))
+    transcript.render(50)
+    expect(transcript.scrollBy(3)).toBe(true)
+    expect(stripAnsi(transcript.render(50).join('\n'))).toContain('锚点回答二')
+
+    transcript.update(snapshot([
+      ...history,
+      user('u3', '新增问题'),
+      assistant('a3', '新增回答一\n新增回答二'),
+    ]))
+    const anchored = stripAnsi(transcript.render(50).join('\n'))
+    expect(anchored).toContain('锚点回答二')
+    expect(anchored).not.toContain('新增回答二')
+
+    transcript.followLatest()
+    expect(stripAnsi(transcript.render(50).join('\n'))).toContain('新增回答二')
+  })
+
   it('searches rendered lines from focus mode and jumps with n/N', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 12)
