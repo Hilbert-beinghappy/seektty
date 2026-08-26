@@ -68,6 +68,7 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "perf:tui": "node scripts/tui-perf-harness.mjs",
     "test:stock": "node scripts/stock-dsh-cycle.mjs",
     "test:clarify-doctor": "node scripts/clarify-doctor-acceptance.mjs",
     "pack:check": "node scripts/pack-check.mjs",
