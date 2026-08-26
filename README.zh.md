@@ -86,7 +86,7 @@ deepseek --version
 deepseek --update
 ```
 
-`deepseek --update` 优先检查 SeekTTY，每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
+`deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
 SeekTTY `1.2.1` 目前是已在官方 Harness `0.1.1-rc.2` 上测试的源码候选版，尚未发布 `v1.2.1` tarball。请运行 `pnpm run build && pnpm pack`，把 `SEEKTTY_SPEC` 指向生成的 tarball，或使用 [Releases 页面](https://github.com/Hilbert-beinghappy/seektty/releases)中后续列出的工件。
 
@@ -255,6 +255,8 @@ dsh plugin --profile tui remove seektty
 ```
 
 ## 兼容与验证
+
+当前已测 Host 是官方 `0.1.1-rc.2`；完整兼容边界汇总如下。
 
 | 边界 | 版本 |
 | --- | --- |

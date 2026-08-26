@@ -86,7 +86,7 @@ deepseek --version
 deepseek --update
 ```
 
-`deepseek --update` checks the latest SeekTTY release first, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
+`deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
 SeekTTY `1.2.1` is currently a source candidate tested with official Harness `0.1.1-rc.2`; no `v1.2.1` release tarball is published. Build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball, or use a later asset listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases).
 
@@ -255,6 +255,8 @@ dsh plugin --profile tui remove seektty
 ```
 
 ## Compatibility and verification
+
+The current tested Host is official `0.1.1-rc.2`; the complete compatibility boundary is summarized below.
 
 | Boundary | Version |
 | --- | --- |
