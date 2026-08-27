@@ -43,7 +43,6 @@ import {
   nextMatchIndex,
   planLineSearch,
   scrollOffsetToContain,
-  scrollOffsetToReveal,
 } from './transcript-search.ts'
 import {
   background,
@@ -57,6 +56,17 @@ import { syntaxLanguageForPath } from './syntax-highlighter.ts'
 import { foldLineBlock } from './tool-output-limit.ts'
 import { unifiedHunks } from './line-diff.ts'
 import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
+import { HeightIndex } from './height-index.ts'
+import {
+  appendScrollbarColumn,
+  paintScrollbar,
+  scrollbarHitRegions,
+  scrollbarModel,
+  SCROLLBAR_MIN_WIDTH,
+  offsetForTrackRow,
+  type ScrollbarModel,
+} from './scrollbar.ts'
+import type { CellRect, HitRegion } from './mouse-hit-map.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -70,6 +80,8 @@ export const internals = {
   fingerprintsComputed: 0,
   imageBlocksUpdated: 0,
   activePulseTimers: 0,
+  heightIndexExact: 0,
+  heightIndexEstimated: 0,
 }
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
@@ -1186,6 +1198,8 @@ interface TranscriptCoordinate {
   readonly lineOffset: number
 }
 
+export type { TranscriptCoordinate }
+
 interface TranscriptViewportAnchor extends TranscriptCoordinate {
   readonly followLatest: boolean
 }
@@ -1247,6 +1261,10 @@ export class Transcript implements Component, Focusable {
   private readonly nodeCache = new Map<string, TranscriptBlock>()
   private readonly lineCache = new WeakMap<Component, { width: number; lines: readonly string[] }>()
   focused = false
+  private readonly heightIndex = new HeightIndex()
+  private scrollbarVisible: 'always' | 'hidden' = DEFAULT_TUI_BEHAVIOR.scrollbarVisibility
+  private pendingOlderAnchor: TranscriptCoordinate | undefined
+  private lastScrollbar: ScrollbarModel | undefined
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1300,8 +1318,80 @@ export class Transcript implements Component, Focusable {
   followLatest(): void {
     this.turnCursor = undefined
     this.scrollOffset = 0
+    this.pendingOlderAnchor = undefined
     this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
     this.requestRender()
+  }
+
+  /** Whether the viewport is pinned to the latest output. */
+  isFollowingLatest(): boolean {
+    return this.viewportAnchor.followLatest
+  }
+
+  /** Apply the Settings-owned scrollbar chrome without changing viewport coordinates. */
+  setScrollbarVisibility(visibility: 'always' | 'hidden'): void {
+    this.scrollbarVisible = visibility
+    this.requestRender()
+  }
+
+  /**
+   * Detach follow, keep `anchor` as the visible start, and request one older page.
+   * Home, wheel, scrollbar track/end-cap, and later thumb/edge-scroll share this path.
+   */
+  requestOlderFromStart(anchor?: TranscriptCoordinate): boolean {
+    if (!this.hasMore || this.loadingOlder) return false
+    const start = anchor
+      ?? this.pendingOlderAnchor
+      ?? this.viewportState?.start
+      ?? (this.viewportAnchor.blockKey === '' ? undefined : this.viewportAnchor)
+    if (start !== undefined && start.blockKey !== '') {
+      this.pendingOlderAnchor = { blockKey: start.blockKey, lineOffset: start.lineOffset }
+      this.viewportAnchor = { ...this.pendingOlderAnchor, followLatest: false }
+    } else {
+      this.viewportAnchor = { ...this.viewportAnchor, followLatest: false }
+    }
+    this.requestOlder()
+    this.requestRender()
+    return true
+  }
+
+  /** Jump within the loaded/estimated height range. Unknown history never targets fake unloaded offsets. */
+  scrollToEstimatedOffset(offset: number): boolean {
+    const at = this.heightIndex.atOffset(offset)
+    if (at === undefined) return false
+    const atStart = this.blocks[0]?.key === at.key && at.lineOffset === 0
+    if (atStart && this.hasMore && offset <= 0) {
+      return this.requestOlderFromStart({ blockKey: at.key, lineOffset: at.lineOffset })
+    }
+    this.viewportAnchor = { blockKey: at.key, lineOffset: at.lineOffset, followLatest: false }
+    this.scrollOffset = Math.max(1, this.scrollOffset)
+    this.requestRender()
+    return true
+  }
+
+  /** Last scrollbar geometry derived from the same viewport snapshot as Home/wheel. */
+  scrollbar(): ScrollbarModel | undefined {
+    return this.lastScrollbar
+  }
+
+  /** Hit regions for the resident scrollbar column, in transcript-local coordinates. */
+  scrollbarHitRegions(origin: CellRect): HitRegion[] {
+    if (this.lastScrollbar === undefined || this.emptyState) return []
+    if (this.scrollbarVisible === 'hidden' || origin.width < SCROLLBAR_MIN_WIDTH) return []
+    return scrollbarHitRegions(origin, this.lastScrollbar)
+  }
+
+  /** Track/end-cap click. A thumb press without movement does not jump. */
+  handleScrollbarClick(region: HitRegion, point: { readonly col: number; readonly row: number }, origin: CellRect): boolean {
+    if (region.role !== 'scrollbar' || region.action.kind !== 'transcript') return false
+    const command = region.action.command
+    if (command === 'drag-thumb') return false
+    const localRow = point.row - origin.row
+    if (command === 'page-older' || (localRow <= 0 && this.hasMore)) {
+      return this.requestOlderFromStart(this.viewportState?.start)
+    }
+    if (this.lastScrollbar === undefined) return false
+    return this.scrollToEstimatedOffset(offsetForTrackRow(this.lastScrollbar, localRow))
   }
 
   /**
@@ -1334,6 +1424,10 @@ export class Transcript implements Component, Focusable {
     this.emptyState = true
     this.hasMore = false
     this.loadingOlder = false
+    this.pendingOlderAnchor = undefined
+    this.lastScrollbar = undefined
+    this.heightIndex.clear()
+    this.syncHeightIndexCounters()
     this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
   }
 
@@ -1366,6 +1460,10 @@ export class Transcript implements Component, Focusable {
       this.search = undefined
       this.searchIndex = undefined
       this.lastFullLines = []
+      this.pendingOlderAnchor = undefined
+      this.lastScrollbar = undefined
+      this.heightIndex.clear()
+      this.syncHeightIndexCounters()
     }
     this.imageLoader = imageLoader
     this.blockGeneration += 1
@@ -1563,6 +1661,10 @@ export class Transcript implements Component, Focusable {
     this.search = undefined
     this.searchIndex = undefined
     this.lastFullLines = []
+    this.pendingOlderAnchor = undefined
+    this.lastScrollbar = undefined
+    this.heightIndex.clear()
+    this.syncHeightIndexCounters()
   }
 
   private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
@@ -1610,14 +1712,35 @@ export class Transcript implements Component, Focusable {
         block.linesByWidth.delete(oldest)
       }
     }
+    this.heightIndex.setExact(block.key, result.lines.length)
+    this.syncHeightIndexCounters()
     return result
   }
 
-  private finiteViewportLines(
-    contentWidth: number,
+  private fillFrom(
+    startIndex: number,
+    startOffset: number,
     rows: number,
-    olderMarker: (count: number) => string,
-  ): string[] {
+    contentWidth: number,
+  ): { visible: string[]; index: number; offset: number } {
+    const visible: string[] = []
+    let index = startIndex
+    let offset = startOffset
+    while (index < this.blocks.length && visible.length < rows) {
+      const blockLines = this.renderBlock(index, contentWidth).lines
+      const available = blockLines.slice(offset, offset + rows - visible.length)
+      visible.push(...available)
+      if (offset + available.length < blockLines.length) {
+        offset += available.length
+        break
+      }
+      index += 1
+      offset = 0
+    }
+    return { visible, index, offset }
+  }
+
+  private finiteViewportLines(contentWidth: number, rows: number): string[] {
     if (this.blocks.length === 0) return Array.from({ length: rows }, () => '')
     let startIndex: number
     let startOffset: number
@@ -1661,20 +1784,17 @@ export class Transcript implements Component, Focusable {
           }
           lineBase += part.lines.length
         }
-        if (latestTurn !== undefined && visible.length - latestTurn.visibleOffset <= rows - 1) {
+        if (latestTurn !== undefined && visible.length - latestTurn.visibleOffset <= rows) {
           visible = [
-            ...Array.from({ length: rows - (visible.length - latestTurn.visibleOffset) - 1 }, () => ''),
-            olderMarker(0),
+            ...Array.from({ length: rows - (visible.length - latestTurn.visibleOffset) }, () => ''),
             ...visible.slice(latestTurn.visibleOffset),
           ]
           startIndex = latestTurn.blockIndex
           startOffset = latestTurn.lineOffset
-        } else {
-          visible[0] = olderMarker(0)
         }
       }
       const padding = Math.max(0, rows - visible.length)
-      const result = [...Array.from({ length: padding }, () => ''), ...visible]
+      const result = [...Array.from({ length: padding }, () => ''), ...visible.slice(-rows)]
       const startBlock = this.blocks[startIndex]
       const start = { blockKey: startBlock?.key ?? '', lineOffset: startOffset }
       this.viewportAnchor = { ...start, followLatest: true }
@@ -1686,153 +1806,127 @@ export class Transcript implements Component, Focusable {
     startIndex = this.blocks.findIndex(block => block.key === this.viewportAnchor.blockKey)
     if (startIndex < 0) {
       this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
-      return this.finiteViewportLines(contentWidth, rows, olderMarker)
+      return this.finiteViewportLines(contentWidth, rows)
     }
     const firstLines = this.renderBlock(startIndex, contentWidth).lines
     startOffset = Math.max(0, Math.min(this.viewportAnchor.lineOffset, Math.max(0, firstLines.length - 1)))
-    const visible: string[] = []
-    let index = startIndex
-    let offset = startOffset
-    while (index < this.blocks.length && visible.length < rows) {
-      const blockLines = this.renderBlock(index, contentWidth).lines
-      const available = blockLines.slice(offset, offset + rows - visible.length)
-      visible.push(...available)
-      if (offset + available.length < blockLines.length) {
-        offset += available.length
-        break
+    let filled = this.fillFrom(startIndex, startOffset, rows, contentWidth)
+    if (filled.visible.length < rows && (startIndex > 0 || startOffset > 0)) {
+      const need = rows - filled.visible.length
+      const moved = this.moveViewportStart(
+        { blockKey: this.blocks[startIndex]?.key ?? '', lineOffset: startOffset },
+        need,
+        contentWidth,
+      )
+      const nextIndex = this.blocks.findIndex(block => block.key === moved.coordinate.blockKey)
+      if (nextIndex >= 0) {
+        startIndex = nextIndex
+        startOffset = moved.coordinate.lineOffset
+        filled = this.fillFrom(startIndex, startOffset, rows, contentWidth)
       }
-      index += 1
-      offset = 0
     }
     const hasOlder = startIndex > 0 || startOffset > 0 || this.hasMore
-    const hasNewer = index < this.blocks.length
-    if (!hasNewer && visible.length < rows) {
-      this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
-      return this.finiteViewportLines(contentWidth, rows, olderMarker)
-    }
-    if (hasOlder && visible.length > 0) {
-      visible.unshift(olderMarker(0))
-      visible.splice(rows)
-    }
-    if (hasNewer && visible.length > 0) {
-      const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
-      visible[visible.length - 1] = color.muted(ui(
-        `↓ 有更新内容 · ${hint}`,
-        `↓ Newer content · ${hint}`,
-      ))
-    }
+    const hasNewer = filled.index < this.blocks.length
     const start = { blockKey: this.blocks[startIndex]?.key ?? '', lineOffset: startOffset }
     this.viewportAnchor = { ...start, followLatest: false }
     this.viewportState = { contentWidth, rows, start, hasOlder, hasNewer }
-    return visible
+    const padding = Math.max(0, rows - filled.visible.length)
+    return [...filled.visible, ...Array.from({ length: padding }, () => '')].slice(0, rows)
   }
 
-  private ensureSearchIndex(contentWidth: number): TranscriptSearchIndex {
+  private logicalRowLines(row: TranscriptRow): readonly string[] {
+    if (row.format === 'image') return [imageLabel(row.attachment)]
+    return row.text.split('\n')
+  }
+
+  /** Incremental logical-source index. Never calls renderBlock/Markdown. */
+  private ensureSearchIndex(): TranscriptSearchIndex {
     const current = this.searchIndex
-    if (current !== undefined
-      && current.width === contentWidth
-      && current.generation === this.blockGeneration) return current
-    const viewportRows = this.viewportRows()
-    const rows = Number.isFinite(viewportRows)
-      ? Math.max(1, Math.floor(viewportRows) - 1)
-      : undefined
-    const previousTop = current !== undefined && rows !== undefined && this.scrollOffset > 0
-      ? (() => {
-          const top = Math.max(0, current.lines.length - this.scrollOffset - rows)
-          const span = current.spans.find(candidate => candidate.start <= top && top < candidate.end)
-          return span === undefined
-            ? undefined
-            : { blockKey: span.blockKey, lineOffset: top - span.start }
-        })()
-      : undefined
+    if (current !== undefined && current.generation === this.blockGeneration) return current
     const lines: string[] = []
     const spans: Array<{ blockKey: string; start: number; end: number }> = []
-    for (const [blockIndex, block] of this.blocks.entries()) {
+    for (const block of this.blocks) {
       const start = lines.length
-      lines.push(...this.renderBlock(blockIndex, contentWidth).lines)
+      for (const row of block.rows) lines.push(...this.logicalRowLines(row))
       spans.push({ blockKey: block.key, start, end: lines.length })
     }
     const index = {
-      width: contentWidth,
+      width: 0,
       generation: this.blockGeneration,
       lines,
       spans,
     }
     this.searchIndex = index
-    if (previousTop !== undefined && rows !== undefined) {
-      const span = spans.find(candidate => candidate.blockKey === previousTop.blockKey)
-      if (span !== undefined) {
-        const lineOffset = Math.min(previousTop.lineOffset, Math.max(0, span.end - span.start - 1))
-        const top = span.start + lineOffset
-        const maxOffset = Math.max(0, lines.length - rows)
-        this.scrollOffset = Math.max(0, Math.min(maxOffset, lines.length - top - rows))
-      }
-    }
     this.lastFullLines = lines
     return index
   }
 
-  private searchViewportLines(
-    contentWidth: number,
-    totalRows: number,
-    olderMarker: (count: number) => string,
-  ): string[] {
-    const index = this.ensureSearchIndex(contentWidth)
-    const rows = Math.max(1, totalRows - 1)
-    const maxOffset = Math.max(0, index.lines.length - rows)
-    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxOffset))
-    const end = index.lines.length - this.scrollOffset
-    const start = Math.max(0, end - rows)
-    const plan = planLineSearch(index.lines, this.search?.query ?? '')
-    if ((this.search?.matchIndex ?? 0) >= plan.matches.length && this.search !== undefined) {
-      this.search.matchIndex = 0
-    }
+  private highlightVisible(lines: readonly string[], query: string): string[] {
+    if (query.trim() === '') return [...lines]
+    const plan = planLineSearch(lines, query)
     const current = plan.matches[this.search?.matchIndex ?? 0]
-    const query = this.search?.query ?? ''
-    const visible = index.lines.slice(start, end).map((line, localIndex) => {
-      const lineIndex = start + localIndex
-      if (query.trim() === '' || !plan.hit.has(lineIndex)) return line
+    return lines.map((line, index) => {
+      if (!plan.hit.has(index)) return line
       return highlightQuery(line, query, matched =>
-        lineIndex === current ? `\u001B[7m${matched}\u001B[0m` : color.accent(matched))
+        index === current ? `\u001B[7m${matched}\u001B[0m` : color.accent(matched))
     })
-    if (start > 0 && visible.length > 0) visible[0] = olderMarker(start)
-    else if (this.hasMore && visible.length > 0) visible[0] = olderMarker(0)
-    if (end < index.lines.length && visible.length > 0) {
-      const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
-      visible[visible.length - 1] = color.muted(ui(
-        `↓ ${String(index.lines.length - end)} 行更新内容 · ${hint}`,
-        `↓ ${String(index.lines.length - end)} newer line(s) · ${hint}`,
-      ))
+  }
+
+  private showsScrollbar(width: number): boolean {
+    return this.scrollbarVisible !== 'hidden'
+      && width >= SCROLLBAR_MIN_WIDTH
+      && !this.emptyState
+  }
+
+  private presentLines(lines: readonly string[], width: number, inset: number, contentWidth: number): string[] {
+    const totalRows = Math.max(1, Math.floor(this.viewportRows()))
+    const body = lines.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
+    const withSearch = this.search === undefined
+      ? body
+      : (() => {
+        const label = `${' '.repeat(inset)}${color.accent(this.searchLabel())}`
+        if (!Number.isFinite(totalRows)) return [...body, label]
+        return [...body.slice(0, Math.max(0, totalRows - 1)), label]
+      })()
+    if (!this.showsScrollbar(width) || !Number.isFinite(totalRows)) {
+      this.lastScrollbar = undefined
+      return withSearch
     }
-    return [
-      ...Array.from({ length: Math.max(0, rows - visible.length) }, () => ''),
-      ...visible,
-    ]
+    const start = this.viewportState?.start
+    const model = scrollbarModel({
+      rows: totalRows,
+      contentWidth,
+      startOffset: start === undefined ? 0 : this.heightIndex.offsetOf(start.blockKey, start.lineOffset),
+      loadedTotal: this.heightIndex.total(),
+      estimated: this.heightIndex.estimatedEntries > 0,
+      hasMore: this.hasMore,
+      hasNewer: this.viewportState?.hasNewer === true,
+      loadingOlder: this.loadingOlder,
+    })
+    this.lastScrollbar = model
+    return appendScrollbarColumn(withSearch, paintScrollbar(model), width)
   }
 
   render(width: number): string[] {
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
+    this.heightIndex.reconcile(
+      this.blocks.map(block => block.key),
+      (key) => {
+        const block = this.blocks.find(candidate => candidate.key === key)
+        return Math.max(1, block?.rows.length ?? 1)
+      },
+      contentWidth,
+    )
+    this.syncHeightIndexCounters()
     const totalRows = Math.max(1, Math.floor(this.viewportRows()))
-    const withInset = (values: readonly string[]): string[] => {
-      const body = values.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
-      if (this.search === undefined) return body
-      const label = `${' '.repeat(inset)}${color.accent(this.searchLabel())}`
-      if (!Number.isFinite(totalRows)) return [...body, label]
-      return [...body.slice(0, Math.max(0, totalRows - 1)), label]
-    }
-    const olderMarker = (count: number): string => {
-      if (this.loadingOlder) return color.muted(ui('↑ 正在加载更早内容…', '↑ Loading older content…'))
-      const hint = this.focused ? 'PgUp/Home' : ui('滚轮上翻', 'Scroll up')
-      return color.muted(count === 0
-        ? ui(`↑ 还有更早内容 · ${hint}`, `↑ Older content available · ${hint}`)
-        : ui(`↑ ${String(count)} 行更早内容 · ${hint}`, `↑ ${String(count)} older line(s) · ${hint}`))
-    }
-    if (Number.isFinite(totalRows) && this.search !== undefined) {
-      return withInset(this.searchViewportLines(contentWidth, totalRows, olderMarker))
-    }
-    if (Number.isFinite(totalRows) && this.search === undefined && !this.emptyState) {
-      return withInset(this.finiteViewportLines(contentWidth, totalRows, olderMarker))
+    if (Number.isFinite(totalRows) && !this.emptyState) {
+      const rows = this.search === undefined ? totalRows : Math.max(1, totalRows - 1)
+      const visible = this.finiteViewportLines(contentWidth, rows)
+      const painted = this.search === undefined
+        ? visible
+        : this.highlightVisible(visible, this.search.query)
+      return this.presentLines(painted, width, inset, contentWidth)
     }
     const lines: string[] = []
     const anchors: number[] = []
@@ -1849,10 +1943,6 @@ export class Transcript implements Component, Focusable {
       }
     }
     const previousRenderedLineCount = this.renderedLineCount
-    if (this.search !== undefined) {
-      internals.lastFullLinesCopied += lines.length
-      this.lastFullLines = [...lines]
-    }
     if (this.scrollOffset > 0 && previousRenderedLineCount > 0) {
       this.scrollOffset = Math.max(
         0,
@@ -1861,93 +1951,43 @@ export class Transcript implements Component, Focusable {
     }
     this.renderedLineCount = lines.length
     this.turnAnchors = anchors
-    if (this.search !== undefined) {
-      const plan = planLineSearch(lines, this.search.query)
-      if (this.search.matchIndex >= plan.matches.length) this.search.matchIndex = 0
-      const current = plan.matches[this.search.matchIndex]
-      const query = this.search.query
-      if (query.trim() !== '') {
-        for (const [index, line] of lines.entries()) {
-          if (!plan.hit.has(index)) continue
-          lines[index] = highlightQuery(line, query, matched =>
-            index === current ? `\u001B[7m${matched}\u001B[0m` : color.accent(matched))
-        }
-      }
-    }
-    const rows = this.search !== undefined && Number.isFinite(totalRows)
-      ? Math.max(1, totalRows - 1)
-      : totalRows
-    if (!Number.isFinite(rows)) {
+    const painted = this.search === undefined
+      ? lines
+      : this.highlightVisible(lines, this.search.query)
+    if (!Number.isFinite(totalRows)) {
       this.scrollOffset = 0
-      return withInset(lines)
+      this.lastScrollbar = undefined
+      return this.presentLines(painted, width, inset, contentWidth)
     }
-    if (lines.length <= rows) {
+    const rows = this.search !== undefined ? Math.max(1, totalRows - 1) : totalRows
+    if (painted.length <= rows) {
       this.scrollOffset = 0
-      const remaining = rows - lines.length
-      if (!this.emptyState && this.hasMore) {
-        if (remaining === 0) {
-          const visible = [...lines]
-          visible[0] = olderMarker(0)
-          return withInset(visible)
-        }
-        return withInset([
-          ...Array.from({ length: remaining - 1 }, () => ''),
-          olderMarker(0),
-          ...lines,
-        ])
-      }
+      const remaining = rows - painted.length
       const before = this.emptyState ? Math.floor(remaining / 2) : remaining
-      return withInset([
+      return this.presentLines([
         ...Array.from({ length: before }, () => ''),
-        ...lines,
+        ...painted,
         ...Array.from({ length: remaining - before }, () => ''),
-      ])
+      ], width, inset, contentWidth)
     }
-    const maxOffset = Math.max(0, lines.length - rows)
+    const maxOffset = Math.max(0, painted.length - rows)
     if (this.emptyState) {
       const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
       const needle = example === undefined ? undefined : emptyExampleText(example)
       const selected = needle === undefined
         ? -1
-        : lines.findIndex(line => line.includes(needle))
+        : painted.findIndex(line => line.includes(needle))
       this.scrollOffset = scrollOffsetToContain(
-        lines.length,
+        painted.length,
         rows,
         selected === -1 ? 0 : selected,
       )
     } else {
       this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
     }
-    const end = lines.length - this.scrollOffset
+    const end = painted.length - this.scrollOffset
     const start = Math.max(0, end - rows)
-    if (!this.emptyState && this.scrollOffset === 0 && start > 0) {
-      const alignedStart = this.turnAnchors.find(anchor =>
-        anchor >= start && end - anchor <= rows - 1)
-      if (alignedStart !== undefined) {
-        const latestTurnRows = lines.slice(alignedStart, end)
-        return withInset([
-          ...Array.from({ length: rows - latestTurnRows.length - 1 }, () => ''),
-          olderMarker(alignedStart),
-          ...latestTurnRows,
-        ])
-      }
-    }
-    const visible = lines.slice(start, end)
-    if (!this.emptyState) {
-      if (start > 0 && visible.length > 0) {
-        visible[0] = olderMarker(start)
-      } else if (this.hasMore && visible.length > 0) {
-        visible[0] = olderMarker(0)
-      }
-      if (end < lines.length && visible.length > 0) {
-        const hint = this.focused ? 'PgDn/End' : ui('滚轮下翻', 'Scroll down')
-        visible[visible.length - 1] = color.muted(ui(
-          `↓ ${String(lines.length - end)} 行更新内容 · ${hint}`,
-          `↓ ${String(lines.length - end)} newer line(s) · ${hint}`,
-        ))
-      }
-    }
-    return withInset(visible)
+    return this.presentLines(painted.slice(start, end), width, inset, contentWidth)
   }
 
   handleInput(data: string): void {
@@ -1998,17 +2038,6 @@ export class Transcript implements Component, Focusable {
    */
   cancelSearch(): boolean {
     if (this.search === undefined) return false
-    const index = this.activeSearchIndex()
-    if (index !== undefined && Number.isFinite(this.viewportRows())) {
-      const rows = Math.max(1, Math.floor(this.viewportRows()) - 1)
-      const top = Math.max(0, index.lines.length - this.scrollOffset - rows)
-      const span = index.spans.find(candidate => candidate.start <= top && top < candidate.end)
-      if (span !== undefined) {
-        this.viewportAnchor = this.scrollOffset === 0
-          ? { blockKey: '', lineOffset: 0, followLatest: true }
-          : { blockKey: span.blockKey, lineOffset: top - span.start, followLatest: false }
-      }
-    }
     this.search = undefined
     this.searchIndex = undefined
     this.lastFullLines = []
@@ -2018,27 +2047,13 @@ export class Transcript implements Component, Focusable {
 
   private beginSearch(): void {
     this.search = { query: '', composing: true, matchIndex: 0 }
-    const viewport = this.viewportState
-    if (viewport !== undefined) {
-      const index = this.ensureSearchIndex(viewport.contentWidth)
-      const span = index.spans.find(candidate => candidate.blockKey === viewport.start.blockKey)
-      if (this.viewportAnchor.followLatest) {
-        this.scrollOffset = 0
-      } else if (span !== undefined) {
-        const rows = Math.max(1, viewport.rows - 1)
-        const top = span.start + viewport.start.lineOffset
-        this.scrollOffset = Math.max(0, Math.min(
-          Math.max(0, index.lines.length - rows),
-          index.lines.length - top - rows,
-        ))
-      }
-    }
+    this.ensureSearchIndex()
     this.requestRender()
   }
 
   private searchLabel(): string {
     const query = this.search?.query ?? ''
-    const matches = findLineMatches(this.lastFullLines, query)
+    const matches = findLineMatches(this.ensureSearchIndex().lines, query)
     if (query.trim() === '') return ui('查找：', 'Find:')
     if (matches.length === 0) {
       return ui(`查找 ${query} · 无匹配 · Esc 取消`, `Find ${query} · no matches · Esc cancel`)
@@ -2083,12 +2098,12 @@ export class Transcript implements Component, Focusable {
       || matchesKey(data, Key.home) || matchesKey(data, Key.end)) {
       this.turnCursor = undefined
       const rows = Math.max(1, Math.floor(this.viewportRows()) - 1)
-      if (matchesKey(data, Key.up)) this.scrollSearchBy(1, rows)
-      else if (matchesKey(data, Key.down)) this.scrollSearchBy(-1, rows)
-      else if (matchesKey(data, Key.pageUp)) this.scrollSearchBy(Math.max(1, rows - 1), rows)
-      else if (matchesKey(data, Key.pageDown)) this.scrollSearchBy(-Math.max(1, rows - 1), rows)
-      else if (matchesKey(data, Key.home)) this.scrollSearchTo('start', rows)
-      else this.scrollSearchTo('end', rows)
+      if (matchesKey(data, Key.up)) this.scrollBy(1)
+      else if (matchesKey(data, Key.down)) this.scrollBy(-1)
+      else if (matchesKey(data, Key.pageUp)) this.scrollBy(Math.max(1, rows - 1))
+      else if (matchesKey(data, Key.pageDown)) this.scrollBy(-Math.max(1, rows - 1))
+      else if (matchesKey(data, Key.home)) this.scrollToStart()
+      else this.followLatest()
       return
     }
     if (this.search?.composing === false) {
@@ -2136,38 +2151,19 @@ export class Transcript implements Component, Focusable {
     const matches = findLineMatches(index.lines, this.search.query)
     const lineIndex = matches[this.search.matchIndex]
     if (lineIndex === undefined) return
-    this.scrollOffset = scrollOffsetToReveal(
-      index.lines.length,
-      Math.max(1, this.viewportRows() - 1),
-      lineIndex,
-    )
+    const span = index.spans.find(candidate => candidate.start <= lineIndex && lineIndex < candidate.end)
+    if (span === undefined) return
+    this.viewportAnchor = {
+      blockKey: span.blockKey,
+      lineOffset: Math.max(0, lineIndex - span.start),
+      followLatest: false,
+    }
+    this.scrollOffset = Math.max(1, this.scrollOffset)
   }
 
   private activeSearchIndex(): TranscriptSearchIndex | undefined {
     if (this.search === undefined) return undefined
-    const contentWidth = this.viewportState?.contentWidth
-    return contentWidth === undefined ? undefined : this.ensureSearchIndex(contentWidth)
-  }
-
-  private scrollSearchBy(lines: number, rows: number): boolean {
-    const index = this.activeSearchIndex()
-    if (index === undefined) return false
-    const maxOffset = Math.max(0, index.lines.length - rows)
-    const nextOffset = Math.max(0, Math.min(maxOffset, this.scrollOffset + Math.trunc(lines)))
-    if (nextOffset === this.scrollOffset) return false
-    this.scrollOffset = nextOffset
-    this.requestRender()
-    return true
-  }
-
-  private scrollSearchTo(edge: 'start' | 'end', rows: number): boolean {
-    const index = this.activeSearchIndex()
-    if (index === undefined) return false
-    const nextOffset = edge === 'start' ? Math.max(0, index.lines.length - rows) : 0
-    if (nextOffset === this.scrollOffset) return false
-    this.scrollOffset = nextOffset
-    this.requestRender()
-    return true
+    return this.ensureSearchIndex()
   }
 
   private moveViewportStart(
@@ -2230,10 +2226,7 @@ export class Transcript implements Component, Focusable {
     const alreadyAtStart = !this.viewportAnchor.followLatest
       && this.viewportAnchor.blockKey === first.key
       && this.viewportAnchor.lineOffset === 0
-    if (alreadyAtStart) {
-      if (this.hasMore && !this.loadingOlder) this.requestOlder()
-      return false
-    }
+    if (alreadyAtStart) return this.requestOlderFromStart({ blockKey: first.key, lineOffset: 0 })
     this.turnCursor = undefined
     this.viewportAnchor = { blockKey: first.key, lineOffset: 0, followLatest: false }
     this.scrollOffset = Math.max(1, this.scrollOffset)
@@ -2250,19 +2243,18 @@ export class Transcript implements Component, Focusable {
     this.turnCursor = undefined
     const delta = Math.trunc(lines)
     if (!Number.isFinite(delta) || delta === 0) return false
-    if (this.search !== undefined) {
-      const rows = Math.max(1, Math.floor(this.viewportRows()) - 1)
-      return this.scrollSearchBy(delta, rows)
-    }
     if (!this.emptyState && this.viewportState !== undefined) {
       if (delta < 0 && this.viewportAnchor.followLatest) return false
+      const start = this.viewportAnchor.followLatest
+        ? this.viewportState.start
+        : { blockKey: this.viewportAnchor.blockKey, lineOffset: this.viewportAnchor.lineOffset }
       const moved = this.moveViewportStart(
-        this.viewportState.start,
+        start,
         delta,
         this.viewportState.contentWidth,
       )
       if (moved.moved === 0) {
-        if (delta > 0 && this.hasMore && !this.loadingOlder) this.requestOlder()
+        if (delta > 0) this.requestOlderFromStart(this.viewportState.start)
         return false
       }
       const reachesLatest = delta < 0 && this.moveViewportStart(
@@ -2270,6 +2262,7 @@ export class Transcript implements Component, Focusable {
         -this.viewportState.rows,
         this.viewportState.contentWidth,
       ).moved < this.viewportState.rows
+      this.pendingOlderAnchor = undefined
       this.viewportAnchor = reachesLatest
         ? { blockKey: '', lineOffset: 0, followLatest: true }
         : { ...moved.coordinate, followLatest: false }
@@ -2282,8 +2275,8 @@ export class Transcript implements Component, Focusable {
     const maxOffset = Math.max(0, this.renderedLineCount - rows)
     const nextOffset = Math.max(0, Math.min(maxOffset, this.scrollOffset + delta))
     if (nextOffset === this.scrollOffset) {
-      if (delta > 0 && this.scrollOffset === maxOffset && this.hasMore && !this.loadingOlder) {
-        this.requestOlder()
+      if (delta > 0 && this.scrollOffset === maxOffset) {
+        this.requestOlderFromStart()
       }
       return false
     }
@@ -2324,12 +2317,7 @@ export class Transcript implements Component, Focusable {
     const anchor = turns[index]
     if (anchor === undefined) return false
     this.turnCursor = { blockKey: anchor.blockKey, lineOffset: anchor.lineOffset }
-    const markerRoom = this.moveViewportStart(
-      { blockKey: anchor.blockKey, lineOffset: anchor.lineOffset },
-      1,
-      viewport.contentWidth,
-    ).coordinate
-    this.viewportAnchor = { ...markerRoom, followLatest: false }
+    this.viewportAnchor = { blockKey: anchor.blockKey, lineOffset: anchor.lineOffset, followLatest: false }
     this.scrollOffset = Math.max(1, this.scrollOffset)
     this.requestRender()
     return true
@@ -2393,13 +2381,31 @@ export class Transcript implements Component, Focusable {
 
   private commit(blocks: readonly TranscriptBlock[]): void {
     this.blocks = blocks
-    if (!this.viewportAnchor.followLatest
+    if (this.pendingOlderAnchor !== undefined
+      && blocks.some(block => block.key === this.pendingOlderAnchor?.blockKey)) {
+      this.viewportAnchor = { ...this.pendingOlderAnchor, followLatest: false }
+    } else if (!this.viewportAnchor.followLatest
       && !blocks.some(block => block.key === this.viewportAnchor.blockKey)) {
       this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
     }
+    this.heightIndex.reconcile(
+      blocks.map(block => block.key),
+      (key) => {
+        const block = blocks.find(candidate => candidate.key === key)
+        return Math.max(1, block?.rows.length ?? 1)
+      },
+      this.viewportState?.contentWidth ?? this.heightIndex.contentWidth,
+    )
+    if (this.search !== undefined) this.ensureSearchIndex()
+    this.syncHeightIndexCounters()
     this.syncPulseAnimation(blocks.some(block => block.rows.some(row =>
       row.liveDurationSince !== undefined
       || (row.pulse !== undefined && terminalColorLevel() !== 0))))
+  }
+
+  private syncHeightIndexCounters(): void {
+    internals.heightIndexExact = this.heightIndex.exactEntries
+    internals.heightIndexEstimated = this.heightIndex.estimatedEntries
   }
 
   private component(row: TranscriptRow): Component {

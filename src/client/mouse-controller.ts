@@ -13,6 +13,9 @@ import type { CellPoint, MouseButton, MouseInput, MouseModifiers } from './mouse
 export const DOUBLE_CLICK_MS = 400
 export const FOCUS_GUARD_MS = 250
 
+export const WHEEL_ACCEL_MS = 80
+export const WHEEL_RESET_MS = 120
+
 type GestureState =
   | { readonly kind: 'idle' }
   | {
@@ -133,6 +136,9 @@ export class MouseController {
   private edgeTimer: ReturnType<typeof setTimeout> | undefined
   private focusTimer: ReturnType<typeof setTimeout> | undefined
   private suppressUntil = 0
+  private wheelStreak = 1
+  private lastWheelAt = 0
+  private lastWheelDir = 0
 
   constructor(private readonly options: MouseControllerOptions) {
     this.now = options.now ?? Date.now
@@ -173,6 +179,14 @@ export class MouseController {
     return this.handleRelease(input)
   }
 
+  noteCoalescedWheel(): void {
+    this.counters.coalescedWheelEvents += 1
+  }
+
+  recordMouseRender(): void {
+    this.counters.mouseRenderRequests += 1
+  }
+
   endGesture(): void {
     this.clearTimer('click')
     this.clearTimer('edge')
@@ -209,34 +223,54 @@ export class MouseController {
     input: Extract<MouseInput, { kind: 'wheel' }>,
   ): MouseControllerOutcome {
     const hit = this.lookup(input.point)
-    if (input.axis === 'horizontal') {
+    const region = hit?.region
+    const overlay = region?.action.kind === 'overlay'
+    const composer = region?.action.kind === 'composer' || region?.role === 'input'
+    const transcript = region?.action.kind === 'transcript'
+      || region?.role === 'text'
+      || region?.role === 'scrollbar'
+    const lines = input.axis === 'horizontal' ? 0 : this.scaledWheelLines(input.delta)
+    const semantic = {
+      kind: 'wheel' as const,
+      axis: input.axis,
+      lines,
+      point: input.point,
+      ...(region === undefined ? {} : { region }),
+      modifiers: input.modifiers,
+    }
+    if (input.axis === 'horizontal' || overlay || composer || !transcript) {
       return {
         consume: true,
-        semantic: {
-          kind: 'wheel',
-          axis: 'horizontal',
-          lines: 0,
-          point: input.point,
-          ...(hit?.region === undefined ? {} : { region: hit.region }),
-          modifiers: input.modifiers,
-        },
+        ...(overlay || composer ? { requestRender: true } : {}),
+        semantic,
       }
     }
-    const lines = clampWheelLines(this.options.getBehavior().wheelScrollLines) * input.delta
-    this.counters.mouseRenderRequests += 1
     return {
       consume: true,
       scrollTranscript: lines,
       requestRender: true,
-      semantic: {
-        kind: 'wheel',
-        axis: 'vertical',
-        lines,
-        point: input.point,
-        ...(hit?.region === undefined ? {} : { region: hit.region }),
-        modifiers: input.modifiers,
-      },
+      semantic,
     }
+  }
+
+  private scaledWheelLines(delta: number): number {
+    const behavior = this.options.getBehavior()
+    const base = clampWheelLines(behavior.wheelScrollLines)
+    const direction = Math.sign(delta)
+    if (direction === 0) return 0
+    const now = this.now()
+    const elapsed = now - this.lastWheelAt
+    if (!behavior.wheelAcceleration || elapsed > WHEEL_RESET_MS || direction !== this.lastWheelDir) {
+      this.wheelStreak = 1
+    } else if (elapsed <= WHEEL_ACCEL_MS) {
+      this.wheelStreak = Math.min(4, this.wheelStreak + 1)
+    }
+    this.lastWheelAt = now
+    this.lastWheelDir = direction
+    const effective = behavior.wheelAcceleration
+      ? Math.min(MAX_WHEEL_SCROLL_LINES, base * this.wheelStreak)
+      : base
+    return effective * direction
   }
 
   private handlePress(

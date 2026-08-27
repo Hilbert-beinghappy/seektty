@@ -346,7 +346,7 @@ describe('conversation viewport', () => {
 
     const rows = transcript.render(40)
     expect(rows).toHaveLength(8)
-    expect(rows.slice(0, 5)).toEqual(['', '', '', '', ''])
+    expect(rows.slice(0, 5).every(row => stripAnsi(row).replace(/[▐│▴▾⇡]/gu, '').trim() === '')).toBe(true)
     expect(rows.at(-3)).toContain('> 问题')
     expect(rows.join('\n')).not.toContain('❯ 问题')
     expect(rows.at(-1)).toContain('回答')
@@ -375,9 +375,9 @@ describe('conversation viewport', () => {
     ]))
 
     const rendered = transcript.render(40).join('\n')
-    expect(rendered).toContain('更早内容 · 滚轮上翻')
-    expect(rendered).not.toContain('思考完成')
     expect(rendered).toContain('最新回答')
+    expect(rendered).not.toContain('思考完成')
+    expect(rendered).toMatch(/[▐│▴▾]/u)
   })
 
   it('starts the latest viewport at a complete user turn when it fits', () => {
@@ -391,7 +391,6 @@ describe('conversation viewport', () => {
     ]))
 
     const rendered = transcript.render(40).join('\n')
-    expect(rendered).toContain('更早内容 · 滚轮上翻')
     expect(rendered).not.toContain('不应悬在顶部的尾行')
     expect(rendered).toContain('> 最新问题')
     expect(rendered).toContain('最新回答第二行')
@@ -412,14 +411,13 @@ describe('conversation viewport', () => {
 
     const latest = transcript.render(40).join('\n')
     expect(latest).toContain('最新回答')
-    expect(latest).toContain('滚轮上翻')
 
     transcript.focused = true
     transcript.handleInput('\u001B[5~')
     const previousPage = transcript.render(40).join('\n')
     expect(requestRender).toHaveBeenCalledTimes(1)
     expect(previousPage).not.toBe(latest)
-    expect(previousPage).toContain('有更新内容 · PgDn/End')
+    expect(previousPage).not.toContain('最新回答')
 
     transcript.handleInput('\u001B[H')
     expect(transcript.render(40).join('\n')).toContain('第一个问题')
@@ -427,7 +425,6 @@ describe('conversation viewport', () => {
     transcript.handleInput('\u001B[F')
     const returned = transcript.render(40).join('\n')
     expect(returned).toContain('最新回答')
-    expect(returned).toContain('更早内容 · PgUp/Home')
     expect(requestRender).toHaveBeenCalledTimes(3)
   })
 
@@ -444,7 +441,8 @@ describe('conversation viewport', () => {
     transcript.render(40)
 
     expect(transcript.scrollBy(3)).toBe(true)
-    expect(transcript.render(40).join('\n')).toContain('滚轮下翻')
+    expect(transcript.render(40).join('\n')).toContain('第三段回答')
+    expect(transcript.render(40).join('\n')).not.toContain('最新回答')
     expect(requestRender).toHaveBeenCalledTimes(1)
     expect(transcript.focused).toBe(false)
 
@@ -467,12 +465,12 @@ describe('conversation viewport', () => {
     transcript.render(40)
 
     expect(transcript.scrollBy(100)).toBe(true)
-    expect(transcript.render(40).join('\n')).toContain('还有更早内容 · 滚轮上翻')
+    expect(transcript.render(40).join('\n')).toContain('当前已加载的最早问题')
     expect(transcript.scrollBy(3)).toBe(false)
     expect(requestOlder).toHaveBeenCalledTimes(1)
 
     transcript.update(snapshot(nodes, { hasMore: true, loadingOlder: true }))
-    expect(transcript.render(40).join('\n')).toContain('正在加载更早内容')
+    expect(transcript.render(40).join('\n')).toContain('⇡')
     expect(transcript.scrollBy(3)).toBe(false)
     expect(requestOlder).toHaveBeenCalledTimes(1)
   })
@@ -491,9 +489,9 @@ describe('conversation viewport', () => {
     expect(codeLines).toHaveLength(2)
     for (const codeLine of codeLines) {
       expect(codeLine).toContain('\u001B[48;2;17;24;39m')
-      expect(codeLine).toMatch(/ +\u001B\[0m\s*$/u)
+      expect(codeLine).toMatch(/ +\u001B\[0m(?:\s*(?:\u001B\[[0-9;:]*m)?▐(?:\u001B\[0m)?)?\s*$/u)
     }
-    expect(codeLines.map(codeLine => stripAnsi(codeLine).length)).toEqual([42, 42])
+    expect(new Set(codeLines.map(codeLine => stripAnsi(codeLine).length)).size).toBe(1)
     expect(stripAnsi(rendered.join('\n'))).not.toContain('```')
   })
 

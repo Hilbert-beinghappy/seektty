@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_TUI_BEHAVIOR } from '../src/protocol.ts'
 import { createMouseController, DOUBLE_CLICK_MS, FOCUS_GUARD_MS } from '../src/client/mouse-controller.ts'
-import { HitMapBuilder, type HitMapSnapshot, type TuiFrameGeometry } from '../src/client/mouse-hit-map.ts'
+import { HitMapBuilder, emptyHitMap, type HitMapSnapshot, type TuiFrameGeometry } from '../src/client/mouse-hit-map.ts'
 import type { MouseInput } from '../src/client/mouse-protocol.ts'
 
 const geometry: TuiFrameGeometry = {
@@ -164,5 +164,65 @@ describe('mouse controller skeleton', () => {
     expect(controller.gesture).toBe('idle')
     expect(timers.size).toBe(0)
     expect(DOUBLE_CLICK_MS).toBe(400)
+  })
+
+  it('does not scroll the transcript when a capturing overlay owns the wheel', () => {
+    const overlayMap = new HitMapBuilder(1)
+      .addCapturingOverlay({
+        overlayId: '1',
+        viewport: { col: 0, row: 0, width: 80, height: 24 },
+        overlay: { col: 10, row: 4, width: 40, height: 10 },
+        zOrder: 0,
+      })
+      .freeze(geometry)
+    const controller = createMouseController({
+      getHitMap: () => overlayMap,
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+    })
+    const outcome = controller.handle(wheel(1, { col: 2, row: 2 }))
+    expect(outcome.consume).toBe(true)
+    expect(outcome.scrollTranscript).toBeUndefined()
+    expect(outcome.semantic).toMatchObject({ kind: 'wheel', axis: 'vertical' })
+  })
+
+  it('consumes a miss without scrolling', () => {
+    const controller = createMouseController({
+      getHitMap: () => emptyHitMap(1, 80, 24),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+    })
+    const outcome = controller.handle(wheel(1, { col: 70, row: 22 }))
+    expect(outcome.consume).toBe(true)
+    expect(outcome.scrollTranscript).toBeUndefined()
+  })
+
+  it('accelerates same-direction detents and resets after 120ms', () => {
+    let now = 10_000
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      now: () => now,
+    })
+    expect(controller.handle(wheel(1)).scrollTranscript).toBe(3)
+    now += 50
+    expect(controller.handle(wheel(1)).scrollTranscript).toBe(6)
+    now += 50
+    expect(controller.handle(wheel(1)).scrollTranscript).toBe(9)
+    now += 50
+    expect(controller.handle(wheel(1)).scrollTranscript).toBe(12)
+    now += 121
+    expect(controller.handle(wheel(1)).scrollTranscript).toBe(3)
+  })
+
+  it('counts extra wheels in the same frame as coalesced', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1),
+      getBehavior: () => ({ ...DEFAULT_TUI_BEHAVIOR, wheelAcceleration: false }),
+    })
+    controller.handle(wheel(1))
+    controller.noteCoalescedWheel()
+    controller.handle(wheel(1))
+    controller.recordMouseRender()
+    expect(controller.metrics.coalescedWheelEvents).toBe(1)
+    expect(controller.metrics.mouseRenderRequests).toBe(1)
   })
 })

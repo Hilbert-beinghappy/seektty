@@ -1002,6 +1002,22 @@ export class OverlayQueue implements OverlayPrompts {
    */
   hasActive(): boolean { return this.active !== undefined }
 
+  /**
+   * Scroll the capturing overlay by keyboard-equivalent steps.
+   * Positive lines move toward the start of the list or detail (Key.up).
+   */
+  handleWheel(lines: number): boolean {
+    const component = this.active?.component
+    const delta = Math.trunc(lines)
+    if (component === undefined || delta === 0) return false
+    const key = delta > 0 ? Key.up : Key.down
+    const steps = Math.min(12, Math.abs(delta))
+    for (let step = 0; step < steps; step += 1) {
+      component.handleInput?.(key)
+    }
+    return true
+  }
+
   /** Frame generation bound to the currently capturing overlay; changes on replace. */
   activeGeneration(): number { return this.generation }
 

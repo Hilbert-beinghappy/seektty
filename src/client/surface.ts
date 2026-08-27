@@ -10,6 +10,7 @@ import {
   type Terminal,
 } from '@mariozechner/pi-tui'
 import {
+  MAX_WHEEL_SCROLL_LINES,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
@@ -94,7 +95,7 @@ import {
 import { MouseProtocolDecoder } from './mouse-protocol.ts'
 import { createMouseController } from './mouse-controller.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder } from './mouse-hit-map.ts'
-import { emptyFrameGeometry, tuiFrameApi } from './pi-tui-adapters.ts'
+import { emptyFrameGeometry, editorMouseApi, tuiFrameApi } from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
 import { attachFatalGuards, fatalLogHint, restoreSurfaceTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -252,6 +253,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       liveBehavior.get().toolOutputLineLimit,
       liveBehavior.get().diffContextLines,
     )
+    transcript.setScrollbarVisibility(liveBehavior.get().scrollbarVisibility)
     let syntax: SyntaxHighlighter | undefined
     disposeConstructedSyntax = () => { syntax?.dispose() }
     void SyntaxHighlighter.create(initialTheme, () => {
@@ -329,6 +331,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           enabled: true,
           action: { kind: 'transcript', command: 'select' },
         })
+        for (const region of transcript.scrollbarHitRegions(slots.transcript)) {
+          builder.add(region)
+        }
         const composerOrigin = { col: slots.composer.col, row: slots.composer.row }
         const local = editor.lastLocalGeometry()
         if (local === undefined) {
@@ -682,6 +687,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
         terminalSession.setMouseReporting(behavior.mouseMode)
         mouseController.endGesture()
+        transcript.setScrollbarVisibility(behavior.scrollbarVisibility)
         transcript.applyPresentationDefaults(
           behavior.toolCards,
           behavior.showReasoning,
@@ -903,10 +909,44 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     tui.addInputListener((data) => {
       performanceProbe.markInput()
       const decoded = mouseDecoder.push(data)
+      let pendingWheel = 0
+      let needMouseRender = false
       for (const event of decoded.events) {
         const outcome = mouseController.handle(event)
-        if (outcome.scrollTranscript !== undefined) transcript.scrollBy(outcome.scrollTranscript)
-        if (outcome.requestRender === true) renderWhileOpen()
+        if (outcome.semantic?.kind === 'wheel') {
+          const region = outcome.semantic.region
+          if (region?.action.kind === 'overlay') {
+            overlays.handleWheel(outcome.semantic.lines)
+          } else if (region?.action.kind === 'composer' && region.action.command === 'autocomplete') {
+            const api = editorMouseApi(editor)
+            const selected = api.getAutocompleteSelectedIndex?.() ?? 0
+            const next = selected - Math.sign(outcome.semantic.lines)
+            api.setAutocompleteSelectedIndex?.(Math.max(0, next))
+          } else if (region?.action.kind === 'composer' || region?.role === 'input') {
+            const steps = Math.min(MAX_WHEEL_SCROLL_LINES, Math.abs(outcome.semantic.lines))
+            const key = outcome.semantic.lines > 0 ? Key.up : Key.down
+            for (let step = 0; step < steps; step += 1) editor.handleInput(key)
+          } else if (outcome.scrollTranscript !== undefined) {
+            if (pendingWheel !== 0) mouseController.noteCoalescedWheel()
+            pendingWheel += outcome.scrollTranscript
+          }
+        } else if (outcome.semantic?.kind === 'click'
+          && outcome.semantic.suppressed === false
+          && outcome.semantic.region?.role === 'scrollbar') {
+          const origin = layout.lastContentGeometry()?.transcript
+          if (origin !== undefined) {
+            transcript.handleScrollbarClick(outcome.semantic.region, outcome.semantic.point, origin)
+          }
+        }
+        if (outcome.requestRender === true) needMouseRender = true
+      }
+      if (pendingWheel !== 0) {
+        transcript.scrollBy(Math.max(-MAX_WHEEL_SCROLL_LINES, Math.min(MAX_WHEEL_SCROLL_LINES, pendingWheel)))
+        needMouseRender = true
+      }
+      if (decoded.events.length > 0 && needMouseRender) {
+        mouseController.recordMouseRender()
+        renderWhileOpen()
       }
       if (decoded.pending !== '') return { consume: true }
       if (decoded.events.length > 0 && decoded.leftover === '') return { consume: true }
