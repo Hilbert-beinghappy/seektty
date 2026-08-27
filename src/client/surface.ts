@@ -138,6 +138,23 @@ function noticeText(message: string, tone: NoticeTone): string {
   }
 }
 
+function sliceEditorSelection(
+  text: string,
+  selection: { readonly anchor: { readonly line: number; readonly col: number }; readonly focus: { readonly line: number; readonly col: number } },
+): string {
+  const lines = text.split('\n')
+  const offsetOf = (point: { readonly line: number; readonly col: number }): number => {
+    let offset = 0
+    for (let index = 0; index < point.line; index += 1) {
+      offset += (lines[index]?.length ?? 0) + 1
+    }
+    return offset + point.col
+  }
+  const start = offsetOf(selection.anchor)
+  const end = offsetOf(selection.focus)
+  return start <= end ? text.slice(start, end) : text.slice(end, start)
+}
+
 /**
  * Start the interactive Surface after the Host bridge is available.
  * @param options - in-process API, RPC carrier, and launch target.
@@ -403,6 +420,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     mouseController = createMouseController({
       getHitMap: () => hitMap,
       getBehavior: () => liveBehavior.get(),
+      onEdgeScroll: (lines) => {
+        transcript.scrollBy(lines)
+        renderWhileOpen()
+      },
     })
     let resolveClosed: (outcome: TuiSurfaceOutcome) => void = () => undefined
     const closed = new Promise<TuiSurfaceOutcome>((resolve) => { resolveClosed = resolve })
@@ -906,6 +927,70 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return { consume: true }
     }
 
+    const copyActiveSelection = (): void => {
+      const transcriptText = transcript.copySelectionText()
+      const editorApi = editorMouseApi(editor)
+      const editorSelection = editorApi.getSelection?.()
+      const composerText = editorSelection === undefined
+        ? ''
+        : sliceEditorSelection(editor.getText(), editorSelection)
+      const text = transcriptText !== '' ? transcriptText : composerText
+      if (text === '') return
+      void writeClipboard(text, {
+        fallback: liveBehavior.get().clipboardFallback,
+        platform: process.platform,
+        writeOsc52: sequence => { terminal.write(sequence) },
+      }).catch((error: unknown) => {
+        setNotice(ui(
+          `复制失败：${capabilityError(error)}`,
+          `Copy failed: ${capabilityError(error)}`,
+        ), 'warning')
+      })
+    }
+
+    const applyTranscriptPointer = (
+      point: { readonly col: number; readonly row: number },
+      originPoint: { readonly col: number; readonly row: number } | undefined,
+      granularity: 'character' | 'word' | 'line',
+    ): void => {
+      const slot = layout.lastContentGeometry()?.transcript
+      if (slot === undefined) return
+      const focus = transcript.hitAnchor(point.col - slot.col, point.row - slot.row, slot.width)
+      const startPoint = originPoint ?? point
+      const anchor = originPoint === undefined
+        ? focus
+        : transcript.hitAnchor(startPoint.col - slot.col, startPoint.row - slot.row, slot.width)
+      if (anchor === undefined || focus === undefined) return
+      transcript.applyPointerSelection(anchor, focus, granularity)
+    }
+
+    const applyComposerPointer = (
+      point: { readonly col: number; readonly row: number },
+      originPoint: { readonly col: number; readonly row: number } | undefined,
+      drag: boolean,
+    ): void => {
+      const slots = layout.lastContentGeometry()
+      const local = editor.lastLocalGeometry()
+      if (slots === undefined || local === undefined) return
+      const api = editorMouseApi(editor)
+      const map = api.getVisualLineMap?.(local.frameWidth) ?? []
+      const toCaret = (target: { readonly col: number; readonly row: number }): { line: number; col: number } => {
+        const row = Math.max(0, target.row - slots.composer.row - local.editor.row)
+        const col = Math.max(0, target.col - slots.composer.col - local.editor.col)
+        const visual = map[Math.min(row, Math.max(0, map.length - 1))]
+        if (visual === undefined) return api.getCursor()
+        return { line: visual.logicalLine, col: visual.startCol + Math.min(col, visual.length) }
+      }
+      const focus = toCaret(point)
+      api.setCursor?.(focus.line, focus.col)
+      if (drag && originPoint !== undefined) {
+        const anchor = toCaret(originPoint)
+        api.setSelection?.(anchor, focus)
+      } else {
+        api.clearSelection?.()
+      }
+    }
+
     tui.addInputListener((data) => {
       performanceProbe.markInput()
       const decoded = mouseDecoder.push(data)
@@ -930,13 +1015,40 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             if (pendingWheel !== 0) mouseController.noteCoalescedWheel()
             pendingWheel += outcome.scrollTranscript
           }
-        } else if (outcome.semantic?.kind === 'click'
-          && outcome.semantic.suppressed === false
-          && outcome.semantic.region?.role === 'scrollbar') {
-          const origin = layout.lastContentGeometry()?.transcript
-          if (origin !== undefined) {
-            transcript.handleScrollbarClick(outcome.semantic.region, outcome.semantic.point, origin)
+        } else if (outcome.semantic?.kind === 'click' && outcome.semantic.suppressed === false) {
+          const semantic = outcome.semantic
+          if (semantic.button === 'right') {
+            if (transcript.copySelectionText() !== '') copyActiveSelection()
+            else {
+              setNotice(ui(
+                '没有应用内选区。按 F3 或 /mouse 切换到原生终端选择。',
+                'No in-app selection. Press F3 or /mouse for native terminal selection.',
+              ), 'info')
+            }
+          } else if (semantic.region?.role === 'scrollbar') {
+            const origin = layout.lastContentGeometry()?.transcript
+            if (origin !== undefined) {
+              transcript.handleScrollbarClick(semantic.region, semantic.point, origin)
+            }
+          } else if (semantic.region?.role === 'text' || semantic.region?.action.kind === 'transcript') {
+            const granularity = semantic.count === 3 ? 'line' : semantic.count === 2 ? 'word' : 'character'
+            applyTranscriptPointer(semantic.point, undefined, granularity)
+          } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
+            applyComposerPointer(semantic.point, undefined, false)
           }
+        } else if (outcome.semantic?.kind === 'drag') {
+          const semantic = outcome.semantic
+          if (semantic.grabOffset !== undefined || mouseController.gesture === 'dragging-scrollbar') {
+            const origin = layout.lastContentGeometry()?.transcript
+            if (origin !== undefined) {
+              transcript.dragThumb(semantic.point.row - origin.row, semantic.grabOffset ?? 0)
+            }
+          } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
+            applyComposerPointer(semantic.point, semantic.origin, true)
+          } else {
+            applyTranscriptPointer(semantic.point, semantic.origin, 'character')
+          }
+          if (semantic.ended === true && liveBehavior.get().copyOnSelect) copyActiveSelection()
         }
         if (outcome.requestRender === true) needMouseRender = true
       }
@@ -957,6 +1069,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (matchesBinding('copySelection', payload)) {
+        copyActiveSelection()
         return { consume: true }
       }
       const interrupt = consumeRunningInterrupt(payload, capabilities.active()?.session)

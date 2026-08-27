@@ -67,6 +67,18 @@ import {
   type ScrollbarModel,
 } from './scrollbar.ts'
 import type { CellRect, HitRegion } from './mouse-hit-map.ts'
+import {
+  anchorAtCell,
+  expandSelection,
+  extractSelectedText,
+  mapCopyableLine,
+  ownerTextFromRenderedLines,
+  paintSelection,
+  selectionClearedForOwner,
+  type SelectionAnchor,
+  type TextSelection,
+  type ViewportCellMap,
+} from './text-selection.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -1265,6 +1277,9 @@ export class Transcript implements Component, Focusable {
   private scrollbarVisible: 'always' | 'hidden' = DEFAULT_TUI_BEHAVIOR.scrollbarVisibility
   private pendingOlderAnchor: TranscriptCoordinate | undefined
   private lastScrollbar: ScrollbarModel | undefined
+  private readonly ownerCopy = new Map<string, { readonly text: string; readonly lineStarts: readonly number[] }>()
+  private lastViewportMaps: readonly ViewportCellMap[] = []
+  private selection: TextSelection | undefined
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1394,6 +1409,65 @@ export class Transcript implements Component, Focusable {
     return this.scrollToEstimatedOffset(offsetForTrackRow(this.lastScrollbar, localRow))
   }
 
+  /** Thumb drag uses the same height-index snapshot as Home/wheel. */
+  dragThumb(localRow: number, grabOffset: number): boolean {
+    if (this.lastScrollbar === undefined) return false
+    const row = localRow - grabOffset
+    if (row <= 0 && this.hasMore) this.requestOlderFromStart(this.viewportState?.start)
+    return this.scrollToEstimatedOffset(offsetForTrackRow(this.lastScrollbar, Math.max(0, row)))
+  }
+
+  setSelection(selection: TextSelection | undefined): void {
+    this.selection = selection
+  }
+
+  currentSelection(): TextSelection | undefined {
+    return this.selection
+  }
+
+  viewportMaps(): readonly ViewportCellMap[] {
+    return this.lastViewportMaps
+  }
+
+  hitAnchor(col: number, row: number, width: number): SelectionAnchor | undefined {
+    const inset = width >= 12 ? 2 : 0
+    if (this.showsScrollbar(width) && col >= width - 1) return undefined
+    const map = this.lastViewportMaps.find(candidate => candidate.row === row)
+    if (map === undefined) return undefined
+    return anchorAtCell(map, col - inset)
+  }
+
+  copySelectionText(): string {
+    if (this.selection === undefined) return ''
+    const keys = new Set(this.blocks.map(block => block.key))
+    const selection = selectionClearedForOwner(this.selection, keys)
+    if (selection === undefined) return ''
+    const owners = this.blocks.flatMap(block => {
+      const copy = this.ownerCopy.get(block.key)
+      return copy === undefined ? [] : [{ key: block.key, text: copy.text }]
+    })
+    return extractSelectedText(selection, owners)
+  }
+
+  clearSelection(): void {
+    this.selection = undefined
+  }
+
+  applyPointerSelection(
+    anchor: SelectionAnchor,
+    focus: SelectionAnchor,
+    granularity: TextSelection['granularity'],
+  ): void {
+    if (anchor.surface !== focus.surface) return
+    let next: TextSelection = { anchor, focus, granularity }
+    if (granularity !== 'character') {
+      const text = this.ownerCopy.get(focus.ownerKey)?.text ?? ''
+      next = expandSelection(next, text, granularity)
+    }
+    this.selection = next
+    this.requestRender()
+  }
+
   /**
    * Report whether the transcript is showing non-durable empty-session guidance.
    * @returns true while the conversation has no visible durable content.
@@ -1427,6 +1501,9 @@ export class Transcript implements Component, Focusable {
     this.pendingOlderAnchor = undefined
     this.lastScrollbar = undefined
     this.heightIndex.clear()
+    this.ownerCopy.clear()
+    this.lastViewportMaps = []
+    this.selection = undefined
     this.syncHeightIndexCounters()
     this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
   }
@@ -1463,6 +1540,9 @@ export class Transcript implements Component, Focusable {
       this.pendingOlderAnchor = undefined
       this.lastScrollbar = undefined
       this.heightIndex.clear()
+      this.ownerCopy.clear()
+      this.lastViewportMaps = []
+      this.selection = undefined
       this.syncHeightIndexCounters()
     }
     this.imageLoader = imageLoader
@@ -1664,6 +1744,9 @@ export class Transcript implements Component, Focusable {
     this.pendingOlderAnchor = undefined
     this.lastScrollbar = undefined
     this.heightIndex.clear()
+    this.ownerCopy.clear()
+    this.lastViewportMaps = []
+    this.selection = undefined
     this.syncHeightIndexCounters()
   }
 
@@ -1677,7 +1760,12 @@ export class Transcript implements Component, Focusable {
       block.dirty = false
     }
     const cachedBlock = block.metadata.dynamic ? undefined : block.linesByWidth.get(cacheKey)
-    if (cachedBlock !== undefined) return cachedBlock
+    if (cachedBlock !== undefined) {
+      this.heightIndex.setExact(block.key, cachedBlock.lines.length)
+      this.rememberOwnerCopy(block.key, cachedBlock.lines, contentWidth)
+      this.syncHeightIndexCounters()
+      return cachedBlock
+    }
     const lines: string[] = []
     const turnAnchors: number[] = []
     for (const [index, component] of block.components.entries()) {
@@ -1713,8 +1801,13 @@ export class Transcript implements Component, Focusable {
       }
     }
     this.heightIndex.setExact(block.key, result.lines.length)
+    this.rememberOwnerCopy(block.key, result.lines, contentWidth)
     this.syncHeightIndexCounters()
     return result
+  }
+
+  private rememberOwnerCopy(key: string, lines: readonly string[], contentWidth: number): void {
+    this.ownerCopy.set(key, ownerTextFromRenderedLines(lines, Math.abs(contentWidth)))
   }
 
   private fillFrom(
@@ -1907,6 +2000,46 @@ export class Transcript implements Component, Focusable {
     return appendScrollbarColumn(withSearch, paintScrollbar(model), width)
   }
 
+  private captureViewportMaps(
+    lines: readonly string[],
+    contentWidth: number,
+  ): { readonly lines: readonly string[]; readonly maps: readonly ViewportCellMap[] } {
+    const start = this.viewportState?.start
+    const maps: ViewportCellMap[] = []
+    if (start === undefined) {
+      this.lastViewportMaps = maps
+      return { lines, maps }
+    }
+    let blockIndex = this.blocks.findIndex(block => block.key === start.blockKey)
+    let lineOffset = start.lineOffset
+    let started = false
+    for (let row = 0; row < lines.length; row += 1) {
+      const empty = (lines[row] ?? '').replace(/\u001B\[[0-9;:]*m/gu, '').trim() === ''
+      if (!started && empty) continue
+      started = true
+      const block = this.blocks[blockIndex]
+      if (block === undefined) break
+      const copy = this.ownerCopy.get(block.key)
+      const startOffset = copy?.lineStarts[lineOffset] ?? 0
+      const mapped = mapCopyableLine(lines[row] ?? '', startOffset, contentWidth)
+      maps.push({
+        row,
+        ownerKey: block.key,
+        surface: 'transcript',
+        startOffset,
+        cellOffsets: mapped.cellOffsets,
+        hardBreakAfter: mapped.hardBreakAfter,
+      })
+      lineOffset += 1
+      if (lineOffset >= (copy?.lineStarts.length ?? 1)) {
+        blockIndex += 1
+        lineOffset = 0
+      }
+    }
+    this.lastViewportMaps = maps
+    return { lines, maps }
+  }
+
   render(width: number): string[] {
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
@@ -1923,10 +2056,17 @@ export class Transcript implements Component, Focusable {
     if (Number.isFinite(totalRows) && !this.emptyState) {
       const rows = this.search === undefined ? totalRows : Math.max(1, totalRows - 1)
       const visible = this.finiteViewportLines(contentWidth, rows)
-      const painted = this.search === undefined
-        ? visible
-        : this.highlightVisible(visible, this.search.query)
-      return this.presentLines(painted, width, inset, contentWidth)
+      const mapped = this.captureViewportMaps(visible, contentWidth)
+      const highlighted = this.search === undefined
+        ? mapped.lines
+        : this.highlightVisible(mapped.lines, this.search.query)
+      const selected = paintSelection(
+        highlighted,
+        mapped.maps,
+        this.selection,
+        this.blocks.map(block => block.key),
+      )
+      return this.presentLines(selected, width, inset, contentWidth)
     }
     const lines: string[] = []
     const anchors: number[] = []
@@ -2397,6 +2537,8 @@ export class Transcript implements Component, Focusable {
       this.viewportState?.contentWidth ?? this.heightIndex.contentWidth,
     )
     if (this.search !== undefined) this.ensureSearchIndex()
+    const keys = new Set(blocks.map(block => block.key))
+    this.selection = selectionClearedForOwner(this.selection, keys)
     this.syncHeightIndexCounters()
     this.syncPulseAnimation(blocks.some(block => block.rows.some(row =>
       row.liveDurationSince !== undefined

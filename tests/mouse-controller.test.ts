@@ -213,6 +213,46 @@ describe('mouse controller skeleton', () => {
     expect(controller.handle(wheel(1)).scrollTranscript).toBe(3)
   })
 
+  it('emits grab offset while dragging the scrollbar thumb', () => {
+    const bar = new HitMapBuilder(1)
+      .add({
+        id: 'transcript:scrollbar:thumb',
+        rect: { col: 79, row: 4, width: 1, height: 4 },
+        zIndex: 11,
+        role: 'scrollbar',
+        enabled: true,
+        action: { kind: 'transcript', command: 'drag-thumb' },
+      })
+      .freeze(geometry)
+    const controller = createMouseController({
+      getHitMap: () => bar,
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    controller.handle({
+      kind: 'press',
+      button: 'left',
+      point: { col: 79, row: 5 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    const dragged = controller.handle({
+      kind: 'drag',
+      button: 'left',
+      point: { col: 79, row: 8 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    expect(controller.gesture).toBe('dragging-scrollbar')
+    expect(dragged.semantic).toMatchObject({ kind: 'drag', grabOffset: 1 })
+    const ended = controller.handle({
+      kind: 'release',
+      button: 'left',
+      point: { col: 79, row: 8 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    expect(ended.semantic).toMatchObject({ kind: 'drag', ended: true })
+  })
+
   it('counts extra wheels in the same frame as coalesced', () => {
     const controller = createMouseController({
       getHitMap: () => snapshot(1),

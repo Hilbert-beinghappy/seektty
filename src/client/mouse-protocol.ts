@@ -71,11 +71,11 @@ export const ENTER_ALTERNATE_SCREEN = `${CSI}?1049h${ESC}[H`
 export const LEAVE_ALTERNATE_SCREEN = `${CSI}?25h${CSI}?1049l`
 
 /**
- * Commit 2 full mouse: button events (`1000`) + SGR (`1006`) + focus (`1004`).
- * Drag reporting (`1002`) stays off until application-owned selection lands.
+ * Full mouse: drag reporting (`1002`) + SGR (`1006`) + focus (`1004`).
+ * `1000` is disabled once `1002` is on; never enable `1003`.
  */
 export function encodeFullMouseReporting(): string {
-  return `${CSI}?1002l${CSI}?1003l${CSI}?1007l${CSI}?1000h${CSI}?1004h${CSI}?1006h`
+  return `${CSI}?1000l${CSI}?1003l${CSI}?1007l${CSI}?1002h${CSI}?1004h${CSI}?1006h`
 }
 
 /** Close every mouse/focus private mode, including `1004`. Never enables `1003`. */

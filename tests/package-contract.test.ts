@@ -122,12 +122,11 @@ describe('out-of-tree Bundle contract', () => {
     expect(session).toContain('ENTER_ALTERNATE_SCREEN')
     expect(session).toContain('setMouseReporting')
     expect(mouse).toContain('?1049h')
-    expect(mouse).toContain('?1000h')
+    expect(mouse).toContain('?1002h')
     expect(mouse).toContain('?1004h')
     expect(mouse).toContain('?1006h')
     expect(mouse).toContain('?1004l')
     expect(mouse).not.toContain('?1003h')
-    expect(mouse).not.toContain('?1002h')
   })
 
   it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {

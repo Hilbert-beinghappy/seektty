@@ -304,6 +304,33 @@ describe('transcript block viewport', () => {
     transcript.dispose()
   })
 
+  it('copies a transcript selection without a full-history render', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot([
+      assistant('copy-a', 'selectable-alpha'),
+      assistant('copy-b', 'selectable-beta'),
+    ]))
+    transcript.render(80)
+    resetRenderCounters()
+    const maps = transcript.viewportMaps()
+    const first = maps.find(map => map.ownerKey === 'copy-a')
+    const offset = first?.cellOffsets.find(value => value !== undefined) ?? 0
+    transcript.applyPointerSelection(
+      { surface: 'transcript', ownerKey: 'copy-a', textOffset: offset, affinity: 'before' },
+      { surface: 'transcript', ownerKey: 'copy-b', textOffset: 32, affinity: 'before' },
+      'character',
+    )
+    expect(transcript.currentSelection()).toBeDefined()
+    expect(transcript.viewportMaps().some(map => map.ownerKey === 'copy-a' && map.cellOffsets.some(value => value !== undefined))).toBe(true)
+    expect(transcript.copySelectionText()).toContain('selectable-alpha')
+    expect(transcript.copySelectionText()).toContain('selectable-beta')
+    const painted = transcript.render(80).join('\n')
+    expect(painted).toContain('\u001B[7m')
+    expect(internals.lastFullLinesCopied).toBe(0)
+    transcript.dispose()
+  })
+
   it('renders the latest tail without visiting old blocks', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 6)

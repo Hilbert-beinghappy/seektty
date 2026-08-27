@@ -12,12 +12,12 @@ const sgr = (code: number, col = 4, row = 8, release = false): string =>
   `\u001B[<${String(code)};${String(col)};${String(row)}${release ? 'm' : 'M'}`
 
 describe('mouse protocol encoding', () => {
-  it('never enables 1003 and keeps commit-2 full mode on 1000+1004+1006', () => {
+  it('never enables 1003 and uses 1002+1004+1006 for application-owned selection', () => {
     const full = encodeFullMouseReporting()
-    expect(full).toContain('\u001B[?1000h')
+    expect(full).toContain('\u001B[?1002h')
     expect(full).toContain('\u001B[?1004h')
     expect(full).toContain('\u001B[?1006h')
-    expect(full).not.toContain('\u001B[?1002h')
+    expect(full).toContain('\u001B[?1000l')
     expect(full).not.toContain('\u001B[?1003h')
     expect(full).not.toContain('\u001B[?1049')
     expect(encodeDisableMouseReporting()).toContain('\u001B[?1004l')
