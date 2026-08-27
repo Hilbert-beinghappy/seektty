@@ -36,10 +36,11 @@ function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocume
 describe('theme export path resolution', () => {
   it('expands ~ and file URLs, then resolves relative paths against the workspace', () => {
     const workspace = '/tmp/seektty-workspace'
+    const localFilePath = resolve(tmpdir(), 'ocean.json')
     expect(resolveHarnessUserPath('./ocean.json', workspace)).toBe(resolve(workspace, 'ocean.json'))
     expect(resolveHarnessUserPath('~/Themes/ocean.json', workspace)).toBe(resolve(homedir(), 'Themes/ocean.json'))
     expect(resolveHarnessUserPath('~', workspace)).toBe(homedir())
-    expect(resolveHarnessUserPath(pathToFileURL('/tmp/ocean.json').href, workspace)).toBe('/tmp/ocean.json')
+    expect(resolveHarnessUserPath(pathToFileURL(localFilePath).href, workspace)).toBe(localFilePath)
   })
 })
 

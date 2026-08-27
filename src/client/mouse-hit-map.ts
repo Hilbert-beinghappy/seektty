@@ -131,6 +131,7 @@ export class HitMapBuilder {
     for (const child of options.children ?? []) {
       this.add({
         ...child,
+        rect: translateRect(child.rect, { col: options.overlay.col, row: options.overlay.row }),
         zIndex: Math.max(child.zIndex, OVERLAY_CAPTURE_Z_BAND + 2 + options.zOrder),
       })
     }

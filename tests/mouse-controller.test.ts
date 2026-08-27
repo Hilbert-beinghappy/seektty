@@ -265,4 +265,43 @@ describe('mouse controller skeleton', () => {
     expect(controller.metrics.coalescedWheelEvents).toBe(1)
     expect(controller.metrics.mouseRenderRequests).toBe(1)
   })
+
+  it('does not start a text selection when the press began on a button', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1, 'button'),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    controller.handle(press())
+    const dragged = controller.handle({
+      kind: 'drag',
+      button: 'left',
+      point: { col: 6, row: 6 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    expect(controller.gesture).toBe('pressed')
+    expect(dragged.semantic).toBeUndefined()
+  })
+
+  it('resets click count on FocusOut and withholds sensitive execute until a focus cycle', () => {
+    let now = 8_000
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      now: () => now,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    expect(controller.allowsSensitiveMouse).toBe(false)
+    controller.handle(press())
+    controller.handle(release())
+    controller.handle({ kind: 'focus', focused: false })
+    expect(controller.gesture).toBe('idle')
+    controller.handle({ kind: 'focus', focused: true })
+    now += FOCUS_GUARD_MS + 1
+    expect(controller.allowsSensitiveMouse).toBe(true)
+    controller.handle(press())
+    expect(controller.handle(release()).semantic).toMatchObject({ kind: 'click', count: 1 })
+  })
 })

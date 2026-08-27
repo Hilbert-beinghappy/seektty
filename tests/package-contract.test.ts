@@ -165,7 +165,7 @@ describe('out-of-tree Bundle contract', () => {
     expect(candidate.bundle).toBe(true)
     expect(candidate.patchValid).toBe(true)
     expect(candidate.diagnostics).toEqual([
-      '安装包声明脚本：build、typecheck、test、perf:tui、test:stock、test:clarify-doctor、pack:check、check',
+      '安装包声明脚本：build、typecheck、test、perf:tui、test:stock、test:clarify-doctor、pack:check、test:mouse-pty、check',
     ])
   })
 

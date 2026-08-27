@@ -100,7 +100,7 @@ SeekTTY `1.2.2` 是面向官方 Harness `0.1.1-rc.2` 的维护更新，修复长
 | --- | --- |
 | ![SeekTTY 亮色 TypeScript 语法高亮](assets/seektty-code-light.png) | ![SeekTTY 暗色工具调用与 Diff 语法高亮](assets/seektty-code-dark.png) |
 
-最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。滚轮和 Transcript 导航键在 SeekTTY 内部浏览历史；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
+最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。完整鼠标模式用滚轮浏览历史、选择文本，并点击已有控件。F3 或 `/mouse` 可切到原生终端选择且不离开备用屏幕；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
 
 ## Clarify 与 Plan
 
@@ -177,8 +177,10 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 | 输入 | 操作 |
 | --- | --- |
-| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键 |
+| 完整鼠标模式 | 滚轮、常驻滚动条、应用内选区、选后复制，以及工具卡、示例、补全、弹窗和仍可见的模型/模式/权限 chrome 点击。危险确认仍需 Enter。 |
+| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键。F3 或 `/mouse native` 切换。 |
 | 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
+| Ctrl+Shift+C / F3 | 复制应用内选区 / 切换完整鼠标模式与终端原生选择 |
 | `/` | 打开命令与 Skill 候选 |
 | Enter / Shift+Enter | 发送或确认 / 输入换行 |
 | Tab / Escape | 在输入框与 transcript 间切换 / 返回或关闭当前弹窗 |
@@ -284,6 +286,11 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+DSH_BIN=/path/to/dsh \
+SEEKTTY_SPEC=/path/to/seektty.tgz \
+SEEKTTY_MOUSE_PTY=1 \
+pnpm test:mouse-pty
 
 CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor

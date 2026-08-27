@@ -72,6 +72,7 @@
     "test:stock": "node scripts/stock-dsh-cycle.mjs",
     "test:clarify-doctor": "node scripts/clarify-doctor-acceptance.mjs",
     "pack:check": "node scripts/pack-check.mjs",
+    "test:mouse-pty": "node scripts/mouse-pty-harness.mjs",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run pack:check"
   },
   "dependencies": {
@@ -210,6 +211,7 @@
     "@types/js-yaml": "4.0.9",
     "@types/node": "24.10.1",
     "@types/cross-spawn": "6.0.6",
+    "node-pty": "1.1.0",
     "tsdown": "0.15.11",
     "typescript": "5.9.3",
     "vitest": "4.0.15"

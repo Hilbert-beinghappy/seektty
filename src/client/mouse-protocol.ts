@@ -298,6 +298,17 @@ export class MouseProtocolDecoder {
   reset(): void {
     this.pending = ''
   }
+
+  /**
+   * Release an ambiguous incomplete prefix as ordinary terminal input.
+   * The Surface calls this after a short escape-sequence timeout so a lone
+   * Escape key is not held until the user's next key or mouse event.
+   */
+  flushPending(): string {
+    const pending = this.pending
+    this.pending = ''
+    return pending
+  }
 }
 
 /**

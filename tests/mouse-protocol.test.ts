@@ -97,6 +97,27 @@ describe('streaming decoder', () => {
     expect(done.pending).toBe('')
   })
 
+  it('can flush a lone Escape without leaking a later mouse report', () => {
+    const decoder = new MouseProtocolDecoder()
+    expect(decoder.push('\u001B')).toMatchObject({ events: [], leftover: '', pending: '\u001B' })
+    expect(decoder.flushPending()).toBe('\u001B')
+    expect(decoder.buffered).toBe('')
+    expect(decoder.push(sgr(64))).toMatchObject({
+      events: [expect.objectContaining({ kind: 'wheel', delta: 1 })],
+      leftover: '',
+      pending: '',
+    })
+  })
+
+  it('still joins an SGR report fragmented immediately after Escape', () => {
+    const decoder = new MouseProtocolDecoder()
+    expect(decoder.push('\u001B').pending).toBe('\u001B')
+    const done = decoder.push('[<64;4;8M')
+    expect(done.events).toEqual([expect.objectContaining({ kind: 'wheel', delta: 1 })])
+    expect(done.leftover).toBe('')
+    expect(done.pending).toBe('')
+  })
+
   it('parses concatenated reports and keeps ordinary CSI intact', () => {
     const decoder = new MouseProtocolDecoder()
     const glued = decoder.push(`${sgr(64)}${sgr(65)}\u001B[A`)

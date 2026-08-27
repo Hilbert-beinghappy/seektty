@@ -390,4 +390,41 @@ describe('Clarify OverlayQueue wrapping', () => {
     harness.component().handleInput(ESCAPE)
     await expect(pending).resolves.toBeUndefined()
   })
+
+  it('focuses overlay options on the first click and never mouse-executes danger confirm', async () => {
+    const harness = overlayHarness()
+    const pending = harness.overlays.confirm('Enter full access?', 'Impact text', 'Enter full access')
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('Enter full access')
+    })
+    harness.component().render(80)
+    const first = harness.overlays.handleOptionClick('confirm')
+    expect(first).toBe('danger')
+    const second = harness.overlays.handleOptionClick('confirm')
+    expect(second).toBe('danger')
+    expect(harness.overlays.activateArmedOption()).toBe('danger')
+    harness.component().handleInput(ESCAPE)
+    await expect(pending).resolves.toBe(false)
+  })
+
+  it('activates an ordinary option only on the second click through the existing submit path', async () => {
+    const harness = overlayHarness()
+    const pending = harness.overlays.select({
+      title: 'picker',
+      searchable: false,
+      choices: [
+        { id: 'save', label: 'Save' },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('Save')
+    })
+    harness.component().render(80)
+    expect(harness.overlays.handleOptionClick('save')).toBe('focused')
+    expect(harness.overlays.hitChildren().some(region => region.action.kind === 'overlay' && region.action.optionId === 'save')).toBe(true)
+    expect(harness.overlays.handleOptionClick('save')).toBe('activated')
+    expect(harness.overlays.activateArmedOption()).toBe('activated')
+    await expect(pending).resolves.toMatchObject({ id: 'save' })
+  })
 })

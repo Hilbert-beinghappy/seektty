@@ -174,6 +174,15 @@ export class MouseController {
     return this.now() < this.suppressUntil
   }
 
+  /** Sensitive mouse execute (submit/delete) requires a seen FocusOut→FocusIn cycle. */
+  get allowsSensitiveMouse(): boolean {
+    return this.observedFocusCycle && !this.isFocusGuarded
+  }
+
+  noteSelectionCells(count: number): void {
+    this.counters.selectionCellsProjected += Math.max(0, count)
+  }
+
   handle(input: MouseInput): MouseControllerOutcome {
     this.counters.parsedMouseEvents += 1
     if (input.kind === 'focus') return this.handleFocus(input.focused)
@@ -214,6 +223,10 @@ export class MouseController {
   private handleFocus(focused: boolean): MouseControllerOutcome {
     if (!focused) {
       this.seenFocusOut = true
+      this.clickCount = 0
+      this.clickButton = undefined
+      this.clickTarget = undefined
+      this.clearTimer('click')
       this.endGesture()
       return { consume: true, semantic: { kind: 'focus', focused: false } }
     }
@@ -309,21 +322,24 @@ export class MouseController {
   ): MouseControllerOutcome {
     if (this.state.kind === 'pressed' && !sameCell(this.state.origin, input.point)) {
       const scrollbar = this.state.region?.role === 'scrollbar'
-      this.state = scrollbar
-        ? {
+      const selectable = this.state.region?.role === 'text' || this.state.region?.role === 'input'
+      if (scrollbar) {
+        this.state = {
           kind: 'dragging-scrollbar',
           origin: this.state.origin,
           ...(this.state.region === undefined ? {} : { region: this.state.region }),
           generation: this.state.generation,
           grabOffset: this.state.grabOffset,
         }
-        : {
+      } else if (selectable) {
+        this.state = {
           kind: 'selecting',
           button: this.state.button,
           origin: this.state.origin,
           ...(this.state.region === undefined ? {} : { region: this.state.region }),
           generation: this.state.generation,
         }
+      }
     }
     if (this.state.kind === 'selecting' || this.state.kind === 'edge-scrolling') {
       this.updateEdgeScroll(input.point)

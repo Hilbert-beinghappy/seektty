@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleWidth, type Component, type TUI } from '@mariozechner/pi-tui'
 import {
   BottomAnchoredLayout,
+  compactFactTokens,
   ContextBar,
   PromptEditor,
+  StatusBar,
   transcriptViewportRows,
 } from '../src/client/chrome.ts'
 import { setUiLocale } from '../src/client/locale.ts'
@@ -234,5 +236,28 @@ describe('context bar running indicator', () => {
     expect(rendered).toContain('Ctrl+C')
     const surface = readFileSync(new URL('../src/client/surface.ts', import.meta.url), 'utf8')
     expect(surface).not.toMatch(/status\.setDetail\(color\.accent\(ui\(\s*`生成中/u)
+  })
+
+  it('compacts fact tokens from the left and only reports remaining ids', () => {
+    const wide = compactFactTokens([
+      { id: 'model', text: 'v4-pro · Maximum reasoning' },
+      { id: 'mode', text: 'Standard' },
+    ], 80)
+    expect(wide.tokens.map(token => token.id)).toEqual(['model', 'mode'])
+    const narrow = compactFactTokens([
+      { id: 'model', text: 'v4-pro · Maximum reasoning' },
+      { id: 'mode', text: 'Standard' },
+    ], 10)
+    expect(narrow.tokens.map(token => token.id)).toEqual(['mode'])
+    expect(narrow.text).toContain('Standard')
+  })
+
+  it('registers permission and detail tokens from the status layout, not a string parse', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const bar = new StatusBar()
+    bar.setPermission('workspace-write')
+    bar.setDetail('notice')
+    bar.render(80)
+    expect(bar.lastTokens().map(token => token.id)).toEqual(['permission', 'detail'])
   })
 })

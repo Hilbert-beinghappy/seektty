@@ -93,7 +93,7 @@ import {
   type ManagedTerminal,
 } from './terminal-session.ts'
 import { MouseProtocolDecoder } from './mouse-protocol.ts'
-import { createMouseController } from './mouse-controller.ts'
+import { createMouseController, type MouseSemanticEvent } from './mouse-controller.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder } from './mouse-hit-map.ts'
 import { emptyFrameGeometry, editorMouseApi, tuiFrameApi } from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
@@ -254,6 +254,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }).catch(() => { /* send must not wait on Settings */ })
     }
     let transcriptFocused = false
+    let mouseArmed: { kind: 'example' | 'autocomplete' | 'option'; id: string } | undefined
     const transcript = new Transcript(
       () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
@@ -325,6 +326,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let mouseController!: ReturnType<typeof createMouseController>
     const overlays = new OverlayQueue(tui, () => { mouseController.endGesture() })
     const mouseDecoder = new MouseProtocolDecoder()
+    let mouseInputFlushTimer: ReturnType<typeof setTimeout> | undefined
+    let replayingMouseInput = false
     let hitMap = emptyHitMap(0, terminal.columns, terminal.rows)
     const freezeHitMap = (): void => {
       const geometry = tuiFrameApi(tui).getLastFrameGeometry?.()
@@ -349,6 +352,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           action: { kind: 'transcript', command: 'select' },
         })
         for (const region of transcript.scrollbarHitRegions(slots.transcript)) {
+          builder.add(region)
+        }
+        for (const region of transcript.controlHitRegions(slots.transcript)) {
           builder.add(region)
         }
         const composerOrigin = { col: slots.composer.col, row: slots.composer.row }
@@ -399,6 +405,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             enabled: true,
             action: { kind: 'chrome', commandId: 'composer-facts' },
           }, composerOrigin)
+          for (const token of editor.lastFactTokens()) {
+            builder.addLocal({
+              id: `chrome:${token.id}`,
+              rect: token.rect,
+              zIndex: 21,
+              role: 'button',
+              enabled: true,
+              action: { kind: 'chrome', commandId: token.id },
+            }, composerOrigin)
+          }
         }
         builder.add({
           id: 'chrome:status',
@@ -408,12 +424,24 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           enabled: true,
           action: { kind: 'chrome', commandId: 'status' },
         })
+        for (const token of status.lastTokens()) {
+          builder.addLocal({
+            id: `chrome:${token.id}`,
+            rect: token.rect,
+            zIndex: 11,
+            role: 'button',
+            enabled: true,
+            action: { kind: 'chrome', commandId: token.id },
+          }, { col: slots.status.col, row: slots.status.row })
+        }
       }
       const overlayId = overlays.activeOverlayId()
       hitMap = finalizeHitMap(
         builder,
         geometry,
-        overlayId === undefined || !overlays.hasActive() ? undefined : { overlayId },
+        overlayId === undefined || !overlays.hasActive()
+          ? undefined
+          : { overlayId, children: [...overlays.hitChildren()] },
       )
     }
     tuiFrameApi(tui).onAfterRender = freezeHitMap
@@ -635,6 +663,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       detachFatalGuards()
       detachFatalGuards = () => undefined
       if (stopping !== undefined) return stopping
+      if (mouseInputFlushTimer !== undefined) {
+        clearTimeout(mouseInputFlushTimer)
+        mouseInputFlushTimer = undefined
+      }
+      mouseDecoder.reset()
       restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
       stopping = (async () => {
         const failures: unknown[] = []
@@ -645,7 +678,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         notices.dispose()
         overlays.dispose()
         mouseController.dispose()
-        mouseDecoder.reset()
         transcript.dispose()
         setCodeHighlighter(undefined)
         try { syntax?.dispose() } catch (error) { failures.push(error) }
@@ -991,9 +1023,131 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
     }
 
+    const hintEnter = (): void => {
+      setNotice(ui('请按 Enter 执行。', 'Press Enter to run this action.'), 'info')
+    }
+
+    const restoreMouseFocus = (region: { readonly action: { readonly kind: string } } | undefined): void => {
+      if (region?.action.kind === 'transcript') {
+        transcriptFocused = true
+        tui.setFocus(transcript)
+        return
+      }
+      if (region?.action.kind === 'overlay') return
+      focusEditor()
+    }
+
+    const dispatchMouseClick = (semantic: Extract<MouseSemanticEvent, { kind: 'click' }>): void => {
+      const region = semantic.region
+      restoreMouseFocus(region)
+      if (semantic.suppressed) return
+      if (semantic.button === 'right') {
+        if (transcript.copySelectionText() !== '') copyActiveSelection()
+        else {
+          setNotice(ui(
+            '没有应用内选区。按 F3 或 /mouse 切换到原生终端选择。',
+            'No in-app selection. Press F3 or /mouse for native terminal selection.',
+          ), 'info')
+        }
+        return
+      }
+      if (region?.action.kind === 'overlay' && region.action.optionId !== undefined) {
+        const optionId = region.action.optionId
+        const result = overlays.handleOptionClick(optionId)
+        if (result === 'danger') {
+          hintEnter()
+          return
+        }
+        if (result === 'activated') {
+          if (!mouseController.allowsSensitiveMouse) {
+            hintEnter()
+            return
+          }
+          overlays.activateArmedOption()
+          mouseArmed = undefined
+          return
+        }
+        if (result === 'focused') mouseArmed = { kind: 'option', id: optionId }
+        return
+      }
+      if (region?.action.kind === 'overlay') return
+      if (region?.role === 'scrollbar') {
+        const origin = layout.lastContentGeometry()?.transcript
+        if (origin !== undefined) transcript.handleScrollbarClick(region, semantic.point, origin)
+        return
+      }
+      if (region?.action.kind === 'transcript' && region.action.command === 'toggle' && region.action.targetKey !== undefined) {
+        transcript.pointerToggleTool(region.action.targetKey)
+        return
+      }
+      if (region?.action.kind === 'transcript' && region.action.command === 'example' && region.action.targetKey !== undefined) {
+        const id = region.action.targetKey
+        transcript.focusExample(id)
+        const armed = mouseArmed?.kind === 'example' && mouseArmed.id === id
+        if (!armed) {
+          mouseArmed = { kind: 'example', id }
+          return
+        }
+        if (!mouseController.allowsSensitiveMouse) {
+          hintEnter()
+          return
+        }
+        mouseArmed = undefined
+        const action = transcript.activateFocused()
+        if (action?.kind === 'example') {
+          focusEditor()
+          void sendPrompt(action.text)
+        }
+        return
+      }
+      if (region?.role === 'text' || region?.action.kind === 'transcript') {
+        const granularity = semantic.count === 3 ? 'line' : semantic.count === 2 ? 'word' : 'character'
+        applyTranscriptPointer(semantic.point, undefined, granularity)
+        return
+      }
+      if (region?.action.kind === 'composer' && region.action.command === 'autocomplete') {
+        const slots = layout.lastContentGeometry()
+        const local = editor.lastLocalGeometry()
+        const api = editorMouseApi(editor)
+        if (slots === undefined || local === undefined) return
+        const index = Math.max(0, semantic.point.row - slots.composer.row - local.autocomplete.row)
+        api.setAutocompleteSelectedIndex?.(index)
+        const key = String(index)
+        const armed = mouseArmed?.kind === 'autocomplete' && mouseArmed.id === key
+        if (!armed) {
+          mouseArmed = { kind: 'autocomplete', id: key }
+          return
+        }
+        if (!mouseController.allowsSensitiveMouse) {
+          hintEnter()
+          return
+        }
+        mouseArmed = undefined
+        api.applyAutocompleteSelection?.()
+        return
+      }
+      if (region?.action.kind === 'chrome') {
+        const commandId = region.action.commandId
+        if (commandId === 'model') void actions.execute('model', '')
+        else if (commandId === 'mode') void actions.execute('mode', '')
+        else if (commandId === 'permission') void actions.execute('permission', '')
+        else if (commandId === 'detail') void actions.execute('status', '')
+        return
+      }
+      if (region?.role === 'input' || region?.action.kind === 'composer') {
+        applyComposerPointer(semantic.point, undefined, false)
+      }
+    }
+
     tui.addInputListener((data) => {
       performanceProbe.markInput()
-      const decoded = mouseDecoder.push(data)
+      if (mouseInputFlushTimer !== undefined) {
+        clearTimeout(mouseInputFlushTimer)
+        mouseInputFlushTimer = undefined
+      }
+      const decoded = replayingMouseInput
+        ? { events: [], leftover: data, pending: '' }
+        : mouseDecoder.push(data)
       let pendingWheel = 0
       let needMouseRender = false
       for (const event of decoded.events) {
@@ -1015,27 +1169,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             if (pendingWheel !== 0) mouseController.noteCoalescedWheel()
             pendingWheel += outcome.scrollTranscript
           }
-        } else if (outcome.semantic?.kind === 'click' && outcome.semantic.suppressed === false) {
-          const semantic = outcome.semantic
-          if (semantic.button === 'right') {
-            if (transcript.copySelectionText() !== '') copyActiveSelection()
-            else {
-              setNotice(ui(
-                '没有应用内选区。按 F3 或 /mouse 切换到原生终端选择。',
-                'No in-app selection. Press F3 or /mouse for native terminal selection.',
-              ), 'info')
-            }
-          } else if (semantic.region?.role === 'scrollbar') {
-            const origin = layout.lastContentGeometry()?.transcript
-            if (origin !== undefined) {
-              transcript.handleScrollbarClick(semantic.region, semantic.point, origin)
-            }
-          } else if (semantic.region?.role === 'text' || semantic.region?.action.kind === 'transcript') {
-            const granularity = semantic.count === 3 ? 'line' : semantic.count === 2 ? 'word' : 'character'
-            applyTranscriptPointer(semantic.point, undefined, granularity)
-          } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
-            applyComposerPointer(semantic.point, undefined, false)
-          }
+        } else if (outcome.semantic?.kind === 'click') {
+          dispatchMouseClick(outcome.semantic)
         } else if (outcome.semantic?.kind === 'drag') {
           const semantic = outcome.semantic
           if (semantic.grabOffset !== undefined || mouseController.gesture === 'dragging-scrollbar') {
@@ -1060,7 +1195,20 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         mouseController.recordMouseRender()
         renderWhileOpen()
       }
-      if (decoded.pending !== '') return { consume: true }
+      if (decoded.pending !== '') {
+        mouseInputFlushTimer = setTimeout(() => {
+          mouseInputFlushTimer = undefined
+          const pending = mouseDecoder.flushPending()
+          if (pending === '' || stopping !== undefined) return
+          replayingMouseInput = true
+          try {
+            ;(tui as unknown as { handleInput(input: string): void }).handleInput(pending)
+          } finally {
+            replayingMouseInput = false
+          }
+        }, 30)
+        return { consume: true }
+      }
       if (decoded.events.length > 0 && decoded.leftover === '') return { consume: true }
       const payload = decoded.events.length > 0 ? decoded.leftover : data
       if (payload === '') return { consume: true }

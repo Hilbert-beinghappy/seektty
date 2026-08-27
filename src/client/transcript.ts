@@ -94,6 +94,7 @@ export const internals = {
   activePulseTimers: 0,
   heightIndexExact: 0,
   heightIndexEstimated: 0,
+  selectionCellsProjected: 0,
 }
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
@@ -1181,6 +1182,12 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
 interface TranscriptBlockLines {
   readonly lines: readonly string[]
   readonly turnAnchors: readonly number[]
+  readonly controls: readonly (TranscriptPointerControl | undefined)[]
+}
+
+interface TranscriptPointerControl {
+  readonly kind: 'tool' | 'example'
+  readonly id: string
 }
 
 interface TranscriptBlock {
@@ -1280,6 +1287,12 @@ export class Transcript implements Component, Focusable {
   private readonly ownerCopy = new Map<string, { readonly text: string; readonly lineStarts: readonly number[] }>()
   private lastViewportMaps: readonly ViewportCellMap[] = []
   private selection: TextSelection | undefined
+  private readonly lineControls = new Map<string, readonly (TranscriptPointerControl | undefined)[]>()
+  private lastPointerControls: readonly {
+    readonly row: number
+    readonly kind: 'tool' | 'example'
+    readonly id: string
+  }[] = []
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1396,6 +1409,57 @@ export class Transcript implements Component, Focusable {
     return scrollbarHitRegions(origin, this.lastScrollbar)
   }
 
+  /** Visible tool titles and empty-session examples from the last viewport. */
+  controlHitRegions(origin: CellRect): HitRegion[] {
+    const inset = origin.width >= SCROLLBAR_MIN_WIDTH ? 2 : 0
+    const bar = this.showsScrollbar(origin.width) ? 1 : 0
+    const width = Math.max(1, origin.width - inset - bar)
+    return this.lastPointerControls.map((control) => ({
+      id: `transcript:${control.kind}:${control.id}`,
+      rect: { col: origin.col + inset, row: origin.row + control.row, width, height: 1 },
+      zIndex: 11,
+      role: control.kind === 'tool' ? 'button' : 'option',
+      enabled: true,
+      action: {
+        kind: 'transcript',
+        command: control.kind === 'tool' ? 'toggle' : 'example',
+        targetKey: control.id,
+      },
+    }))
+  }
+
+  /**
+   * Focus an empty-session example using the existing cursor path.
+   * @param id - EMPTY_SESSION_EXAMPLES id.
+   */
+  focusExample(id: string): boolean {
+    if (!this.emptyState || this.snapshot === undefined) return false
+    const index = EMPTY_SESSION_EXAMPLES.findIndex(example => example.id === id)
+    if (index < 0) return false
+    if (this.exampleCursor !== index) {
+      this.exampleCursor = index
+      this.replace(this.emptySessionRows())
+    }
+    this.requestRender()
+    return true
+  }
+
+  /**
+   * Focus a tool card and toggle it through the existing expand path.
+   * @param key - tool-card identity.
+   */
+  pointerToggleTool(key: string): TranscriptFocusAction | undefined {
+    const keys = this.toolKeys()
+    const index = keys.indexOf(key)
+    if (index < 0 || this.snapshot === undefined) return undefined
+    this.toolCursor = index
+    this.toolFocus = true
+    this.toggleToolCard(key)
+    this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return { kind: 'tool', key }
+  }
+
   /** Track/end-cap click. A thumb press without movement does not jump. */
   handleScrollbarClick(region: HitRegion, point: { readonly col: number; readonly row: number }, origin: CellRect): boolean {
     if (region.role !== 'scrollbar' || region.action.kind !== 'transcript') return false
@@ -1502,7 +1566,9 @@ export class Transcript implements Component, Focusable {
     this.lastScrollbar = undefined
     this.heightIndex.clear()
     this.ownerCopy.clear()
+    this.lineControls.clear()
     this.lastViewportMaps = []
+    this.lastPointerControls = []
     this.selection = undefined
     this.syncHeightIndexCounters()
     this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
@@ -1745,14 +1811,16 @@ export class Transcript implements Component, Focusable {
     this.lastScrollbar = undefined
     this.heightIndex.clear()
     this.ownerCopy.clear()
+    this.lineControls.clear()
     this.lastViewportMaps = []
+    this.lastPointerControls = []
     this.selection = undefined
     this.syncHeightIndexCounters()
   }
 
   private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
     const block = this.blocks[blockIndex]
-    if (block === undefined) return { lines: [], turnAnchors: [] }
+    if (block === undefined) return { lines: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
     const cacheKey = blockIndex === 0 ? -contentWidth : contentWidth
     if (block.dirty) {
@@ -1763,14 +1831,19 @@ export class Transcript implements Component, Focusable {
     if (cachedBlock !== undefined) {
       this.heightIndex.setExact(block.key, cachedBlock.lines.length)
       this.rememberOwnerCopy(block.key, cachedBlock.lines, contentWidth)
+      this.lineControls.set(block.key, cachedBlock.controls)
       this.syncHeightIndexCounters()
       return cachedBlock
     }
     const lines: string[] = []
     const turnAnchors: number[] = []
+    const controls: (TranscriptPointerControl | undefined)[] = []
     for (const [index, component] of block.components.entries()) {
       const row = block.rows[index]
-      if ((blockIndex > 0 || lines.length > 0) && row?.gapBefore === true) lines.push('')
+      if ((blockIndex > 0 || lines.length > 0) && row?.gapBefore === true) {
+        lines.push('')
+        controls.push(undefined)
+      }
       if (row?.userTurn === true) turnAnchors.push(lines.length)
       const pulsing = row?.pulse !== undefined || row?.liveDurationSince !== undefined
       const cached = pulsing ? undefined : this.lineCache.get(component)
@@ -1782,6 +1855,12 @@ export class Transcript implements Component, Focusable {
           if (!pulsing) this.lineCache.set(component, { width: contentWidth, lines: output })
           return output
         })()
+      const start = lines.length
+      const control: TranscriptPointerControl | undefined = row?.toolKey !== undefined
+        ? { kind: 'tool', id: row.toolKey }
+        : row?.exampleId !== undefined
+          ? { kind: 'example', id: row.exampleId }
+          : undefined
       if (row?.format === 'image') {
         lines.push(...rendered)
       } else {
@@ -1790,8 +1869,11 @@ export class Transcript implements Component, Focusable {
           lines.push(escapeTerminalText(line))
         }
       }
+      for (let lineIndex = start; lineIndex < lines.length; lineIndex += 1) {
+        controls[lineIndex] = control
+      }
     }
-    const result = { lines, turnAnchors }
+    const result = { lines, turnAnchors, controls }
     if (!block.metadata.dynamic) {
       block.linesByWidth.set(cacheKey, result)
       while (block.linesByWidth.size > 4) {
@@ -1802,6 +1884,7 @@ export class Transcript implements Component, Focusable {
     }
     this.heightIndex.setExact(block.key, result.lines.length)
     this.rememberOwnerCopy(block.key, result.lines, contentWidth)
+    this.lineControls.set(block.key, result.controls)
     this.syncHeightIndexCounters()
     return result
   }
@@ -1972,6 +2055,13 @@ export class Transcript implements Component, Focusable {
   }
 
   private presentLines(lines: readonly string[], width: number, inset: number, contentWidth: number): string[] {
+    if (this.emptyState) {
+      this.lastPointerControls = EMPTY_SESSION_EXAMPLES.flatMap((example) => {
+        const needle = emptyExampleText(example)
+        const row = lines.findIndex(line => line.includes(needle))
+        return row < 0 ? [] : [{ row, kind: 'example' as const, id: example.id }]
+      })
+    }
     const totalRows = Math.max(1, Math.floor(this.viewportRows()))
     const body = lines.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
     const withSearch = this.search === undefined
@@ -2006,8 +2096,10 @@ export class Transcript implements Component, Focusable {
   ): { readonly lines: readonly string[]; readonly maps: readonly ViewportCellMap[] } {
     const start = this.viewportState?.start
     const maps: ViewportCellMap[] = []
+    const pointerControls: { readonly row: number; readonly kind: 'tool' | 'example'; readonly id: string }[] = []
     if (start === undefined) {
       this.lastViewportMaps = maps
+      this.lastPointerControls = pointerControls
       return { lines, maps }
     }
     let blockIndex = this.blocks.findIndex(block => block.key === start.blockKey)
@@ -2030,6 +2122,8 @@ export class Transcript implements Component, Focusable {
         cellOffsets: mapped.cellOffsets,
         hardBreakAfter: mapped.hardBreakAfter,
       })
+      const control = this.lineControls.get(block.key)?.[lineOffset]
+      if (control !== undefined) pointerControls.push({ row, kind: control.kind, id: control.id })
       lineOffset += 1
       if (lineOffset >= (copy?.lineStarts.length ?? 1)) {
         blockIndex += 1
@@ -2037,6 +2131,7 @@ export class Transcript implements Component, Focusable {
       }
     }
     this.lastViewportMaps = maps
+    this.lastPointerControls = pointerControls
     return { lines, maps }
   }
 
@@ -2065,6 +2160,10 @@ export class Transcript implements Component, Focusable {
         mapped.maps,
         this.selection,
         this.blocks.map(block => block.key),
+      )
+      internals.selectionCellsProjected += mapped.maps.reduce(
+        (count, map) => count + map.cellOffsets.filter(offset => offset !== undefined).length,
+        0,
       )
       return this.presentLines(selected, width, inset, contentWidth)
     }

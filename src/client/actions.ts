@@ -204,7 +204,8 @@ function commandArguments(args: string): readonly string[] {
     if (quote !== undefined) {
       if (character === quote) {
         quote = undefined
-      } else if (character === '\\' && quote === '"' && index + 1 < args.length) {
+      } else if (character === '\\' && quote === '"' && index + 1 < args.length
+        && ((args[index + 1] ?? '') === '"' || (args[index + 1] ?? '') === '\\')) {
         index += 1
         current += args[index] ?? ''
       } else {
@@ -222,7 +223,8 @@ function commandArguments(args: string): readonly string[] {
         current = ''
         started = false
       }
-    } else if (character === '\\' && index + 1 < args.length) {
+    } else if (character === '\\' && index + 1 < args.length
+      && /[\s'"\\]/u.test(args[index + 1] ?? '')) {
       index += 1
       current += args[index] ?? ''
       started = true

@@ -100,7 +100,7 @@ SeekTTY `1.2.2` is a maintenance update targeting official Harness `0.1.1-rc.2`,
 | --- | --- |
 | ![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png) | ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png) |
 
-The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. The mouse wheel and transcript navigation keys browse history inside SeekTTY; exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
+The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
 
 ## Clarify and Plan
 
@@ -177,8 +177,10 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 
 | Input | Action |
 | --- | --- |
-| Hold the terminal selection modifier while dragging, then copy | Use native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+| Full mouse mode | Wheel, resident scrollbar, in-app selection, copy-on-select, and clicks on tool cards, examples, autocomplete, overlays, and remaining model/mode/permission chrome. Dangerous confirmations still require Enter. |
+| Hold the terminal selection modifier while dragging, then copy | Native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere. Switch with F3 or `/mouse native`. |
 | Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
+| Ctrl+Shift+C / F3 | Copy the in-app selection / toggle full and native mouse modes |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
 | Tab / Escape | Switch between composer and transcript / return or close the active overlay |
@@ -284,6 +286,11 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+DSH_BIN=/path/to/dsh \
+SEEKTTY_SPEC=/path/to/seektty.tgz \
+SEEKTTY_MOUSE_PTY=1 \
+pnpm test:mouse-pty
 
 CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor

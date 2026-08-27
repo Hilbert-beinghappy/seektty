@@ -107,15 +107,48 @@ function draftAttachmentLine(items: readonly ComposerDraftAttachment[]): string 
   }).join(ui('；', '; '))
 }
 
-function compactFacts(label: string, width: number): string {
-  if (width <= 0) return ''
-  const parts = label.split(' · ')
-  const candidates = [label]
-  const model = parts[0] ?? label
-  const mode = parts.at(-1) ?? label
-  candidates.push([model, mode].join(' · '), mode)
-  return candidates.find(candidate => visibleWidth(candidate) <= width)
-    ?? truncateToWidth(mode, width, '…')
+/** One compactable chrome fact with a stable semantic id. */
+export interface ChromeFactToken {
+  readonly id: 'model' | 'mode' | 'permission' | 'detail'
+  readonly text: string
+}
+
+/** Visible chrome token after compact, in content-local cells. */
+export interface ChromeHitToken {
+  readonly id: ChromeFactToken['id']
+  readonly rect: CellRect
+}
+
+/**
+ * Compact fact tokens from the left until the joined label fits.
+ * Coordinates are relative to the compacted label, not a painted string parse.
+ */
+export function compactFactTokens(
+  tokens: readonly ChromeFactToken[],
+  width: number,
+): { readonly text: string; readonly tokens: readonly { readonly id: ChromeFactToken['id']; readonly col: number; readonly width: number }[] } {
+  if (width <= 0 || tokens.length === 0) return { text: '', tokens: [] }
+  let kept = [...tokens]
+  let text = kept.map(token => token.text).join(' · ')
+  while (kept.length > 1 && visibleWidth(text) > width) {
+    kept = kept.slice(1)
+    text = kept.map(token => token.text).join(' · ')
+  }
+  if (visibleWidth(text) > width) {
+    const last = kept[0]
+    if (last === undefined) return { text: '', tokens: [] }
+    const clipped = truncateToWidth(last.text, width, '…')
+    return { text: clipped, tokens: [{ id: last.id, col: 0, width: visibleWidth(clipped) }] }
+  }
+  const hits: { readonly id: ChromeFactToken['id']; readonly col: number; readonly width: number }[] = []
+  let col = 0
+  for (const [index, token] of kept.entries()) {
+    if (index > 0) col += 3
+    const tokenWidth = visibleWidth(token.text)
+    hits.push({ id: token.id, col, width: tokenWidth })
+    col += tokenWidth
+  }
+  return { text, tokens: hits }
 }
 
 function isHorizontalRule(line: string): boolean {
@@ -324,6 +357,7 @@ export class ContextBar implements Component {
 export class StatusBar implements Component {
   private permission = 'workspace-write'
   private detail: string | undefined
+  private tokens: readonly ChromeHitToken[] = []
 
   /**
    * Show the current permission projected by Harness.
@@ -336,6 +370,11 @@ export class StatusBar implements Component {
    * @param detail - High-signal state; absent while idle.
    */
   setDetail(detail?: string): void { this.detail = detail }
+
+  /** Permission/detail tokens that remained visible after the last render. */
+  lastTokens(): readonly ChromeHitToken[] {
+    return this.tokens
+  }
 
   invalidate(): void { /* presentation is derived directly from state */ }
 
@@ -351,9 +390,23 @@ export class StatusBar implements Component {
         : this.permission === 'read-only' ? color.muted(label) : color.accent(label)
     }`
     if (this.detail === undefined || innerWidth - visibleWidth(permission) - visibleWidth(this.detail) < 1) {
-      return [`${prefix}${fit(permission, innerWidth)}`]
+      const clipped = fit(permission, innerWidth)
+      this.tokens = [{
+        id: 'permission',
+        rect: { col: prefix.length, row: 0, width: visibleWidth(clipped), height: 1 },
+      }]
+      return [`${prefix}${clipped}`]
     }
-    return [`${prefix}${columns(permission, this.detail, innerWidth)}`]
+    const detail = this.detail
+    const gap = innerWidth - visibleWidth(permission) - visibleWidth(detail)
+    this.tokens = [
+      { id: 'permission', rect: { col: prefix.length, row: 0, width: visibleWidth(permission), height: 1 } },
+      {
+        id: 'detail',
+        rect: { col: prefix.length + innerWidth - visibleWidth(detail), row: 0, width: visibleWidth(detail), height: 1 },
+      },
+    ]
+    return [`${prefix}${permission}${' '.repeat(gap)}${detail}`]
   }
 }
 
@@ -363,6 +416,7 @@ export class PromptEditor extends Editor {
   private drafts: readonly ComposerDraftAttachment[] = []
   private submitSnapshot: string | undefined
   private localGeometry: PromptEditorLocalGeometry | undefined
+  private factTokens: readonly ChromeHitToken[] = []
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -418,10 +472,16 @@ export class PromptEditor extends Editor {
     return this.localGeometry
   }
 
+  /** Model/mode tokens that remained visible after compact on the last render. */
+  lastFactTokens(): readonly ChromeHitToken[] {
+    return this.factTokens
+  }
+
   override render(width: number): string[] {
     this.borderColor = this.focused ? color.brand : color.border
     if (width < 8) {
       const lines = super.render(width)
+      this.factTokens = []
       this.localGeometry = {
         prefix: 0,
         frameWidth: width,
@@ -458,22 +518,30 @@ export class PromptEditor extends Editor {
         frameWidth,
       ))]
     const body = [...editorRows, ...attachmentRows, ...autocompleteRows].map(row => padded(row, frameWidth))
-    const facts = this.facts === undefined
-      ? ui('deepseek · 标准', 'deepseek · Standard')
+    const source: ChromeFactToken[] = this.facts === undefined
+      ? []
       : [
-        this.facts.model === '' ? undefined : modelLabel(this.facts.model),
-        modeLabel(this.facts.mode),
-      ].filter((value): value is string => value !== undefined).join(' · ')
-    const compactedFacts = compactFacts(facts, Math.max(0, frameWidth - 2))
+        ...(this.facts.model === '' ? [] : [{ id: 'model' as const, text: modelLabel(this.facts.model) }]),
+        { id: 'mode' as const, text: modeLabel(this.facts.mode) },
+      ]
+    const compacted = source.length === 0
+      ? { text: ui('deepseek · 标准', 'deepseek · Standard'), tokens: [] as const }
+      : compactFactTokens(source, Math.max(0, frameWidth - 2))
     const inner = [
       horizontalRule('', frameWidth, this.borderColor),
       ...body,
-      horizontalRule(compactedFacts, frameWidth, this.borderColor),
+      horizontalRule(compacted.text, frameWidth, this.borderColor),
     ]
     const editorTop = 1
     const attachmentTop = editorTop + editorRows.length
     const autocompleteTop = attachmentTop + attachmentRows.length
     const factsRow = inner.length - 1
+    const suffix = compacted.text === '' ? '' : ` ${compacted.text}`
+    const labelStart = prefix.length + Math.max(0, frameWidth - visibleWidth(suffix)) + (suffix === '' ? 0 : 1)
+    this.factTokens = compacted.tokens.map(token => ({
+      id: token.id,
+      rect: { col: labelStart + token.col, row: factsRow, width: token.width, height: 1 },
+    }))
     this.localGeometry = {
       prefix: prefix.length,
       frameWidth,

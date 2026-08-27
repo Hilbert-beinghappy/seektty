@@ -81,7 +81,7 @@ describe('hit map z-order and overlay capture', () => {
         overlayId: 'picker',
         children: [{
           id: 'overlay:picker:option:save',
-          rect: { col: 12, row: 6, width: 20, height: 1 },
+          rect: { col: 2, row: 2, width: 20, height: 1 },
           zIndex: 1,
           role: 'option',
           enabled: true,
