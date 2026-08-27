@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setUiLocale } from '../src/client/locale.ts'
-import type { InputOverlayRequest } from '../src/client/overlays.ts'
+import type { InputOverlayRequest, SecretTransactionRequest } from '../src/client/overlays.ts'
 import {
   dispatchAfterProviderOnboarding,
   inspectProviderReadiness,
@@ -13,6 +13,35 @@ import {
 const DEEPSEEK_REF = 'TEAM_DEEPSEEK_TOKEN'
 
 type OnboardingApi = Parameters<typeof inspectProviderReadiness>[0]
+
+function transactionHarness(
+  secretInput: (request: InputOverlayRequest) => Promise<string | undefined>,
+) {
+  return async <T>(request: SecretTransactionRequest<T>): Promise<T | undefined> => {
+    let failure: string | undefined
+    while (true) {
+      const raw = await secretInput({
+        ...request.input,
+        detail: [request.input.detail, failure]
+          .filter((line): line is string => line !== undefined && line !== '')
+          .join('\n'),
+      })
+      if (raw === undefined) return undefined
+      const checked = request.validate(raw)
+      if (!checked.ok) {
+        failure = checked.message
+        continue
+      }
+      try {
+        const result = await request.work(checked.value, new AbortController().signal)
+        if (result.ok) return result.value
+        failure = result.message
+      } catch {
+        failure = request.failureMessage
+      }
+    }
+  }
+}
 
 const provider = {
   provider: 'deepseek-official',
@@ -193,7 +222,7 @@ describe('Provider onboarding gate', () => {
     const notices: string[] = []
     const gate = new ProviderOnboardingGate(
       api,
-      { secretInput },
+      { secretTransaction: transactionHarness(secretInput) },
       message => { notices.push(message) },
       missing,
     )
@@ -225,7 +254,7 @@ describe('Provider onboarding gate', () => {
         requests.push(request)
         return 'sk-second-valid'
       })
-    const gate = new ProviderOnboardingGate(api, { secretInput }, () => undefined, missing)
+    const gate = new ProviderOnboardingGate(api, { secretTransaction: transactionHarness(secretInput) }, () => undefined, missing)
 
     await expect(gate.ensure()).resolves.toBe('ready')
     expect(secretInput).toHaveBeenCalledTimes(3)
@@ -239,7 +268,7 @@ describe('Provider onboarding gate', () => {
     const { api, set } = apiHarness()
     let settle: ((value: string | undefined) => void) | undefined
     const secretInput = vi.fn(() => new Promise<string | undefined>((resolve) => { settle = resolve }))
-    const gate = new ProviderOnboardingGate(api, { secretInput }, () => undefined, missing)
+    const gate = new ProviderOnboardingGate(api, { secretTransaction: transactionHarness(secretInput) }, () => undefined, missing)
 
     const first = gate.ensure()
     const second = gate.ensure()

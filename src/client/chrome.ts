@@ -9,10 +9,12 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
+import type { CellRect } from './mouse-hit-map.ts'
 import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
-import { color, editorTheme } from './theme.ts'
+import { background, color, editorTheme } from './theme.ts'
+import { autocompleteTargetId, editorMouseApi } from './pi-tui-adapters.ts'
 
 /** Pending composer image shown above the model rule. */
 export interface ComposerDraftAttachment {
@@ -106,15 +108,48 @@ function draftAttachmentLine(items: readonly ComposerDraftAttachment[]): string 
   }).join(ui('；', '; '))
 }
 
-function compactFacts(label: string, width: number): string {
-  if (width <= 0) return ''
-  const parts = label.split(' · ')
-  const candidates = [label]
-  const model = parts[0] ?? label
-  const mode = parts.at(-1) ?? label
-  candidates.push([model, mode].join(' · '), mode)
-  return candidates.find(candidate => visibleWidth(candidate) <= width)
-    ?? truncateToWidth(mode, width, '…')
+/** One compactable chrome fact with a stable semantic id. */
+export interface ChromeFactToken {
+  readonly id: 'model' | 'mode' | 'permission' | 'detail'
+  readonly text: string
+}
+
+/** Visible chrome token after compact, in content-local cells. */
+export interface ChromeHitToken {
+  readonly id: ChromeFactToken['id']
+  readonly rect: CellRect
+}
+
+/**
+ * Compact fact tokens from the left until the joined label fits.
+ * Coordinates are relative to the compacted label, not a painted string parse.
+ */
+export function compactFactTokens(
+  tokens: readonly ChromeFactToken[],
+  width: number,
+): { readonly text: string; readonly tokens: readonly { readonly id: ChromeFactToken['id']; readonly col: number; readonly width: number }[] } {
+  if (width <= 0 || tokens.length === 0) return { text: '', tokens: [] }
+  let kept = [...tokens]
+  let text = kept.map(token => token.text).join(' · ')
+  while (kept.length > 1 && visibleWidth(text) > width) {
+    kept = kept.slice(1)
+    text = kept.map(token => token.text).join(' · ')
+  }
+  if (visibleWidth(text) > width) {
+    const last = kept[0]
+    if (last === undefined) return { text: '', tokens: [] }
+    const clipped = truncateToWidth(last.text, width, '…')
+    return { text: clipped, tokens: [{ id: last.id, col: 0, width: visibleWidth(clipped) }] }
+  }
+  const hits: { readonly id: ChromeFactToken['id']; readonly col: number; readonly width: number }[] = []
+  let col = 0
+  for (const [index, token] of kept.entries()) {
+    if (index > 0) col += 3
+    const tokenWidth = visibleWidth(token.text)
+    hits.push({ id: token.id, col, width: tokenWidth })
+    col += tokenWidth
+  }
+  return { text, tokens: hits }
 }
 
 function isHorizontalRule(line: string): boolean {
@@ -138,8 +173,33 @@ export function transcriptViewportRows(terminalRows: number, editorRows: number)
   return Math.max(1, terminalRows - 4 - editorRows)
 }
 
+function slot(row: number, width: number, height: number): CellRect {
+  return { col: 0, row: Math.max(0, row), width, height: Math.max(0, height) }
+}
+
+export interface LayoutContentGeometry {
+  readonly width: number
+  readonly height: number
+  readonly context: CellRect
+  readonly transcript: CellRect
+  readonly composer: CellRect
+  readonly status: CellRect
+}
+
+export interface PromptEditorLocalGeometry {
+  readonly prefix: number
+  readonly frameWidth: number
+  readonly height: number
+  readonly borderTop: CellRect
+  readonly editor: CellRect
+  readonly attachments: CellRect
+  readonly autocomplete: CellRect
+  readonly facts: CellRect
+}
+
 /** Full-height chat layout whose composer and status remain at the viewport bottom. */
 export class BottomAnchoredLayout implements Component {
+  private geometry: LayoutContentGeometry | undefined
   /**
    * @param viewportRows - current terminal height in rows.
    * @param context - one-row execution context.
@@ -162,6 +222,11 @@ export class BottomAnchoredLayout implements Component {
     this.transcript.invalidate()
     this.composer.invalidate()
     this.status.invalidate()
+  }
+
+  /** Content-relative slot rects from the last render, before TUI screen translation. */
+  lastContentGeometry(): LayoutContentGeometry | undefined {
+    return this.geometry
   }
 
   /**
@@ -200,9 +265,31 @@ export class BottomAnchoredLayout implements Component {
       ...composerRows,
       ...statusRows,
     ]
-    return minimumRows === undefined || rendered.length <= minimumRows
+    const sliceOffset = minimumRows !== undefined && rendered.length > minimumRows
+      ? rendered.length - minimumRows
+      : 0
+    const visible = sliceOffset === 0 || minimumRows === undefined
       ? rendered
       : rendered.slice(-minimumRows)
+    const contextRow = 0
+    const transcriptRow = contextRows.length + 1 + flexibleBefore
+    const composerRow = transcriptRow + visibleTranscript.length + flexibleAfter + 1
+    const statusRow = composerRow + composerRows.length
+    const shift = (row: number, height: number): CellRect => {
+      const next = row - sliceOffset
+      if (next + height <= 0) return slot(0, width, 0)
+      if (next < 0) return slot(0, width, height + next)
+      return slot(next, width, height)
+    }
+    this.geometry = {
+      width,
+      height: visible.length,
+      context: shift(contextRow, contextRows.length),
+      transcript: shift(transcriptRow, visibleTranscript.length),
+      composer: shift(composerRow, composerRows.length),
+      status: shift(statusRow, statusRows.length),
+    }
+    return visible
   }
 }
 
@@ -271,6 +358,8 @@ export class ContextBar implements Component {
 export class StatusBar implements Component {
   private permission = 'workspace-write'
   private detail: string | undefined
+  private tokens: readonly ChromeHitToken[] = []
+  private hoveredTokenId: string | undefined
 
   /**
    * Show the current permission projected by Harness.
@@ -284,6 +373,18 @@ export class StatusBar implements Component {
    */
   setDetail(detail?: string): void { this.detail = detail }
 
+  /** Permission/detail tokens that remained visible after the last render. */
+  lastTokens(): readonly ChromeHitToken[] {
+    return this.tokens
+  }
+
+  /** Set a visual-only status token hover. */
+  setHoveredToken(id?: string): boolean {
+    if (this.hoveredTokenId === id) return false
+    this.hoveredTokenId = id
+    return true
+  }
+
   invalidate(): void { /* presentation is derived directly from state */ }
 
   render(width: number): string[] {
@@ -292,15 +393,32 @@ export class StatusBar implements Component {
       `使用权限：${permissionLabel(this.permission)}`,
       `Permission: ${permissionLabel(this.permission)}`,
     )
-    const permission = `${color.brand('▸▸')} ${
+    const permissionText = `${color.brand('▸▸')} ${
       this.permission === 'danger-full-access'
         ? color.danger(label)
         : this.permission === 'read-only' ? color.muted(label) : color.accent(label)
     }`
+    const permission = this.hoveredTokenId === 'permission'
+      ? background.hover(permissionText)
+      : permissionText
     if (this.detail === undefined || innerWidth - visibleWidth(permission) - visibleWidth(this.detail) < 1) {
-      return [`${prefix}${fit(permission, innerWidth)}`]
+      const clipped = fit(permission, innerWidth)
+      this.tokens = [{
+        id: 'permission',
+        rect: { col: prefix.length, row: 0, width: visibleWidth(clipped), height: 1 },
+      }]
+      return [`${prefix}${clipped}`]
     }
-    return [`${prefix}${columns(permission, this.detail, innerWidth)}`]
+    const detail = this.hoveredTokenId === 'detail' ? background.hover(this.detail) : this.detail
+    const gap = innerWidth - visibleWidth(permission) - visibleWidth(detail)
+    this.tokens = [
+      { id: 'permission', rect: { col: prefix.length, row: 0, width: visibleWidth(permission), height: 1 } },
+      {
+        id: 'detail',
+        rect: { col: prefix.length + innerWidth - visibleWidth(detail), row: 0, width: visibleWidth(detail), height: 1 },
+      },
+    ]
+    return [`${prefix}${permission}${' '.repeat(gap)}${detail}`]
   }
 }
 
@@ -309,6 +427,9 @@ export class PromptEditor extends Editor {
   private facts: TuiHeaderFacts | undefined
   private drafts: readonly ComposerDraftAttachment[] = []
   private submitSnapshot: string | undefined
+  private localGeometry: PromptEditorLocalGeometry | undefined
+  private factTokens: readonly ChromeHitToken[] = []
+  private hoveredTargetId: string | undefined
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -341,7 +462,10 @@ export class PromptEditor extends Editor {
   }
 
   override handleInput(data: string): void {
-    this.submitSnapshot = this.getExpandedText()
+    // Slash completion changes the value before inherited Enter submits it;
+    // in that case the callback argument is authoritative. Ordinary submit
+    // keeps the expanded pre-clear snapshot so paste markers stay lossless.
+    this.submitSnapshot = this.isShowingAutocomplete() ? undefined : this.getExpandedText()
     try {
       super.handleInput(data)
       const text = this.getText()
@@ -359,15 +483,57 @@ export class PromptEditor extends Editor {
     return this.submitSnapshot ?? fallback
   }
 
+  /** Content-relative composer subregions from the last render. */
+  lastLocalGeometry(): PromptEditorLocalGeometry | undefined {
+    return this.localGeometry
+  }
+
+  /** Model/mode tokens that remained visible after compact on the last render. */
+  lastFactTokens(): readonly ChromeHitToken[] {
+    return this.factTokens
+  }
+
+  /** Set visual-only hover for a composer fact or autocomplete area. */
+  setHoveredTarget(id?: string): boolean {
+    if (this.hoveredTargetId === id) return false
+    this.hoveredTargetId = id
+    return true
+  }
+
   override render(width: number): string[] {
     this.borderColor = this.focused ? color.brand : color.border
-    if (width < 8) return super.render(width)
+    if (width < 8) {
+      const lines = super.render(width)
+      this.factTokens = []
+      this.localGeometry = {
+        prefix: 0,
+        frameWidth: width,
+        height: lines.length,
+        borderTop: { col: 0, row: 0, width, height: 0 },
+        editor: { col: 0, row: 0, width, height: lines.length },
+        attachments: { col: 0, row: 0, width, height: 0 },
+        autocomplete: { col: 0, row: 0, width, height: 0 },
+        facts: { col: 0, row: 0, width, height: 0 },
+      }
+      return lines
+    }
     const { prefix, innerWidth: frameWidth } = gutter(width)
     const lines = super.render(frameWidth)
     const lowerRule = lines.findIndex((line, index) => index > 0 && isHorizontalRule(line))
     const split = lowerRule < 0 ? lines.length - 1 : lowerRule
     const editorRows = lines.slice(1, split)
-    const autocompleteRows = lines.slice(split + 1)
+    const autocompleteSnapshot = editorMouseApi(this).getAutocompleteSnapshot?.()
+    const autocompleteRows = lines.slice(split + 1).map((row, visualRow) => {
+      const visible = autocompleteSnapshot?.visibleRows.find(candidate => candidate.visualRow === visualRow)
+      const hovered = visible === undefined
+        ? false
+        : visible.absoluteIndex !== autocompleteSnapshot?.selectedIndex
+          && this.hoveredTargetId === autocompleteTargetId(
+          autocompleteSnapshot?.generation ?? -1,
+          visible.absoluteIndex,
+          )
+      return hovered ? background.hover(row) : row
+    })
 
     if (this.getText() === '' && !this.isShowingAutocomplete() && editorRows.length > 0) {
       const cursor = this.focused ? `${CURSOR_MARKER}\u001B[7m \u001B[0m` : ''
@@ -386,17 +552,60 @@ export class PromptEditor extends Editor {
         frameWidth,
       ))]
     const body = [...editorRows, ...attachmentRows, ...autocompleteRows].map(row => padded(row, frameWidth))
-    const facts = this.facts === undefined
-      ? ui('deepseek · 标准', 'deepseek · Standard')
+    const source: ChromeFactToken[] = this.facts === undefined
+      ? []
       : [
-        this.facts.model === '' ? undefined : modelLabel(this.facts.model),
-        modeLabel(this.facts.mode),
-      ].filter((value): value is string => value !== undefined).join(' · ')
-    const compactedFacts = compactFacts(facts, Math.max(0, frameWidth - 2))
-    return [
+        ...(this.facts.model === '' ? [] : [{
+          id: 'model' as const,
+          text: this.hoveredTargetId === 'chrome:model'
+            ? background.hover(modelLabel(this.facts.model))
+            : modelLabel(this.facts.model),
+        }]),
+        {
+          id: 'mode' as const,
+          text: this.hoveredTargetId === 'chrome:mode'
+            ? background.hover(modeLabel(this.facts.mode))
+            : modeLabel(this.facts.mode),
+        },
+      ]
+    const compacted = source.length === 0
+      ? { text: ui('deepseek · 标准', 'deepseek · Standard'), tokens: [] as const }
+      : compactFactTokens(source, Math.max(0, frameWidth - 2))
+    const inner = [
       horizontalRule('', frameWidth, this.borderColor),
       ...body,
-      horizontalRule(compactedFacts, frameWidth, this.borderColor),
-    ].map(line => `${prefix}${line}`)
+      horizontalRule(compacted.text, frameWidth, this.borderColor),
+    ]
+    const editorTop = 1
+    const attachmentTop = editorTop + editorRows.length
+    const autocompleteTop = attachmentTop + attachmentRows.length
+    const factsRow = inner.length - 1
+    const suffix = compacted.text === '' ? '' : ` ${compacted.text}`
+    const labelStart = prefix.length + Math.max(0, frameWidth - visibleWidth(suffix)) + (suffix === '' ? 0 : 1)
+    this.factTokens = compacted.tokens.map(token => ({
+      id: token.id,
+      rect: { col: labelStart + token.col, row: factsRow, width: token.width, height: 1 },
+    }))
+    this.localGeometry = {
+      prefix: prefix.length,
+      frameWidth,
+      height: inner.length,
+      borderTop: { col: prefix.length, row: 0, width: frameWidth, height: 1 },
+      editor: { col: prefix.length, row: editorTop, width: frameWidth, height: editorRows.length },
+      attachments: {
+        col: prefix.length,
+        row: attachmentTop,
+        width: frameWidth,
+        height: attachmentRows.length,
+      },
+      autocomplete: {
+        col: prefix.length,
+        row: autocompleteTop,
+        width: frameWidth,
+        height: autocompleteRows.length,
+      },
+      facts: { col: prefix.length, row: factsRow, width: frameWidth, height: 1 },
+    }
+    return inner.map(line => `${prefix}${line}`)
   }
 }

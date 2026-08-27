@@ -132,4 +132,26 @@ describe('per-card tool expand', () => {
     expect(transcript.exitToolFocus()).toBe(true)
     expect(stripAnsi(transcript.render(80).join('\n'))).not.toMatch(/›/u)
   })
+
+  it('toggles a tool card through the existing expand path on a pointer hit', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      tool('a', 'First tool', 'result-a'),
+      tool('b', 'Second tool', 'result-b'),
+    ]))
+    expect(transcript.pointerToggleTool('b')).toEqual({ kind: 'tool', key: 'b' })
+    const rendered = stripAnsi(transcript.render(80).join('\n'))
+    expect(rendered).toContain('result-b')
+    expect(rendered).not.toContain('result-a')
+    expect(transcript.pointerToggleTool('b')).toEqual({ kind: 'tool', key: 'b' })
+    expect(stripAnsi(transcript.render(80).join('\n'))).not.toContain('result-b')
+    const origin = { col: 0, row: 0, width: 80, height: 12 }
+    const hits = transcript.controlHitRegions(origin)
+    expect(hits.some(region => region.id === 'transcript:tool:b'
+      && region.activation === 'direct'
+      && region.hover === 'highlight'
+      && region.action.kind === 'transcript'
+      && region.action.command === 'toggle')).toBe(true)
+  })
 })

@@ -75,6 +75,16 @@ describe('empty session examples', () => {
       kind: 'example',
       text: emptyExampleText(EMPTY_SESSION_EXAMPLES[1]!),
     })
+    expect(transcript.focusExample('review')).toBe(true)
+    expect(transcript.activateFocused()).toEqual({
+      kind: 'example',
+      text: emptyExampleText(EMPTY_SESSION_EXAMPLES[0]!),
+    })
+    const hits = transcript.controlHitRegions({ col: 0, row: 0, width: 80, height: 20 })
+    expect(hits.map(region => region.id)).toEqual([
+      'transcript:example:review',
+      'transcript:example:boot',
+    ])
   })
 
   it('localizes starter prompts without translating a later user message', () => {

@@ -123,3 +123,28 @@ describe('/keymap', () => {
     )
   })
 })
+
+describe('/mouse', () => {
+  it('persists a live mode toggle through Settings and applyBehavior', async () => {
+    const { actions, host, mutate } = actionHarness()
+    await actions.execute('mouse', 'toggle')
+    expect(mutate).toHaveBeenCalledWith(
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['mouseMode'], value: 'native' }],
+      0,
+    )
+    expect(host.applyBehavior).toHaveBeenCalledWith(expect.objectContaining({ mouseMode: 'native' }))
+  })
+
+  it('keeps full and native as explicit Settings writes', async () => {
+    const { actions, mutate } = actionHarness()
+    await actions.execute('mouse', 'full')
+    expect(mutate).not.toHaveBeenCalled()
+    await actions.execute('mouse', 'native')
+    expect(mutate).toHaveBeenCalledWith(
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['mouseMode'], value: 'native' }],
+      0,
+    )
+  })
+})

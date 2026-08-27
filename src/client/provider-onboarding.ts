@@ -49,7 +49,7 @@ interface ProviderRow {
 }
 
 /** Minimal write-only prompt surface needed by the onboarding controller. */
-export type ProviderOnboardingOverlays = Pick<OverlayPrompts, 'secretInput'>
+export type ProviderOnboardingOverlays = Pick<OverlayPrompts, 'secretTransaction'>
 
 function apiKeyEnvOf(namespace: SettingsNamespaceView | undefined, path: readonly string[]): string | undefined {
   if (namespace === undefined) return undefined
@@ -261,53 +261,48 @@ export class ProviderOnboardingGate {
   }
 
   private async run(initial?: ProviderReadiness): Promise<ProviderOnboardingResult> {
-    let readiness = initial
-    let failure: string | undefined
-    while (true) {
-      readiness ??= await inspectProviderReadiness(this.api)
-      if (readiness.kind === 'ready') return 'ready'
-      if (readiness.kind === 'unavailable') {
-        this.notice(providerUnavailableNotice(readiness.reason), 'warning')
-        return 'unavailable'
-      }
-
-      const raw = await this.overlays.secretInput(promptRequest(readiness, failure))
-      if (raw === undefined) {
-        this.notice(onboardingDeferredNotice(), 'warning')
-        return 'deferred'
-      }
-      const checked = normalizeOnboardingApiKey(raw)
-      if (!checked.ok) {
-        failure = checked.message
-        continue
-      }
-      try {
-        const response = await this.api.credentials.set({ ref: readiness.ref, value: checked.value })
-        if (!response.result.ok) {
-          failure = credentialSaveFailure()
-          continue
-        }
-      } catch {
-        failure = credentialSaveFailure()
-        continue
-      }
-
-      const refreshed = await inspectProviderReadiness(this.api)
-      if (refreshed.kind === 'needs-credential') {
-        readiness = refreshed
-        failure = ui(
-          '凭证已写入，但 Harness 仍报告未配置；请重新输入或使用 /doctor 检查。',
-          'The credential was written, but Harness still reports it missing. Re-enter it or inspect /doctor.',
-        )
-        continue
-      }
-      if (refreshed.kind === 'unavailable') {
-        this.notice(providerUnavailableNotice(refreshed.reason), 'warning')
-        return 'unavailable'
-      }
-      this.notice(ui('API Key 已保存，可以开始使用。', 'API key saved. You can start using the model.'), 'success')
-      return 'ready'
+    const readiness = initial ?? await inspectProviderReadiness(this.api)
+    if (readiness.kind === 'ready') return 'ready'
+    if (readiness.kind === 'unavailable') {
+      this.notice(providerUnavailableNotice(readiness.reason), 'warning')
+      return 'unavailable'
     }
+
+    const saved = await this.overlays.secretTransaction<ProviderReadiness>({
+      input: promptRequest(readiness),
+      busyTitle: ui('正在保存 API Key', 'Saving API key'),
+      busyDetail: ui(
+        '正在通过 DeepSeek Harness 写入并重新检查凭证状态。',
+        'Writing through DeepSeek Harness and rechecking credential status.',
+      ),
+      failureMessage: credentialSaveFailure(),
+      validate: normalizeOnboardingApiKey,
+      work: async (value) => {
+        const response = await this.api.credentials.set({ ref: readiness.ref, value })
+        if (!response.result.ok) return { ok: false, message: credentialSaveFailure() }
+        const refreshed = await inspectProviderReadiness(this.api)
+        if (refreshed.kind === 'needs-credential') {
+          return {
+            ok: false,
+            message: ui(
+              '凭证已写入，但 Harness 仍报告未配置；请重新输入或使用 /doctor 检查。',
+              'The credential was written, but Harness still reports it missing. Re-enter it or inspect /doctor.',
+            ),
+          }
+        }
+        return { ok: true, value: refreshed }
+      },
+    })
+    if (saved === undefined) {
+      this.notice(onboardingDeferredNotice(), 'warning')
+      return 'deferred'
+    }
+    if (saved.kind === 'unavailable') {
+      this.notice(providerUnavailableNotice(saved.reason), 'warning')
+      return 'unavailable'
+    }
+    this.notice(ui('API Key 已保存，可以开始使用。', 'API key saved. You can start using the model.'), 'success')
+    return 'ready'
   }
 }
 

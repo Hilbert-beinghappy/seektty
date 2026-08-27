@@ -35,6 +35,7 @@ describe('command catalog copy (review #60)', () => {
     const names = tuiCommands().map(command => command.name)
     expect(names.slice(0, 6)).toEqual(['new', 'sessions', 'model', 'mode', 'permission', 'workspace'])
     expect(names).toContain('plugin')
+    expect(names).toContain('mouse')
     expect(names).toContain('exit')
     expect(names).not.toContain('resume')
     expect(names).not.toContain('plugins')

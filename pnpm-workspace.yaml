@@ -1,6 +1,7 @@
 allowBuilds:
   esbuild: true
   koffi: true
+  node-pty: true
 patchedDependencies:
   '@mariozechner/pi-tui@0.73.1': patches/@mariozechner__pi-tui@0.73.1.patch
 minimumReleaseAgeExclude:

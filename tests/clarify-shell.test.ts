@@ -196,6 +196,7 @@ function overlays(script: {
     input: async () => input.shift(),
     multilineInput: async () => input.shift(),
     secretInput: async () => undefined,
+    secretTransaction: async () => undefined,
     detail: async (request: { content: string }) => { detailContents.push(request.content) },
     confirm: async () => {
       const next = confirm.shift()

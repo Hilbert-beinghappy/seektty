@@ -84,8 +84,8 @@ describe('Ctrl+C while an overlay is open', () => {
 
   it('registers consumeRunningInterrupt as the Surface listener first stage', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    const helperAt = surface.indexOf('consumeRunningInterrupt(data, capabilities.active()?.session)')
-    const overlayAt = surface.indexOf('if (overlays.hasActive()) return undefined')
+    const helperAt = surface.indexOf('consumeRunningInterrupt(payload, capabilities.active()?.session)')
+    const overlayAt = surface.indexOf('if (overlays.hasActive()) return payload === data ? undefined : { data: payload }')
     expect(helperAt).toBeGreaterThan(-1)
     expect(overlayAt).toBeGreaterThan(helperAt)
     expect(surface).not.toMatch(/interrupt-priority/u)

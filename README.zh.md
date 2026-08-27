@@ -7,7 +7,7 @@
 <p>DeepSeek Harness 的键盘优先终端工作台。</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.2-orange" alt="Version 1.2.2"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.3-orange" alt="Version 1.2.3"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -88,7 +88,15 @@ deepseek --update
 
 `deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
-SeekTTY `1.2.2` 是面向官方 Harness `0.1.1-rc.2` 的维护更新，修复长会话渲染性能、终端滚动越界和偶发白块问题。请使用 [Releases 页面](https://github.com/Hilbert-beinghappy/seektty/releases)列出的安装包，或运行 `pnpm run build && pnpm pack`，把 `SEEKTTY_SPEC` 指向生成的 tarball。
+SeekTTY `1.2.3` 在保留原生终端选择作为备用通道的同时，加入完整的应用内鼠标交互，目标 Host 为官方 Harness `0.1.1-rc.2`。请使用 [Releases 页面](https://github.com/Hilbert-beinghappy/seektty/releases)列出的安装包，或运行 `pnpm run build && pnpm pack`，把 `SEEKTTY_SPEC` 指向生成的 tarball。
+
+### 1.2.3 新增内容
+
+- 常驻 Transcript 滚动条和受视口约束的滚轮处理可避免滚轮事件进入输入框，让短会话和长会话拥有一致的滚动行为。
+- 应用内文本选区会在松开鼠标后保留，支持按词、按行选择，并可跨已加载的 Transcript 页面自动滚动。选后复制和右键复制／粘贴在 Windows、macOS、Wayland 与 X11 上使用明确的 UTF-8 路径。
+- 稳定的悬停反馈和目标感知点击覆盖工具卡、示例、自动补全、弹窗以及模型、模式和权限控件。
+- 自动补全命中测试始终对应滚动后实际渲染的候选项。首次单击选中；按 Enter 或安全地再次单击只执行一次斜杠命令；Tab 仅补全。
+- F3 或 `/mouse` 可在完整鼠标模式与原生终端选择之间切换。危险确认仍只能通过键盘完成。
 
 ## 界面预览
 
@@ -100,7 +108,7 @@ SeekTTY `1.2.2` 是面向官方 Harness `0.1.1-rc.2` 的维护更新，修复长
 | --- | --- |
 | ![SeekTTY 亮色 TypeScript 语法高亮](assets/seektty-code-light.png) | ![SeekTTY 暗色工具调用与 Diff 语法高亮](assets/seektty-code-dark.png) |
 
-最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。滚轮和 Transcript 导航键在 SeekTTY 内部浏览历史；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
+最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。完整鼠标模式用滚轮浏览历史、选择文本，并点击已有控件。把选区拖到 Transcript 边缘并停留会自动跨已加载页面滚动，同时保持同一个逻辑文本锚点；每帧仍只重绘当前可见窗口。F3 或 `/mouse` 可切到原生终端选择且不离开备用屏幕；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
 
 ## Clarify 与 Plan
 
@@ -173,15 +181,21 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 `/plugin`、`/workspace` 和 `/profile` 同时提供交互中心与直接子命令。未知命令不会作为普通消息发送，而会留在命令界面并显示相近建议。
 
+实际渲染的候选窗口是唯一权威：滚轮和方向键移动高亮，鼠标悬停只做预览，首次单击会立即、清晰地选中指针下的可见候选。按 Enter 或安全地再次点击会补全并且只执行一次斜杠命令；Tab 只补全。文件和路径补全永不自动提交，滚动位置提示行不可点击。
+
+完整鼠标模式复制会把文本统一编码一次为 UTF-8。Windows 使用固定的 PowerShell `Set-Clipboard` writer，macOS 在 UTF-8 locale 下运行 `pbcopy`，Wayland 明确声明 `text/plain;charset=utf-8`，X11 明确请求 `UTF8_STRING`；OSC 52 继续服务于终端、SSH 与 tmux 路径。
+
 ## 常用操作
 
 | 输入 | 操作 |
 | --- | --- |
-| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键 |
+| 完整鼠标模式 | 滚轮、常驻滚动条、应用内选区、选后复制、稳定悬停反馈，以及工具卡、示例、补全、弹窗和仍可见的模型/模式/权限 chrome 精确点击。危险确认仍需 Enter。 |
+| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键。F3 或 `/mouse native` 切换。 |
 | 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
+| Ctrl+Shift+C / F3 | 复制应用内选区 / 切换完整鼠标模式与终端原生选择 |
 | `/` | 打开命令与 Skill 候选 |
-| Enter / Shift+Enter | 发送或确认 / 输入换行 |
-| Tab / Escape | 在输入框与 transcript 间切换 / 返回或关闭当前弹窗 |
+| Enter / Shift+Enter | 发送或确认；选中的斜杠候选会补全并只执行一次 / 输入换行 |
+| Tab / Escape | 只补全选中的候选而不提交 / 返回或关闭当前弹窗 |
 | PgUp / PgDn / Home / End | 在 transcript 中翻页、跳到最早内容或回到最新 |
 | Shift+Tab | 循环权限预设，进入完全访问前确认 |
 | Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |
@@ -264,7 +278,7 @@ dsh plugin --profile tui remove seektty
 | 声明的最低 Harness Host | `0.1.0-rc.6` |
 | 当前已测 Harness Host | `0.1.1-rc.2` |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| 当前维护版本 | SeekTTY `1.2.2` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`；本次补丁不代表新增完整联合验收 |
+| 当前鼠标功能版本 | SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`；本次发布不代表新增完整联合验收 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 
@@ -284,6 +298,11 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+DSH_BIN=/path/to/dsh \
+SEEKTTY_SPEC=/path/to/seektty.tgz \
+SEEKTTY_MOUSE_PTY=1 \
+pnpm test:mouse-pty
 
 CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor

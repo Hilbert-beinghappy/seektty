@@ -22,6 +22,7 @@ import {
   type TuiBehaviorSettings,
   type TuiCodeThemeId,
   type TuiCustomTheme,
+  type TuiMouseMode,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiDraftAttachment, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
@@ -100,6 +101,7 @@ import {
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
+import { normalizeOnboardingApiKey } from './provider-onboarding.ts'
 import {
   captureClipboardImage,
   cleanupClipboardImageWorkspace,
@@ -203,7 +205,8 @@ function commandArguments(args: string): readonly string[] {
     if (quote !== undefined) {
       if (character === quote) {
         quote = undefined
-      } else if (character === '\\' && quote === '"' && index + 1 < args.length) {
+      } else if (character === '\\' && quote === '"' && index + 1 < args.length
+        && ((args[index + 1] ?? '') === '"' || (args[index + 1] ?? '') === '\\')) {
         index += 1
         current += args[index] ?? ''
       } else {
@@ -221,7 +224,8 @@ function commandArguments(args: string): readonly string[] {
         current = ''
         started = false
       }
-    } else if (character === '\\' && index + 1 < args.length) {
+    } else if (character === '\\' && index + 1 < args.length
+      && /[\s'"\\]/u.test(args[index + 1] ?? '')) {
       index += 1
       current += args[index] ?? ''
       started = true
@@ -393,6 +397,23 @@ function elapsedLabel(milliseconds: number): string {
   return `${Math.round(milliseconds / 6_000) / 10} min`
 }
 
+const DEEPSEEK_CREDENTIAL_REF = 'DEEPSEEK_API_KEY'
+
+function validateSecretValue(raw: string, deepseek: boolean):
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly message: string } {
+  if (deepseek) return normalizeOnboardingApiKey(raw)
+  if (raw === '') return { ok: false, message: ui('Secret 不能为空。', 'The secret cannot be empty.') }
+  return { ok: true, value: raw }
+}
+
+function credentialWriteFailure(ref: string): string {
+  return ui(
+    `Credential ${ref} 保存失败；请重试，或按 Esc 后使用 /doctor 检查。`,
+    `Could not save credential ${ref}. Retry, or press Esc and inspect /doctor.`,
+  )
+}
+
 /** TUI-local actions. Every durable operation delegates to HarnessTuiCapabilities. */
 export class TuiActions {
   private readonly handledInteractions = new Set<string>()
@@ -450,6 +471,7 @@ export class TuiActions {
         case 'attachments': await this.attachments(); break
         case 'settings': await this.settings(args); break
         case 'keymap': await this.keymap(args); break
+        case 'mouse': await this.mouse(args); break
         case 'plugin':
         case 'plugins': await this.plugin(args); break
         case 'doctor': await this.doctor(); break
@@ -2056,6 +2078,61 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.settingsChanged(updated, ui(`键位 ${id}`, `Key binding ${id}`))
   }
 
+  private async mouse(args: string): Promise<void> {
+    const document = behaviorSettings(
+      await this.capabilities.managementBridge().settings.describe(TUI_BEHAVIOR_SETTINGS_NAMESPACE),
+    )
+    const current = behaviorFromSettings(document)
+    const token = args.trim().toLowerCase()
+    let next: TuiMouseMode | undefined
+    if (token === 'full' || token === 'native') next = token
+    else if (token === 'toggle') next = current.mouseMode === 'full' ? 'native' : 'full'
+    else if (token !== '') {
+      throw new Error(ui('用法：/mouse [full|native|toggle]', 'Usage: /mouse [full|native|toggle]'))
+    }
+    if (next === undefined) {
+      const selected = await this.host.overlays.select({
+        title: ui('鼠标模式', 'Mouse mode'),
+        detail: ui(
+          '完整模式提供应用内滚动和点击；原生模式关闭鼠标报告，供终端选择文本。切换不会离开备用屏幕。',
+          'Full mode provides in-app scrolling and clicks; native mode turns off mouse reporting so the terminal can select text. Switching never leaves the alternate screen.',
+        ),
+        searchable: false,
+        choices: [
+          {
+            id: 'full',
+            label: ui('完整模式', 'Full mode'),
+            description: ui('应用内滚轮、滚动条和点击', 'In-app wheel, scrollbar, and clicks'),
+            active: current.mouseMode === 'full',
+          },
+          {
+            id: 'native',
+            label: ui('原生选择', 'Native selection'),
+            description: ui('关闭鼠标报告，使用终端选区', 'Disable mouse reporting and use terminal selection'),
+            active: current.mouseMode === 'native',
+          },
+        ],
+      })
+      if (selected === undefined) return
+      next = selected.id as TuiMouseMode
+    }
+    if (next === current.mouseMode) {
+      this.host.notice(next === 'full'
+        ? ui('已是完整鼠标模式', 'Already in full mouse mode')
+        : ui('已是原生选择模式', 'Already in native selection mode'), 'info')
+      return
+    }
+    const updated = await this.capabilities.managementBridge().settings.mutate(
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['mouseMode'], value: next }],
+      document.revision,
+    )
+    await this.settingsChanged(updated, ui(
+      next === 'full' ? '完整鼠标模式' : '原生选择模式',
+      next === 'full' ? 'Full mouse mode' : 'Native selection mode',
+    ))
+  }
+
   private async settingsNamespace(
     navigation: OverlayNavigation<void>,
     namespace: string,
@@ -2334,13 +2411,35 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
       if (choice === undefined) return undefined
       value = field.choices.find(option => option.id === choice.id)?.value
     } else if (field.control === 'secret') {
-      const secret = await overlays.secretInput({
-        title: ui(`写入 ${field.label}`, `Write ${field.label}`),
-        detail: ui('现有值不会回显；保存后将替换原值', "The current value is hidden; saving replaces it"),
-        placeholder: ui('输入新 Secret', "Enter a new secret"),
+      const failure = ui(
+        `${field.label} 保存失败；请重试。`,
+        `Could not save ${field.label}. Please retry.`,
+      )
+      return overlays.secretTransaction<TuiSettingsDocument>({
+        input: {
+          title: ui(`写入 ${field.label}`, `Write ${field.label}`),
+          detail: ui('现有值不会回显；保存后将替换原值', "The current value is hidden; saving replaces it"),
+          placeholder: ui('输入新 Secret', "Enter a new secret"),
+        },
+        busyTitle: ui(`正在保存 ${field.label}`, `Saving ${field.label}`),
+        busyDetail: ui('正在通过 Harness Settings 写入。', 'Writing through Harness Settings.'),
+        failureMessage: failure,
+        validate: raw => validateSecretValue(raw, document.namespace === 'llm-deepseek'),
+        work: async (secret) => {
+          try {
+            return {
+              ok: true,
+              value: await this.capabilities.managementBridge().settings.mutate(
+                document.namespace,
+                [{ op: 'set', path: field.path, value: secret }],
+                document.revision,
+              ),
+            }
+          } catch {
+            return { ok: false, message: failure }
+          }
+        },
       })
-      if (secret === undefined || secret === '') return undefined
-      value = secret
     } else {
       const initialValue = field.control === 'json'
         ? JSON.stringify(field.value, null, 2)
@@ -2380,22 +2479,47 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
       writeReference = true
     }
     const info = await bridge.credentialInfo(ref)
-    if (!info.writable) throw new Error(ui(`Credential ${JSON.stringify(ref)} 由系统管理，不能在这里修改`, `Credential ${JSON.stringify(ref)} is system-managed and cannot be changed here`))
+    if (!info.writable) {
+      const source = info.source === undefined ? '' : ` (${info.source})`
+      throw new Error(ui(
+        `Credential ${JSON.stringify(ref)} 由外部来源${source}管理，不能在这里修改；请修改启动环境或对应配置层。`,
+        `Credential ${JSON.stringify(ref)} is managed by an external source${source} and cannot be changed here; update the launch environment or its owning configuration layer.`,
+      ))
+    }
     if (set) {
-      const secret = await overlays.secretInput({
-        title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
-        detail: ui(`状态：${info.configured ? '已配置' : '未配置'}。原值不会回显；保存后将替换原值。`, `Status: ${info.configured ? 'Configured' : 'Not configured'}. The current value is never echoed; saving replaces it.`),
-        placeholder: ui('输入 Secret', "Enter secret"),
+      const failure = credentialWriteFailure(ref)
+      const updated = await overlays.secretTransaction<TuiSettingsDocument>({
+        input: {
+          title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
+          detail: ui(`状态：${info.configured ? '已配置' : '未配置'}。原值不会回显；保存后将替换原值。`, `Status: ${info.configured ? 'Configured' : 'Not configured'}. The current value is never echoed; saving replaces it.`),
+          placeholder: ui('输入 Secret', "Enter secret"),
+        },
+        busyTitle: ui(`正在保存 Credential ${ref}`, `Saving credential ${ref}`),
+        busyDetail: ui('正在通过 Harness Credential API 写入并检查状态。', 'Writing through the Harness Credential API and checking status.'),
+        failureMessage: failure,
+        validate: raw => validateSecretValue(
+          raw,
+          document.namespace === 'llm-deepseek' || ref === DEEPSEEK_CREDENTIAL_REF,
+        ),
+        work: async (secret) => {
+          try {
+            const saved = await bridge.setCredential(ref, secret)
+            if (!saved.configured) return { ok: false, message: failure }
+            const next = writeReference
+              ? await bridge.mutate(
+                document.namespace,
+                [{ op: 'set', path: field.path, value: ref }],
+                document.revision,
+              )
+              : document
+            return { ok: true, value: next }
+          } catch {
+            return { ok: false, message: failure }
+          }
+        },
       })
-      if (secret === undefined || secret === '') return
-      if (writeReference) {
-        document = await bridge.mutate(
-          document.namespace,
-          [{ op: 'set', path: field.path, value: ref }],
-          document.revision,
-        )
-      }
-      await bridge.setCredential(ref, secret)
+      if (updated === undefined) return
+      document = updated
       await this.settingsChanged(document, `Credential ${ref}`, overlays)
       return
     }
@@ -3008,16 +3132,36 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     const bridge = this.capabilities.managementBridge().settings
     const info = await bridge.credentialInfo(ref)
     if (!info.writable) {
-      this.host.notice(ui(`Credential ${ref} 由系统管理，无需在这里配置`, `Credential ${ref} is system-managed and does not need configuration here`), 'info')
+      const source = info.source === undefined ? '' : ` (${info.source})`
+      this.host.notice(ui(
+        `Credential ${ref} 由外部来源${source}管理；请修改其拥有的配置层。`,
+        `Credential ${ref} is managed by an external source${source}; update its owning configuration layer.`,
+      ), 'info')
       return
     }
-    const secret = await overlays.secretInput({
-      title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
-      detail: ui('值不会回显；保存后将替换原值', "The value is never displayed; saving replaces it"),
-      placeholder: ui('输入 Secret；Esc 跳过', "Enter secret; Esc skips"),
+    const failure = credentialWriteFailure(ref)
+    const saved = await overlays.secretTransaction<boolean>({
+      input: {
+        title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
+        detail: ui('值不会回显；保存后将替换原值', "The value is never displayed; saving replaces it"),
+        placeholder: ui('输入 Secret；Esc 跳过', "Enter secret; Esc skips"),
+      },
+      busyTitle: ui(`正在保存 Credential ${ref}`, `Saving credential ${ref}`),
+      busyDetail: ui('正在通过 Harness Credential API 写入并检查状态。', 'Writing through the Harness Credential API and checking status.'),
+      failureMessage: failure,
+      validate: raw => validateSecretValue(raw, ref === DEEPSEEK_CREDENTIAL_REF),
+      work: async (secret) => {
+        try {
+          const result = await bridge.setCredential(ref, secret)
+          return result.configured
+            ? { ok: true, value: true }
+            : { ok: false, message: failure }
+        } catch {
+          return { ok: false, message: failure }
+        }
+      },
     })
-    if (secret === undefined || secret === '') return
-    await bridge.setCredential(ref, secret)
+    if (saved !== true) return
     this.host.notice(ui(`Credential ${ref} 已配置`, `Credential ${ref} configured`), 'success')
   }
 

@@ -24,6 +24,8 @@ describe('normalizeChord', () => {
     expect(normalizeChord('Win+,')).toBe('super+,')
     expect(normalizeChord('Meta+,')).toBe('super+,')
     expect(normalizeChord('F2')).toBe('f2')
+    expect(normalizeChord('F3')).toBe('f3')
+    expect(normalizeChord('Ctrl+Shift+C')).toBe('ctrl+shift+c')
     expect(normalizeChord('Shift+Tab')).toBe('shift+tab')
     expect(normalizeChord('Shift+Left')).toBe('shift+left')
     expect(normalizeChord('  Ctrl+O  ')).toBe('ctrl+o')
@@ -93,5 +95,17 @@ describe('key binding overrides', () => {
     })).toThrow(/conflict|冲突/u)
     expect(BehaviorSettingsSchema({ keyBindings: { commandPalette: 'Ctrl+K' } }).keyBindings)
       .toEqual({ commandPalette: 'ctrl+k' })
+  })
+})
+
+describe('mouse keymap bindings', () => {
+  it('matches F3 and Ctrl+Shift+C across legacy and Kitty encodings', () => {
+    expect(matchesBinding('toggleMouseMode', '\u001bOR')).toBe(true)
+    expect(matchesBinding('toggleMouseMode', '\u001b[13~')).toBe(true)
+    expect(matchesBinding('copySelection', '\u001b[99;6u')).toBe(true)
+    expect(matchesBinding('copySelection', '\u001b[27;6;99~')).toBe(true)
+    expect(keyBindingsIssue({ toggleMouseMode: 'F3' })).toBeUndefined()
+    expect(keyBindingsIssue({ copySelection: 'Ctrl+Shift+C' })).toBeUndefined()
+    expect(keyBindingsIssue({ copySelection: 'ctrl+c' })).toMatch(/interrupt|冲突|conflict/u)
   })
 })

@@ -7,7 +7,7 @@
 <p>A keyboard-first terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.2-orange" alt="Version 1.2.2"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.3-orange" alt="Version 1.2.3"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -88,7 +88,15 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.2` is a maintenance update targeting official Harness `0.1.1-rc.2`, with fixes for long-session rendering performance, terminal viewport scrolling, and intermittent white blocks. Use the package listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases), or build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball.
+SeekTTY `1.2.3` adds complete application-owned mouse interaction while retaining native terminal selection as an escape hatch. It targets official Harness `0.1.1-rc.2`. Use the package listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases), or build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball.
+
+### What's new in 1.2.3
+
+- A resident transcript scrollbar and viewport-bound wheel handling keep scrolling out of the composer and make short and long conversations behave consistently.
+- In-app text selection persists after release, supports word and line selection, and auto-scrolls across loaded transcript pages. Copy-on-select and right-click Copy/Paste use explicit UTF-8 paths on Windows, macOS, Wayland, and X11.
+- Stable hover feedback and target-aware clicks cover tool cards, examples, autocomplete, overlays, and the model, mode, and permission controls.
+- Autocomplete hit testing follows the candidates actually rendered after scrolling. The first click selects; Enter or a safe second click executes a slash command once; Tab only completes it.
+- F3 or `/mouse` switches between full mouse mode and native terminal selection. Dangerous confirmations remain keyboard-only.
 
 ## Interface
 
@@ -100,7 +108,7 @@ SeekTTY `1.2.2` is a maintenance update targeting official Harness `0.1.1-rc.2`,
 | --- | --- |
 | ![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png) | ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png) |
 
-The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. The mouse wheel and transcript navigation keys browse history inside SeekTTY; exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
+The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. Holding a selection at the transcript edge auto-scrolls across loaded pages while preserving one logical text anchor; only the visible viewport is repainted. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
 
 ## Clarify and Plan
 
@@ -173,15 +181,21 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 
 `/plugin`, `/workspace`, and `/profile` provide interactive centers and direct subcommands. Unknown commands stay inside the command surface and show nearby suggestions.
 
+The rendered candidate window is authoritative: the wheel and arrow keys move its highlight, pointer hover is preview-only, and the first click visibly selects the exact candidate under the pointer. Enter or a safe second click completes and runs a slash command once; Tab only completes it. File and path completions never auto-submit, and the scroll-position footer is not clickable.
+
+Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerShell `Set-Clipboard` writer, macOS runs `pbcopy` under a UTF-8 locale, Wayland declares `text/plain;charset=utf-8`, and X11 requests `UTF8_STRING`; OSC 52 remains available for terminal, SSH, and tmux paths.
+
 ## Common controls
 
 | Input | Action |
 | --- | --- |
-| Hold the terminal selection modifier while dragging, then copy | Use native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+| Full mouse mode | Wheel, resident scrollbar, in-app selection, copy-on-select, stable hover feedback, and target-aware clicks on tool cards, examples, autocomplete, overlays, and remaining model/mode/permission chrome. Dangerous confirmations still require Enter. |
+| Hold the terminal selection modifier while dragging, then copy | Native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere. Switch with F3 or `/mouse native`. |
 | Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
+| Ctrl+Shift+C / F3 | Copy the in-app selection / toggle full and native mouse modes |
 | `/` | Open command and Skill candidates |
-| Enter / Shift+Enter | Submit or confirm / insert a newline |
-| Tab / Escape | Switch between composer and transcript / return or close the active overlay |
+| Enter / Shift+Enter | Submit or confirm; a selected slash candidate completes and runs once / insert a newline |
+| Tab / Escape | Complete the selected candidate without submitting / return or close the active overlay |
 | PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
 | Shift+Tab | Cycle permission presets, confirming full access first |
 | Shift+Left / Shift+Right | Jump to the previous or next user turn |
@@ -264,7 +278,7 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Declared minimum Harness Host | `0.1.0-rc.6` |
 | Current tested Harness Host | `0.1.1-rc.2` |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current maintenance version | SeekTTY `1.2.2` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`; this patch does not establish new complete joint acceptance |
+| Current mouse release | SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`; this release does not establish new complete joint acceptance |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
@@ -284,6 +298,11 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+DSH_BIN=/path/to/dsh \
+SEEKTTY_SPEC=/path/to/seektty.tgz \
+SEEKTTY_MOUSE_PTY=1 \
+pnpm test:mouse-pty
 
 CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor

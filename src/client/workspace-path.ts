@@ -1,7 +1,7 @@
 /** Resolve user-typed paths against the current Harness workspace. */
 
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { unescapePosixPath } from './pasted-image.ts'
 
@@ -24,5 +24,9 @@ export function resolveHarnessUserPath(rawPath: string, workspacePath: string): 
   if (input.startsWith('file:')) return fileURLToPath(input)
   if (input === '~') return homedir()
   if (/^~[/\\]/u.test(input)) return resolve(homedir(), input.slice(2))
+  // Preserve an explicitly absolute POSIX path even when the client runs on
+  // Windows. Sessions can expose remote/macOS paths, and win32.resolve()
+  // would silently reinterpret `/Users/...` on the current drive.
+  if (input.startsWith('/')) return posix.normalize(input)
   return resolve(workspacePath, input)
 }

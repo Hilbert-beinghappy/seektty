@@ -82,6 +82,7 @@ function questionOverlays(
       multilineInput: overlays.multilineInput ?? (async () => undefined),
       input: async () => undefined,
       secretInput: async () => undefined,
+      secretTransaction: async () => undefined,
       detail: async () => undefined,
       confirm: async () => false,
       progress: async () => undefined,

@@ -1,8 +1,516 @@
+diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
+index fb224b9da697aab89a31336eae65071dc07d736e..8e862bd74de72476498eb44805ca75362b5f727f 100644
+--- a/dist/components/editor.d.ts
++++ b/dist/components/editor.d.ts
+@@ -30,6 +30,20 @@ export interface EditorOptions {
+     paddingX?: number;
+     autocompleteMaxVisible?: number;
+ }
++export interface AutocompleteSnapshot {
++    generation: number;
++    selectedIndex: number;
++    visibleRows: ReadonlyArray<{
++        visualRow: number;
++        absoluteIndex: number;
++        itemId: string;
++        selectable: boolean;
++    }>;
++}
++export interface AutocompleteActivation {
++    applied: boolean;
++    submitText?: string;
++}
+ export declare class Editor implements Component, Focusable {
+     private state;
+     /** Focusable interface - set by TUI when focus changes */
+@@ -50,6 +64,9 @@ export declare class Editor implements Component, Focusable {
+     private autocompleteRequestTask;
+     private autocompleteStartToken;
+     private autocompleteRequestId;
++    private autocompleteGeneration;
++    private autocompleteItemIds;
++    private autocompleteRenderSnapshot;
+     private pastes;
+     private pasteCounter;
+     private pasteBuffer;
+@@ -102,6 +119,37 @@ export declare class Editor implements Component, Focusable {
+         line: number;
+         col: number;
+     };
++    setCursor(line: number, col: number): void;
++    getSelection(): {
++        anchor: {
++            line: number;
++            col: number;
++        };
++        focus: {
++            line: number;
++            col: number;
++        };
++    } | undefined;
++    setSelection(anchor: {
++        line: number;
++        col: number;
++    }, focus: {
++        line: number;
++        col: number;
++    }): void;
++    clearSelection(): void;
++    replaceSelection(text: string): boolean;
++    getVisualLineMap(width?: number): {
++        logicalLine: number;
++        startCol: number;
++        length: number;
++    }[];
++    getAutocompleteSnapshot(): AutocompleteSnapshot | undefined;
++    moveAutocompleteSelection(delta: number): boolean;
++    selectAutocompleteItem(generation: number, itemId: string): boolean;
++    completeAutocompleteSelection(): boolean;
++    activateAutocompleteSelection(source: "enter" | "mouse"): AutocompleteActivation;
++    private applyAutocompleteSelection;
+     setText(text: string): void;
+     /**
+      * Insert text at the current cursor position.
+@@ -125,6 +173,7 @@ export declare class Editor implements Component, Focusable {
+     private handlePaste;
+     private addNewLine;
+     private shouldSubmitOnBackslashEnter;
++    private consumeSubmitValue;
+     private submitValue;
+     private handleBackspace;
+     /**
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..579d81846fc4284babe2f69cf0efc1b6e49e351a 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..60c14017663266aeebee8edea96351164db13eb5 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -1204,6 +1204,7 @@ export class Editor {
+@@ -184,6 +184,9 @@ export class Editor {
+     autocompleteRequestTask = Promise.resolve();
+     autocompleteStartToken = 0;
+     autocompleteRequestId = 0;
++    autocompleteGeneration = 0;
++    autocompleteItemIds = [];
++    autocompleteRenderSnapshot = null;
+     // Paste tracking for large pastes
+     pastes = new Map();
+     pasteCounter = 0;
+@@ -208,6 +211,7 @@ export class Editor {
+     snappedFromCursorCol = null;
+     // Undo support
+     undoStack = new UndoStack();
++    selectionRange = null;
+     onSubmit;
+     onChange;
+     disableSubmit = false;
+@@ -308,6 +312,7 @@ export class Editor {
+         this.state.lines = lines.length === 0 ? [""] : lines;
+         this.state.cursorLine = this.state.lines.length - 1;
+         this.setCursorCol(this.state.lines[this.state.cursorLine]?.length || 0);
++        this.selectionRange = null;
+         // Reset scroll - render() will adjust to show cursor
+         this.scrollOffset = 0;
+         if (this.onChange) {
+@@ -372,10 +377,33 @@ export class Editor {
+             let displayText = layoutLine.text;
+             let lineVisibleWidth = visibleWidth(layoutLine.text);
+             let cursorInPadding = false;
++            const selection = this.normalizedSelection();
++            let selectionStart = -1;
++            let selectionEnd = -1;
++            if (selection && layoutLine.logicalLine >= selection.start.line && layoutLine.logicalLine <= selection.end.line) {
++                selectionStart = layoutLine.logicalLine === selection.start.line
++                    ? Math.max(0, selection.start.col - layoutLine.startCol)
++                    : 0;
++                selectionEnd = layoutLine.logicalLine === selection.end.line
++                    ? Math.min(displayText.length, selection.end.col - layoutLine.startCol)
++                    : displayText.length;
++                selectionStart = Math.min(displayText.length, selectionStart);
++                if (selectionEnd > selectionStart) {
++                    displayText = displayText.slice(0, selectionStart) + "\x1b[7m" +
++                        displayText.slice(selectionStart, selectionEnd) + "\x1b[27m" +
++                        displayText.slice(selectionEnd);
++                }
++            }
+             // Add cursor if this line has it
+             if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+-                const before = displayText.slice(0, layoutLine.cursorPos);
+-                const after = displayText.slice(layoutLine.cursorPos);
++                let cursorPos = layoutLine.cursorPos;
++                const cursorInsideSelection = selectionEnd > selectionStart &&
++                    cursorPos >= selectionStart && cursorPos < selectionEnd;
++                if (selectionEnd > selectionStart && cursorPos >= selectionStart) {
++                    cursorPos += cursorPos >= selectionEnd ? 9 : 4;
++                }
++                const before = displayText.slice(0, cursorPos);
++                const after = displayText.slice(cursorPos);
+                 // Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
+                 const marker = emitCursorMarker ? CURSOR_MARKER : "";
+                 if (after.length > 0) {
+@@ -384,7 +412,7 @@ export class Editor {
+                     const afterGraphemes = [...this.segment(after)];
+                     const firstGrapheme = afterGraphemes[0]?.segment || "";
+                     const restAfter = after.slice(firstGrapheme.length);
+-                    const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
++                    const cursor = `\x1b[7m${firstGrapheme}\x1b[0m${cursorInsideSelection ? "\x1b[7m" : ""}`;
+                     displayText = before + marker + cursor + restAfter;
+                     // lineVisibleWidth stays the same - we're replacing, not adding
+                 }
+@@ -423,6 +451,22 @@ export class Editor {
+                 const linePadding = " ".repeat(Math.max(0, contentWidth - lineWidth));
+                 result.push(`${leftPadding}${line}${linePadding}${rightPadding}`);
+             }
++            const listSnapshot = this.autocompleteList.getRenderSnapshot?.();
++            this.autocompleteRenderSnapshot = listSnapshot
++                ? {
++                    generation: this.autocompleteGeneration,
++                    selectedIndex: listSnapshot.selectedIndex,
++                    visibleRows: listSnapshot.visibleRows.map((row) => ({
++                        visualRow: row.visualRow,
++                        absoluteIndex: row.absoluteIndex,
++                        itemId: this.autocompleteItemIds[row.absoluteIndex] ?? "",
++                        selectable: this.autocompleteItemIds[row.absoluteIndex] !== undefined,
++                    })),
++                }
++                : null;
++        }
++        else {
++            this.autocompleteRenderSnapshot = null;
+         }
+         return result;
+     }
+@@ -474,6 +518,11 @@ export class Editor {
+         if (kb.matches(data, "tui.input.copy")) {
+             return;
+         }
++        // Escape explicitly clears a persistent mouse selection when no popup owns it.
++        if (!this.autocompleteState && this.normalizedSelection() && kb.matches(data, "tui.select.cancel")) {
++            this.clearSelection();
++            return;
++        }
+         // Undo
+         if (kb.matches(data, "tui.editor.undo")) {
+             this.undo();
+@@ -486,44 +535,18 @@ export class Editor {
+                 return;
+             }
+             if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+-                this.autocompleteList.handleInput(data);
++                this.moveAutocompleteSelection(kb.matches(data, "tui.select.up") ? -1 : 1);
+                 return;
+             }
+             if (kb.matches(data, "tui.input.tab")) {
+-                const selected = this.autocompleteList.getSelectedItem();
+-                if (selected && this.autocompleteProvider) {
+-                    this.pushUndoSnapshot();
+-                    this.lastAction = null;
+-                    const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
+-                    this.state.lines = result.lines;
+-                    this.state.cursorLine = result.cursorLine;
+-                    this.setCursorCol(result.cursorCol);
+-                    this.cancelAutocomplete();
+-                    if (this.onChange)
+-                        this.onChange(this.getText());
+-                }
++                this.completeAutocompleteSelection();
+                 return;
+             }
+             if (kb.matches(data, "tui.select.confirm")) {
+-                const selected = this.autocompleteList.getSelectedItem();
+-                if (selected && this.autocompleteProvider) {
+-                    this.pushUndoSnapshot();
+-                    this.lastAction = null;
+-                    const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
+-                    this.state.lines = result.lines;
+-                    this.state.cursorLine = result.cursorLine;
+-                    this.setCursorCol(result.cursorCol);
+-                    if (this.autocompletePrefix.startsWith("/")) {
+-                        this.cancelAutocomplete();
+-                        // Fall through to submit
+-                    }
+-                    else {
+-                        this.cancelAutocomplete();
+-                        if (this.onChange)
+-                            this.onChange(this.getText());
+-                        return;
+-                    }
+-                }
++                const activation = this.activateAutocompleteSelection("enter");
++                if (activation.submitText !== undefined && this.onSubmit)
++                    this.onSubmit(activation.submitText);
++                return;
+             }
+         }
+         // Tab - trigger completion
+@@ -691,6 +714,8 @@ export class Editor {
+                 text: "",
+                 hasCursor: true,
+                 cursorPos: 0,
++                logicalLine: 0,
++                startCol: 0,
+             });
+             return layoutLines;
+         }
+@@ -706,12 +731,16 @@ export class Editor {
+                         text: line,
+                         hasCursor: true,
+                         cursorPos: this.state.cursorCol,
++                        logicalLine: i,
++                        startCol: 0,
+                     });
+                 }
+                 else {
+                     layoutLines.push({
+                         text: line,
+                         hasCursor: false,
++                        logicalLine: i,
++                        startCol: 0,
+                     });
+                 }
+             }
+@@ -753,12 +782,16 @@ export class Editor {
+                             text: chunk.text,
+                             hasCursor: true,
+                             cursorPos: adjustedCursorPos,
++                            logicalLine: i,
++                            startCol: chunk.startIndex,
+                         });
+                     }
+                     else {
+                         layoutLines.push({
+                             text: chunk.text,
+                             hasCursor: false,
++                            logicalLine: i,
++                            startCol: chunk.startIndex,
+                         });
+                     }
+                 }
+@@ -790,6 +823,139 @@ export class Editor {
+     getCursor() {
+         return { line: this.state.cursorLine, col: this.state.cursorCol };
+     }
++    setCursor(line, col) {
++        const lineCount = this.state.lines.length;
++        const nextLine = Math.max(0, Math.min(Math.floor(line), Math.max(0, lineCount - 1)));
++        const currentLine = this.state.lines[nextLine] || "";
++        const nextCol = Math.max(0, Math.min(Math.floor(col), currentLine.length));
++        this.state.cursorLine = nextLine;
++        this.setCursorCol(nextCol);
++    }
++    getSelection() {
++        return this.selectionRange ?? undefined;
++    }
++    setSelection(anchor, focus) {
++        this.selectionRange = { anchor: this.clampPoint(anchor), focus: this.clampPoint(focus) };
++        this.tui.requestRender();
++    }
++    clearSelection() {
++        this.selectionRange = null;
++        this.tui.requestRender();
++    }
++    clampPoint(point) {
++        const line = Math.max(0, Math.min(Math.floor(point.line), Math.max(0, this.state.lines.length - 1)));
++        const col = Math.max(0, Math.min(Math.floor(point.col), (this.state.lines[line] || "").length));
++        return { line, col };
++    }
++    normalizedSelection() {
++        if (!this.selectionRange)
++            return null;
++        const anchor = this.clampPoint(this.selectionRange.anchor);
++        const focus = this.clampPoint(this.selectionRange.focus);
++        const reversed = anchor.line > focus.line || (anchor.line === focus.line && anchor.col > focus.col);
++        const start = reversed ? focus : anchor;
++        const end = reversed ? anchor : focus;
++        return start.line === end.line && start.col === end.col ? null : { start, end };
++    }
++    deleteSelectionInternal() {
++        const selection = this.normalizedSelection();
++        if (!selection)
++            return false;
++        const prefix = (this.state.lines[selection.start.line] || "").slice(0, selection.start.col);
++        const suffix = (this.state.lines[selection.end.line] || "").slice(selection.end.col);
++        this.state.lines.splice(selection.start.line, selection.end.line - selection.start.line + 1, prefix + suffix);
++        this.state.cursorLine = selection.start.line;
++        this.setCursorCol(selection.start.col);
++        this.selectionRange = null;
++        return true;
++    }
++    replaceSelection(text) {
++        const hasSelection = this.normalizedSelection() !== null;
++        if (!hasSelection && !text)
++            return false;
++        this.cancelAutocomplete();
++        this.pushUndoSnapshot();
++        this.lastAction = null;
++        this.historyIndex = -1;
++        this.deleteSelectionInternal();
++        if (text) {
++            this.insertTextAtCursorInternal(text);
++        }
++        else if (this.onChange) {
++            this.onChange(this.getText());
++        }
++        this.tui.requestRender();
++        return true;
++    }
++    getVisualLineMap(width) {
++        return this.buildVisualLineMap(width ?? this.lastWidth);
++    }
++    getAutocompleteSnapshot() {
++        const snapshot = this.autocompleteRenderSnapshot;
++        if (!snapshot)
++            return undefined;
++        return {
++            generation: snapshot.generation,
++            selectedIndex: snapshot.selectedIndex,
++            visibleRows: snapshot.visibleRows.map((row) => ({ ...row })),
++        };
++    }
++    moveAutocompleteSelection(delta) {
++        if (!this.autocompleteState || !this.autocompleteList || this.autocompleteItemIds.length === 0)
++            return false;
++        const step = Math.trunc(delta);
++        if (step === 0)
++            return false;
++        const count = this.autocompleteItemIds.length;
++        const selected = this.autocompleteList.getSelectedIndex();
++        const next = ((selected + step) % count + count) % count;
++        this.autocompleteList.setSelectedIndex(next);
++        this.autocompleteRenderSnapshot = null;
++        this.tui.requestRender();
++        return true;
++    }
++    selectAutocompleteItem(generation, itemId) {
++        const snapshot = this.autocompleteRenderSnapshot;
++        if (!snapshot || snapshot.generation !== generation || generation !== this.autocompleteGeneration)
++            return false;
++        const row = snapshot.visibleRows.find((candidate) => candidate.selectable && candidate.itemId === itemId);
++        if (!row || this.autocompleteItemIds[row.absoluteIndex] !== itemId || !this.autocompleteList)
++            return false;
++        this.autocompleteList.setSelectedIndex(row.absoluteIndex, true);
++        this.autocompleteRenderSnapshot = null;
++        this.tui.requestRender();
++        return true;
++    }
++    completeAutocompleteSelection() {
++        return this.applyAutocompleteSelection(false).applied;
++    }
++    activateAutocompleteSelection(source) {
++        return this.applyAutocompleteSelection(source === "enter" || source === "mouse");
++    }
++    applyAutocompleteSelection(submitSlash) {
++        if (!this.autocompleteState || !this.autocompleteList || !this.autocompleteProvider)
++            return { applied: false };
++        const selected = this.autocompleteList.getSelectedItem();
++        if (!selected)
++            return { applied: false };
++        const slash = this.autocompletePrefix.startsWith("/");
++        this.pushUndoSnapshot();
++        this.lastAction = null;
++        const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
++        this.state.lines = result.lines;
++        this.state.cursorLine = result.cursorLine;
++        this.setCursorCol(result.cursorCol);
++        this.cancelAutocomplete();
++        if (submitSlash && slash) {
++            const submitText = this.consumeSubmitValue();
++            this.tui.requestRender();
++            return { applied: true, submitText };
++        }
++        if (this.onChange)
++            this.onChange(this.getText());
++        this.tui.requestRender();
++        return { applied: true };
++    }
+     setText(text) {
+         this.cancelAutocomplete();
+         this.lastAction = null;
+@@ -809,6 +975,10 @@ export class Editor {
+     insertTextAtCursor(text) {
+         if (!text)
+             return;
++        if (this.normalizedSelection()) {
++            this.replaceSelection(text);
++            return;
++        }
+         this.cancelAutocomplete();
+         this.pushUndoSnapshot();
+         this.lastAction = null;
+@@ -866,17 +1036,19 @@ export class Editor {
+     // All the editor methods from before...
+     insertCharacter(char, skipUndoCoalescing) {
+         this.historyIndex = -1; // Exit history browsing mode
++        const replacingSelection = this.normalizedSelection() !== null;
+         // Undo coalescing (fish-style):
+         // - Consecutive word chars coalesce into one undo unit
+         // - Space captures state before itself (so undo removes space+following word together)
+         // - Each space is separately undoable
+         // Skip coalescing when called from atomic operations (e.g., handlePaste)
+         if (!skipUndoCoalescing) {
+-            if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
++            if (replacingSelection || isWhitespaceChar(char) || this.lastAction !== "type-word") {
+                 this.pushUndoSnapshot();
+             }
+             this.lastAction = "type-word";
+         }
++        this.deleteSelectionInternal();
+         const line = this.state.lines[this.state.cursorLine] || "";
+         const before = line.slice(0, this.state.cursorCol);
+         const after = line.slice(this.state.cursorCol);
+@@ -923,6 +1095,7 @@ export class Editor {
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
+         this.pushUndoSnapshot();
++        this.deleteSelectionInternal();
+         // Some terminals (e.g. tmux popups with extended-keys-format=csi-u) re-encode
+         // control bytes inside bracketed paste as CSI-u Ctrl+<letter> sequences
+         // (ESC [ <codepoint> ; 5 u). Decode those back to their literal byte so the
+@@ -977,6 +1150,10 @@ export class Editor {
+         this.insertTextAtCursorInternal(filteredText);
+     }
+     addNewLine() {
++        if (this.normalizedSelection()) {
++            this.replaceSelection("\n");
++            return;
++        }
+         this.cancelAutocomplete();
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
+@@ -1006,8 +1183,9 @@ export class Editor {
+         const currentLine = this.state.lines[this.state.cursorLine] || "";
+         return this.state.cursorCol > 0 && currentLine[this.state.cursorCol - 1] === "\\";
+     }
+-    submitValue() {
++    consumeSubmitValue() {
+         this.cancelAutocomplete();
++        this.selectionRange = null;
+         const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
+         this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+         this.pastes.clear();
+@@ -1018,12 +1196,24 @@ export class Editor {
+         this.lastAction = null;
+         if (this.onChange)
+             this.onChange("");
++        return result;
++    }
++    submitValue() {
++        const result = this.consumeSubmitValue();
+         if (this.onSubmit)
+             this.onSubmit(result);
+     }
+     handleBackspace() {
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
++        if (this.normalizedSelection()) {
++            this.cancelAutocomplete();
++            this.pushUndoSnapshot();
++            this.deleteSelectionInternal();
++            if (this.onChange)
++                this.onChange(this.getText());
++            return;
++        }
+         if (this.state.cursorCol > 0) {
+             this.pushUndoSnapshot();
+             // Delete grapheme before cursor (handles emojis, combining characters, etc.)
+@@ -1204,6 +1394,7 @@ export class Editor {
          this.setCursorCol(currentLine.length);
      }
      deleteToStartOfLine() {
@@ -10,8 +518,48 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..579d81846fc4284babe2f69cf0efc1b6
          this.historyIndex = -1; // Exit history browsing mode
          const currentLine = this.state.lines[this.state.cursorLine] || "";
          if (this.state.cursorCol > 0) {
+@@ -1328,6 +1519,14 @@ export class Editor {
+     handleForwardDelete() {
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
++        if (this.normalizedSelection()) {
++            this.cancelAutocomplete();
++            this.pushUndoSnapshot();
++            this.deleteSelectionInternal();
++            if (this.onChange)
++                this.onChange(this.getText());
++            return;
++        }
+         const currentLine = this.state.lines[this.state.cursorLine] || "";
+         if (this.state.cursorCol < currentLine.length) {
+             this.pushUndoSnapshot();
+@@ -1878,6 +2077,15 @@ export class Editor {
+             this.state.cursorCol === snapshotCol);
+     }
+     applyAutocompleteSuggestions(suggestions, state) {
++        const occurrences = new Map();
++        this.autocompleteItemIds = suggestions.items.map((item) => {
++            const identity = JSON.stringify([item.value, item.label, item.description ?? ""]);
++            const occurrence = occurrences.get(identity) ?? 0;
++            occurrences.set(identity, occurrence + 1);
++            return JSON.stringify([identity, occurrence]);
++        });
++        this.autocompleteGeneration += 1;
++        this.autocompleteRenderSnapshot = null;
+         this.autocompletePrefix = suggestions.prefix;
+         this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
+         const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
+@@ -1899,6 +2107,8 @@ export class Editor {
+         this.autocompleteState = null;
+         this.autocompleteList = undefined;
+         this.autocompletePrefix = "";
++        this.autocompleteItemIds = [];
++        this.autocompleteRenderSnapshot = null;
+     }
+     cancelAutocomplete() {
+         this.cancelAutocompleteRequest();
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..fc274db16b9779ecb525c0ebb921042ceeeb46ad 100644
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9734a2654 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
 @@ -231,28 +231,35 @@ export class Markdown {
@@ -133,8 +681,134 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..fc274db16b9779ecb525c0ebb921042c
              }
              else {
                  // Other token types - try to render as inline
+diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
+index 9db54d907f801e43208a462bca925f2905787b7a..4421dd1bcefd3dd87dae54442e06269ed4849bdb 100644
+--- a/dist/components/select-list.d.ts
++++ b/dist/components/select-list.d.ts
+@@ -23,6 +23,15 @@ export interface SelectListLayoutOptions {
+     maxPrimaryColumnWidth?: number;
+     truncatePrimary?: (context: SelectListTruncatePrimaryContext) => string;
+ }
++export interface SelectListRenderSnapshot {
++    selectedIndex: number;
++    startIndex: number;
++    visibleRows: Array<{
++        visualRow: number;
++        absoluteIndex: number;
++        item: SelectItem;
++    }>;
++}
+ export declare class SelectList implements Component {
+     private items;
+     private filteredItems;
+@@ -35,7 +44,11 @@ export declare class SelectList implements Component {
+     onSelectionChange?: (item: SelectItem) => void;
+     constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions);
+     setFilter(filter: string): void;
+-    setSelectedIndex(index: number): void;
++    private lastRenderSnapshot;
++    private pinnedStartIndex;
++    setSelectedIndex(index: number, preserveViewport?: boolean): void;
++    getSelectedIndex(): number;
++    getRenderSnapshot(): SelectListRenderSnapshot | null;
+     invalidate(): void;
+     render(width: number): string[];
+     handleInput(keyData: string): void;
+diff --git a/dist/components/select-list.js b/dist/components/select-list.js
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..90f05dbd130301ba880e02ca2e15118ae6dc4709 100644
+--- a/dist/components/select-list.js
++++ b/dist/components/select-list.js
+@@ -10,6 +10,7 @@ export class SelectList {
+     filteredItems = [];
+     selectedIndex = 0;
+     maxVisible = 5;
++    lastRenderSnapshot = null;
+     theme;
+     layout;
+     onSelect;
+@@ -26,9 +27,27 @@ export class SelectList {
+         this.filteredItems = this.items.filter((item) => item.value.toLowerCase().startsWith(filter.toLowerCase()));
+         // Reset selection when filter changes
+         this.selectedIndex = 0;
++        this.pinnedStartIndex = undefined;
++        this.lastRenderSnapshot = null;
+     }
+-    setSelectedIndex(index) {
++    setSelectedIndex(index, preserveViewport = false) {
++        const previousStartIndex = preserveViewport ? this.lastRenderSnapshot?.startIndex : undefined;
+         this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
++        if (previousStartIndex !== undefined &&
++            this.selectedIndex >= previousStartIndex &&
++            this.selectedIndex < previousStartIndex + this.maxVisible) {
++            this.pinnedStartIndex = previousStartIndex;
++        }
++        else {
++            this.pinnedStartIndex = undefined;
++        }
++    }
++    getSelectedIndex() {
++        return this.selectedIndex;
++    }
++    pinnedStartIndex;
++    getRenderSnapshot() {
++        return this.lastRenderSnapshot;
+     }
+     invalidate() {
+         // No cached state to invalidate currently
+@@ -38,12 +57,21 @@ export class SelectList {
+         // If no items match filter, show message
+         if (this.filteredItems.length === 0) {
+             lines.push(this.theme.noMatch("  No matching commands"));
++            this.lastRenderSnapshot = { selectedIndex: -1, startIndex: 0, visibleRows: [] };
+             return lines;
+         }
+         const primaryColumnWidth = this.getPrimaryColumnWidth();
+         // Calculate visible range with scrolling
+-        const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible));
++        const centeredStartIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible));
++        const pinnedStartIndex = this.pinnedStartIndex;
++        const startIndex = pinnedStartIndex !== undefined &&
++            this.selectedIndex >= pinnedStartIndex &&
++            this.selectedIndex < pinnedStartIndex + this.maxVisible
++            ? pinnedStartIndex
++            : centeredStartIndex;
++        this.pinnedStartIndex = undefined;
+         const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
++        const visibleRows = [];
+         // Render visible items
+         for (let i = startIndex; i < endIndex; i++) {
+             const item = this.filteredItems[i];
+@@ -52,6 +80,7 @@ export class SelectList {
+             const isSelected = i === this.selectedIndex;
+             const descriptionSingleLine = item.description ? normalizeToSingleLine(item.description) : undefined;
+             lines.push(this.renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth));
++            visibleRows.push({ visualRow: lines.length - 1, absoluteIndex: i, item });
+         }
+         // Add scroll indicators if needed
+         if (startIndex > 0 || endIndex < this.filteredItems.length) {
+@@ -59,17 +88,20 @@ export class SelectList {
+             // Truncate if too long for terminal
+             lines.push(this.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
+         }
++        this.lastRenderSnapshot = { selectedIndex: this.selectedIndex, startIndex, visibleRows };
+         return lines;
+     }
+     handleInput(keyData) {
+         const kb = getKeybindings();
+         // Up arrow - wrap to bottom when at top
+         if (kb.matches(keyData, "tui.select.up")) {
++            this.pinnedStartIndex = undefined;
+             this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
+             this.notifySelectionChange();
+         }
+         // Down arrow - wrap to top when at bottom
+         else if (kb.matches(keyData, "tui.select.down")) {
++            this.pinnedStartIndex = undefined;
+             this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+             this.notifySelectionChange();
+         }
 diff --git a/dist/terminal.js b/dist/terminal.js
-index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a78768300f91d 100644
+index 3545b284ce2da594cc728803feb607a34cea5ca0..79bb3e8769594c1b8f70ef71304ab9032ed4ecd3 100644
 --- a/dist/terminal.js
 +++ b/dist/terminal.js
 @@ -16,6 +16,7 @@ export class ProcessTerminal {
@@ -206,11 +880,70 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a7876
      async drainInput(maxMs = 1000, idleMs = 50) {
          if (this._kittyProtocolActive) {
              // Disable Kitty keyboard protocol first so any late key releases
+diff --git a/dist/tui.d.ts b/dist/tui.d.ts
+index 8394d461feed1287deba13443c7afe79ff45c151..afe2af52b6acb83b07b3d0e2e3db05f1ab4e8646 100644
+--- a/dist/tui.d.ts
++++ b/dist/tui.d.ts
+@@ -155,8 +155,28 @@ export declare class TUI extends Container {
+     private stopped;
+     private focusOrderCounter;
+     private overlayStack;
++    lastFrameGeometry: {
++        terminalWidth: number;
++        terminalHeight: number;
++        rootScreenOrigin: {
++            col: number;
++            row: number;
++        };
++        rootSliceOffset: number;
++        overlays: {
++            row: number;
++            col: number;
++            width: number;
++            height: number;
++            zOrder: number;
++            capturing: boolean;
++        }[];
++    };
++    /** Called after post-slice composite geometry is frozen. */
++    onAfterRender?: () => void;
+     constructor(terminal: Terminal, showHardwareCursor?: boolean);
+     get fullRedraws(): number;
++    getLastFrameGeometry(): TUI["lastFrameGeometry"];
+     getShowHardwareCursor(): boolean;
+     setShowHardwareCursor(enabled: boolean): void;
+     getClearOnShrink(): boolean;
 diff --git a/dist/tui.js b/dist/tui.js
-index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a4eccb0e3 100644
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..4c0afd0fbf050525008897ddbe9581ed1516b4ba 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -307,13 +307,9 @@ export class TUI extends Container {
+@@ -118,6 +118,15 @@ export class TUI extends Container {
+     // Overlay stack for modal components rendered on top of base content
+     focusOrderCounter = 0;
+     overlayStack = [];
++    lastOverlayPlacements = [];
++    lastFrameGeometry = {
++        terminalWidth: 0,
++        terminalHeight: 0,
++        rootScreenOrigin: { col: 0, row: 0 },
++        rootSliceOffset: 0,
++        overlays: [],
++    };
++    onAfterRender;
+     constructor(terminal, showHardwareCursor) {
+         super();
+         this.terminal = terminal;
+@@ -128,6 +137,9 @@ export class TUI extends Container {
+     get fullRedraws() {
+         return this.fullRedrawCount;
+     }
++    getLastFrameGeometry() {
++        return this.lastFrameGeometry;
++    }
+     getShowHardwareCursor() {
+         return this.showHardwareCursor;
+     }
+@@ -307,13 +319,9 @@ export class TUI extends Container {
          this.terminal.write("\x1b[16t");
      }
      stop() {
@@ -226,7 +959,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
              const targetRow = this.previousLines.length; // Line after the last content
              const lineDiff = targetRow - this.hardwareCursorRow;
              if (lineDiff > 0) {
-@@ -327,6 +323,16 @@ export class TUI extends Container {
+@@ -327,6 +335,16 @@ export class TUI extends Container {
          this.terminal.showCursor();
          this.terminal.stop();
      }
@@ -243,13 +976,45 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
      requestRender(force = false) {
          if (force) {
              this.previousLines = [];
-@@ -752,27 +758,54 @@ export class TUI extends Container {
+@@ -592,9 +610,17 @@ export class TUI extends Container {
+             }
+             // Get final row/col with actual overlay height
+             const { row, col } = this.resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);
+-            rendered.push({ overlayLines, row, col, w: width });
++            rendered.push({ overlayLines, row, col, w: width, capturing: !entry.options?.nonCapturing, zOrder: entry.focusOrder });
+             minLinesNeeded = Math.max(minLinesNeeded, row + overlayLines.length);
+         }
++        this.lastOverlayPlacements = rendered.map((item) => ({
++            row: item.row,
++            col: item.col,
++            width: item.w,
++            height: item.overlayLines.length,
++            zOrder: item.zOrder,
++            capturing: item.capturing,
++        }));
+         // Pad to at least terminal height so overlays have screen-relative positions.
+         // Excludes maxLinesRendered: the historical high-water mark caused self-reinforcing
+         // inflation that pushed content into scrollback on terminal widen.
+@@ -749,30 +775,67 @@ export class TUI extends Container {
+         // Render all components to get new lines
+         let newLines = this.render(width);
+         // Composite overlays into the rendered lines (before differential compare)
++        this.lastOverlayPlacements = [];
          if (this.overlayStack.length > 0) {
              newLines = this.compositeOverlays(newLines, width, height);
          }
++        const preSliceLength = newLines.length;
 +        if (newLines.length > height) {
 +            newLines = newLines.slice(-height);
 +        }
++        this.lastFrameGeometry = {
++            terminalWidth: width,
++            terminalHeight: height,
++            rootScreenOrigin: { col: 0, row: 0 },
++            rootSliceOffset: Math.max(0, preSliceLength - newLines.length),
++            overlays: this.lastOverlayPlacements,
++        };
++        this.onAfterRender?.();
          // Extract cursor position before applying line resets (marker must be found first)
          const cursorPos = this.extractCursorPosition(newLines, height);
          newLines = this.applyLineResets(newLines);
@@ -302,7 +1067,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
              if (clear) {
                  this.maxLinesRendered = newLines.length;
              }
-@@ -844,6 +877,37 @@ export class TUI extends Container {
+@@ -844,6 +907,37 @@ export class TUI extends Container {
              }
              lastChanged = newLines.length - 1;
          }
@@ -340,7 +1105,8 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
          if (firstChanged !== -1) {
              lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
          }
-@@ -945,5 +1009,6 @@ export class TUI extends Container {
+@@ -944,8 +1038,9 @@ export class TUI extends Container {
+         for (let i = firstChanged; i <= renderEnd; i++) {
              if (i > firstChanged)
                  buffer += "\r\n";
 -            buffer += "\x1b[2K"; // Clear current line
@@ -348,3 +1114,5 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
 +            if (visibleWidth(line) < width)
 +                buffer += "\x1b[2K";
              const isImage = isImageLine(line);
+             if (!isImage && visibleWidth(line) > width) {
+                 // Log all lines to crash file for debugging

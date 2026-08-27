@@ -26,7 +26,7 @@ export function helpSectionText(id: HelpSectionId): string {
         '会话：Ctrl+S 打开会话列表，新建或切换会话。',
         '审批：弹窗里查看命令或 diff，再选仅本次允许或拒绝。',
         '浏览对话：Tab 进入对话浏览，按 / 增量搜索，n/N 跳转。',
-        '滚动与复制：滚轮浏览内部对话；Terminal.app 按住 Fn、iTerm2 按住 Option 后拖选，再按 Command+C。',
+        '滚动与复制：完整鼠标模式用滚轮浏览内部对话，并点击工具卡、示例、补全和已有 chrome。F3 或 /mouse 可切到原生模式，用终端选择；Terminal.app 按住 Fn、iTerm2 按住 Option 后拖选。复制选区默认 Ctrl+Shift+C。危险确认只能用 Enter 执行。',
       ].join('\n'),
       [
         'Input: type in the composer and press Enter to send.',
@@ -36,7 +36,7 @@ export function helpSectionText(id: HelpSectionId): string {
         'Sessions: Ctrl+S opens the session list to create or switch sessions.',
         'Approvals: inspect the command or diff in the overlay, then allow once or reject.',
         'Browse the transcript: Tab into browse mode, press / to search, then n/N to jump.',
-        'Scroll and copy: the wheel browses the internal transcript; hold Fn in Terminal.app or Option in iTerm2 while dragging, then press Command+C.',
+        'Scroll and copy: full mouse mode uses the wheel on the internal transcript and clicks tool cards, examples, autocomplete, and existing chrome. F3 or /mouse switches to native mode for terminal selection; hold Fn in Terminal.app or Option in iTerm2 while dragging. Copy selection defaults to Ctrl+Shift+C. Dangerous confirmations still require Enter.',
       ].join('\n'),
     )
   }

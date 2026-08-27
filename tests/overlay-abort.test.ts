@@ -17,8 +17,8 @@ describe('overlay abort wiring (task 5.4)', () => {
   it('stops a running session with Ctrl+C before overlays consume the chord', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
     const keymap = readFileSync(resolve(root, 'src/client/keymap.ts'), 'utf8')
-    const interruptAt = surface.indexOf('consumeRunningInterrupt(data, capabilities.active()?.session)')
-    const overlayGateAt = surface.indexOf('if (overlays.hasActive()) return undefined')
+    const interruptAt = surface.indexOf('consumeRunningInterrupt(payload, capabilities.active()?.session)')
+    const overlayGateAt = surface.indexOf('if (overlays.hasActive()) return payload === data ? undefined : { data: payload }')
     expect(interruptAt).toBeGreaterThan(-1)
     expect(overlayGateAt).toBeGreaterThan(interruptAt)
     expect(keymap).toMatch(/session\?\.getSnapshot\(\)\.running !== true/u)

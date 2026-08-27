@@ -28,7 +28,7 @@ describe('app handoff (task 6.6)', () => {
     const real = join(root, 'real')
     const link = join(root, 'link')
     mkdirSync(real)
-    symlinkSync(real, link)
+    symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir')
     internals.tmpdir = () => real
     const path = writeAppHandoff('seektty-v1', { ok: true }).replace(real, link)
     process.env[APP_HANDOFF_ENV] = path

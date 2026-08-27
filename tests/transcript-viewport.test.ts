@@ -195,12 +195,14 @@ describe('transcript block viewport', () => {
     ]))
     const latest = plain(transcript.render(60))
     expect(latest).toContain('wheel-line-9')
-    expect(latest).not.toContain('wheel-line-5')
+    expect(latest).toContain('wheel-line-5')
+    expect(latest).not.toContain('wheel-line-4')
 
     expect(transcript.scrollBy(1)).toBe(true)
     const oneStepOlder = plain(transcript.render(60))
     expect(oneStepOlder).toContain('wheel-line-4')
     expect(oneStepOlder).not.toContain('wheel-line-3')
+    expect(oneStepOlder).not.toContain('wheel-line-9')
 
     expect(transcript.scrollBy(-1)).toBe(true)
     expect(plain(transcript.render(60))).toContain('wheel-line-9')
@@ -225,6 +227,141 @@ describe('transcript block viewport', () => {
     transcript.handleInput('\u001B[H')
 
     expect(requestOlder).toHaveBeenCalledTimes(1)
+    transcript.dispose()
+  })
+
+  it('detaches follow and backfills older history on a short page (#151)', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const requestOlder = vi.fn()
+    const transcript = new Transcript(() => 10, () => undefined, requestOlder)
+    const latest = [
+      assistant('short-0', 'visible-latest-0'),
+      assistant('short-1', 'visible-latest-1'),
+      assistant('short-2', 'visible-latest-2'),
+    ]
+    transcript.update(snapshot(latest, [], { hasMore: true }))
+    expect(plain(transcript.render(60))).toContain('visible-latest-2')
+    expect(transcript.isFollowingLatest()).toBe(true)
+
+    expect(transcript.scrollBy(3)).toBe(false)
+    expect(requestOlder).toHaveBeenCalledTimes(1)
+    expect(transcript.isFollowingLatest()).toBe(false)
+
+    const older = Array.from({ length: 20 }, (_, index) =>
+      assistant(`older-${String(index)}`, `prepended-older-${String(index)}`))
+    transcript.update(snapshot([...older, ...latest], [], { hasMore: false }))
+    const after = plain(transcript.render(60))
+
+    expect(transcript.isFollowingLatest()).toBe(false)
+    expect(after).toContain('visible-latest-0')
+    expect(after).toContain('prepended-older-')
+    expect(after).not.toContain('prepended-older-0')
+    transcript.dispose()
+  })
+
+  it('hides the scrollbar when the terminal is narrower than 12 columns', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot(Array.from({ length: 20 }, (_, index) =>
+      assistant(`narrow-${String(index)}`, `narrow-${String(index)}`))))
+    const wide = plain(transcript.render(40))
+    expect(wide).toMatch(/[▐│▴]/u)
+    const narrow = plain(transcript.render(11))
+    expect(narrow).not.toMatch(/[▐▴▾]/u)
+    transcript.dispose()
+  })
+
+  it('records exact height-index entries only for visited viewport blocks', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    internals.heightIndexExact = 0
+    internals.heightIndexEstimated = 0
+    const transcript = new Transcript(() => 6)
+    transcript.update(snapshot(Array.from({ length: 40 }, (_, index) =>
+      assistant(`height-${String(index)}`, `height-${String(index)}`))))
+    transcript.render(80)
+    expect(internals.heightIndexExact).toBeGreaterThan(0)
+    expect(internals.heightIndexExact).toBeLessThanOrEqual(8)
+    expect(internals.heightIndexEstimated).toBeGreaterThan(20)
+    transcript.dispose()
+  })
+
+  it('requests an older page from the scrollbar older end-cap', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const requestOlder = vi.fn()
+    const transcript = new Transcript(() => 6, () => undefined, requestOlder)
+    transcript.update(snapshot(
+      Array.from({ length: 12 }, (_, index) => assistant(`cap-${String(index)}`, `cap-${String(index)}`)),
+      [],
+      { hasMore: true },
+    ))
+    transcript.render(40)
+    const origin = { col: 0, row: 0, width: 40, height: 6 }
+    const cap = transcript.scrollbarHitRegions(origin).find(region => region.id.endsWith('cap-older'))
+    expect(cap).toBeDefined()
+    expect(transcript.handleScrollbarClick(cap!, { col: 39, row: 0 }, origin)).toBe(true)
+    expect(requestOlder).toHaveBeenCalledTimes(1)
+    expect(transcript.isFollowingLatest()).toBe(false)
+    transcript.dispose()
+  })
+
+  it('copies a transcript selection without a full-history render', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot([
+      assistant('copy-a', 'selectable-alpha'),
+      assistant('copy-b', 'selectable-beta'),
+    ]))
+    transcript.render(80)
+    resetRenderCounters()
+    const maps = transcript.viewportMaps()
+    const first = maps.find(map => map.ownerKey === 'copy-a')
+    const offset = first?.cellOffsets.find(value => value !== undefined) ?? 0
+    transcript.applyPointerSelection(
+      { surface: 'transcript', ownerKey: 'copy-a', textOffset: offset, affinity: 'before' },
+      { surface: 'transcript', ownerKey: 'copy-b', textOffset: 32, affinity: 'before' },
+      'character',
+    )
+    expect(transcript.currentSelection()).toBeDefined()
+    expect(transcript.viewportMaps().some(map => map.ownerKey === 'copy-a' && map.cellOffsets.some(value => value !== undefined))).toBe(true)
+    expect(transcript.copySelectionText()).toContain('selectable-alpha')
+    expect(transcript.copySelectionText()).toContain('selectable-beta')
+    const painted = transcript.render(80).join('\n')
+    expect(painted).toContain('\u001B[7m')
+    expect(internals.lastFullLinesCopied).toBe(0)
+    transcript.dispose()
+  })
+
+  it('keeps one logical anchor while an edge drag crosses multiple viewports', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const nodes = Array.from({ length: 24 }, (_, index) => (
+      assistant(`selection-${String(index).padStart(2, '0')}`, `long-selection-${String(index).padStart(2, '0')}`)
+    ))
+    const transcript = new Transcript(() => 6)
+    transcript.update(snapshot(nodes))
+    transcript.render(60)
+    const initialOwners = new Set(transcript.viewportMaps().map(map => map.ownerKey))
+    const originBefore = transcript.hitViewportEdgeAnchor(59, 60, 'newer', 'before')
+    const originAfter = transcript.hitViewportEdgeAnchor(59, 60, 'newer', 'after')
+    expect(originBefore).toBeDefined()
+    expect(originAfter).toBeDefined()
+
+    let focus = transcript.hitViewportEdgeAnchor(2, 60, 'older', 'before')
+    for (let page = 0; page < 3; page += 1) {
+      expect(focus).toBeDefined()
+      transcript.applyPointerSelection(originAfter!, focus!, 'character')
+      expect(transcript.scrollBy(5)).toBe(true)
+      transcript.render(60)
+      focus = transcript.hitViewportEdgeAnchor(2, 60, 'older', 'before')
+    }
+    transcript.applyPointerSelection(originAfter!, focus!, 'character')
+
+    expect(focus).toBeDefined()
+    expect(initialOwners.has(focus!.ownerKey)).toBe(false)
+    expect(transcript.currentSelection()?.anchor).toEqual(originAfter)
+    const copied = transcript.copySelectionText()
+    expect(copied).toContain(focus!.ownerKey.replace('selection-', 'long-selection-'))
+    expect(copied).toContain('long-selection-23')
+    expect(internals.lastFullLinesCopied).toBe(0)
     transcript.dispose()
   })
 
@@ -287,7 +424,7 @@ describe('transcript block viewport', () => {
     transcript.dispose()
   })
 
-  it('builds the full rendered search index only while search is active', () => {
+  it('indexes logical source text without rendering the full history', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 8)
     transcript.update(snapshot(Array.from({ length: 200 }, (_, index) =>
@@ -296,10 +433,12 @@ describe('transcript block viewport', () => {
     resetRenderCounters()
 
     transcript.handleInput('/')
-    expect(internals.blocksVisited).toBeGreaterThanOrEqual(200)
+    expect(internals.blocksVisited).toBe(0)
+    expect(internals.lastFullLinesCopied).toBe(0)
     resetRenderCounters()
     transcript.render(80)
-    expect(internals.blocksVisited).toBe(0)
+    expect(internals.blocksVisited).toBeLessThanOrEqual(10)
+    expect(internals.lastFullLinesCopied).toBe(0)
     transcript.cancelSearch()
     resetRenderCounters()
     transcript.render(80)
@@ -346,7 +485,7 @@ describe('transcript block viewport', () => {
     const afterWheel = plain(transcript.render(80))
     expect(afterWheel).not.toContain('token-39')
     expect(afterWheel).toContain('token-2')
-    expect(afterWheel).toMatch(/↑ 3 行更早内容/u)
+    expect(afterWheel).not.toMatch(/↑ \d+ 行更早内容/u)
 
     const keyboard = new Transcript(() => 8)
     keyboard.update(snapshot(Array.from({ length: 40 }, (_, index) =>
@@ -400,7 +539,8 @@ describe('transcript block viewport', () => {
     transcript.handleInput('\r')
 
     const rendered = plain(transcript.render(80))
-    expect(rendered.split('\n').filter(line => line.trim() === 'zzz-update-match')).toHaveLength(1)
+    expect(rendered.split('\n').filter(line =>
+      line.replace(/[▐│▴▾⇡]/gu, '').trim() === 'zzz-update-match')).toHaveLength(1)
     transcript.dispose()
   })
 
@@ -440,11 +580,13 @@ describe('transcript block viewport', () => {
     transcript.handleInput('\u001B[6~')
     const before = plain(transcript.render(80))
     const anchor = before.match(/search-resize-\d+/u)?.[0]
+    resetRenderCounters()
 
     const resized = plain(transcript.render(40))
 
     expect(anchor).toBeDefined()
     expect(resized).toContain(anchor)
+    expect(internals.lastFullLinesCopied).toBe(0)
     transcript.dispose()
   })
 

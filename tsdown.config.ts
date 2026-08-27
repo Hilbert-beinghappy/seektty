@@ -54,6 +54,11 @@ export default defineConfig({
   target: 'node22.19',
   tsconfig: 'tsconfig.build.json',
   alias: aliases,
+  inputOptions: {
+    experimental: {
+      attachDebugInfo: 'none',
+    },
+  },
   clean: true,
   dts: false,
   sourcemap: false,
