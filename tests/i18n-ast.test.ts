@@ -316,6 +316,9 @@ describe('i18n AST gate (task 7)', () => {
     const gated = new Set(GATED.map(file => join(SRC, file)))
     const files = walk(SRC).filter(path => gated.has(path))
     expect(files).toHaveLength(GATED.length)
-    expect(files.flatMap(path => analyzeSource(relative(SRC, path), readFileSync(path, 'utf8')))).toEqual([])
+    expect(files.flatMap(path => analyzeSource(
+      relative(SRC, path).replaceAll('\\', '/'),
+      readFileSync(path, 'utf8'),
+    ))).toEqual([])
   })
 })

@@ -1,10 +1,15 @@
 import type { Terminal } from '@mariozechner/pi-tui'
+import {
+  encodeDisableMouseReporting,
+  encodeMouseReporting,
+  ENTER_ALTERNATE_SCREEN,
+  LEAVE_ALTERNATE_SCREEN,
+  terminalMouseDelta,
+} from './mouse-protocol.ts'
 
-const ENTER_ALTERNATE_SCREEN = '\u001B[?1049h\u001B[H'
-const ENABLE_MOUSE = '\u001B[?1002l\u001B[?1003l\u001B[?1007l\u001B[?1000h\u001B[?1006h'
-const DISABLE_MOUSE = '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[?1007l'
-const SHOW_CURSOR_AND_LEAVE = '\u001B[?25h\u001B[?1049l'
-const SGR_MOUSE = /^\u001B\[<(\d+);(\d+);(\d+)[Mm]$/u
+export { terminalMouseDelta }
+
+export type MouseReportingMode = 'full' | 'native'
 
 /** Private compatibility marker consumed only by the pinned pi-tui patch. */
 export interface ManagedTerminal {
@@ -16,11 +21,28 @@ export interface ManagedTerminal {
 /** Private compatibility hook supplied by the pinned pi-tui patch. */
 export interface ManagedTui {
   stopRenderingSync?(): void
+  getLastFrameGeometry?(): {
+    readonly terminalWidth: number
+    readonly terminalHeight: number
+    readonly rootScreenOrigin: { readonly col: number; readonly row: number }
+    readonly rootSliceOffset: number
+    readonly overlays: readonly {
+      readonly row: number
+      readonly col: number
+      readonly width: number
+      readonly height: number
+      readonly zOrder: number
+      readonly capturing: boolean
+    }[]
+  }
+  onAfterRender?: () => void
 }
 
 export interface TerminalSession {
   enter(): void
   restore(): void
+  setMouseReporting(mode: MouseReportingMode): void
+  mouseReporting(): MouseReportingMode
 }
 
 /** Whether an interactive Surface may safely use terminal private modes. */
@@ -31,6 +53,7 @@ export function supportsManagedTerminal(interactive: boolean, term: string | und
 /**
  * Own the alternate-screen and mouse-reporting bytes around one Surface.
  * Existing pi-tui paste, keyboard, raw-mode, and listener state stays with pi-tui.
+ * Live mouse toggles write only mouse/focus private modes and never 1049h/1049l.
  */
 export function createTerminalSession(
   terminal: Terminal & ManagedTerminal,
@@ -38,44 +61,34 @@ export function createTerminalSession(
   beforeRestore: () => void = () => undefined,
 ): TerminalSession {
   let active = false
+  let mouseMode: MouseReportingMode = 'full'
   return {
     enter: () => {
       if (!enabled || active) return
       active = true
       terminal.__seekttyManagedAlternateScreen = true
-      terminal.write(ENTER_ALTERNATE_SCREEN + ENABLE_MOUSE)
+      terminal.write(ENTER_ALTERNATE_SCREEN + encodeMouseReporting(mouseMode))
     },
     restore: () => {
       if (!active) return
       try { beforeRestore() } catch { /* terminal restoration must still run */ }
       try {
-        terminal.write(DISABLE_MOUSE)
+        terminal.write(encodeDisableMouseReporting())
       } finally {
         try {
           terminal.restoreProtocolsSync?.()
         } finally {
-          terminal.write(SHOW_CURSOR_AND_LEAVE)
+          terminal.write(LEAVE_ALTERNATE_SCREEN)
           active = false
         }
       }
     },
+    setMouseReporting: (mode) => {
+      if (mouseMode === mode) return
+      mouseMode = mode
+      if (!enabled || !active) return
+      terminal.write(encodeMouseReporting(mode))
+    },
+    mouseReporting: () => mouseMode,
   }
-}
-
-/**
- * Decode one SGR mouse report.
- * @returns positive/negative wheel lines, null for a consumed mouse sequence,
- * or undefined when the input is not mouse data.
- */
-export function terminalMouseDelta(data: string): number | null | undefined {
-  const match = SGR_MOUSE.exec(data)
-  if (match !== null) {
-    const button = Number(match[1])
-    const normalized = button & ~28 // Ignore Shift/Alt/Ctrl modifier bits.
-    if (normalized === 64) return 3
-    if (normalized === 65) return -3
-    return null
-  }
-  if (data.startsWith('\u001B[<') || data.startsWith('\u001B[M')) return null
-  return undefined
 }

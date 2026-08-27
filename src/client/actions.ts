@@ -22,6 +22,7 @@ import {
   type TuiBehaviorSettings,
   type TuiCodeThemeId,
   type TuiCustomTheme,
+  type TuiMouseMode,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiDraftAttachment, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
@@ -450,6 +451,7 @@ export class TuiActions {
         case 'attachments': await this.attachments(); break
         case 'settings': await this.settings(args); break
         case 'keymap': await this.keymap(args); break
+        case 'mouse': await this.mouse(args); break
         case 'plugin':
         case 'plugins': await this.plugin(args); break
         case 'doctor': await this.doctor(); break
@@ -2054,6 +2056,61 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       document.revision,
     )
     await this.settingsChanged(updated, ui(`键位 ${id}`, `Key binding ${id}`))
+  }
+
+  private async mouse(args: string): Promise<void> {
+    const document = behaviorSettings(
+      await this.capabilities.managementBridge().settings.describe(TUI_BEHAVIOR_SETTINGS_NAMESPACE),
+    )
+    const current = behaviorFromSettings(document)
+    const token = args.trim().toLowerCase()
+    let next: TuiMouseMode | undefined
+    if (token === 'full' || token === 'native') next = token
+    else if (token === 'toggle') next = current.mouseMode === 'full' ? 'native' : 'full'
+    else if (token !== '') {
+      throw new Error(ui('用法：/mouse [full|native|toggle]', 'Usage: /mouse [full|native|toggle]'))
+    }
+    if (next === undefined) {
+      const selected = await this.host.overlays.select({
+        title: ui('鼠标模式', 'Mouse mode'),
+        detail: ui(
+          '完整模式提供应用内滚动和点击；原生模式关闭鼠标报告，供终端选择文本。切换不会离开备用屏幕。',
+          'Full mode provides in-app scrolling and clicks; native mode turns off mouse reporting so the terminal can select text. Switching never leaves the alternate screen.',
+        ),
+        searchable: false,
+        choices: [
+          {
+            id: 'full',
+            label: ui('完整模式', 'Full mode'),
+            description: ui('应用内滚轮、滚动条和点击', 'In-app wheel, scrollbar, and clicks'),
+            active: current.mouseMode === 'full',
+          },
+          {
+            id: 'native',
+            label: ui('原生选择', 'Native selection'),
+            description: ui('关闭鼠标报告，使用终端选区', 'Disable mouse reporting and use terminal selection'),
+            active: current.mouseMode === 'native',
+          },
+        ],
+      })
+      if (selected === undefined) return
+      next = selected.id as TuiMouseMode
+    }
+    if (next === current.mouseMode) {
+      this.host.notice(next === 'full'
+        ? ui('已是完整鼠标模式', 'Already in full mouse mode')
+        : ui('已是原生选择模式', 'Already in native selection mode'), 'info')
+      return
+    }
+    const updated = await this.capabilities.managementBridge().settings.mutate(
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['mouseMode'], value: next }],
+      document.revision,
+    )
+    await this.settingsChanged(updated, ui(
+      next === 'full' ? '完整鼠标模式' : '原生选择模式',
+      next === 'full' ? 'Full mouse mode' : 'Native selection mode',
+    ))
   }
 
   private async settingsNamespace(

@@ -49,7 +49,7 @@ describe('managed terminal session', () => {
     expect(terminal.writes.join('')).toBe(
       '\u001B[?1049h\u001B[H'
       + '\u001B[?1002l\u001B[?1003l\u001B[?1007l'
-      + '\u001B[?1000h\u001B[?1006h',
+      + '\u001B[?1000h\u001B[?1004h\u001B[?1006h',
     )
     expect(terminal.__seekttyManagedAlternateScreen).toBe(true)
 
@@ -58,7 +58,7 @@ describe('managed terminal session', () => {
     session.restore()
     expect(order).toEqual(['quiesce'])
     expect(terminal.writes.join('')).toBe(
-      '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l\u001B[?1007l'
+      '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1004l\u001B[?1006l\u001B[?1007l'
       + '\u001B[?2004l\u001B[<u\u001B[>4;0m'
       + '\u001B[?25h\u001B[?1049l',
     )
@@ -72,6 +72,7 @@ describe('managed terminal session', () => {
     terminal.writes = []
 
     expect(() => { session.restore() }).toThrow('protocol restore failed')
+    expect(terminal.writes.join('')).toContain('\u001B[?1004l')
     expect(terminal.writes.join('')).toContain('\u001B[?25h\u001B[?1049l')
 
     terminal.writes = []
@@ -86,6 +87,33 @@ describe('managed terminal session', () => {
     session.restore()
     expect(terminal.writes).toEqual([])
     expect(terminal.__seekttyManagedAlternateScreen).toBeUndefined()
+  })
+
+  it('switches mouse reporting without leaving the alternate screen', () => {
+    const terminal = new RecordingTerminal()
+    const session = createTerminalSession(terminal, true)
+    session.enter()
+    terminal.writes = []
+
+    session.setMouseReporting('native')
+    const native = terminal.writes.join('')
+    expect(native).toContain('\u001B[?1004l')
+    expect(native).toContain('\u001B[?1000l')
+    expect(native).not.toContain('\u001B[?1049')
+    expect(native).not.toContain('\u001B[?1003h')
+
+    terminal.writes = []
+    session.setMouseReporting('full')
+    const full = terminal.writes.join('')
+    expect(full).toContain('\u001B[?1000h')
+    expect(full).toContain('\u001B[?1004h')
+    expect(full).toContain('\u001B[?1006h')
+    expect(full).not.toContain('\u001B[?1002h')
+    expect(full).not.toContain('\u001B[?1049')
+
+    terminal.writes = []
+    session.setMouseReporting('full')
+    expect(terminal.writes).toEqual([])
   })
 
   it('restores pi-tui protocols synchronously and clears keyboard flags', () => {

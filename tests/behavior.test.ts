@@ -47,6 +47,11 @@ describe('seektty-behavior settings', () => {
       toolOutputLineLimit: 200,
       diffContextLines: 3,
       dangerConfirmDefault: 'cancel',
+      mouseMode: 'full',
+      scrollbarVisibility: 'always',
+      copyOnSelect: true,
+      wheelScrollLines: 3,
+      wheelAcceleration: true,
       keyBindings: {},
     })
     expect(normalizeBehavior({
@@ -71,6 +76,27 @@ describe('seektty-behavior settings', () => {
       diffContextLines: 1,
       dangerConfirmDefault: 'confirm',
     })
+    expect(normalizeBehavior({
+      mouseMode: 'native',
+      scrollbarVisibility: 'hidden',
+      copyOnSelect: false,
+      wheelScrollLines: 1,
+      wheelAcceleration: false,
+    })).toMatchObject({
+      mouseMode: 'native',
+      scrollbarVisibility: 'hidden',
+      copyOnSelect: false,
+      wheelScrollLines: 1,
+      wheelAcceleration: false,
+    })
+    expect(normalizeBehavior({
+      mouseMode: 'mystery',
+      wheelScrollLines: 99,
+    })).toMatchObject({
+      mouseMode: 'full',
+      wheelScrollLines: 12,
+    })
+    expect(normalizeBehavior({ wheelScrollLines: 0 }).wheelScrollLines).toBe(1)
   })
 
   it('reads the registered namespace and applies transcript startup defaults', () => {

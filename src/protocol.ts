@@ -120,6 +120,12 @@ export type TuiClipboardFallback = 'auto' | 'osc52' | 'off'
 /** Which confirm-dialog choice is focused when a dangerous action opens. */
 export type TuiDangerConfirmDefault = 'cancel' | 'confirm'
 
+/** Application-owned mouse reporting versus emulator-native selection. */
+export type TuiMouseMode = 'full' | 'native'
+
+/** Whether the transcript always reserves a scrollbar column. */
+export type TuiScrollbarVisibility = 'always' | 'hidden'
+
 /** Complete behavior value owned by the SeekTTY Settings namespace. */
 export interface TuiBehaviorSettings {
   readonly toolCards: TuiToolCardDisplay
@@ -132,8 +138,19 @@ export interface TuiBehaviorSettings {
   readonly toolOutputLineLimit: number
   readonly diffContextLines: number
   readonly dangerConfirmDefault: TuiDangerConfirmDefault
+  readonly mouseMode: TuiMouseMode
+  readonly scrollbarVisibility: TuiScrollbarVisibility
+  readonly copyOnSelect: boolean
+  readonly wheelScrollLines: number
+  readonly wheelAcceleration: boolean
   readonly keyBindings: Readonly<Record<string, string>>
 }
+
+/** Default wheel detents converted to transcript lines in the mouse controller. */
+export const DEFAULT_WHEEL_SCROLL_LINES = 3
+
+/** Inclusive upper bound for `wheelScrollLines`; also the per-frame accelerated cap. */
+export const MAX_WHEEL_SCROLL_LINES = 12
 
 /** First-run interaction defaults when no user override has been stored. */
 export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
@@ -147,6 +164,11 @@ export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
   toolOutputLineLimit: 200,
   diffContextLines: 3,
   dangerConfirmDefault: 'cancel',
+  mouseMode: 'full',
+  scrollbarVisibility: 'always',
+  copyOnSelect: true,
+  wheelScrollLines: DEFAULT_WHEEL_SCROLL_LINES,
+  wheelAcceleration: true,
   keyBindings: Object.freeze({}),
 })
 

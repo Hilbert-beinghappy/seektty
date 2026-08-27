@@ -73,6 +73,13 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
       || matchesKey(data, Key.super(Key.comma)),
   },
   {
+    id: 'toggleMouseMode',
+    keys: ['F3'],
+    zh: '切换完整鼠标模式与终端原生选择',
+    en: 'Toggle full mouse mode and native terminal selection',
+    match: data => matchesKey(data, Key.f3),
+  },
+  {
     id: 'cyclePermission',
     keys: ['Shift+Tab'],
     zh: '循环当前权限',
@@ -106,6 +113,13 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
     zh: '停止当前轮次、清空草稿，或再按一次退出',
     en: 'Stop the active turn, clear a draft, or press again to exit',
     match: data => matchesKey(data, Key.ctrl('c')),
+  },
+  {
+    id: 'copySelection',
+    keys: ['Ctrl+Shift+C'],
+    zh: '复制当前选区',
+    en: 'Copy the current selection',
+    match: data => matchesKey(data, Key.ctrlShift('c')) || matchesKey(data, Key.shiftCtrl('c')),
   },
   {
     id: 'submit',

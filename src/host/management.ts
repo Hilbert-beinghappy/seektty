@@ -21,6 +21,7 @@ import {
   MAX_TEXTMATE_RULES,
   MAX_TOOL_OUTPUT_LINE_LIMIT,
   MAX_DIFF_CONTEXT_LINES,
+  MAX_WHEEL_SCROLL_LINES,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
@@ -190,6 +191,34 @@ export const BehaviorSettingsSchema = z.object({
     .description(localeDescription({
       zh: '危险确认默认焦点；cancel 表示回车不执行。',
       en: 'Default focus for danger confirmation; cancel means Enter does not proceed.',
+    })),
+  mouseMode: z.union(['full', 'native'])
+    .default(DEFAULT_TUI_BEHAVIOR.mouseMode)
+    .description(localeDescription({
+      zh: '完整鼠标模式提供应用内滚动和点击；原生模式关闭鼠标报告，供终端选择文本。',
+      en: 'Full mouse mode provides in-app scrolling and clicks; native mode turns off mouse reporting so the terminal can select text.',
+    })),
+  scrollbarVisibility: z.union(['always', 'hidden'])
+    .default(DEFAULT_TUI_BEHAVIOR.scrollbarVisibility)
+    .description(localeDescription({
+      zh: '对话区内部滚动条是否始终显示。',
+      en: 'Whether the in-transcript scrollbar is always visible.',
+    })),
+  copyOnSelect: z.boolean().default(DEFAULT_TUI_BEHAVIOR.copyOnSelect)
+    .description(localeDescription({
+      zh: '鼠标松开选区后自动写入剪贴板。',
+      en: 'Write the clipboard automatically when a mouse selection is released.',
+    })),
+  wheelScrollLines: z.natural().min(1).max(MAX_WHEEL_SCROLL_LINES)
+    .default(DEFAULT_TUI_BEHAVIOR.wheelScrollLines)
+    .description(localeDescription({
+      zh: '每个滚轮刻度滚动的行数。',
+      en: 'Lines scrolled per mouse-wheel detent.',
+    })),
+  wheelAcceleration: z.boolean().default(DEFAULT_TUI_BEHAVIOR.wheelAcceleration)
+    .description(localeDescription({
+      zh: '连续同向滚轮刻度加速滚动。',
+      en: 'Accelerate consecutive same-direction wheel detents.',
     })),
   keyBindings: z.transform(z.dict(z.string()), (value) => {
     const issue = keyBindingsIssue(value)

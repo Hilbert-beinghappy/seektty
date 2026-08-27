@@ -14,7 +14,10 @@ describe('in-app help keymap', () => {
     expect(matchesBinding('commandPalette', '\u0010')).toBe(true)
     expect(helpKeymapText()).toContain('F1')
     expect(helpKeymapText()).toContain('Ctrl+P')
+    expect(helpKeymapText()).toContain('F3')
+    expect(helpKeymapText()).toContain('Ctrl+Shift+C')
     expect(helpSectionText('doctor')).toContain('/doctor')
+    expect(helpSectionText('flows')).toContain('/mouse')
   })
 
   it('keeps F1 flows on daily work, not theme export or keymap setup', () => {

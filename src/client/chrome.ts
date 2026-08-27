@@ -9,6 +9,7 @@ import {
   type TUI,
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
+import type { CellRect } from './mouse-hit-map.ts'
 import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
@@ -138,8 +139,33 @@ export function transcriptViewportRows(terminalRows: number, editorRows: number)
   return Math.max(1, terminalRows - 4 - editorRows)
 }
 
+function slot(row: number, width: number, height: number): CellRect {
+  return { col: 0, row: Math.max(0, row), width, height: Math.max(0, height) }
+}
+
+export interface LayoutContentGeometry {
+  readonly width: number
+  readonly height: number
+  readonly context: CellRect
+  readonly transcript: CellRect
+  readonly composer: CellRect
+  readonly status: CellRect
+}
+
+export interface PromptEditorLocalGeometry {
+  readonly prefix: number
+  readonly frameWidth: number
+  readonly height: number
+  readonly borderTop: CellRect
+  readonly editor: CellRect
+  readonly attachments: CellRect
+  readonly autocomplete: CellRect
+  readonly facts: CellRect
+}
+
 /** Full-height chat layout whose composer and status remain at the viewport bottom. */
 export class BottomAnchoredLayout implements Component {
+  private geometry: LayoutContentGeometry | undefined
   /**
    * @param viewportRows - current terminal height in rows.
    * @param context - one-row execution context.
@@ -162,6 +188,11 @@ export class BottomAnchoredLayout implements Component {
     this.transcript.invalidate()
     this.composer.invalidate()
     this.status.invalidate()
+  }
+
+  /** Content-relative slot rects from the last render, before TUI screen translation. */
+  lastContentGeometry(): LayoutContentGeometry | undefined {
+    return this.geometry
   }
 
   /**
@@ -200,9 +231,31 @@ export class BottomAnchoredLayout implements Component {
       ...composerRows,
       ...statusRows,
     ]
-    return minimumRows === undefined || rendered.length <= minimumRows
+    const sliceOffset = minimumRows !== undefined && rendered.length > minimumRows
+      ? rendered.length - minimumRows
+      : 0
+    const visible = sliceOffset === 0 || minimumRows === undefined
       ? rendered
       : rendered.slice(-minimumRows)
+    const contextRow = 0
+    const transcriptRow = contextRows.length + 1 + flexibleBefore
+    const composerRow = transcriptRow + visibleTranscript.length + flexibleAfter + 1
+    const statusRow = composerRow + composerRows.length
+    const shift = (row: number, height: number): CellRect => {
+      const next = row - sliceOffset
+      if (next + height <= 0) return slot(0, width, 0)
+      if (next < 0) return slot(0, width, height + next)
+      return slot(next, width, height)
+    }
+    this.geometry = {
+      width,
+      height: visible.length,
+      context: shift(contextRow, contextRows.length),
+      transcript: shift(transcriptRow, visibleTranscript.length),
+      composer: shift(composerRow, composerRows.length),
+      status: shift(statusRow, statusRows.length),
+    }
+    return visible
   }
 }
 
@@ -309,6 +362,7 @@ export class PromptEditor extends Editor {
   private facts: TuiHeaderFacts | undefined
   private drafts: readonly ComposerDraftAttachment[] = []
   private submitSnapshot: string | undefined
+  private localGeometry: PromptEditorLocalGeometry | undefined
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -359,9 +413,27 @@ export class PromptEditor extends Editor {
     return this.submitSnapshot ?? fallback
   }
 
+  /** Content-relative composer subregions from the last render. */
+  lastLocalGeometry(): PromptEditorLocalGeometry | undefined {
+    return this.localGeometry
+  }
+
   override render(width: number): string[] {
     this.borderColor = this.focused ? color.brand : color.border
-    if (width < 8) return super.render(width)
+    if (width < 8) {
+      const lines = super.render(width)
+      this.localGeometry = {
+        prefix: 0,
+        frameWidth: width,
+        height: lines.length,
+        borderTop: { col: 0, row: 0, width, height: 0 },
+        editor: { col: 0, row: 0, width, height: lines.length },
+        attachments: { col: 0, row: 0, width, height: 0 },
+        autocomplete: { col: 0, row: 0, width, height: 0 },
+        facts: { col: 0, row: 0, width, height: 0 },
+      }
+      return lines
+    }
     const { prefix, innerWidth: frameWidth } = gutter(width)
     const lines = super.render(frameWidth)
     const lowerRule = lines.findIndex((line, index) => index > 0 && isHorizontalRule(line))
@@ -393,10 +465,35 @@ export class PromptEditor extends Editor {
         modeLabel(this.facts.mode),
       ].filter((value): value is string => value !== undefined).join(' · ')
     const compactedFacts = compactFacts(facts, Math.max(0, frameWidth - 2))
-    return [
+    const inner = [
       horizontalRule('', frameWidth, this.borderColor),
       ...body,
       horizontalRule(compactedFacts, frameWidth, this.borderColor),
-    ].map(line => `${prefix}${line}`)
+    ]
+    const editorTop = 1
+    const attachmentTop = editorTop + editorRows.length
+    const autocompleteTop = attachmentTop + attachmentRows.length
+    const factsRow = inner.length - 1
+    this.localGeometry = {
+      prefix: prefix.length,
+      frameWidth,
+      height: inner.length,
+      borderTop: { col: prefix.length, row: 0, width: frameWidth, height: 1 },
+      editor: { col: prefix.length, row: editorTop, width: frameWidth, height: editorRows.length },
+      attachments: {
+        col: prefix.length,
+        row: attachmentTop,
+        width: frameWidth,
+        height: attachmentRows.length,
+      },
+      autocomplete: {
+        col: prefix.length,
+        row: autocompleteTop,
+        width: frameWidth,
+        height: autocompleteRows.length,
+      },
+      facts: { col: prefix.length, row: factsRow, width: frameWidth, height: 1 },
+    }
+    return inner.map(line => `${prefix}${line}`)
   }
 }

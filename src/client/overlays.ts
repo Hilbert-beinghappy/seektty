@@ -988,15 +988,27 @@ export class OverlayQueue implements OverlayPrompts {
   private readonly entries: Array<QueueEntry<unknown>> = []
   private active: QueueEntry<unknown> | undefined
   private accepting = true
+  private generation = 0
 
   /** @param tui - mounted pi-tui root whose public overlay API owns focus. */
-  constructor(private readonly tui: TUI) {}
+  constructor(
+    private readonly tui: TUI,
+    private readonly onSessionChange: () => void = () => undefined,
+  ) {}
 
   /**
    * Whether a modal currently owns input focus.
    * @returns true while an overlay owns input focus.
    */
   hasActive(): boolean { return this.active !== undefined }
+
+  /** Frame generation bound to the currently capturing overlay; changes on replace. */
+  activeGeneration(): number { return this.generation }
+
+  /** Stable id for the capturing overlay, if any. */
+  activeOverlayId(): string | undefined {
+    return this.active === undefined ? undefined : String(this.generation)
+  }
 
   /**
    * Mount one physical overlay whose navigator owns every logical child page.
@@ -1181,6 +1193,8 @@ export class OverlayQueue implements OverlayPrompts {
     const entry = this.entries.shift()
     if (entry === undefined) return
     this.active = entry
+    this.generation += 1
+    this.onSessionChange()
     try {
       const component = entry.create(
         value => { this.settle(entry, value) },
@@ -1206,6 +1220,8 @@ export class OverlayQueue implements OverlayPrompts {
     if (this.active === entry) this.active = undefined
     const queued = this.entries.indexOf(entry)
     if (queued >= 0) this.entries.splice(queued, 1)
+    this.generation += 1
+    this.onSessionChange()
     entry.resolve(value)
     this.tui.requestRender()
     queueMicrotask(() => { this.activateNext() })
@@ -1219,6 +1235,8 @@ export class OverlayQueue implements OverlayPrompts {
     if (this.active === entry) this.active = undefined
     const queued = this.entries.indexOf(entry)
     if (queued >= 0) this.entries.splice(queued, 1)
+    this.generation += 1
+    this.onSessionChange()
     entry.reject(error)
     this.tui.requestRender()
     queueMicrotask(() => { this.activateNext() })

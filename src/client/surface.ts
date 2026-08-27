@@ -89,9 +89,12 @@ import {
   createTerminalSession,
   type ManagedTui,
   supportsManagedTerminal,
-  terminalMouseDelta,
   type ManagedTerminal,
 } from './terminal-session.ts'
+import { MouseProtocolDecoder } from './mouse-protocol.ts'
+import { createMouseController } from './mouse-controller.ts'
+import { emptyHitMap, finalizeHitMap, HitMapBuilder } from './mouse-hit-map.ts'
+import { emptyFrameGeometry, tuiFrameApi } from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
 import { attachFatalGuards, fatalLogHint, restoreSurfaceTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -182,6 +185,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
     applyKeyBindingOverrides(liveBehavior.get().keyBindings)
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
+    terminalSession.setMouseReporting(liveBehavior.get().mouseMode)
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     const requestTuiRender = tui.requestRender.bind(tui)
@@ -287,18 +291,114 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const renderCanvas = canvas.render.bind(canvas)
     canvas.render = (width: number): string[] => performanceProbe.measureRender(() => renderCanvas(width))
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
-    canvas.addChild(new BottomAnchoredLayout(
+    const layout = new BottomAnchoredLayout(
       () => terminal.rows,
       contextBar,
       transcript,
       editor,
       status,
       () => transcript.isEmptyState(),
-    ))
+    )
+    canvas.addChild(layout)
     tui.addChild(canvas)
     tui.setFocus(editor)
 
-    const overlays = new OverlayQueue(tui)
+    let mouseController!: ReturnType<typeof createMouseController>
+    const overlays = new OverlayQueue(tui, () => { mouseController.endGesture() })
+    const mouseDecoder = new MouseProtocolDecoder()
+    let hitMap = emptyHitMap(0, terminal.columns, terminal.rows)
+    const freezeHitMap = (): void => {
+      const geometry = tuiFrameApi(tui).getLastFrameGeometry?.()
+        ?? emptyFrameGeometry(terminal.columns, terminal.rows)
+      const builder = new HitMapBuilder(hitMap.generation + 1)
+      const slots = layout.lastContentGeometry()
+      if (slots !== undefined) {
+        builder.add({
+          id: 'chrome:context',
+          rect: slots.context,
+          zIndex: 10,
+          role: 'passive',
+          enabled: true,
+          action: { kind: 'chrome', commandId: 'context' },
+        })
+        builder.add({
+          id: 'transcript:text',
+          rect: slots.transcript,
+          zIndex: 10,
+          role: 'text',
+          enabled: true,
+          action: { kind: 'transcript', command: 'select' },
+        })
+        const composerOrigin = { col: slots.composer.col, row: slots.composer.row }
+        const local = editor.lastLocalGeometry()
+        if (local === undefined) {
+          builder.add({
+            id: 'composer:input',
+            rect: slots.composer,
+            zIndex: 20,
+            role: 'input',
+            enabled: true,
+            action: { kind: 'composer', command: 'focus' },
+          })
+        } else {
+          builder.addLocal({
+            id: 'composer:input',
+            rect: local.editor,
+            zIndex: 20,
+            role: 'input',
+            enabled: true,
+            action: { kind: 'composer', command: 'caret' },
+          }, composerOrigin)
+          if (local.autocomplete.height > 0) {
+            builder.addLocal({
+              id: 'composer:autocomplete',
+              rect: local.autocomplete,
+              zIndex: 21,
+              role: 'option',
+              enabled: true,
+              action: { kind: 'composer', command: 'autocomplete' },
+            }, composerOrigin)
+          }
+          if (local.attachments.height > 0) {
+            builder.addLocal({
+              id: 'composer:attachments',
+              rect: local.attachments,
+              zIndex: 20,
+              role: 'passive',
+              enabled: true,
+              action: { kind: 'composer', command: 'focus' },
+            }, composerOrigin)
+          }
+          builder.addLocal({
+            id: 'composer:facts',
+            rect: local.facts,
+            zIndex: 20,
+            role: 'passive',
+            enabled: true,
+            action: { kind: 'chrome', commandId: 'composer-facts' },
+          }, composerOrigin)
+        }
+        builder.add({
+          id: 'chrome:status',
+          rect: slots.status,
+          zIndex: 10,
+          role: 'passive',
+          enabled: true,
+          action: { kind: 'chrome', commandId: 'status' },
+        })
+      }
+      const overlayId = overlays.activeOverlayId()
+      hitMap = finalizeHitMap(
+        builder,
+        geometry,
+        overlayId === undefined || !overlays.hasActive() ? undefined : { overlayId },
+      )
+    }
+    tuiFrameApi(tui).onAfterRender = freezeHitMap
+    mouseController = createMouseController({
+      getHitMap: () => hitMap,
+      getBehavior: () => liveBehavior.get(),
+    })
     let resolveClosed: (outcome: TuiSurfaceOutcome) => void = () => undefined
     const closed = new Promise<TuiSurfaceOutcome>((resolve) => { resolveClosed = resolve })
     let exitArmedUntil = 0
@@ -518,6 +618,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
         notices.dispose()
         overlays.dispose()
+        mouseController.dispose()
+        mouseDecoder.reset()
         transcript.dispose()
         setCodeHighlighter(undefined)
         try { syntax?.dispose() } catch (error) { failures.push(error) }
@@ -578,6 +680,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         liveBehavior.apply(behavior)
         applyKeyBindingOverrides(behavior.keyBindings)
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
+        terminalSession.setMouseReporting(behavior.mouseMode)
+        mouseController.endGesture()
         transcript.applyPresentationDefaults(
           behavior.toolCards,
           behavior.showReasoning,
@@ -651,6 +755,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       editor.disableSubmit = false
       if (latestSessionId !== current.sessionId) {
         latestSessionId = current.sessionId
+        mouseController.endGesture()
         dismissNotice()
         refreshHeader(true)
       } else {
@@ -797,19 +902,31 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     tui.addInputListener((data) => {
       performanceProbe.markInput()
-      const wheelDelta = terminalMouseDelta(data)
-      if (wheelDelta !== undefined) {
-        if (wheelDelta !== null) transcript.scrollBy(wheelDelta)
+      const decoded = mouseDecoder.push(data)
+      for (const event of decoded.events) {
+        const outcome = mouseController.handle(event)
+        if (outcome.scrollTranscript !== undefined) transcript.scrollBy(outcome.scrollTranscript)
+        if (outcome.requestRender === true) renderWhileOpen()
+      }
+      if (decoded.pending !== '') return { consume: true }
+      if (decoded.events.length > 0 && decoded.leftover === '') return { consume: true }
+      const payload = decoded.events.length > 0 ? decoded.leftover : data
+      if (payload === '') return { consume: true }
+      if (matchesBinding('toggleMouseMode', payload)) {
+        void actions.execute('mouse', 'toggle')
         return { consume: true }
       }
-      const interrupt = consumeRunningInterrupt(data, capabilities.active()?.session)
+      if (matchesBinding('copySelection', payload)) {
+        return { consume: true }
+      }
+      const interrupt = consumeRunningInterrupt(payload, capabilities.active()?.session)
       if (interrupt !== undefined) return interrupt
-      if (overlays.hasActive()) return undefined
-      const pasted = imagePathFromPasteText(data)
+      if (overlays.hasActive()) return payload === data ? undefined : { data: payload }
+      const pasted = imagePathFromPasteText(payload)
       if (!transcriptFocused && pasted !== undefined) {
         return attachPastedImage(pasted.path, pasted.raw, pasted.rest)
       }
-      const paste = BRACKETED_PASTE.exec(data)
+      const paste = BRACKETED_PASTE.exec(payload)
       if (!transcriptFocused && paste !== null) {
         const content = paste[1] ?? ''
         if (content.trim() === '') {
@@ -845,17 +962,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return { data: `\u001B[200~${safeContent}\u001B[201~` }
         }
       }
-      if (matchesBinding('focusToggle', data) && (transcriptFocused || editor.getText() === '')) {
+      if (matchesBinding('focusToggle', payload) && (transcriptFocused || editor.getText() === '')) {
         applyTranscriptFocusToggle(transcript)
         transcriptFocused = !transcriptFocused
         tui.setFocus(transcriptFocused ? transcript : editor)
         return { consume: true }
       }
-      if (transcriptFocused && matchesKey(data, Key.escape)) {
+      if (transcriptFocused && matchesKey(payload, Key.escape)) {
         applyTranscriptEscape(transcript, focusEditor)
         return { consume: true }
       }
-      if (transcriptFocused && (matchesKey(data, Key.enter) || data === '\r' || data === '\n')) {
+      if (transcriptFocused && (matchesKey(payload, Key.enter) || payload === '\r' || payload === '\n')) {
         const action = transcript.activateFocused()
         if (action?.kind === 'example') {
           focusEditor()
@@ -867,19 +984,19 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           return { consume: true }
         }
       }
-      if (matchesBinding('cyclePermission', data)) {
+      if (matchesBinding('cyclePermission', payload)) {
         void actions.cyclePermission()
         return { consume: true }
       }
-      if (matchesBinding('help', data)) {
+      if (matchesBinding('help', payload)) {
         void actions.help()
         return { consume: true }
       }
-      if (matchesBinding('commandPalette', data)) {
+      if (matchesBinding('commandPalette', payload)) {
         void actions.commandPalette()
         return { consume: true }
       }
-      if (matchesBinding('historySearch', data)) {
+      if (matchesBinding('historySearch', payload)) {
         if (historyLimit <= 0) {
           setNotice(ui('输入历史已关闭', 'Composer history is disabled'), 'info')
           return { consume: true }
@@ -909,19 +1026,19 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       // Legacy terminals encode both Enter and Ctrl+M as CR. Only an extended
       // keyboard protocol can identify Ctrl+M without stealing every submit.
-      if (matchesBinding('model', data)) {
+      if (matchesBinding('model', payload)) {
         void actions.execute('model', '')
         return { consume: true }
       }
-      if (matchesBinding('sessions', data)) {
+      if (matchesBinding('sessions', payload)) {
         void actions.execute('sessions', '')
         return { consume: true }
       }
-      if (matchesBinding('toolsDisplay', data)) {
+      if (matchesBinding('toolsDisplay', payload)) {
         void actions.execute('tools', 'display')
         return { consume: true }
       }
-      if (matchesBinding('reasoning', data)) {
+      if (matchesBinding('reasoning', payload)) {
         const visible = transcript.toggleReasoning()
         setNotice(visible
           ? ui('推理内容：显示', 'Reasoning: shown')
@@ -929,12 +1046,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         refresh()
         return { consume: true }
       }
-      if (matchesBinding('previousTurn', data) || matchesBinding('nextTurn', data)) {
+      if (matchesBinding('previousTurn', payload) || matchesBinding('nextTurn', payload)) {
         if (!transcriptFocused) {
           transcriptFocused = true
           tui.setFocus(transcript)
         }
-        const offset = matchesBinding('previousTurn', data) ? -1 : 1
+        const offset = matchesBinding('previousTurn', payload) ? -1 : 1
         const moved = transcript.navigateTurn(offset)
         setNotice(
           moved
@@ -946,17 +1063,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         )
         return { consume: true }
       }
-      if (matchesBinding('settings', data)) {
+      if (matchesBinding('settings', payload)) {
         void actions.execute('settings', '')
         return { consume: true }
       }
-      if (matchesKey(data, Key.escape) && notices.hasVisible()) {
+      if (matchesKey(payload, Key.escape) && notices.hasVisible()) {
         dismissNotice()
         updateStatus()
         renderWhileOpen()
         return { consume: true }
       }
-      if (!matchesBinding('interrupt', data)) return undefined
+      if (!matchesBinding('interrupt', payload)) return payload === data ? undefined : { data: payload }
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
         setNotice(clearIdleComposerDraft(
           editor,

@@ -1,8 +1,105 @@
+diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
+index fb224b9da697aab89a31336eae65071dc07d736e..ff14671af2b2983b0de426e395e9ad49d2db2b97 100644
+--- a/dist/components/editor.d.ts
++++ b/dist/components/editor.d.ts
+@@ -102,6 +102,33 @@ export declare class Editor implements Component, Focusable {
+         line: number;
+         col: number;
+     };
++    setCursor(line: number, col: number): void;
++    getSelection(): {
++        anchor: {
++            line: number;
++            col: number;
++        };
++        focus: {
++            line: number;
++            col: number;
++        };
++    } | undefined;
++    setSelection(anchor: {
++        line: number;
++        col: number;
++    }, focus: {
++        line: number;
++        col: number;
++    }): void;
++    clearSelection(): void;
++    getVisualLineMap(width?: number): {
++        logicalLine: number;
++        startCol: number;
++        length: number;
++    }[];
++    getAutocompleteSelectedIndex(): number;
++    setAutocompleteSelectedIndex(index: number): void;
++    applyAutocompleteSelection(): boolean;
+     setText(text: string): void;
+     /**
+      * Insert text at the current cursor position.
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..579d81846fc4284babe2f69cf0efc1b6e49e351a 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..843a390c27d7b49e818df487ca6167aea63ca1ba 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -1204,6 +1204,7 @@ export class Editor {
+@@ -208,6 +208,7 @@ export class Editor {
+     snappedFromCursorCol = null;
+     // Undo support
+     undoStack = new UndoStack();
++    selectionRange = null;
+     onSubmit;
+     onChange;
+     disableSubmit = false;
+@@ -790,6 +791,50 @@ export class Editor {
+     getCursor() {
+         return { line: this.state.cursorLine, col: this.state.cursorCol };
+     }
++    setCursor(line, col) {
++        const lineCount = this.state.lines.length;
++        const nextLine = Math.max(0, Math.min(Math.floor(line), Math.max(0, lineCount - 1)));
++        const currentLine = this.state.lines[nextLine] || "";
++        const nextCol = Math.max(0, Math.min(Math.floor(col), currentLine.length));
++        this.state.cursorLine = nextLine;
++        this.setCursorCol(nextCol);
++    }
++    getSelection() {
++        return this.selectionRange ?? undefined;
++    }
++    setSelection(anchor, focus) {
++        this.selectionRange = { anchor: { line: anchor.line, col: anchor.col }, focus: { line: focus.line, col: focus.col } };
++    }
++    clearSelection() {
++        this.selectionRange = null;
++    }
++    getVisualLineMap(width) {
++        return this.buildVisualLineMap(width ?? this.lastWidth);
++    }
++    getAutocompleteSelectedIndex() {
++        return this.autocompleteList?.getSelectedIndex?.() ?? -1;
++    }
++    setAutocompleteSelectedIndex(index) {
++        this.autocompleteList?.setSelectedIndex(index);
++    }
++    applyAutocompleteSelection() {
++        if (!this.autocompleteState || !this.autocompleteList || !this.autocompleteProvider)
++            return false;
++        const selected = this.autocompleteList.getSelectedItem();
++        if (!selected)
++            return false;
++        this.pushUndoSnapshot();
++        this.lastAction = null;
++        const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
++        this.state.lines = result.lines;
++        this.state.cursorLine = result.cursorLine;
++        this.setCursorCol(result.cursorCol);
++        this.cancelAutocomplete();
++        if (this.onChange)
++            this.onChange(this.getText());
++        this.tui.requestRender();
++        return true;
++    }
+     setText(text) {
+         this.cancelAutocomplete();
+         this.lastAction = null;
+@@ -1204,6 +1249,7 @@ export class Editor {
          this.setCursorCol(currentLine.length);
      }
      deleteToStartOfLine() {
@@ -11,7 +108,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..579d81846fc4284babe2f69cf0efc1b6
          const currentLine = this.state.lines[this.state.cursorLine] || "";
          if (this.state.cursorCol > 0) {
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..fc274db16b9779ecb525c0ebb921042ceeeb46ad 100644
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9734a2654 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
 @@ -231,28 +231,35 @@ export class Markdown {
@@ -133,8 +230,34 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..fc274db16b9779ecb525c0ebb921042c
              }
              else {
                  // Other token types - try to render as inline
+diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
+index 9db54d907f801e43208a462bca925f2905787b7a..186c8d12c3a753a377ad2e82077657f895482d4a 100644
+--- a/dist/components/select-list.d.ts
++++ b/dist/components/select-list.d.ts
+@@ -36,6 +36,7 @@ export declare class SelectList implements Component {
+     constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions);
+     setFilter(filter: string): void;
+     setSelectedIndex(index: number): void;
++    getSelectedIndex(): number;
+     invalidate(): void;
+     render(width: number): string[];
+     handleInput(keyData: string): void;
+diff --git a/dist/components/select-list.js b/dist/components/select-list.js
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..38b1ca99cfc8c51401794f24bb2d1c91e8efdb32 100644
+--- a/dist/components/select-list.js
++++ b/dist/components/select-list.js
+@@ -30,6 +30,9 @@ export class SelectList {
+     setSelectedIndex(index) {
+         this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
+     }
++    getSelectedIndex() {
++        return this.selectedIndex;
++    }
+     invalidate() {
+         // No cached state to invalidate currently
+     }
 diff --git a/dist/terminal.js b/dist/terminal.js
-index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a78768300f91d 100644
+index 3545b284ce2da594cc728803feb607a34cea5ca0..79bb3e8769594c1b8f70ef71304ab9032ed4ecd3 100644
 --- a/dist/terminal.js
 +++ b/dist/terminal.js
 @@ -16,6 +16,7 @@ export class ProcessTerminal {
@@ -206,11 +329,70 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a7876
      async drainInput(maxMs = 1000, idleMs = 50) {
          if (this._kittyProtocolActive) {
              // Disable Kitty keyboard protocol first so any late key releases
+diff --git a/dist/tui.d.ts b/dist/tui.d.ts
+index 8394d461feed1287deba13443c7afe79ff45c151..afe2af52b6acb83b07b3d0e2e3db05f1ab4e8646 100644
+--- a/dist/tui.d.ts
++++ b/dist/tui.d.ts
+@@ -155,8 +155,28 @@ export declare class TUI extends Container {
+     private stopped;
+     private focusOrderCounter;
+     private overlayStack;
++    lastFrameGeometry: {
++        terminalWidth: number;
++        terminalHeight: number;
++        rootScreenOrigin: {
++            col: number;
++            row: number;
++        };
++        rootSliceOffset: number;
++        overlays: {
++            row: number;
++            col: number;
++            width: number;
++            height: number;
++            zOrder: number;
++            capturing: boolean;
++        }[];
++    };
++    /** Called after post-slice composite geometry is frozen. */
++    onAfterRender?: () => void;
+     constructor(terminal: Terminal, showHardwareCursor?: boolean);
+     get fullRedraws(): number;
++    getLastFrameGeometry(): TUI["lastFrameGeometry"];
+     getShowHardwareCursor(): boolean;
+     setShowHardwareCursor(enabled: boolean): void;
+     getClearOnShrink(): boolean;
 diff --git a/dist/tui.js b/dist/tui.js
-index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a4eccb0e3 100644
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..4c0afd0fbf050525008897ddbe9581ed1516b4ba 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -307,13 +307,9 @@ export class TUI extends Container {
+@@ -118,6 +118,15 @@ export class TUI extends Container {
+     // Overlay stack for modal components rendered on top of base content
+     focusOrderCounter = 0;
+     overlayStack = [];
++    lastOverlayPlacements = [];
++    lastFrameGeometry = {
++        terminalWidth: 0,
++        terminalHeight: 0,
++        rootScreenOrigin: { col: 0, row: 0 },
++        rootSliceOffset: 0,
++        overlays: [],
++    };
++    onAfterRender;
+     constructor(terminal, showHardwareCursor) {
+         super();
+         this.terminal = terminal;
+@@ -128,6 +137,9 @@ export class TUI extends Container {
+     get fullRedraws() {
+         return this.fullRedrawCount;
+     }
++    getLastFrameGeometry() {
++        return this.lastFrameGeometry;
++    }
+     getShowHardwareCursor() {
+         return this.showHardwareCursor;
+     }
+@@ -307,13 +319,9 @@ export class TUI extends Container {
          this.terminal.write("\x1b[16t");
      }
      stop() {
@@ -226,7 +408,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
              const targetRow = this.previousLines.length; // Line after the last content
              const lineDiff = targetRow - this.hardwareCursorRow;
              if (lineDiff > 0) {
-@@ -327,6 +323,16 @@ export class TUI extends Container {
+@@ -327,6 +335,16 @@ export class TUI extends Container {
          this.terminal.showCursor();
          this.terminal.stop();
      }
@@ -243,13 +425,45 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
      requestRender(force = false) {
          if (force) {
              this.previousLines = [];
-@@ -752,27 +758,54 @@ export class TUI extends Container {
+@@ -592,9 +610,17 @@ export class TUI extends Container {
+             }
+             // Get final row/col with actual overlay height
+             const { row, col } = this.resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);
+-            rendered.push({ overlayLines, row, col, w: width });
++            rendered.push({ overlayLines, row, col, w: width, capturing: !entry.options?.nonCapturing, zOrder: entry.focusOrder });
+             minLinesNeeded = Math.max(minLinesNeeded, row + overlayLines.length);
+         }
++        this.lastOverlayPlacements = rendered.map((item) => ({
++            row: item.row,
++            col: item.col,
++            width: item.w,
++            height: item.overlayLines.length,
++            zOrder: item.zOrder,
++            capturing: item.capturing,
++        }));
+         // Pad to at least terminal height so overlays have screen-relative positions.
+         // Excludes maxLinesRendered: the historical high-water mark caused self-reinforcing
+         // inflation that pushed content into scrollback on terminal widen.
+@@ -749,30 +775,67 @@ export class TUI extends Container {
+         // Render all components to get new lines
+         let newLines = this.render(width);
+         // Composite overlays into the rendered lines (before differential compare)
++        this.lastOverlayPlacements = [];
          if (this.overlayStack.length > 0) {
              newLines = this.compositeOverlays(newLines, width, height);
          }
++        const preSliceLength = newLines.length;
 +        if (newLines.length > height) {
 +            newLines = newLines.slice(-height);
 +        }
++        this.lastFrameGeometry = {
++            terminalWidth: width,
++            terminalHeight: height,
++            rootScreenOrigin: { col: 0, row: 0 },
++            rootSliceOffset: Math.max(0, preSliceLength - newLines.length),
++            overlays: this.lastOverlayPlacements,
++        };
++        this.onAfterRender?.();
          // Extract cursor position before applying line resets (marker must be found first)
          const cursorPos = this.extractCursorPosition(newLines, height);
          newLines = this.applyLineResets(newLines);
@@ -302,7 +516,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
              if (clear) {
                  this.maxLinesRendered = newLines.length;
              }
-@@ -844,6 +877,37 @@ export class TUI extends Container {
+@@ -844,6 +907,37 @@ export class TUI extends Container {
              }
              lastChanged = newLines.length - 1;
          }
@@ -340,7 +554,8 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
          if (firstChanged !== -1) {
              lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
          }
-@@ -945,5 +1009,6 @@ export class TUI extends Container {
+@@ -944,8 +1038,9 @@ export class TUI extends Container {
+         for (let i = firstChanged; i <= renderEnd; i++) {
              if (i > firstChanged)
                  buffer += "\r\n";
 -            buffer += "\x1b[2K"; // Clear current line
@@ -348,3 +563,5 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a
 +            if (visibleWidth(line) < width)
 +                buffer += "\x1b[2K";
              const isImage = isImageLine(line);
+             if (!isImage && visibleWidth(line) > width) {
+                 // Log all lines to crash file for debugging

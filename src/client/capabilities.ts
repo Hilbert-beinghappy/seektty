@@ -273,6 +273,7 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'pending', description: ui('处理待审批或待回答事项', 'Handle pending approvals or questions'), source: 'TUI', behavior: 'local' },
     { name: 'settings', description: ui('打开设置', 'Open Settings'), argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },
     { name: 'keymap', description: ui('自定义快捷键', 'Customize shortcuts'), argumentHint: '[binding [chord|reset]]', source: 'TUI', behavior: 'local' },
+    { name: 'mouse', description: ui('切换完整鼠标或原生选择', 'Switch full mouse or native selection'), argumentHint: '[full|native|toggle]', source: 'TUI', behavior: 'local' },
     { name: 'plugin', description: ui('打开插件中心', 'Open plugin center'), argumentHint: ui('[子命令]', '[subcommand]'), source: 'TUI', behavior: 'local' },
     { name: 'doctor', description: ui('检查运行环境', 'Check runtime environment'), source: 'TUI', behavior: 'local' },
     { name: 'restart', description: ui('重启并恢复当前会话', 'Restart and resume current session'), source: 'TUI', behavior: 'local' },

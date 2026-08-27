@@ -114,11 +114,20 @@ describe('out-of-tree Bundle contract', () => {
   it('keeps transcript scrolling inside a managed fixed terminal viewport', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
     const session = readFileSync(resolve(root, 'src/client/terminal-session.ts'), 'utf8')
+    const mouse = readFileSync(resolve(root, 'src/client/mouse-protocol.ts'), 'utf8')
     expect(surface).toContain('createTerminalSession')
-    expect(surface).toContain('terminalMouseDelta')
+    expect(surface).toContain('setMouseReporting')
+    expect(surface).toContain('MouseProtocolDecoder')
     expect(surface).not.toContain('Number.POSITIVE_INFINITY')
-    expect(session).toContain('\\u001B[?1049h')
-    expect(session).toContain('\\u001B[?1000h\\u001B[?1006h')
+    expect(session).toContain('ENTER_ALTERNATE_SCREEN')
+    expect(session).toContain('setMouseReporting')
+    expect(mouse).toContain('?1049h')
+    expect(mouse).toContain('?1000h')
+    expect(mouse).toContain('?1004h')
+    expect(mouse).toContain('?1006h')
+    expect(mouse).toContain('?1004l')
+    expect(mouse).not.toContain('?1003h')
+    expect(mouse).not.toContain('?1002h')
   })
 
   it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {
