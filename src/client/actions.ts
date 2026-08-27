@@ -101,6 +101,7 @@ import {
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
+import { normalizeOnboardingApiKey } from './provider-onboarding.ts'
 import {
   captureClipboardImage,
   cleanupClipboardImageWorkspace,
@@ -394,6 +395,23 @@ function elapsedLabel(milliseconds: number): string {
   if (milliseconds < 1_000) return `${milliseconds} ms`
   if (milliseconds < 60_000) return `${Math.round(milliseconds / 100) / 10} s`
   return `${Math.round(milliseconds / 6_000) / 10} min`
+}
+
+const DEEPSEEK_CREDENTIAL_REF = 'DEEPSEEK_API_KEY'
+
+function validateSecretValue(raw: string, deepseek: boolean):
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly message: string } {
+  if (deepseek) return normalizeOnboardingApiKey(raw)
+  if (raw === '') return { ok: false, message: ui('Secret 不能为空。', 'The secret cannot be empty.') }
+  return { ok: true, value: raw }
+}
+
+function credentialWriteFailure(ref: string): string {
+  return ui(
+    `Credential ${ref} 保存失败；请重试，或按 Esc 后使用 /doctor 检查。`,
+    `Could not save credential ${ref}. Retry, or press Esc and inspect /doctor.`,
+  )
 }
 
 /** TUI-local actions. Every durable operation delegates to HarnessTuiCapabilities. */
@@ -2393,13 +2411,35 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
       if (choice === undefined) return undefined
       value = field.choices.find(option => option.id === choice.id)?.value
     } else if (field.control === 'secret') {
-      const secret = await overlays.secretInput({
-        title: ui(`写入 ${field.label}`, `Write ${field.label}`),
-        detail: ui('现有值不会回显；保存后将替换原值', "The current value is hidden; saving replaces it"),
-        placeholder: ui('输入新 Secret', "Enter a new secret"),
+      const failure = ui(
+        `${field.label} 保存失败；请重试。`,
+        `Could not save ${field.label}. Please retry.`,
+      )
+      return overlays.secretTransaction<TuiSettingsDocument>({
+        input: {
+          title: ui(`写入 ${field.label}`, `Write ${field.label}`),
+          detail: ui('现有值不会回显；保存后将替换原值', "The current value is hidden; saving replaces it"),
+          placeholder: ui('输入新 Secret', "Enter a new secret"),
+        },
+        busyTitle: ui(`正在保存 ${field.label}`, `Saving ${field.label}`),
+        busyDetail: ui('正在通过 Harness Settings 写入。', 'Writing through Harness Settings.'),
+        failureMessage: failure,
+        validate: raw => validateSecretValue(raw, document.namespace === 'llm-deepseek'),
+        work: async (secret) => {
+          try {
+            return {
+              ok: true,
+              value: await this.capabilities.managementBridge().settings.mutate(
+                document.namespace,
+                [{ op: 'set', path: field.path, value: secret }],
+                document.revision,
+              ),
+            }
+          } catch {
+            return { ok: false, message: failure }
+          }
+        },
       })
-      if (secret === undefined || secret === '') return undefined
-      value = secret
     } else {
       const initialValue = field.control === 'json'
         ? JSON.stringify(field.value, null, 2)
@@ -2439,22 +2479,47 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
       writeReference = true
     }
     const info = await bridge.credentialInfo(ref)
-    if (!info.writable) throw new Error(ui(`Credential ${JSON.stringify(ref)} 由系统管理，不能在这里修改`, `Credential ${JSON.stringify(ref)} is system-managed and cannot be changed here`))
+    if (!info.writable) {
+      const source = info.source === undefined ? '' : ` (${info.source})`
+      throw new Error(ui(
+        `Credential ${JSON.stringify(ref)} 由外部来源${source}管理，不能在这里修改；请修改启动环境或对应配置层。`,
+        `Credential ${JSON.stringify(ref)} is managed by an external source${source} and cannot be changed here; update the launch environment or its owning configuration layer.`,
+      ))
+    }
     if (set) {
-      const secret = await overlays.secretInput({
-        title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
-        detail: ui(`状态：${info.configured ? '已配置' : '未配置'}。原值不会回显；保存后将替换原值。`, `Status: ${info.configured ? 'Configured' : 'Not configured'}. The current value is never echoed; saving replaces it.`),
-        placeholder: ui('输入 Secret', "Enter secret"),
+      const failure = credentialWriteFailure(ref)
+      const updated = await overlays.secretTransaction<TuiSettingsDocument>({
+        input: {
+          title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
+          detail: ui(`状态：${info.configured ? '已配置' : '未配置'}。原值不会回显；保存后将替换原值。`, `Status: ${info.configured ? 'Configured' : 'Not configured'}. The current value is never echoed; saving replaces it.`),
+          placeholder: ui('输入 Secret', "Enter secret"),
+        },
+        busyTitle: ui(`正在保存 Credential ${ref}`, `Saving credential ${ref}`),
+        busyDetail: ui('正在通过 Harness Credential API 写入并检查状态。', 'Writing through the Harness Credential API and checking status.'),
+        failureMessage: failure,
+        validate: raw => validateSecretValue(
+          raw,
+          document.namespace === 'llm-deepseek' || ref === DEEPSEEK_CREDENTIAL_REF,
+        ),
+        work: async (secret) => {
+          try {
+            const saved = await bridge.setCredential(ref, secret)
+            if (!saved.configured) return { ok: false, message: failure }
+            const next = writeReference
+              ? await bridge.mutate(
+                document.namespace,
+                [{ op: 'set', path: field.path, value: ref }],
+                document.revision,
+              )
+              : document
+            return { ok: true, value: next }
+          } catch {
+            return { ok: false, message: failure }
+          }
+        },
       })
-      if (secret === undefined || secret === '') return
-      if (writeReference) {
-        document = await bridge.mutate(
-          document.namespace,
-          [{ op: 'set', path: field.path, value: ref }],
-          document.revision,
-        )
-      }
-      await bridge.setCredential(ref, secret)
+      if (updated === undefined) return
+      document = updated
       await this.settingsChanged(document, `Credential ${ref}`, overlays)
       return
     }
@@ -3067,16 +3132,36 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     const bridge = this.capabilities.managementBridge().settings
     const info = await bridge.credentialInfo(ref)
     if (!info.writable) {
-      this.host.notice(ui(`Credential ${ref} 由系统管理，无需在这里配置`, `Credential ${ref} is system-managed and does not need configuration here`), 'info')
+      const source = info.source === undefined ? '' : ` (${info.source})`
+      this.host.notice(ui(
+        `Credential ${ref} 由外部来源${source}管理；请修改其拥有的配置层。`,
+        `Credential ${ref} is managed by an external source${source}; update its owning configuration layer.`,
+      ), 'info')
       return
     }
-    const secret = await overlays.secretInput({
-      title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
-      detail: ui('值不会回显；保存后将替换原值', "The value is never displayed; saving replaces it"),
-      placeholder: ui('输入 Secret；Esc 跳过', "Enter secret; Esc skips"),
+    const failure = credentialWriteFailure(ref)
+    const saved = await overlays.secretTransaction<boolean>({
+      input: {
+        title: ui(`配置 Credential ${ref}`, `Configure credential ${ref}`),
+        detail: ui('值不会回显；保存后将替换原值', "The value is never displayed; saving replaces it"),
+        placeholder: ui('输入 Secret；Esc 跳过', "Enter secret; Esc skips"),
+      },
+      busyTitle: ui(`正在保存 Credential ${ref}`, `Saving credential ${ref}`),
+      busyDetail: ui('正在通过 Harness Credential API 写入并检查状态。', 'Writing through the Harness Credential API and checking status.'),
+      failureMessage: failure,
+      validate: raw => validateSecretValue(raw, ref === DEEPSEEK_CREDENTIAL_REF),
+      work: async (secret) => {
+        try {
+          const result = await bridge.setCredential(ref, secret)
+          return result.configured
+            ? { ok: true, value: true }
+            : { ok: false, message: failure }
+        } catch {
+          return { ok: false, message: failure }
+        }
+      },
     })
-    if (secret === undefined || secret === '') return
-    await bridge.setCredential(ref, secret)
+    if (saved !== true) return
     this.host.notice(ui(`Credential ${ref} 已配置`, `Credential ${ref} configured`), 'success')
   }
 

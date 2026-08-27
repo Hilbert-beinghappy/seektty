@@ -1162,9 +1162,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             const next = selected - Math.sign(outcome.semantic.lines)
             api.setAutocompleteSelectedIndex?.(Math.max(0, next))
           } else if (region?.action.kind === 'composer' || region?.role === 'input') {
-            const steps = Math.min(MAX_WHEEL_SCROLL_LINES, Math.abs(outcome.semantic.lines))
-            const key = outcome.semantic.lines > 0 ? Key.up : Key.down
-            for (let step = 0; step < steps; step += 1) editor.handleInput(key)
+            // A mouse wheel is a semantic navigation gesture, never keyboard bytes.
+            // Inputs consume it without changing text or cursor state.
           } else if (outcome.scrollTranscript !== undefined) {
             if (pendingWheel !== 0) mouseController.noteCoalescedWheel()
             pendingWheel += outcome.scrollTranscript

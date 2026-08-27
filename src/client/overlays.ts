@@ -115,12 +115,33 @@ export interface ProgressOverlayRequest<T> {
   work(report: (chunk: string) => void, signal: AbortSignal): Promise<T>
 }
 
+/** Value-only validation result for a write-only secret transaction. */
+export type SecretValidationResult =
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly message: string }
+
+/** Safe result returned by the Harness-owned write step. */
+export type SecretTransactionWorkResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly message: string }
+
+/** One prompt -> visible busy page -> success/retry transaction. */
+export interface SecretTransactionRequest<T> {
+  readonly input: InputOverlayRequest
+  readonly busyTitle: string
+  readonly busyDetail?: string
+  readonly failureMessage: string
+  validate(raw: string): SecretValidationResult
+  work(value: string, signal: AbortSignal): Promise<SecretTransactionWorkResult<T>>
+}
+
 /** Shared prompt surface implemented by both standalone and navigated overlays. */
 export interface OverlayPrompts {
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined>
   input(request: InputOverlayRequest): Promise<string | undefined>
   multilineInput(request: InputOverlayRequest): Promise<string | undefined>
   secretInput(request: InputOverlayRequest): Promise<string | undefined>
+  secretTransaction<T>(request: SecretTransactionRequest<T>): Promise<T | undefined>
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined>
   detail(request: DetailOverlayRequest): Promise<void>
   confirm(title: string, detail: string, confirmLabel?: string): Promise<boolean>
@@ -164,6 +185,7 @@ interface NavigationEntry {
   component: DisposableComponent
   readonly dismiss: () => void
   busy: boolean
+  abortOnEscape?: boolean
   active: boolean
   escapeHandler?: (() => void | Promise<void>) | undefined
 }
@@ -240,8 +262,25 @@ interface OverlayMouseTarget {
   activateArmedOption(): OverlayMouseClickResult
 }
 
+interface OverlayWheelTarget {
+  handleWheel(lines: number): boolean
+}
+
 function isOverlayMouseTarget(value: Component): value is Component & OverlayMouseTarget {
   return 'hitChildren' in value && 'handleOptionClick' in value && 'activateArmedOption' in value
+}
+
+function isOverlayWheelTarget(value: Component): value is Component & OverlayWheelTarget {
+  return 'handleWheel' in value && typeof value.handleWheel === 'function'
+}
+
+function moveListByWheel(list: SelectList, length: number, lines: number): boolean {
+  const delta = Math.trunc(lines)
+  if (delta === 0 || length <= 0) return false
+  const steps = Math.min(12, Math.abs(delta))
+  const next = list.getSelectedIndex() - Math.sign(delta) * steps
+  list.setSelectedIndex(Math.max(0, Math.min(length - 1, next)))
+  return true
 }
 
 const MULTILINE_VISIBLE_ROWS = 12
@@ -388,6 +427,11 @@ class SearchSelectOverlay implements Component {
     this.applyFilter(this.input.getValue())
   }
 
+  handleWheel(lines: number): boolean {
+    this.armedOptionId = undefined
+    return moveListByWheel(this.list, this.filtered.length, lines)
+  }
+
   private createList(choices: readonly OverlayChoice[], preferredId?: string): SelectList {
     const rows = choices.map(choice => rowOf(choice, this.descriptionWidth))
     const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList)
@@ -467,6 +511,8 @@ class TextInputOverlay implements Component {
     this.input.handleInput(data)
     if (this.input.getValue() !== before) this.notice = ''
   }
+
+  handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
 }
 
 /** Multiline editor overlay: Enter inserts a newline, Ctrl+Enter submits. */
@@ -515,6 +561,8 @@ class MultilineEditorOverlay implements Component {
     }
     this.editor.handleInput(data)
   }
+
+  handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
 }
 
 /** Write-only secret input: the underlying value is never returned by render(). */
@@ -555,6 +603,8 @@ class SecretInputOverlay implements Component {
   handleInput(data: string): void {
     this.input.handleInput(data)
   }
+
+  handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
 
   dispose(): void { this.input.setValue('') }
 
@@ -679,6 +729,11 @@ class MultiSelectOverlay implements Component {
     this.applyFilter(this.input.getValue())
   }
 
+  handleWheel(lines: number): boolean {
+    this.armedOptionId = undefined
+    return moveListByWheel(this.list, this.filtered.length, lines)
+  }
+
   private createList(preferredId?: string): SelectList {
     const rows = this.filtered.map(choice => ({
       value: choice.id,
@@ -760,6 +815,14 @@ class ScrollableDetailOverlay implements Component {
     else if (matchesKey(data, Key.home)) this.offset = 0
     else if (matchesKey(data, Key.end)) this.offset = maxOffset
   }
+
+  handleWheel(lines: number): boolean {
+    const delta = Math.trunc(lines)
+    if (delta === 0) return false
+    const maxOffset = Math.max(0, this.lineCount - this.viewportRows)
+    this.offset = Math.max(0, Math.min(maxOffset, this.offset - delta))
+    return true
+  }
 }
 
 /** Live output page while a Host operation holds the overlay; Escape aborts. */
@@ -803,6 +866,33 @@ class ProgressOverlay implements Component {
   }
 
   handleInput(_data: string): void {}
+
+  handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
+}
+
+/** Stable visible state while a write-only secret is being persisted. */
+class SecretBusyOverlay implements Component {
+  focused = false
+
+  constructor(
+    private readonly title: string,
+    private readonly detail: string | undefined,
+  ) {}
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    const safeWidth = frameContentWidth(width)
+    return modalFrame(this.title, [
+      ...(this.detail === undefined ? [] : wrappedDetail(this.detail, safeWidth)),
+      color.warning(ui('正在保存…', 'Saving…')),
+      color.muted(ui('请稍候；重复按 Enter 不会再次提交', 'Please wait; pressing Enter again will not resubmit')),
+    ], width)
+  }
+
+  handleInput(_data: string): void {}
+
+  handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
 }
 
 /** A single mounted modal with a logical page stack and one Escape owner. */
@@ -858,6 +948,12 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       : 'none'
   }
 
+  handleWheel(lines: number): boolean {
+    const component = this.current()?.component
+    if (component === undefined) return false
+    return isOverlayWheelTarget(component) ? component.handleWheel(lines) : Math.trunc(lines) !== 0
+  }
+
   activateArmedOption(): OverlayMouseClickResult {
     const component = this.current()?.component
     return component !== undefined && isOverlayMouseTarget(component)
@@ -874,6 +970,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     if (current === undefined) return
     if (matchesKey(data, Key.escape)) {
       if (current.busy) {
+        if (current.abortOnEscape === false) return
         this.abort()
         this.pendingBack = current
         return
@@ -949,6 +1046,29 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   secretInput(request: InputOverlayRequest): Promise<string | undefined> {
     return this.prompt(submit => new SecretInputOverlay(request, submit), request.onEscape)
+  }
+
+  async secretTransaction<T>(request: SecretTransactionRequest<T>): Promise<T | undefined> {
+    let failure: string | undefined
+    while (!this.closed) {
+      const raw = await this.secretInput({
+        ...request.input,
+        detail: [request.input.detail, failure]
+          .filter((line): line is string => line !== undefined && line !== '')
+          .join('\n'),
+      })
+      if (raw === undefined) return undefined
+      const checked = request.validate(raw)
+      if (!checked.ok) {
+        failure = checked.message
+        continue
+      }
+      const result = await this.runSecretWork(request, checked.value)
+      if (result === undefined) return undefined
+      if (result.ok) return result.value
+      failure = result.message
+    }
+    return undefined
   }
 
   multiSelect(request: SelectOverlayRequest): Promise<readonly OverlayChoice[] | undefined> {
@@ -1042,6 +1162,31 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     })
   }
 
+  private async runSecretWork<T>(
+    request: SecretTransactionRequest<T>,
+    value: string,
+  ): Promise<SecretTransactionWorkResult<T> | undefined> {
+    if (this.closed) return undefined
+    let entry: NavigationEntry
+    entry = {
+      component: new SecretBusyOverlay(request.busyTitle, request.busyDetail),
+      dismiss: () => undefined,
+      busy: true,
+      abortOnEscape: false,
+      active: true,
+    }
+    this.stack.push(entry)
+    this.requestRender()
+    try {
+      return await request.work(value, this.signal)
+    } catch {
+      if (this.signal.aborted || this.closed) return undefined
+      return { ok: false, message: request.failureMessage }
+    } finally {
+      if (entry.active) this.remove(entry)
+    }
+  }
+
   private dispatch(entry: NavigationEntry, action: () => void | Promise<void>): void {
     if (this.closed || this.current() !== entry || entry.busy) return
     entry.busy = true
@@ -1128,12 +1273,7 @@ export class OverlayQueue implements OverlayPrompts {
     const component = this.active?.component
     const delta = Math.trunc(lines)
     if (component === undefined || delta === 0) return false
-    const key = delta > 0 ? Key.up : Key.down
-    const steps = Math.min(12, Math.abs(delta))
-    for (let step = 0; step < steps; step += 1) {
-      component.handleInput?.(key)
-    }
-    return true
+    return isOverlayWheelTarget(component) ? component.handleWheel(delta) : true
   }
 
   /** Frame generation bound to the currently capturing overlay; changes on replace. */
@@ -1271,6 +1411,12 @@ export class OverlayQueue implements OverlayPrompts {
       const value = await navigation.secretInput(request)
       navigation.finish(value)
     }, request.options)
+  }
+
+  secretTransaction<T>(request: SecretTransactionRequest<T>): Promise<T | undefined> {
+    return this.navigate<T>(async (navigation) => {
+      navigation.finish(await navigation.secretTransaction(request))
+    }, request.input.options)
   }
 
   /**

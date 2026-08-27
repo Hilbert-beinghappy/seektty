@@ -56,6 +56,81 @@ describe('overlay navigation', () => {
     await expect(secret).resolves.toBeUndefined()
   })
 
+  it('routes wheel semantically without inserting key names into text or secret inputs', async () => {
+    const textHarness = overlayHarness()
+    const text = textHarness.overlays.input({ title: 'text' })
+    textHarness.component().handleInput('safe-value')
+    expect(textHarness.overlays.handleWheel(-4)).toBe(true)
+    expect(textHarness.overlays.handleWheel(4)).toBe(true)
+    textHarness.component().handleInput(ENTER)
+    await expect(text).resolves.toBe('safe-value')
+
+    const secretHarness = overlayHarness()
+    const secret = secretHarness.overlays.secretInput({ title: 'secret' })
+    secretHarness.component().handleInput('synthetic-secret')
+    expect(secretHarness.overlays.handleWheel(-4)).toBe(true)
+    expect(secretHarness.overlays.handleWheel(4)).toBe(true)
+    secretHarness.component().handleInput(ENTER)
+    await expect(secret).resolves.toBe('synthetic-secret')
+  })
+
+  it('moves selector and detail state through typed wheel methods', async () => {
+    const selectHarness = overlayHarness()
+    const selected = selectHarness.overlays.select({
+      title: 'wheel picker',
+      searchable: false,
+      choices: [
+        { id: 'a', label: 'alpha' },
+        { id: 'b', label: 'bravo' },
+        { id: 'c', label: 'charlie' },
+      ],
+    })
+    expect(selectHarness.overlays.handleWheel(-2)).toBe(true)
+    selectHarness.component().handleInput(ENTER)
+    await expect(selected).resolves.toMatchObject({ id: 'c' })
+
+    const detailHarness = overlayHarness()
+    const detail = detailHarness.overlays.detail({
+      title: 'detail',
+      content: Array.from({ length: 8 }, (_, index) => `line-${String(index)}`).join('\n'),
+      maxVisible: 3,
+    })
+    detailHarness.component().render(80)
+    expect(detailHarness.overlays.handleWheel(-2)).toBe(true)
+    expect(plain(detailHarness.component().render(80))).toContain('line-2')
+    detailHarness.component().handleInput(ESCAPE)
+    await detail
+  })
+
+  it('keeps a visible single-submit busy page for secret transactions', async () => {
+    const harness = overlayHarness()
+    let finish: ((result: { ok: true; value: string }) => void) | undefined
+    const work = vi.fn((_value: string) => new Promise<{ ok: true; value: string }>((resolve) => {
+      finish = resolve
+    }))
+    const transaction = harness.overlays.secretTransaction({
+      input: { title: 'API key', placeholder: 'synthetic only' },
+      busyTitle: 'Saving API key',
+      busyDetail: 'Harness owns the write',
+      failureMessage: 'safe failure',
+      validate: raw => ({ ok: true, value: raw.trim() }),
+      work,
+    })
+    harness.component().handleInput('synthetic-key')
+    harness.component().handleInput(ENTER)
+    await vi.waitFor(() => {
+      const rendered = plain(harness.component().render(80))
+      expect(rendered).toContain('Saving API key')
+      expect(rendered).toContain('Saving')
+      expect(rendered).not.toContain('synthetic-key')
+    })
+    harness.component().handleInput(ENTER)
+    harness.component().handleInput(ENTER)
+    expect(work).toHaveBeenCalledOnce()
+    finish?.({ ok: true, value: 'saved' })
+    await expect(transaction).resolves.toBe('saved')
+  })
+
   it('uses one physical overlay while Escape returns through the logical page stack', async () => {
     const harness = overlayHarness()
     const session = harness.overlays.navigate(async (navigation) => {
