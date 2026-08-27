@@ -69,6 +69,7 @@ import {
 import type { CellRect, HitRegion } from './mouse-hit-map.ts'
 import {
   anchorAtCell,
+  compareAnchors,
   expandSelection,
   extractSelectedText,
   mapCopyableLine,
@@ -153,6 +154,47 @@ type TranscriptRow = ({
   readonly exampleId?: string
   /** Tool-card identity for per-card expand in focus mode. */
   readonly toolKey?: string
+}
+
+/** Preserve source newlines that would otherwise be indistinguishable from exact-width wraps. */
+function explicitHardBreakIndexes(row: TranscriptRow | undefined, width: number): readonly number[] {
+  if (row === undefined) return []
+  const safeWidth = Math.max(1, width)
+  if (row.format === 'plain' && row.pulse === undefined) {
+    const logicalLines = escapeTerminalText(row.text).replace(/\t/gu, '   ').split('\n')
+    const breaks: number[] = []
+    let renderedIndex = 0
+    for (const [index, logicalLine] of logicalLines.entries()) {
+      renderedIndex += Math.max(1, wrapTextWithAnsi(logicalLine, safeWidth).length)
+      if (index < logicalLines.length - 1) breaks.push(renderedIndex - 1)
+    }
+    return breaks
+  }
+  if (row.format !== 'code') return []
+  const requestedPrefix = escapeTerminalText(row.prefix ?? '')
+  const prefix = visibleWidth(requestedPrefix) < safeWidth ? requestedPrefix : ''
+  const prefixWidth = visibleWidth(prefix)
+  const highest = row.lineNumbers?.reduce((value, number) => Math.max(value, number), 0) ?? 0
+  const numberWidth = row.lineNumbers !== undefined && safeWidth - prefixWidth >= 8
+    ? String(highest).length + 2
+    : 0
+  const codeWidth = Math.max(1, safeWidth - prefixWidth - numberWidth)
+  const highlighted = highlightCodeLines(row.text, row.language)
+  const breaks: number[] = []
+  let renderedIndex = 0
+  if (row.caption !== undefined) {
+    renderedIndex += new Text(
+      `${color.muted(prefix)}${color.muted(escapeTerminalText(row.caption))}`,
+      0,
+      0,
+    ).render(safeWidth).length
+    if (highlighted.length > 0) breaks.push(renderedIndex - 1)
+  }
+  for (const [index, sourceLine] of highlighted.entries()) {
+    renderedIndex += Math.max(1, wrapTextWithAnsi(sourceLine, codeWidth).length)
+    if (index < highlighted.length - 1) breaks.push(renderedIndex - 1)
+  }
+  return breaks
 }
 
 /** Result of Enter on the focused transcript row. */
@@ -1181,6 +1223,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
 
 interface TranscriptBlockLines {
   readonly lines: readonly string[]
+  readonly hardBreaks: readonly (boolean | undefined)[]
   readonly turnAnchors: readonly number[]
   readonly controls: readonly (TranscriptPointerControl | undefined)[]
 }
@@ -1493,12 +1536,42 @@ export class Transcript implements Component, Focusable {
     return this.lastViewportMaps
   }
 
-  hitAnchor(col: number, row: number, width: number): SelectionAnchor | undefined {
+  hitAnchor(
+    col: number,
+    row: number,
+    width: number,
+    affinity: SelectionAnchor['affinity'] = 'before',
+  ): SelectionAnchor | undefined {
     const inset = width >= 12 ? 2 : 0
     if (this.showsScrollbar(width) && col >= width - 1) return undefined
     const map = this.lastViewportMaps.find(candidate => candidate.row === row)
     if (map === undefined) return undefined
-    return anchorAtCell(map, col - inset)
+    return anchorAtCell(map, col - inset, affinity)
+  }
+
+  /** Resolve the nearest selectable cell on the visible edge during auto-scroll. */
+  hitViewportEdgeAnchor(
+    col: number,
+    width: number,
+    edge: 'older' | 'newer',
+    affinity: SelectionAnchor['affinity'] = 'before',
+  ): SelectionAnchor | undefined {
+    const maps = [...this.lastViewportMaps].sort((left, right) => left.row - right.row)
+    const map = edge === 'older' ? maps[0] : maps.at(-1)
+    if (map === undefined || map.cellOffsets.length === 0) return undefined
+    const inset = width >= 12 ? 2 : 0
+    const localCol = Math.max(0, Math.min(col - inset, map.cellOffsets.length - 1))
+    return anchorAtCell(map, localCol, affinity)
+  }
+
+  /** Compare two durable transcript anchors independently of viewport coordinates. */
+  selectionRunsForward(anchor: SelectionAnchor, focus: SelectionAnchor): boolean {
+    return compareAnchors(anchor, focus, this.blocks.map(block => block.key)) <= 0
+  }
+
+  /** Whether a durable pointer anchor still belongs to the current transcript. */
+  containsSelectionAnchor(anchor: SelectionAnchor): boolean {
+    return anchor.surface === 'transcript' && this.blocks.some(block => block.key === anchor.ownerKey)
   }
 
   copySelectionText(): string {
@@ -1820,7 +1893,7 @@ export class Transcript implements Component, Focusable {
 
   private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
     const block = this.blocks[blockIndex]
-    if (block === undefined) return { lines: [], turnAnchors: [], controls: [] }
+    if (block === undefined) return { lines: [], hardBreaks: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
     const cacheKey = blockIndex === 0 ? -contentWidth : contentWidth
     if (block.dirty) {
@@ -1830,18 +1903,20 @@ export class Transcript implements Component, Focusable {
     const cachedBlock = block.metadata.dynamic ? undefined : block.linesByWidth.get(cacheKey)
     if (cachedBlock !== undefined) {
       this.heightIndex.setExact(block.key, cachedBlock.lines.length)
-      this.rememberOwnerCopy(block.key, cachedBlock.lines, contentWidth)
+      this.rememberOwnerCopy(block.key, cachedBlock.lines, contentWidth, cachedBlock.hardBreaks)
       this.lineControls.set(block.key, cachedBlock.controls)
       this.syncHeightIndexCounters()
       return cachedBlock
     }
     const lines: string[] = []
+    const hardBreaks: Array<boolean | undefined> = []
     const turnAnchors: number[] = []
     const controls: (TranscriptPointerControl | undefined)[] = []
     for (const [index, component] of block.components.entries()) {
       const row = block.rows[index]
       if ((blockIndex > 0 || lines.length > 0) && row?.gapBefore === true) {
         lines.push('')
+        hardBreaks.push(true)
         controls.push(undefined)
       }
       if (row?.userTurn === true) turnAnchors.push(lines.length)
@@ -1869,11 +1944,18 @@ export class Transcript implements Component, Focusable {
           lines.push(escapeTerminalText(line))
         }
       }
+      for (const hardBreakIndex of explicitHardBreakIndexes(row, contentWidth)) {
+        const target = start + hardBreakIndex
+        if (target >= start && target < lines.length) hardBreaks[target] = true
+      }
+      if (lines.length > start && index < block.components.length - 1) {
+        hardBreaks[lines.length - 1] = true
+      }
       for (let lineIndex = start; lineIndex < lines.length; lineIndex += 1) {
         controls[lineIndex] = control
       }
     }
-    const result = { lines, turnAnchors, controls }
+    const result = { lines, hardBreaks, turnAnchors, controls }
     if (!block.metadata.dynamic) {
       block.linesByWidth.set(cacheKey, result)
       while (block.linesByWidth.size > 4) {
@@ -1883,14 +1965,19 @@ export class Transcript implements Component, Focusable {
       }
     }
     this.heightIndex.setExact(block.key, result.lines.length)
-    this.rememberOwnerCopy(block.key, result.lines, contentWidth)
+    this.rememberOwnerCopy(block.key, result.lines, contentWidth, result.hardBreaks)
     this.lineControls.set(block.key, result.controls)
     this.syncHeightIndexCounters()
     return result
   }
 
-  private rememberOwnerCopy(key: string, lines: readonly string[], contentWidth: number): void {
-    this.ownerCopy.set(key, ownerTextFromRenderedLines(lines, Math.abs(contentWidth)))
+  private rememberOwnerCopy(
+    key: string,
+    lines: readonly string[],
+    contentWidth: number,
+    hardBreaks: readonly (boolean | undefined)[],
+  ): void {
+    this.ownerCopy.set(key, ownerTextFromRenderedLines(lines, Math.abs(contentWidth), hardBreaks))
   }
 
   private fillFrom(
@@ -2119,6 +2206,7 @@ export class Transcript implements Component, Focusable {
         ownerKey: block.key,
         surface: 'transcript',
         startOffset,
+        endOffset: mapped.endOffset,
         cellOffsets: mapped.cellOffsets,
         hardBreakAfter: mapped.hardBreakAfter,
       })

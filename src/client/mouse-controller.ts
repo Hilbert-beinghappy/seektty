@@ -46,6 +46,7 @@ type GestureState =
   | {
     readonly kind: 'edge-scrolling'
     readonly origin: CellPoint
+    readonly point: CellPoint
     readonly region?: HitRegion
     readonly generation: number
     readonly direction: 'older' | 'newer'
@@ -108,7 +109,7 @@ export interface MouseControllerOptions {
   now?: () => number
   setTimeout?: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>
   clearTimeout?: (id: ReturnType<typeof setTimeout>) => void
-  onEdgeScroll?: (lines: number) => void
+  onEdgeScroll?: (lines: number, point: CellPoint) => void
 }
 
 function clampWheelLines(value: number): number {
@@ -321,8 +322,10 @@ export class MouseController {
     input: Extract<MouseInput, { kind: 'drag' }>,
   ): MouseControllerOutcome {
     if (this.state.kind === 'pressed' && !sameCell(this.state.origin, input.point)) {
-      const scrollbar = this.state.region?.role === 'scrollbar'
-      const selectable = this.state.region?.role === 'text' || this.state.region?.role === 'input'
+      const primary = this.state.button === 'left'
+      const scrollbar = primary && this.state.region?.role === 'scrollbar'
+      const selectable = primary
+        && (this.state.region?.role === 'text' || this.state.region?.role === 'input')
       if (scrollbar) {
         this.state = {
           kind: 'dragging-scrollbar',
@@ -349,7 +352,6 @@ export class MouseController {
       return { consume: true }
     }
     this.counters.mouseRenderRequests += 1
-    const hit = this.lookup(input.point)
     const grabOffset = this.state.kind === 'dragging-scrollbar' ? this.state.grabOffset : undefined
     const origin = this.state.origin
     return {
@@ -360,7 +362,7 @@ export class MouseController {
         button: input.button,
         point: input.point,
         origin,
-        ...(hit?.region === undefined ? {} : { region: hit.region }),
+        ...(this.state.region === undefined ? {} : { region: this.state.region }),
         modifiers: input.modifiers,
         ...(grabOffset === undefined ? {} : { grabOffset }),
       },
@@ -370,26 +372,27 @@ export class MouseController {
   private handleRelease(
     input: Extract<MouseInput, { kind: 'release' }>,
   ): MouseControllerOutcome {
-    const pressed = this.state.kind === 'pressed' ? this.state : undefined
-    const wasDrag = this.state.kind === 'selecting' || this.state.kind === 'dragging-scrollbar'
-      || this.state.kind === 'edge-scrolling'
+    const gesture = this.state
+    const pressed = gesture.kind === 'pressed' ? gesture : undefined
+    const wasDrag = gesture.kind === 'selecting' || gesture.kind === 'dragging-scrollbar'
+      || gesture.kind === 'edge-scrolling'
     const generation = this.options.getHitMap()?.generation ?? 0
-    if (pressed !== undefined && pressed.generation !== generation) {
+    if (gesture.kind !== 'idle' && gesture.generation !== generation) {
       this.endGesture()
       return { consume: true }
     }
-    const grabOffset = this.state.kind === 'dragging-scrollbar' ? this.state.grabOffset : undefined
+    const grabOffset = gesture.kind === 'dragging-scrollbar' ? gesture.grabOffset : undefined
     this.clearTimer('edge')
     this.state = { kind: 'idle' }
     if (wasDrag) {
-      const hit = this.lookup(input.point)
       return {
         consume: true,
         semantic: {
           kind: 'drag',
           button: input.button,
           point: input.point,
-          ...(hit?.region === undefined ? {} : { region: hit.region }),
+          origin: gesture.origin,
+          ...(gesture.region === undefined ? {} : { region: gesture.region }),
           modifiers: input.modifiers,
           ended: true,
           ...(grabOffset === undefined ? {} : { grabOffset }),
@@ -468,20 +471,26 @@ export class MouseController {
     this.state = {
       kind: 'edge-scrolling',
       origin: this.state.origin,
+      point,
       ...(region === undefined ? {} : { region }),
       generation: this.state.generation,
       direction,
       distance,
     }
-    if (this.edgeTimer === undefined) this.tickEdge()
+    this.scheduleEdgeTick()
   }
 
   private tickEdge(): void {
     if (this.state.kind !== 'edge-scrolling') return
     const lines = this.state.direction === 'older' ? this.state.distance : -this.state.distance
-    this.counters.edgeScrollTimers = 1
     this.counters.mouseRenderRequests += 1
-    this.options.onEdgeScroll?.(lines)
+    this.options.onEdgeScroll?.(lines, this.state.point)
+    this.scheduleEdgeTick()
+  }
+
+  private scheduleEdgeTick(): void {
+    if (this.state.kind !== 'edge-scrolling' || this.edgeTimer !== undefined) return
+    this.counters.edgeScrollTimers = 1
     this.edgeTimer = this.setTimeoutFn(() => {
       this.edgeTimer = undefined
       this.tickEdge()

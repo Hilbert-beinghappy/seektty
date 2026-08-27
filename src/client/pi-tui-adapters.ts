@@ -25,6 +25,7 @@ interface PatchedEditor {
   getSelection?(): EditorTextSelection | undefined
   setSelection?(anchor: EditorPoint, focus: EditorPoint): void
   clearSelection?(): void
+  replaceSelection?(text: string): boolean
   getVisualLineMap?(width?: number): readonly VisualLine[]
   isShowingAutocomplete(): boolean
   getAutocompleteSelectedIndex?(): number

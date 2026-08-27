@@ -1,8 +1,8 @@
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index fb224b9da697aab89a31336eae65071dc07d736e..ff14671af2b2983b0de426e395e9ad49d2db2b97 100644
+index fb224b9da697aab89a31336eae65071dc07d736e..7cea170492826d552a1bdf9c0cc645bc773818bf 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
-@@ -102,6 +102,33 @@ export declare class Editor implements Component, Focusable {
+@@ -102,6 +102,34 @@ export declare class Editor implements Component, Focusable {
          line: number;
          col: number;
      };
@@ -25,6 +25,7 @@ index fb224b9da697aab89a31336eae65071dc07d736e..ff14671af2b2983b0de426e395e9ad49
 +        col: number;
 +    }): void;
 +    clearSelection(): void;
++    replaceSelection(text: string): boolean;
 +    getVisualLineMap(width?: number): {
 +        logicalLine: number;
 +        startCol: number;
@@ -37,7 +38,7 @@ index fb224b9da697aab89a31336eae65071dc07d736e..ff14671af2b2983b0de426e395e9ad49
      /**
       * Insert text at the current cursor position.
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..843a390c27d7b49e818df487ca6167aea63ca1ba 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa7496737ab83 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -208,6 +208,7 @@ export class Editor {
@@ -48,7 +49,115 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..843a390c27d7b49e818df487ca6167ae
      onSubmit;
      onChange;
      disableSubmit = false;
-@@ -790,6 +791,50 @@ export class Editor {
+@@ -308,6 +309,7 @@ export class Editor {
+         this.state.lines = lines.length === 0 ? [""] : lines;
+         this.state.cursorLine = this.state.lines.length - 1;
+         this.setCursorCol(this.state.lines[this.state.cursorLine]?.length || 0);
++        this.selectionRange = null;
+         // Reset scroll - render() will adjust to show cursor
+         this.scrollOffset = 0;
+         if (this.onChange) {
+@@ -372,10 +374,33 @@ export class Editor {
+             let displayText = layoutLine.text;
+             let lineVisibleWidth = visibleWidth(layoutLine.text);
+             let cursorInPadding = false;
++            const selection = this.normalizedSelection();
++            let selectionStart = -1;
++            let selectionEnd = -1;
++            if (selection && layoutLine.logicalLine >= selection.start.line && layoutLine.logicalLine <= selection.end.line) {
++                selectionStart = layoutLine.logicalLine === selection.start.line
++                    ? Math.max(0, selection.start.col - layoutLine.startCol)
++                    : 0;
++                selectionEnd = layoutLine.logicalLine === selection.end.line
++                    ? Math.min(displayText.length, selection.end.col - layoutLine.startCol)
++                    : displayText.length;
++                selectionStart = Math.min(displayText.length, selectionStart);
++                if (selectionEnd > selectionStart) {
++                    displayText = displayText.slice(0, selectionStart) + "\x1b[7m" +
++                        displayText.slice(selectionStart, selectionEnd) + "\x1b[27m" +
++                        displayText.slice(selectionEnd);
++                }
++            }
+             // Add cursor if this line has it
+             if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+-                const before = displayText.slice(0, layoutLine.cursorPos);
+-                const after = displayText.slice(layoutLine.cursorPos);
++                let cursorPos = layoutLine.cursorPos;
++                const cursorInsideSelection = selectionEnd > selectionStart &&
++                    cursorPos >= selectionStart && cursorPos < selectionEnd;
++                if (selectionEnd > selectionStart && cursorPos >= selectionStart) {
++                    cursorPos += cursorPos >= selectionEnd ? 9 : 4;
++                }
++                const before = displayText.slice(0, cursorPos);
++                const after = displayText.slice(cursorPos);
+                 // Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
+                 const marker = emitCursorMarker ? CURSOR_MARKER : "";
+                 if (after.length > 0) {
+@@ -384,7 +409,7 @@ export class Editor {
+                     const afterGraphemes = [...this.segment(after)];
+                     const firstGrapheme = afterGraphemes[0]?.segment || "";
+                     const restAfter = after.slice(firstGrapheme.length);
+-                    const cursor = `\x1b[7m${firstGrapheme}\x1b[0m`;
++                    const cursor = `\x1b[7m${firstGrapheme}\x1b[0m${cursorInsideSelection ? "\x1b[7m" : ""}`;
+                     displayText = before + marker + cursor + restAfter;
+                     // lineVisibleWidth stays the same - we're replacing, not adding
+                 }
+@@ -474,6 +499,11 @@ export class Editor {
+         if (kb.matches(data, "tui.input.copy")) {
+             return;
+         }
++        // Escape explicitly clears a persistent mouse selection when no popup owns it.
++        if (!this.autocompleteState && this.normalizedSelection() && kb.matches(data, "tui.select.cancel")) {
++            this.clearSelection();
++            return;
++        }
+         // Undo
+         if (kb.matches(data, "tui.editor.undo")) {
+             this.undo();
+@@ -691,6 +721,8 @@ export class Editor {
+                 text: "",
+                 hasCursor: true,
+                 cursorPos: 0,
++                logicalLine: 0,
++                startCol: 0,
+             });
+             return layoutLines;
+         }
+@@ -706,12 +738,16 @@ export class Editor {
+                         text: line,
+                         hasCursor: true,
+                         cursorPos: this.state.cursorCol,
++                        logicalLine: i,
++                        startCol: 0,
+                     });
+                 }
+                 else {
+                     layoutLines.push({
+                         text: line,
+                         hasCursor: false,
++                        logicalLine: i,
++                        startCol: 0,
+                     });
+                 }
+             }
+@@ -753,12 +789,16 @@ export class Editor {
+                             text: chunk.text,
+                             hasCursor: true,
+                             cursorPos: adjustedCursorPos,
++                            logicalLine: i,
++                            startCol: chunk.startIndex,
+                         });
+                     }
+                     else {
+                         layoutLines.push({
+                             text: chunk.text,
+                             hasCursor: false,
++                            logicalLine: i,
++                            startCol: chunk.startIndex,
+                         });
+                     }
+                 }
+@@ -790,6 +830,97 @@ export class Editor {
      getCursor() {
          return { line: this.state.cursorLine, col: this.state.cursorCol };
      }
@@ -64,10 +173,57 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..843a390c27d7b49e818df487ca6167ae
 +        return this.selectionRange ?? undefined;
 +    }
 +    setSelection(anchor, focus) {
-+        this.selectionRange = { anchor: { line: anchor.line, col: anchor.col }, focus: { line: focus.line, col: focus.col } };
++        this.selectionRange = { anchor: this.clampPoint(anchor), focus: this.clampPoint(focus) };
++        this.tui.requestRender();
 +    }
 +    clearSelection() {
 +        this.selectionRange = null;
++        this.tui.requestRender();
++    }
++    clampPoint(point) {
++        const line = Math.max(0, Math.min(Math.floor(point.line), Math.max(0, this.state.lines.length - 1)));
++        const col = Math.max(0, Math.min(Math.floor(point.col), (this.state.lines[line] || "").length));
++        return { line, col };
++    }
++    normalizedSelection() {
++        if (!this.selectionRange)
++            return null;
++        const anchor = this.clampPoint(this.selectionRange.anchor);
++        const focus = this.clampPoint(this.selectionRange.focus);
++        const reversed = anchor.line > focus.line || (anchor.line === focus.line && anchor.col > focus.col);
++        const start = reversed ? focus : anchor;
++        const end = reversed ? anchor : focus;
++        return start.line === end.line && start.col === end.col ? null : { start, end };
++    }
++    deleteSelectionInternal() {
++        const selection = this.normalizedSelection();
++        if (!selection)
++            return false;
++        const prefix = (this.state.lines[selection.start.line] || "").slice(0, selection.start.col);
++        const suffix = (this.state.lines[selection.end.line] || "").slice(selection.end.col);
++        this.state.lines.splice(selection.start.line, selection.end.line - selection.start.line + 1, prefix + suffix);
++        this.state.cursorLine = selection.start.line;
++        this.setCursorCol(selection.start.col);
++        this.selectionRange = null;
++        return true;
++    }
++    replaceSelection(text) {
++        const hasSelection = this.normalizedSelection() !== null;
++        if (!hasSelection && !text)
++            return false;
++        this.cancelAutocomplete();
++        this.pushUndoSnapshot();
++        this.lastAction = null;
++        this.historyIndex = -1;
++        this.deleteSelectionInternal();
++        if (text) {
++            this.insertTextAtCursorInternal(text);
++        }
++        else if (this.onChange) {
++            this.onChange(this.getText());
++        }
++        this.tui.requestRender();
++        return true;
 +    }
 +    getVisualLineMap(width) {
 +        return this.buildVisualLineMap(width ?? this.lastWidth);
@@ -99,7 +255,81 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..843a390c27d7b49e818df487ca6167ae
      setText(text) {
          this.cancelAutocomplete();
          this.lastAction = null;
-@@ -1204,6 +1249,7 @@ export class Editor {
+@@ -809,6 +940,10 @@ export class Editor {
+     insertTextAtCursor(text) {
+         if (!text)
+             return;
++        if (this.normalizedSelection()) {
++            this.replaceSelection(text);
++            return;
++        }
+         this.cancelAutocomplete();
+         this.pushUndoSnapshot();
+         this.lastAction = null;
+@@ -866,17 +1001,19 @@ export class Editor {
+     // All the editor methods from before...
+     insertCharacter(char, skipUndoCoalescing) {
+         this.historyIndex = -1; // Exit history browsing mode
++        const replacingSelection = this.normalizedSelection() !== null;
+         // Undo coalescing (fish-style):
+         // - Consecutive word chars coalesce into one undo unit
+         // - Space captures state before itself (so undo removes space+following word together)
+         // - Each space is separately undoable
+         // Skip coalescing when called from atomic operations (e.g., handlePaste)
+         if (!skipUndoCoalescing) {
+-            if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
++            if (replacingSelection || isWhitespaceChar(char) || this.lastAction !== "type-word") {
+                 this.pushUndoSnapshot();
+             }
+             this.lastAction = "type-word";
+         }
++        this.deleteSelectionInternal();
+         const line = this.state.lines[this.state.cursorLine] || "";
+         const before = line.slice(0, this.state.cursorCol);
+         const after = line.slice(this.state.cursorCol);
+@@ -923,6 +1060,7 @@ export class Editor {
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
+         this.pushUndoSnapshot();
++        this.deleteSelectionInternal();
+         // Some terminals (e.g. tmux popups with extended-keys-format=csi-u) re-encode
+         // control bytes inside bracketed paste as CSI-u Ctrl+<letter> sequences
+         // (ESC [ <codepoint> ; 5 u). Decode those back to their literal byte so the
+@@ -977,6 +1115,10 @@ export class Editor {
+         this.insertTextAtCursorInternal(filteredText);
+     }
+     addNewLine() {
++        if (this.normalizedSelection()) {
++            this.replaceSelection("\n");
++            return;
++        }
+         this.cancelAutocomplete();
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
+@@ -1008,6 +1150,7 @@ export class Editor {
+     }
+     submitValue() {
+         this.cancelAutocomplete();
++        this.selectionRange = null;
+         const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
+         this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+         this.pastes.clear();
+@@ -1024,6 +1167,14 @@ export class Editor {
+     handleBackspace() {
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
++        if (this.normalizedSelection()) {
++            this.cancelAutocomplete();
++            this.pushUndoSnapshot();
++            this.deleteSelectionInternal();
++            if (this.onChange)
++                this.onChange(this.getText());
++            return;
++        }
+         if (this.state.cursorCol > 0) {
+             this.pushUndoSnapshot();
+             // Delete grapheme before cursor (handles emojis, combining characters, etc.)
+@@ -1204,6 +1355,7 @@ export class Editor {
          this.setCursorCol(currentLine.length);
      }
      deleteToStartOfLine() {
@@ -107,6 +337,21 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..843a390c27d7b49e818df487ca6167ae
          this.historyIndex = -1; // Exit history browsing mode
          const currentLine = this.state.lines[this.state.cursorLine] || "";
          if (this.state.cursorCol > 0) {
+@@ -1328,6 +1480,14 @@ export class Editor {
+     handleForwardDelete() {
+         this.historyIndex = -1; // Exit history browsing mode
+         this.lastAction = null;
++        if (this.normalizedSelection()) {
++            this.cancelAutocomplete();
++            this.pushUndoSnapshot();
++            this.deleteSelectionInternal();
++            if (this.onChange)
++                this.onChange(this.getText());
++            return;
++        }
+         const currentLine = this.state.lines[this.state.cursorLine] || "";
+         if (this.state.cursorCol < currentLine.length) {
+             this.pushUndoSnapshot();
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
 index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9734a2654 100644
 --- a/dist/components/markdown.js

@@ -25,6 +25,7 @@ export interface ViewportCellMap {
   readonly ownerKey: string
   readonly surface: 'transcript' | 'composer'
   readonly startOffset: number
+  readonly endOffset: number
   readonly cellOffsets: readonly (number | undefined)[]
   readonly hardBreakAfter: boolean
 }
@@ -150,6 +151,7 @@ export function extractSelectedText(
 
 export interface CopyableLine {
   readonly text: string
+  readonly endOffset: number
   readonly cellOffsets: readonly (number | undefined)[]
   readonly hardBreakAfter: boolean
 }
@@ -187,6 +189,7 @@ export function mapCopyableLine(
   const hardBreakAfter = used < contentWidth - skipLeading - skipTrailing
   return {
     text: stripped.slice(skipLeading) + (hardBreakAfter ? '\n' : ''),
+    endOffset: offset,
     cellOffsets,
     hardBreakAfter,
   }
@@ -199,6 +202,7 @@ export function mapCopyableLine(
 export function ownerTextFromRenderedLines(
   lines: readonly string[],
   contentWidth: number,
+  hardBreaks?: readonly (boolean | undefined)[],
 ): { readonly text: string; readonly lineStarts: readonly number[] } {
   let text = ''
   const lineStarts: number[] = []
@@ -207,7 +211,8 @@ export function ownerTextFromRenderedLines(
     const mapped = mapCopyableLine(line, text.length, contentWidth)
     const piece = stripCopyDecorations(line)
     text += piece
-    if (index < lines.length - 1 && mapped.hardBreakAfter) text += '\n'
+    const hardBreakAfter = hardBreaks?.[index] ?? mapped.hardBreakAfter
+    if (index < lines.length - 1 && hardBreakAfter) text += '\n'
   }
   return { text, lineStarts }
 }
@@ -220,12 +225,24 @@ export function anchorAtCell(
   if (col < 0 || col >= map.cellOffsets.length) return undefined
   const offset = map.cellOffsets[col]
   if (offset === undefined) {
-    const nearby = map.cellOffsets.findLast((value, index) => index <= col && value !== undefined)
-      ?? map.cellOffsets.find(value => value !== undefined)
+    const nearbyIndex = map.cellOffsets.findLastIndex((value, index) => index <= col && value !== undefined)
+    const fallbackIndex = map.cellOffsets.findIndex(value => value !== undefined)
+    const resolvedIndex = nearbyIndex >= 0 ? nearbyIndex : fallbackIndex
+    const nearby = resolvedIndex < 0 ? undefined : map.cellOffsets[resolvedIndex]
     if (nearby === undefined) return undefined
-    return { surface: map.surface, ownerKey: map.ownerKey, textOffset: nearby, affinity }
+    const textOffset = affinity === 'after' ? offsetAfterCell(map, resolvedIndex, nearby) : nearby
+    return { surface: map.surface, ownerKey: map.ownerKey, textOffset, affinity }
   }
-  return { surface: map.surface, ownerKey: map.ownerKey, textOffset: offset, affinity }
+  const textOffset = affinity === 'after' ? offsetAfterCell(map, col, offset) : offset
+  return { surface: map.surface, ownerKey: map.ownerKey, textOffset, affinity }
+}
+
+function offsetAfterCell(map: ViewportCellMap, col: number, offset: number): number {
+  for (let index = col + 1; index < map.cellOffsets.length; index += 1) {
+    const candidate = map.cellOffsets[index]
+    if (candidate !== undefined && candidate !== offset) return candidate
+  }
+  return map.endOffset
 }
 
 export function selectionCellsOnLine(
@@ -264,7 +281,9 @@ export function invertLineCells(line: string, startCol: number, endCol: number):
   while (index < line.length) {
     if (line.charCodeAt(index) === 0x1B) {
       const end = consumeEscape(line, index)
-      result += line.slice(index, end)
+      const escape = line.slice(index, end)
+      result += escape
+      if (open && escape.startsWith('\u001B[') && escape.endsWith('m')) result += '\u001B[7m'
       index = end
       continue
     }

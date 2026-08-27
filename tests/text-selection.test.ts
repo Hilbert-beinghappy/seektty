@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  anchorAtCell,
   expandSelection,
   extractSelectedText,
   graphemeRangeAt,
@@ -76,6 +77,19 @@ describe('text selection coordinates', () => {
     expect(mapped.cellOffsets[0]).toBe(0)
     expect(mapped.cellOffsets[1]).toBe(0)
     expect(mapped.cellOffsets[2]).toBe(1)
+    expect(mapped.endOffset).toBe(2)
+    const viewport = {
+      row: 0,
+      ownerKey: 'wide',
+      surface: 'transcript' as const,
+      startOffset: 0,
+      endOffset: mapped.endOffset,
+      cellOffsets: mapped.cellOffsets,
+      hardBreakAfter: mapped.hardBreakAfter,
+    }
+    expect(anchorAtCell(viewport, 1, 'before')?.textOffset).toBe(0)
+    expect(anchorAtCell(viewport, 1, 'after')?.textOffset).toBe(1)
+    expect(anchorAtCell(viewport, 2, 'after')?.textOffset).toBe(2)
   })
 
   it('inverts already generated cells without changing owner text', () => {
@@ -85,12 +99,26 @@ describe('text selection coordinates', () => {
     expect(stripCopyDecorations(inverted)).toBe('hello')
   })
 
+  it('reapplies the selection layer after inline SGR changes and resets', () => {
+    const line = '\u001B[31mhe\u001B[0mll\u001B[1mo\u001B[0m'
+    const inverted = invertLineCells(line, 0, 5)
+    expect(inverted.match(/\u001B\[7m/gu)?.length).toBeGreaterThanOrEqual(4)
+    expect(stripCopyDecorations(inverted)).toBe('hello')
+  })
+
+  it('uses explicit hard-break metadata when a real newline exactly fills the width', () => {
+    const exact = ownerTextFromRenderedLines(['1234', 'next'], 4, [true, false])
+    expect(exact.text).toBe('1234\nnext')
+    expect(exact.lineStarts).toEqual([0, 5])
+  })
+
   it('paints a viewport highlight from logical anchors', () => {
     const maps = [{
       row: 0,
       ownerKey: 'a',
       surface: 'transcript' as const,
       startOffset: 0,
+      endOffset: 5,
       cellOffsets: [0, 1, 2, 3, 4],
       hardBreakAfter: true,
     }]

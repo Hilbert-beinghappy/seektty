@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_TUI_BEHAVIOR } from '../src/protocol.ts'
-import { createMouseController, DOUBLE_CLICK_MS, FOCUS_GUARD_MS } from '../src/client/mouse-controller.ts'
+import {
+  createMouseController,
+  DOUBLE_CLICK_MS,
+  EDGE_SCROLL_MS,
+  FOCUS_GUARD_MS,
+} from '../src/client/mouse-controller.ts'
 import { HitMapBuilder, emptyHitMap, type HitMapSnapshot, type TuiFrameGeometry } from '../src/client/mouse-hit-map.ts'
 import type { MouseInput } from '../src/client/mouse-protocol.ts'
 
@@ -106,6 +111,88 @@ describe('mouse controller skeleton', () => {
     expect(released.semantic?.kind).not.toBe('click')
   })
 
+  it('keeps the press origin and owner through the final selection release', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    const origin = { col: 1, row: 1 }
+    const focus = { col: 9, row: 4 }
+    controller.handle(press(origin))
+    controller.handle({
+      kind: 'drag',
+      button: 'left',
+      point: focus,
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    const released = controller.handle(release(focus))
+    expect(released.semantic).toMatchObject({
+      kind: 'drag',
+      button: 'left',
+      origin,
+      point: focus,
+      ended: true,
+      region: { id: 'transcript:text' },
+    })
+  })
+
+  it('starts edge scrolling after one dwell and carries the stationary selection point', () => {
+    vi.useFakeTimers()
+    try {
+      const onEdgeScroll = vi.fn()
+      const controller = createMouseController({
+        getHitMap: () => snapshot(1),
+        getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+        onEdgeScroll,
+      })
+      const origin = { col: 8, row: 5 }
+      const edge = { col: 8, row: 0 }
+      controller.handle(press(origin))
+      const dragged = controller.handle({
+        kind: 'drag',
+        button: 'left',
+        point: edge,
+        modifiers: { shift: false, alt: false, ctrl: false },
+      })
+      expect(dragged.semantic).toMatchObject({ kind: 'drag', origin, point: edge })
+      expect(onEdgeScroll).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(EDGE_SCROLL_MS)
+      expect(onEdgeScroll).toHaveBeenCalledWith(1, edge)
+      expect(controller.metrics.edgeScrollTimers).toBe(1)
+      controller.handle(release(edge))
+      vi.advanceTimersByTime(EDGE_SCROLL_MS * 2)
+      expect(onEdgeScroll).toHaveBeenCalledTimes(1)
+      expect(controller.metrics.edgeScrollTimers).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never starts application-owned selection from a right-button drag', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    controller.handle({
+      kind: 'press',
+      button: 'right',
+      point: { col: 1, row: 1 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    const dragged = controller.handle({
+      kind: 'drag',
+      button: 'right',
+      point: { col: 6, row: 3 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    expect(controller.gesture).toBe('pressed')
+    expect(dragged.semantic).toBeUndefined()
+  })
+
   it('drops a release when the hit-map generation changed', () => {
     let generation = 1
     const controller = createMouseController({
@@ -119,6 +206,26 @@ describe('mouse controller skeleton', () => {
     const released = controller.handle(release())
     expect(released.semantic).toBeUndefined()
     expect(released.consume).toBe(true)
+  })
+
+  it('drops the final selection release when its hit-map generation is stale', () => {
+    let generation = 1
+    const controller = createMouseController({
+      getHitMap: () => snapshot(generation),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    controller.handle(press({ col: 1, row: 1 }))
+    controller.handle({
+      kind: 'drag',
+      button: 'left',
+      point: { col: 5, row: 2 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    generation = 2
+    expect(controller.handle(release({ col: 5, row: 2 })).semantic).toBeUndefined()
+    expect(controller.gesture).toBe('idle')
   })
 
   it('suppresses the first click after FocusOut then FocusIn', () => {

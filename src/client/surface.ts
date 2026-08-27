@@ -66,7 +66,8 @@ import {
 import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
-import { writeClipboard } from './clipboard.ts'
+import { canReadClipboardText, readClipboardText, writeClipboard } from './clipboard.ts'
+import { graphemeRangeAt, type SelectionAnchor } from './text-selection.ts'
 import {
   captureClipboardImage,
   cleanupClipboardImageWorkspace,
@@ -92,8 +93,9 @@ import {
   supportsManagedTerminal,
   type ManagedTerminal,
 } from './terminal-session.ts'
-import { MouseProtocolDecoder } from './mouse-protocol.ts'
+import { MouseProtocolDecoder, type CellPoint } from './mouse-protocol.ts'
 import { createMouseController, type MouseSemanticEvent } from './mouse-controller.ts'
+import { mouseContextChoices } from './mouse-context-menu.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder } from './mouse-hit-map.ts'
 import { emptyFrameGeometry, editorMouseApi, tuiFrameApi } from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
@@ -255,6 +257,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     let transcriptFocused = false
     let mouseArmed: { kind: 'example' | 'autocomplete' | 'option'; id: string } | undefined
+    let transcriptPointerOrigin: {
+      readonly point: CellPoint
+      readonly before: SelectionAnchor
+      readonly after: SelectionAnchor
+    } | undefined
+    const clearTranscriptPointerGesture = (): void => {
+      transcriptPointerOrigin = undefined
+    }
     const transcript = new Transcript(
       () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
@@ -324,7 +334,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     tui.setFocus(editor)
 
     let mouseController!: ReturnType<typeof createMouseController>
-    const overlays = new OverlayQueue(tui, () => { mouseController.endGesture() })
+    let extendTranscriptPointerAtEdge = (_edge: 'older' | 'newer', _point: CellPoint): void => undefined
+    const overlays = new OverlayQueue(tui, () => {
+      mouseController.endGesture()
+      clearTranscriptPointerGesture()
+    })
     const mouseDecoder = new MouseProtocolDecoder()
     let mouseInputFlushTimer: ReturnType<typeof setTimeout> | undefined
     let replayingMouseInput = false
@@ -448,7 +462,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     mouseController = createMouseController({
       getHitMap: () => hitMap,
       getBehavior: () => liveBehavior.get(),
-      onEdgeScroll: (lines) => {
+      onEdgeScroll: (lines, point) => {
+        extendTranscriptPointerAtEdge(lines > 0 ? 'older' : 'newer', point)
         transcript.scrollBy(lines)
         renderWhileOpen()
       },
@@ -485,6 +500,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           data: Buffer.from(result.value.data).toString('base64'),
         }
       })
+      if (transcriptPointerOrigin !== undefined
+        && !transcript.containsSelectionAnchor(transcriptPointerOrigin.before)) {
+        clearTranscriptPointerGesture()
+      }
     }
 
     const setNotice = (message: string, tone: NoticeTone = 'info'): void => {
@@ -637,6 +656,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const current = capabilities.active()
       if (current === undefined) {
         active = undefined
+        clearTranscriptPointerGesture()
         headerGeneration += 1
         contextBar.setEmpty(profile, options.cwd)
         editor.setEmpty()
@@ -740,6 +760,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
         terminalSession.setMouseReporting(behavior.mouseMode)
         mouseController.endGesture()
+        clearTranscriptPointerGesture()
         transcript.setScrollbarVisibility(behavior.scrollbarVisibility)
         transcript.applyPresentationDefaults(
           behavior.toolCards,
@@ -795,6 +816,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (stopping !== undefined) return
       if (current === undefined || snapshot === undefined) {
         active = undefined
+        clearTranscriptPointerGesture()
         latestSessionId = ''
         headerGeneration += 1
         transcript.empty(ui(
@@ -815,6 +837,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (latestSessionId !== current.sessionId) {
         latestSessionId = current.sessionId
         mouseController.endGesture()
+        clearTranscriptPointerGesture()
         dismissNotice()
         refreshHeader(true)
       } else {
@@ -959,14 +982,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return { consume: true }
     }
 
-    const copyActiveSelection = (): void => {
-      const transcriptText = transcript.copySelectionText()
+    const composerSelectionText = (): string => {
       const editorApi = editorMouseApi(editor)
       const editorSelection = editorApi.getSelection?.()
-      const composerText = editorSelection === undefined
+      return editorSelection === undefined
         ? ''
         : sliceEditorSelection(editor.getText(), editorSelection)
-      const text = transcriptText !== '' ? transcriptText : composerText
+    }
+
+    const copyText = (text: string): void => {
       if (text === '') return
       void writeClipboard(text, {
         fallback: liveBehavior.get().clipboardFallback,
@@ -980,20 +1004,142 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       })
     }
 
+    const copyActiveSelection = (): void => {
+      const transcriptText = transcript.copySelectionText()
+      copyText(transcriptText !== '' ? transcriptText : composerSelectionText())
+    }
+
+    const openMouseContextMenu = async (
+      semantic: Extract<MouseSemanticEvent, { kind: 'click' }>,
+    ): Promise<void> => {
+      const region = semantic.region
+      if (region?.action.kind === 'overlay') return
+      const composer = region?.role === 'input' || region?.action.kind === 'composer'
+      const selectionText = composer ? composerSelectionText() : transcript.copySelectionText()
+      const pasteSupported = composer && canReadClipboardText(process.platform)
+      const choices = mouseContextChoices({
+        target: composer ? 'composer' : 'transcript',
+        hasSelection: selectionText !== '',
+        pasteSupported,
+      })
+      const selected = await overlays.select({
+        title: ui('文本操作', 'Text actions'),
+        searchable: false,
+        maxVisible: 4,
+        choices,
+        options: {
+          width: 38,
+          minWidth: 28,
+          maxHeight: 9,
+          row: semantic.point.row,
+          col: semantic.point.col,
+          margin: 1,
+        },
+      })
+      if (selected === undefined || selected.id === 'cancel' || stopping !== undefined) return
+      if (selected.id === 'copy') {
+        copyText(selectionText)
+        return
+      }
+      if (selected.id === 'native') {
+        await actions.execute('mouse', 'native')
+        return
+      }
+      if (selected.id !== 'paste') return
+      try {
+        const pasted = await readClipboardText({ platform: process.platform })
+        if (pasted === '') {
+          setNotice(ui('剪贴板中没有文本', 'The clipboard contains no text'), 'info')
+          return
+        }
+        focusEditor()
+        const api = editorMouseApi(editor)
+        if (api.replaceSelection?.(pasted) !== true) editor.insertTextAtCursor(pasted)
+        renderWhileOpen()
+      } catch (error: unknown) {
+        setNotice(ui(
+          `无法安全读取剪贴板：${capabilityError(error)}`,
+          `Could not safely read the clipboard: ${capabilityError(error)}`,
+        ), 'warning')
+      }
+    }
+
+    const applyTranscriptPointerFocus = (
+      beforeFocus: SelectionAnchor | undefined,
+      afterFocus: SelectionAnchor | undefined,
+      granularity: 'character' | 'word' | 'line',
+    ): void => {
+      const origin = transcriptPointerOrigin
+      if (origin === undefined || beforeFocus === undefined || afterFocus === undefined) return
+      const forward = transcript.selectionRunsForward(origin.before, beforeFocus)
+      transcript.applyPointerSelection(
+        forward ? origin.before : origin.after,
+        forward ? afterFocus : beforeFocus,
+        granularity,
+      )
+    }
+
     const applyTranscriptPointer = (
       point: { readonly col: number; readonly row: number },
       originPoint: { readonly col: number; readonly row: number } | undefined,
       granularity: 'character' | 'word' | 'line',
+      ended = false,
     ): void => {
       const slot = layout.lastContentGeometry()?.transcript
-      if (slot === undefined) return
-      const focus = transcript.hitAnchor(point.col - slot.col, point.row - slot.row, slot.width)
-      const startPoint = originPoint ?? point
-      const anchor = originPoint === undefined
-        ? focus
-        : transcript.hitAnchor(startPoint.col - slot.col, startPoint.row - slot.row, slot.width)
-      if (anchor === undefined || focus === undefined) return
-      transcript.applyPointerSelection(anchor, focus, granularity)
+      if (slot === undefined) {
+        if (ended) clearTranscriptPointerGesture()
+        return
+      }
+      const edge = originPoint === undefined
+        ? undefined
+        : point.row <= slot.row
+          ? 'older'
+          : point.row >= slot.row + slot.height - 1
+            ? 'newer'
+            : undefined
+      const hit = (target: typeof point, affinity: SelectionAnchor['affinity']): SelectionAnchor | undefined => (
+        edge === undefined
+          ? transcript.hitAnchor(target.col - slot.col, target.row - slot.row, slot.width, affinity)
+          : transcript.hitViewportEdgeAnchor(target.col - slot.col, slot.width, edge, affinity)
+      )
+      if (originPoint === undefined) {
+        const focus = hit(point, 'before')
+        if (focus !== undefined) transcript.applyPointerSelection(focus, focus, granularity)
+        return
+      }
+      const sameOrigin = transcriptPointerOrigin?.point.col === originPoint.col
+        && transcriptPointerOrigin.point.row === originPoint.row
+      if (!sameOrigin) {
+        const before = transcript.hitAnchor(
+          originPoint.col - slot.col,
+          originPoint.row - slot.row,
+          slot.width,
+          'before',
+        )
+        const after = transcript.hitAnchor(
+          originPoint.col - slot.col,
+          originPoint.row - slot.row,
+          slot.width,
+          'after',
+        )
+        transcriptPointerOrigin = before === undefined || after === undefined
+          ? undefined
+          : { point: originPoint, before, after }
+      }
+      const beforeFocus = hit(point, 'before')
+      const afterFocus = hit(point, 'after')
+      applyTranscriptPointerFocus(beforeFocus, afterFocus, granularity)
+      if (ended) clearTranscriptPointerGesture()
+    }
+
+    extendTranscriptPointerAtEdge = (edge, point): void => {
+      const slot = layout.lastContentGeometry()?.transcript
+      const origin = transcriptPointerOrigin
+      if (slot === undefined || origin === undefined) return
+      const localCol = point.col - slot.col
+      const beforeFocus = transcript.hitViewportEdgeAnchor(localCol, slot.width, edge, 'before')
+      const afterFocus = transcript.hitViewportEdgeAnchor(localCol, slot.width, edge, 'after')
+      applyTranscriptPointerFocus(beforeFocus, afterFocus, 'character')
     }
 
     const applyComposerPointer = (
@@ -1017,7 +1163,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       api.setCursor?.(focus.line, focus.col)
       if (drag && originPoint !== undefined) {
         const anchor = toCaret(originPoint)
-        api.setSelection?.(anchor, focus)
+        const forward = focus.line > anchor.line
+          || (focus.line === anchor.line && focus.col >= anchor.col)
+        const advance = (caret: { line: number; col: number }): { line: number; col: number } => {
+          const line = editor.getLines()[caret.line] ?? ''
+          return { line: caret.line, col: graphemeRangeAt(line, caret.col).end }
+        }
+        api.setSelection?.(forward ? anchor : advance(anchor), forward ? advance(focus) : focus)
       } else {
         api.clearSelection?.()
       }
@@ -1038,17 +1190,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const dispatchMouseClick = (semantic: Extract<MouseSemanticEvent, { kind: 'click' }>): void => {
+      clearTranscriptPointerGesture()
       const region = semantic.region
       restoreMouseFocus(region)
       if (semantic.suppressed) return
       if (semantic.button === 'right') {
-        if (transcript.copySelectionText() !== '') copyActiveSelection()
-        else {
-          setNotice(ui(
-            '没有应用内选区。按 F3 或 /mouse 切换到原生终端选择。',
-            'No in-app selection. Press F3 or /mouse for native terminal selection.',
-          ), 'info')
-        }
+        void openMouseContextMenu(semantic)
         return
       }
       if (region?.action.kind === 'overlay' && region.action.optionId !== undefined) {
@@ -1173,16 +1320,20 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         } else if (outcome.semantic?.kind === 'drag') {
           const semantic = outcome.semantic
           if (semantic.grabOffset !== undefined || mouseController.gesture === 'dragging-scrollbar') {
+            clearTranscriptPointerGesture()
             const origin = layout.lastContentGeometry()?.transcript
             if (origin !== undefined) {
               transcript.dragThumb(semantic.point.row - origin.row, semantic.grabOffset ?? 0)
             }
           } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
+            clearTranscriptPointerGesture()
             applyComposerPointer(semantic.point, semantic.origin, true)
           } else {
-            applyTranscriptPointer(semantic.point, semantic.origin, 'character')
+            applyTranscriptPointer(semantic.point, semantic.origin, 'character', semantic.ended === true)
           }
           if (semantic.ended === true && liveBehavior.get().copyOnSelect) copyActiveSelection()
+        } else if (outcome.semantic?.kind === 'focus' && !outcome.semantic.focused) {
+          clearTranscriptPointerGesture()
         }
         if (outcome.requestRender === true) needMouseRender = true
       }
@@ -1211,6 +1362,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (decoded.events.length > 0 && decoded.leftover === '') return { consume: true }
       const payload = decoded.events.length > 0 ? decoded.leftover : data
       if (payload === '') return { consume: true }
+      clearTranscriptPointerGesture()
       if (matchesBinding('toggleMouseMode', payload)) {
         void actions.execute('mouse', 'toggle')
         return { consume: true }

@@ -331,6 +331,40 @@ describe('transcript block viewport', () => {
     transcript.dispose()
   })
 
+  it('keeps one logical anchor while an edge drag crosses multiple viewports', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const nodes = Array.from({ length: 24 }, (_, index) => (
+      assistant(`selection-${String(index).padStart(2, '0')}`, `long-selection-${String(index).padStart(2, '0')}`)
+    ))
+    const transcript = new Transcript(() => 6)
+    transcript.update(snapshot(nodes))
+    transcript.render(60)
+    const initialOwners = new Set(transcript.viewportMaps().map(map => map.ownerKey))
+    const originBefore = transcript.hitViewportEdgeAnchor(59, 60, 'newer', 'before')
+    const originAfter = transcript.hitViewportEdgeAnchor(59, 60, 'newer', 'after')
+    expect(originBefore).toBeDefined()
+    expect(originAfter).toBeDefined()
+
+    let focus = transcript.hitViewportEdgeAnchor(2, 60, 'older', 'before')
+    for (let page = 0; page < 3; page += 1) {
+      expect(focus).toBeDefined()
+      transcript.applyPointerSelection(originAfter!, focus!, 'character')
+      expect(transcript.scrollBy(5)).toBe(true)
+      transcript.render(60)
+      focus = transcript.hitViewportEdgeAnchor(2, 60, 'older', 'before')
+    }
+    transcript.applyPointerSelection(originAfter!, focus!, 'character')
+
+    expect(focus).toBeDefined()
+    expect(initialOwners.has(focus!.ownerKey)).toBe(false)
+    expect(transcript.currentSelection()?.anchor).toEqual(originAfter)
+    const copied = transcript.copySelectionText()
+    expect(copied).toContain(focus!.ownerKey.replace('selection-', 'long-selection-'))
+    expect(copied).toContain('long-selection-23')
+    expect(internals.lastFullLinesCopied).toBe(0)
+    transcript.dispose()
+  })
+
   it('renders the latest tail without visiting old blocks', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 6)
