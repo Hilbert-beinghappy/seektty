@@ -326,6 +326,19 @@ describe('mouse controller skeleton', () => {
     expect(later.semantic).toMatchObject({ kind: 'click', suppressed: false })
   })
 
+  it('requests a repaint when a completed click arrives without hover invalidation', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1, 'button'),
+      getBehavior: () => ({ ...DEFAULT_TUI_BEHAVIOR, hoverFeedback: false }),
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    expect(controller.handle(press()).requestRender).not.toBe(true)
+    const released = controller.handle(release())
+    expect(released.semantic).toMatchObject({ kind: 'click', count: 1, suppressed: false })
+    expect(released.requestRender).toBe(true)
+  })
+
   it('clears timers on dispose so no gesture remains', () => {
     const timers = new Set<ReturnType<typeof setTimeout>>()
     const controller = createMouseController({

@@ -95,9 +95,20 @@ import {
 } from './terminal-session.ts'
 import { MouseProtocolDecoder, type CellPoint } from './mouse-protocol.ts'
 import { createMouseController, type MouseSemanticEvent } from './mouse-controller.ts'
+import {
+  armMouseActivation,
+  matchesMouseActivation,
+  type MouseArmedActivation,
+  type MouseArmedKind,
+} from './mouse-activation.ts'
 import { mouseContextChoices } from './mouse-context-menu.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
-import { emptyFrameGeometry, editorMouseApi, tuiFrameApi } from './pi-tui-adapters.ts'
+import {
+  autocompleteTargetId,
+  emptyFrameGeometry,
+  editorMouseApi,
+  tuiFrameApi,
+} from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
 import { attachFatalGuards, fatalLogHint, restoreSurfaceTerminalSync, withCleanupTimeout } from '../process-guards.ts'
@@ -259,7 +270,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }).catch(() => { /* send must not wait on Settings */ })
     }
     let transcriptFocused = false
-    let mouseArmed: { kind: 'example' | 'autocomplete' | 'option'; id: string } | undefined
+    let mouseContentGeneration = 0
+    let mouseArmed: MouseArmedActivation | undefined
     let transcriptPointerOrigin: {
       readonly point: CellPoint
       readonly before: SelectionAnchor
@@ -268,6 +280,22 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const clearTranscriptPointerGesture = (): void => {
       transcriptPointerOrigin = undefined
     }
+    const clearMouseArm = (contentChanged = false): void => {
+      mouseArmed = undefined
+      if (contentChanged) mouseContentGeneration += 1
+    }
+    const armMouseTarget = (
+      kind: MouseArmedKind,
+      targetId: string,
+      contentGeneration: number,
+    ): void => {
+      mouseArmed = armMouseActivation(kind, targetId, contentGeneration)
+    }
+    const isMouseTargetArmed = (
+      kind: MouseArmedKind,
+      targetId: string,
+      contentGeneration: number,
+    ): boolean => matchesMouseActivation(mouseArmed, kind, targetId, contentGeneration)
     const transcript = new Transcript(
       () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
@@ -342,6 +370,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const overlays = new OverlayQueue(tui, () => {
       mouseController.endGesture()
       clearTranscriptPointerGesture()
+      clearMouseArm(true)
       clearHoverPresentation()
     })
     const mouseDecoder = new MouseProtocolDecoder()
@@ -405,17 +434,43 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             hover: 'none',
             action: { kind: 'composer', command: 'caret' },
           }, composerOrigin)
+          const autocompleteSnapshot = editorMouseApi(editor).getAutocompleteSnapshot?.()
           if (local.autocomplete.height > 0) {
             builder.addLocal({
-              id: 'composer:autocomplete',
+              id: 'composer:autocomplete-surface',
               rect: local.autocomplete,
-              zIndex: 21,
-              role: 'option',
+              zIndex: 20,
+              role: 'passive',
               enabled: true,
-              activation: 'arm',
-              hover: 'highlight',
-              action: { kind: 'composer', command: 'autocomplete' },
+              activation: 'none',
+              hover: 'none',
+              action: { kind: 'composer', command: 'autocomplete-scroll' },
             }, composerOrigin)
+            for (const row of autocompleteSnapshot?.visibleRows ?? []) {
+              if (!row.selectable) continue
+              const generation = autocompleteSnapshot?.generation
+              if (generation === undefined) continue
+              builder.addLocal({
+                id: autocompleteTargetId(generation, row.absoluteIndex),
+                rect: {
+                  col: local.autocomplete.col,
+                  row: local.autocomplete.row + row.visualRow,
+                  width: local.autocomplete.width,
+                  height: 1,
+                },
+                zIndex: 21,
+                role: 'option',
+                enabled: true,
+                activation: 'arm',
+                hover: 'highlight',
+                action: {
+                  kind: 'composer',
+                  command: 'autocomplete',
+                  autocompleteGeneration: generation,
+                  autocompleteItemId: row.itemId,
+                },
+              }, composerOrigin)
+            }
           }
           if (local.attachments.height > 0) {
             builder.addLocal({
@@ -485,6 +540,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       )
       if (resized) {
         clearTranscriptPointerGesture()
+        clearMouseArm(true)
         if (clearHoverPresentation()) tui.requestRender()
       }
     }
@@ -518,6 +574,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const updateTranscript = (current: TuiActiveSession): void => {
+      clearMouseArm(true)
       clearHoverPresentation()
       performanceProbe.markSnapshot()
       transcript.update(current.session.getSnapshot(), async (attachment) => {
@@ -792,6 +849,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         terminalSession.setMouseReporting(behavior.mouseMode, behavior.hoverFeedback)
         mouseController.endGesture()
         clearTranscriptPointerGesture()
+        clearMouseArm(true)
         clearHoverPresentation()
         transcript.setScrollbarVisibility(behavior.scrollbarVisibility)
         transcript.applyPresentationDefaults(
@@ -960,7 +1018,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
     }
 
-    editor.onSubmit = (raw): void => {
+    const dispatchSubmittedComposer = (raw: string): void => {
       // PromptEditor snapshots the expanded composer before pi-tui trims and
       // clears it. Classify Clarify from that snapshot before history or send
       // so a local invocation cannot leak and failures restore exact text.
@@ -1035,6 +1093,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         ), 'warning')
       })
     }
+    editor.onSubmit = dispatchSubmittedComposer
 
     const copyActiveSelection = (): void => {
       const transcriptText = transcript.copySelectionText()
@@ -1225,7 +1284,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const id = region?.id
       const transcriptChanged = transcript.setHoveredRegion(id)
       const editorChanged = editor.setHoveredTarget(
-        id === 'composer:autocomplete' || id?.startsWith('chrome:model') === true
+        id?.startsWith('composer:autocomplete:') === true || id?.startsWith('chrome:model') === true
           || id?.startsWith('chrome:mode') === true
           ? id
           : undefined,
@@ -1255,23 +1314,32 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         void openMouseContextMenu(semantic)
         return
       }
+      const isArmedTarget = region?.action.kind === 'overlay' && region.action.optionId !== undefined
+        || region?.action.kind === 'transcript' && region.action.command === 'example'
+        || region?.action.kind === 'composer' && region.action.command === 'autocomplete'
+      if (!isArmedTarget) clearMouseArm()
       if (region?.action.kind === 'overlay' && region.action.optionId !== undefined) {
         const optionId = region.action.optionId
+        const contentGeneration = overlays.activeGeneration()
         const result = overlays.handleOptionClick(optionId)
         if (result === 'danger') {
           hintEnter()
           return
         }
         if (result === 'activated') {
+          if (!isMouseTargetArmed('option', optionId, contentGeneration)) {
+            armMouseTarget('option', optionId, contentGeneration)
+            return
+          }
           if (!mouseController.allowsSensitiveMouse) {
             hintEnter()
             return
           }
           overlays.activateArmedOption()
-          mouseArmed = undefined
+          clearMouseArm()
           return
         }
-        if (result === 'focused') mouseArmed = { kind: 'option', id: optionId }
+        if (result === 'focused') armMouseTarget('option', optionId, contentGeneration)
         return
       }
       if (region?.action.kind === 'overlay') return
@@ -1287,16 +1355,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (region?.action.kind === 'transcript' && region.action.command === 'example' && region.action.targetKey !== undefined) {
         const id = region.action.targetKey
         transcript.focusExample(id)
-        const armed = mouseArmed?.kind === 'example' && mouseArmed.id === id
+        const armed = isMouseTargetArmed('example', id, mouseContentGeneration)
         if (!armed) {
-          mouseArmed = { kind: 'example', id }
+          armMouseTarget('example', id, mouseContentGeneration)
           return
         }
         if (!mouseController.allowsSensitiveMouse) {
           hintEnter()
           return
         }
-        mouseArmed = undefined
+        clearMouseArm()
         const action = transcript.activateFocused()
         if (action?.kind === 'example') {
           focusEditor()
@@ -1310,24 +1378,29 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return
       }
       if (region?.action.kind === 'composer' && region.action.command === 'autocomplete') {
-        const slots = layout.lastContentGeometry()
-        const local = editor.lastLocalGeometry()
         const api = editorMouseApi(editor)
-        if (slots === undefined || local === undefined) return
-        const index = Math.max(0, semantic.point.row - slots.composer.row - local.autocomplete.row)
-        api.setAutocompleteSelectedIndex?.(index)
-        const key = String(index)
-        const armed = mouseArmed?.kind === 'autocomplete' && mouseArmed.id === key
+        const generation = region.action.autocompleteGeneration
+        const itemId = region.action.autocompleteItemId
+        if (generation === undefined || itemId === undefined) return
+        if (api.selectAutocompleteItem?.(generation, itemId) !== true) {
+          clearMouseArm()
+          return
+        }
+        const armed = isMouseTargetArmed('autocomplete', itemId, generation)
         if (!armed) {
-          mouseArmed = { kind: 'autocomplete', id: key }
+          armMouseTarget('autocomplete', itemId, generation)
           return
         }
         if (!mouseController.allowsSensitiveMouse) {
           hintEnter()
           return
         }
-        mouseArmed = undefined
-        api.applyAutocompleteSelection?.()
+        clearMouseArm()
+        const activation = api.activateAutocompleteSelection?.('mouse')
+        if (activation?.submitText !== undefined) dispatchSubmittedComposer(activation.submitText)
+        return
+      }
+      if (region?.action.kind === 'composer' && region.action.command === 'autocomplete-scroll') {
         return
       }
       if (region?.action.kind === 'chrome') {
@@ -1362,12 +1435,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (outcome.semantic?.kind === 'wheel') {
           const region = outcome.semantic.region
           if (region?.action.kind === 'overlay') {
+            clearMouseArm()
             overlays.handleWheel(outcome.semantic.lines)
-          } else if (region?.action.kind === 'composer' && region.action.command === 'autocomplete') {
+          } else if (region?.action.kind === 'composer' && region.action.command.startsWith('autocomplete')) {
             const api = editorMouseApi(editor)
-            const selected = api.getAutocompleteSelectedIndex?.() ?? 0
-            const next = selected - Math.sign(outcome.semantic.lines)
-            api.setAutocompleteSelectedIndex?.(Math.max(0, next))
+            clearMouseArm()
+            api.moveAutocompleteSelection?.(-Math.sign(outcome.semantic.lines))
           } else if (region?.action.kind === 'composer' || region?.role === 'input') {
             // A mouse wheel is a semantic navigation gesture, never keyboard bytes.
             // Inputs consume it without changing text or cursor state.
@@ -1378,6 +1451,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         } else if (outcome.semantic?.kind === 'click') {
           dispatchMouseClick(outcome.semantic)
         } else if (outcome.semantic?.kind === 'drag') {
+          clearMouseArm()
           const semantic = outcome.semantic
           if (semantic.grabOffset !== undefined || mouseController.gesture === 'dragging-scrollbar') {
             clearTranscriptPointerGesture()
@@ -1396,6 +1470,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           applyHoverPresentation(outcome.semantic.region)
         } else if (outcome.semantic?.kind === 'focus' && !outcome.semantic.focused) {
           clearTranscriptPointerGesture()
+          clearMouseArm(true)
           clearHoverPresentation()
         }
         if (outcome.requestRender === true) needMouseRender = true
@@ -1426,6 +1501,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const payload = decoded.events.length > 0 ? decoded.leftover : data
       if (payload === '') return { consume: true }
       clearTranscriptPointerGesture()
+      clearMouseArm()
       if (clearHoverPresentation()) renderWhileOpen()
       if (matchesBinding('toggleMouseMode', payload)) {
         void actions.execute('mouse', 'toggle')

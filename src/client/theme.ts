@@ -357,6 +357,7 @@ export const color = {
 export const background = {
   canvas: (text: string): string => layer(palette.canvas, text),
   surface: (text: string): string => layer(palette.surface, text),
+  hover: (text: string): string => layer(palette.surface, text),
   selection: (text: string): string => layer(palette.selection, text),
   code: (text: string): string => layer(palette.codeBackground, text, palette.codeForeground),
 } as const

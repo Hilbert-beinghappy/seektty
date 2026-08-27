@@ -18,7 +18,13 @@ export type HitHoverPolicy = 'none' | 'highlight'
 export type MouseAction =
   | { readonly kind: 'focus'; readonly targetId: string }
   | { readonly kind: 'transcript'; readonly command: string; readonly targetKey?: string }
-  | { readonly kind: 'composer'; readonly command: string; readonly logicalOffset?: number }
+  | {
+      readonly kind: 'composer'
+      readonly command: string
+      readonly logicalOffset?: number
+      readonly autocompleteGeneration?: number
+      readonly autocompleteItemId?: string
+    }
   | { readonly kind: 'overlay'; readonly command: string; readonly optionId?: string }
   | { readonly kind: 'chrome'; readonly commandId: string }
 

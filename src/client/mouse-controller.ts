@@ -435,6 +435,7 @@ export class MouseController {
     if (wasDrag) {
       return {
         consume: true,
+        requestRender: true,
         semantic: {
           kind: 'drag',
           button: input.button,
@@ -471,6 +472,7 @@ export class MouseController {
     const hit = this.lookup(input.point)
     return {
       consume: true,
+      requestRender: true,
       semantic: {
         kind: 'click',
         count: capped,

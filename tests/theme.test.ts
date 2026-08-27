@@ -60,6 +60,8 @@ describe('terminal themes', () => {
 
     setTheme(BUILT_IN_THEMES.dark)
     expect(background.canvas('frame')).toContain('\u001B[48;2;9;14;27m')
+    expect(background.hover('option')).toContain('\u001B[48;2;17;24;39m')
+    expect(background.hover('option')).not.toBe(background.selection('option'))
     expect(color.brand('brand')).toContain('\u001B[38;2;102;130;255m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;52;65;95m')
     expect(color.pulse('◆', 4)).toContain('\u001B[38;2;145;167;255m')

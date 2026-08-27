@@ -100,7 +100,7 @@ SeekTTY `1.2.2` is a maintenance update targeting official Harness `0.1.1-rc.2`,
 | --- | --- |
 | ![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png) | ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png) |
 
-The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
+The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. Holding a selection at the transcript edge auto-scrolls across loaded pages while preserving one logical text anchor; only the visible viewport is repainted. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
 
 ## Clarify and Plan
 
@@ -173,17 +173,21 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 
 `/plugin`, `/workspace`, and `/profile` provide interactive centers and direct subcommands. Unknown commands stay inside the command surface and show nearby suggestions.
 
+The rendered candidate window is authoritative: the wheel and arrow keys move its highlight, pointer hover is preview-only, and the first click visibly selects the exact candidate under the pointer. Enter or a safe second click completes and runs a slash command once; Tab only completes it. File and path completions never auto-submit, and the scroll-position footer is not clickable.
+
+Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerShell `Set-Clipboard` writer, macOS runs `pbcopy` under a UTF-8 locale, Wayland declares `text/plain;charset=utf-8`, and X11 requests `UTF8_STRING`; OSC 52 remains available for terminal, SSH, and tmux paths.
+
 ## Common controls
 
 | Input | Action |
 | --- | --- |
-| Full mouse mode | Wheel, resident scrollbar, in-app selection, copy-on-select, and clicks on tool cards, examples, autocomplete, overlays, and remaining model/mode/permission chrome. Dangerous confirmations still require Enter. |
+| Full mouse mode | Wheel, resident scrollbar, in-app selection, copy-on-select, stable hover feedback, and target-aware clicks on tool cards, examples, autocomplete, overlays, and remaining model/mode/permission chrome. Dangerous confirmations still require Enter. |
 | Hold the terminal selection modifier while dragging, then copy | Native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere. Switch with F3 or `/mouse native`. |
 | Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
 | Ctrl+Shift+C / F3 | Copy the in-app selection / toggle full and native mouse modes |
 | `/` | Open command and Skill candidates |
-| Enter / Shift+Enter | Submit or confirm / insert a newline |
-| Tab / Escape | Switch between composer and transcript / return or close the active overlay |
+| Enter / Shift+Enter | Submit or confirm; a selected slash candidate completes and runs once / insert a newline |
+| Tab / Escape | Complete the selected candidate without submitting / return or close the active overlay |
 | PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
 | Shift+Tab | Cycle permission presets, confirming full access first |
 | Shift+Left / Shift+Right | Jump to the previous or next user turn |

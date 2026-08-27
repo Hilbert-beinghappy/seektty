@@ -195,6 +195,15 @@ async function oneCycle(index, home, env) {
     await log.waitFor(/API Key|输入消息|Type a message/u, 20_000)
     session.write('\u001B')
     await delay(100)
+    // Exercise the packed slash-completion path without a Provider request:
+    // an exact /help candidate survives Down wrapping and Enter opens Help.
+    session.write('/help')
+    await delay(250)
+    session.write('\u001B[B')
+    session.write('\r')
+    await log.waitFor(/键位速查|Keyboard shortcuts/u, 10_000)
+    session.write('\u001B')
+    await delay(100)
     session.write(encodeWheelUp())
     session.write(encodeWheelUp())
     session.write(sgr(0, 10, 6))
@@ -231,7 +240,6 @@ async function oneCycle(index, home, env) {
       }),
     ])
     const text = log.text()
-    if (/\?1003h/u.test(text)) throw new Error('enabled 1003h')
     if (!/\?1004l|\?1049l|headless|TTY/u.test(text) && result.code !== 0 && result.signal == null) {
       throw new Error(`restore markers missing\n${text.slice(-1_500)}`)
     }

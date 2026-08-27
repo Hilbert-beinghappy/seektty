@@ -100,7 +100,7 @@ SeekTTY `1.2.2` 是面向官方 Harness `0.1.1-rc.2` 的维护更新，修复长
 | --- | --- |
 | ![SeekTTY 亮色 TypeScript 语法高亮](assets/seektty-code-light.png) | ![SeekTTY 暗色工具调用与 Diff 语法高亮](assets/seektty-code-dark.png) |
 
-最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。完整鼠标模式用滚轮浏览历史、选择文本，并点击已有控件。F3 或 `/mouse` 可切到原生终端选择且不离开备用屏幕；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
+最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。完整鼠标模式用滚轮浏览历史、选择文本，并点击已有控件。把选区拖到 Transcript 边缘并停留会自动跨已加载页面滚动，同时保持同一个逻辑文本锚点；每帧仍只重绘当前可见窗口。F3 或 `/mouse` 可切到原生终端选择且不离开备用屏幕；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
 
 ## Clarify 与 Plan
 
@@ -173,17 +173,21 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 `/plugin`、`/workspace` 和 `/profile` 同时提供交互中心与直接子命令。未知命令不会作为普通消息发送，而会留在命令界面并显示相近建议。
 
+实际渲染的候选窗口是唯一权威：滚轮和方向键移动高亮，鼠标悬停只做预览，首次单击会立即、清晰地选中指针下的可见候选。按 Enter 或安全地再次点击会补全并且只执行一次斜杠命令；Tab 只补全。文件和路径补全永不自动提交，滚动位置提示行不可点击。
+
+完整鼠标模式复制会把文本统一编码一次为 UTF-8。Windows 使用固定的 PowerShell `Set-Clipboard` writer，macOS 在 UTF-8 locale 下运行 `pbcopy`，Wayland 明确声明 `text/plain;charset=utf-8`，X11 明确请求 `UTF8_STRING`；OSC 52 继续服务于终端、SSH 与 tmux 路径。
+
 ## 常用操作
 
 | 输入 | 操作 |
 | --- | --- |
-| 完整鼠标模式 | 滚轮、常驻滚动条、应用内选区、选后复制，以及工具卡、示例、补全、弹窗和仍可见的模型/模式/权限 chrome 点击。危险确认仍需 Enter。 |
+| 完整鼠标模式 | 滚轮、常驻滚动条、应用内选区、选后复制、稳定悬停反馈，以及工具卡、示例、补全、弹窗和仍可见的模型/模式/权限 chrome 精确点击。危险确认仍需 Enter。 |
 | 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键。F3 或 `/mouse native` 切换。 |
 | 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
 | Ctrl+Shift+C / F3 | 复制应用内选区 / 切换完整鼠标模式与终端原生选择 |
 | `/` | 打开命令与 Skill 候选 |
-| Enter / Shift+Enter | 发送或确认 / 输入换行 |
-| Tab / Escape | 在输入框与 transcript 间切换 / 返回或关闭当前弹窗 |
+| Enter / Shift+Enter | 发送或确认；选中的斜杠候选会补全并只执行一次 / 输入换行 |
+| Tab / Escape | 只补全选中的候选而不提交 / 返回或关闭当前弹窗 |
 | PgUp / PgDn / Home / End | 在 transcript 中翻页、跳到最早内容或回到最新 |
 | Shift+Tab | 循环权限预设，进入完全访问前确认 |
 | Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |

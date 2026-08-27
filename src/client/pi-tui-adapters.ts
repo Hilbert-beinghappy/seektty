@@ -19,6 +19,24 @@ export interface VisualLine {
   readonly length: number
 }
 
+export interface AutocompleteVisibleRow {
+  readonly visualRow: number
+  readonly absoluteIndex: number
+  readonly itemId: string
+  readonly selectable: boolean
+}
+
+export interface AutocompleteSnapshot {
+  readonly generation: number
+  readonly selectedIndex: number
+  readonly visibleRows: readonly AutocompleteVisibleRow[]
+}
+
+export interface AutocompleteActivation {
+  readonly applied: boolean
+  readonly submitText?: string
+}
+
 interface PatchedEditor {
   setCursor?(line: number, col: number): void
   getCursor(): EditorPoint
@@ -28,9 +46,11 @@ interface PatchedEditor {
   replaceSelection?(text: string): boolean
   getVisualLineMap?(width?: number): readonly VisualLine[]
   isShowingAutocomplete(): boolean
-  getAutocompleteSelectedIndex?(): number
-  setAutocompleteSelectedIndex?(index: number): void
-  applyAutocompleteSelection?(): boolean
+  getAutocompleteSnapshot?(): AutocompleteSnapshot | undefined
+  moveAutocompleteSelection?(delta: number): boolean
+  selectAutocompleteItem?(generation: number, itemId: string): boolean
+  completeAutocompleteSelection?(): boolean
+  activateAutocompleteSelection?(source: 'enter' | 'mouse'): AutocompleteActivation
 }
 
 interface PatchedTui {
@@ -40,6 +60,11 @@ interface PatchedTui {
 
 export function editorMouseApi(editor: Editor): PatchedEditor {
   return editor as unknown as PatchedEditor
+}
+
+/** Stable current-generation target id used by render, hit-test, and hover. */
+export function autocompleteTargetId(generation: number, absoluteIndex: number): string {
+  return `composer:autocomplete:${generation}:${absoluteIndex}`
 }
 
 export function tuiFrameApi(tui: TUI): PatchedTui {

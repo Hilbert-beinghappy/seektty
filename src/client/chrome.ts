@@ -14,6 +14,7 @@ import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
 import { background, color, editorTheme } from './theme.ts'
+import { autocompleteTargetId, editorMouseApi } from './pi-tui-adapters.ts'
 
 /** Pending composer image shown above the model rule. */
 export interface ComposerDraftAttachment {
@@ -398,7 +399,7 @@ export class StatusBar implements Component {
         : this.permission === 'read-only' ? color.muted(label) : color.accent(label)
     }`
     const permission = this.hoveredTokenId === 'permission'
-      ? background.selection(permissionText)
+      ? background.hover(permissionText)
       : permissionText
     if (this.detail === undefined || innerWidth - visibleWidth(permission) - visibleWidth(this.detail) < 1) {
       const clipped = fit(permission, innerWidth)
@@ -408,7 +409,7 @@ export class StatusBar implements Component {
       }]
       return [`${prefix}${clipped}`]
     }
-    const detail = this.hoveredTokenId === 'detail' ? background.selection(this.detail) : this.detail
+    const detail = this.hoveredTokenId === 'detail' ? background.hover(this.detail) : this.detail
     const gap = innerWidth - visibleWidth(permission) - visibleWidth(detail)
     this.tokens = [
       { id: 'permission', rect: { col: prefix.length, row: 0, width: visibleWidth(permission), height: 1 } },
@@ -461,7 +462,10 @@ export class PromptEditor extends Editor {
   }
 
   override handleInput(data: string): void {
-    this.submitSnapshot = this.getExpandedText()
+    // Slash completion changes the value before inherited Enter submits it;
+    // in that case the callback argument is authoritative. Ordinary submit
+    // keeps the expanded pre-clear snapshot so paste markers stay lossless.
+    this.submitSnapshot = this.isShowingAutocomplete() ? undefined : this.getExpandedText()
     try {
       super.handleInput(data)
       const text = this.getText()
@@ -518,9 +522,18 @@ export class PromptEditor extends Editor {
     const lowerRule = lines.findIndex((line, index) => index > 0 && isHorizontalRule(line))
     const split = lowerRule < 0 ? lines.length - 1 : lowerRule
     const editorRows = lines.slice(1, split)
-    const autocompleteRows = lines.slice(split + 1).map(row => (
-      this.hoveredTargetId === 'composer:autocomplete' ? background.selection(row) : row
-    ))
+    const autocompleteSnapshot = editorMouseApi(this).getAutocompleteSnapshot?.()
+    const autocompleteRows = lines.slice(split + 1).map((row, visualRow) => {
+      const visible = autocompleteSnapshot?.visibleRows.find(candidate => candidate.visualRow === visualRow)
+      const hovered = visible === undefined
+        ? false
+        : visible.absoluteIndex !== autocompleteSnapshot?.selectedIndex
+          && this.hoveredTargetId === autocompleteTargetId(
+          autocompleteSnapshot?.generation ?? -1,
+          visible.absoluteIndex,
+          )
+      return hovered ? background.hover(row) : row
+    })
 
     if (this.getText() === '' && !this.isShowingAutocomplete() && editorRows.length > 0) {
       const cursor = this.focused ? `${CURSOR_MARKER}\u001B[7m \u001B[0m` : ''
@@ -545,13 +558,13 @@ export class PromptEditor extends Editor {
         ...(this.facts.model === '' ? [] : [{
           id: 'model' as const,
           text: this.hoveredTargetId === 'chrome:model'
-            ? background.selection(modelLabel(this.facts.model))
+            ? background.hover(modelLabel(this.facts.model))
             : modelLabel(this.facts.model),
         }]),
         {
           id: 'mode' as const,
           text: this.hoveredTargetId === 'chrome:mode'
-            ? background.selection(modeLabel(this.facts.mode))
+            ? background.hover(modeLabel(this.facts.mode))
             : modeLabel(this.facts.mode),
         },
       ]

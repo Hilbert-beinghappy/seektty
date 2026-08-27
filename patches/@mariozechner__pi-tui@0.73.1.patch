@@ -1,8 +1,39 @@
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index fb224b9da697aab89a31336eae65071dc07d736e..7cea170492826d552a1bdf9c0cc645bc773818bf 100644
+index fb224b9da697aab89a31336eae65071dc07d736e..8e862bd74de72476498eb44805ca75362b5f727f 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
-@@ -102,6 +102,34 @@ export declare class Editor implements Component, Focusable {
+@@ -30,6 +30,20 @@ export interface EditorOptions {
+     paddingX?: number;
+     autocompleteMaxVisible?: number;
+ }
++export interface AutocompleteSnapshot {
++    generation: number;
++    selectedIndex: number;
++    visibleRows: ReadonlyArray<{
++        visualRow: number;
++        absoluteIndex: number;
++        itemId: string;
++        selectable: boolean;
++    }>;
++}
++export interface AutocompleteActivation {
++    applied: boolean;
++    submitText?: string;
++}
+ export declare class Editor implements Component, Focusable {
+     private state;
+     /** Focusable interface - set by TUI when focus changes */
+@@ -50,6 +64,9 @@ export declare class Editor implements Component, Focusable {
+     private autocompleteRequestTask;
+     private autocompleteStartToken;
+     private autocompleteRequestId;
++    private autocompleteGeneration;
++    private autocompleteItemIds;
++    private autocompleteRenderSnapshot;
+     private pastes;
+     private pasteCounter;
+     private pasteBuffer;
+@@ -102,6 +119,37 @@ export declare class Editor implements Component, Focusable {
          line: number;
          col: number;
      };
@@ -31,17 +62,38 @@ index fb224b9da697aab89a31336eae65071dc07d736e..7cea170492826d552a1bdf9c0cc645bc
 +        startCol: number;
 +        length: number;
 +    }[];
-+    getAutocompleteSelectedIndex(): number;
-+    setAutocompleteSelectedIndex(index: number): void;
-+    applyAutocompleteSelection(): boolean;
++    getAutocompleteSnapshot(): AutocompleteSnapshot | undefined;
++    moveAutocompleteSelection(delta: number): boolean;
++    selectAutocompleteItem(generation: number, itemId: string): boolean;
++    completeAutocompleteSelection(): boolean;
++    activateAutocompleteSelection(source: "enter" | "mouse"): AutocompleteActivation;
++    private applyAutocompleteSelection;
      setText(text: string): void;
      /**
       * Insert text at the current cursor position.
+@@ -125,6 +173,7 @@ export declare class Editor implements Component, Focusable {
+     private handlePaste;
+     private addNewLine;
+     private shouldSubmitOnBackslashEnter;
++    private consumeSubmitValue;
+     private submitValue;
+     private handleBackspace;
+     /**
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa7496737ab83 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..60c14017663266aeebee8edea96351164db13eb5 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -208,6 +208,7 @@ export class Editor {
+@@ -184,6 +184,9 @@ export class Editor {
+     autocompleteRequestTask = Promise.resolve();
+     autocompleteStartToken = 0;
+     autocompleteRequestId = 0;
++    autocompleteGeneration = 0;
++    autocompleteItemIds = [];
++    autocompleteRenderSnapshot = null;
+     // Paste tracking for large pastes
+     pastes = new Map();
+     pasteCounter = 0;
+@@ -208,6 +211,7 @@ export class Editor {
      snappedFromCursorCol = null;
      // Undo support
      undoStack = new UndoStack();
@@ -49,7 +101,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
      onSubmit;
      onChange;
      disableSubmit = false;
-@@ -308,6 +309,7 @@ export class Editor {
+@@ -308,6 +312,7 @@ export class Editor {
          this.state.lines = lines.length === 0 ? [""] : lines;
          this.state.cursorLine = this.state.lines.length - 1;
          this.setCursorCol(this.state.lines[this.state.cursorLine]?.length || 0);
@@ -57,7 +109,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          // Reset scroll - render() will adjust to show cursor
          this.scrollOffset = 0;
          if (this.onChange) {
-@@ -372,10 +374,33 @@ export class Editor {
+@@ -372,10 +377,33 @@ export class Editor {
              let displayText = layoutLine.text;
              let lineVisibleWidth = visibleWidth(layoutLine.text);
              let cursorInPadding = false;
@@ -93,7 +145,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
                  // Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
                  const marker = emitCursorMarker ? CURSOR_MARKER : "";
                  if (after.length > 0) {
-@@ -384,7 +409,7 @@ export class Editor {
+@@ -384,7 +412,7 @@ export class Editor {
                      const afterGraphemes = [...this.segment(after)];
                      const firstGrapheme = afterGraphemes[0]?.segment || "";
                      const restAfter = after.slice(firstGrapheme.length);
@@ -102,7 +154,30 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
                      displayText = before + marker + cursor + restAfter;
                      // lineVisibleWidth stays the same - we're replacing, not adding
                  }
-@@ -474,6 +499,11 @@ export class Editor {
+@@ -423,6 +451,22 @@ export class Editor {
+                 const linePadding = " ".repeat(Math.max(0, contentWidth - lineWidth));
+                 result.push(`${leftPadding}${line}${linePadding}${rightPadding}`);
+             }
++            const listSnapshot = this.autocompleteList.getRenderSnapshot?.();
++            this.autocompleteRenderSnapshot = listSnapshot
++                ? {
++                    generation: this.autocompleteGeneration,
++                    selectedIndex: listSnapshot.selectedIndex,
++                    visibleRows: listSnapshot.visibleRows.map((row) => ({
++                        visualRow: row.visualRow,
++                        absoluteIndex: row.absoluteIndex,
++                        itemId: this.autocompleteItemIds[row.absoluteIndex] ?? "",
++                        selectable: this.autocompleteItemIds[row.absoluteIndex] !== undefined,
++                    })),
++                }
++                : null;
++        }
++        else {
++            this.autocompleteRenderSnapshot = null;
+         }
+         return result;
+     }
+@@ -474,6 +518,11 @@ export class Editor {
          if (kb.matches(data, "tui.input.copy")) {
              return;
          }
@@ -114,7 +189,58 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          // Undo
          if (kb.matches(data, "tui.editor.undo")) {
              this.undo();
-@@ -691,6 +721,8 @@ export class Editor {
+@@ -486,44 +535,18 @@ export class Editor {
+                 return;
+             }
+             if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+-                this.autocompleteList.handleInput(data);
++                this.moveAutocompleteSelection(kb.matches(data, "tui.select.up") ? -1 : 1);
+                 return;
+             }
+             if (kb.matches(data, "tui.input.tab")) {
+-                const selected = this.autocompleteList.getSelectedItem();
+-                if (selected && this.autocompleteProvider) {
+-                    this.pushUndoSnapshot();
+-                    this.lastAction = null;
+-                    const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
+-                    this.state.lines = result.lines;
+-                    this.state.cursorLine = result.cursorLine;
+-                    this.setCursorCol(result.cursorCol);
+-                    this.cancelAutocomplete();
+-                    if (this.onChange)
+-                        this.onChange(this.getText());
+-                }
++                this.completeAutocompleteSelection();
+                 return;
+             }
+             if (kb.matches(data, "tui.select.confirm")) {
+-                const selected = this.autocompleteList.getSelectedItem();
+-                if (selected && this.autocompleteProvider) {
+-                    this.pushUndoSnapshot();
+-                    this.lastAction = null;
+-                    const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
+-                    this.state.lines = result.lines;
+-                    this.state.cursorLine = result.cursorLine;
+-                    this.setCursorCol(result.cursorCol);
+-                    if (this.autocompletePrefix.startsWith("/")) {
+-                        this.cancelAutocomplete();
+-                        // Fall through to submit
+-                    }
+-                    else {
+-                        this.cancelAutocomplete();
+-                        if (this.onChange)
+-                            this.onChange(this.getText());
+-                        return;
+-                    }
+-                }
++                const activation = this.activateAutocompleteSelection("enter");
++                if (activation.submitText !== undefined && this.onSubmit)
++                    this.onSubmit(activation.submitText);
++                return;
+             }
+         }
+         // Tab - trigger completion
+@@ -691,6 +714,8 @@ export class Editor {
                  text: "",
                  hasCursor: true,
                  cursorPos: 0,
@@ -123,7 +249,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
              });
              return layoutLines;
          }
-@@ -706,12 +738,16 @@ export class Editor {
+@@ -706,12 +731,16 @@ export class Editor {
                          text: line,
                          hasCursor: true,
                          cursorPos: this.state.cursorCol,
@@ -140,7 +266,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
                      });
                  }
              }
-@@ -753,12 +789,16 @@ export class Editor {
+@@ -753,12 +782,16 @@ export class Editor {
                              text: chunk.text,
                              hasCursor: true,
                              cursorPos: adjustedCursorPos,
@@ -157,7 +283,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
                          });
                      }
                  }
-@@ -790,6 +830,97 @@ export class Editor {
+@@ -790,6 +823,139 @@ export class Editor {
      getCursor() {
          return { line: this.state.cursorLine, col: this.state.cursorCol };
      }
@@ -228,18 +354,55 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
 +    getVisualLineMap(width) {
 +        return this.buildVisualLineMap(width ?? this.lastWidth);
 +    }
-+    getAutocompleteSelectedIndex() {
-+        return this.autocompleteList?.getSelectedIndex?.() ?? -1;
++    getAutocompleteSnapshot() {
++        const snapshot = this.autocompleteRenderSnapshot;
++        if (!snapshot)
++            return undefined;
++        return {
++            generation: snapshot.generation,
++            selectedIndex: snapshot.selectedIndex,
++            visibleRows: snapshot.visibleRows.map((row) => ({ ...row })),
++        };
 +    }
-+    setAutocompleteSelectedIndex(index) {
-+        this.autocompleteList?.setSelectedIndex(index);
-+    }
-+    applyAutocompleteSelection() {
-+        if (!this.autocompleteState || !this.autocompleteList || !this.autocompleteProvider)
++    moveAutocompleteSelection(delta) {
++        if (!this.autocompleteState || !this.autocompleteList || this.autocompleteItemIds.length === 0)
 +            return false;
++        const step = Math.trunc(delta);
++        if (step === 0)
++            return false;
++        const count = this.autocompleteItemIds.length;
++        const selected = this.autocompleteList.getSelectedIndex();
++        const next = ((selected + step) % count + count) % count;
++        this.autocompleteList.setSelectedIndex(next);
++        this.autocompleteRenderSnapshot = null;
++        this.tui.requestRender();
++        return true;
++    }
++    selectAutocompleteItem(generation, itemId) {
++        const snapshot = this.autocompleteRenderSnapshot;
++        if (!snapshot || snapshot.generation !== generation || generation !== this.autocompleteGeneration)
++            return false;
++        const row = snapshot.visibleRows.find((candidate) => candidate.selectable && candidate.itemId === itemId);
++        if (!row || this.autocompleteItemIds[row.absoluteIndex] !== itemId || !this.autocompleteList)
++            return false;
++        this.autocompleteList.setSelectedIndex(row.absoluteIndex, true);
++        this.autocompleteRenderSnapshot = null;
++        this.tui.requestRender();
++        return true;
++    }
++    completeAutocompleteSelection() {
++        return this.applyAutocompleteSelection(false).applied;
++    }
++    activateAutocompleteSelection(source) {
++        return this.applyAutocompleteSelection(source === "enter" || source === "mouse");
++    }
++    applyAutocompleteSelection(submitSlash) {
++        if (!this.autocompleteState || !this.autocompleteList || !this.autocompleteProvider)
++            return { applied: false };
 +        const selected = this.autocompleteList.getSelectedItem();
 +        if (!selected)
-+            return false;
++            return { applied: false };
++        const slash = this.autocompletePrefix.startsWith("/");
 +        this.pushUndoSnapshot();
 +        this.lastAction = null;
 +        const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
@@ -247,15 +410,20 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
 +        this.state.cursorLine = result.cursorLine;
 +        this.setCursorCol(result.cursorCol);
 +        this.cancelAutocomplete();
++        if (submitSlash && slash) {
++            const submitText = this.consumeSubmitValue();
++            this.tui.requestRender();
++            return { applied: true, submitText };
++        }
 +        if (this.onChange)
 +            this.onChange(this.getText());
 +        this.tui.requestRender();
-+        return true;
++        return { applied: true };
 +    }
      setText(text) {
          this.cancelAutocomplete();
          this.lastAction = null;
-@@ -809,6 +940,10 @@ export class Editor {
+@@ -809,6 +975,10 @@ export class Editor {
      insertTextAtCursor(text) {
          if (!text)
              return;
@@ -266,7 +434,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          this.cancelAutocomplete();
          this.pushUndoSnapshot();
          this.lastAction = null;
-@@ -866,17 +1001,19 @@ export class Editor {
+@@ -866,17 +1036,19 @@ export class Editor {
      // All the editor methods from before...
      insertCharacter(char, skipUndoCoalescing) {
          this.historyIndex = -1; // Exit history browsing mode
@@ -287,7 +455,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          const line = this.state.lines[this.state.cursorLine] || "";
          const before = line.slice(0, this.state.cursorCol);
          const after = line.slice(this.state.cursorCol);
-@@ -923,6 +1060,7 @@ export class Editor {
+@@ -923,6 +1095,7 @@ export class Editor {
          this.historyIndex = -1; // Exit history browsing mode
          this.lastAction = null;
          this.pushUndoSnapshot();
@@ -295,7 +463,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          // Some terminals (e.g. tmux popups with extended-keys-format=csi-u) re-encode
          // control bytes inside bracketed paste as CSI-u Ctrl+<letter> sequences
          // (ESC [ <codepoint> ; 5 u). Decode those back to their literal byte so the
-@@ -977,6 +1115,10 @@ export class Editor {
+@@ -977,6 +1150,10 @@ export class Editor {
          this.insertTextAtCursorInternal(filteredText);
      }
      addNewLine() {
@@ -306,15 +474,28 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          this.cancelAutocomplete();
          this.historyIndex = -1; // Exit history browsing mode
          this.lastAction = null;
-@@ -1008,6 +1150,7 @@ export class Editor {
+@@ -1006,8 +1183,9 @@ export class Editor {
+         const currentLine = this.state.lines[this.state.cursorLine] || "";
+         return this.state.cursorCol > 0 && currentLine[this.state.cursorCol - 1] === "\\";
      }
-     submitValue() {
+-    submitValue() {
++    consumeSubmitValue() {
          this.cancelAutocomplete();
 +        this.selectionRange = null;
          const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
          this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
          this.pastes.clear();
-@@ -1024,6 +1167,14 @@ export class Editor {
+@@ -1018,12 +1196,24 @@ export class Editor {
+         this.lastAction = null;
+         if (this.onChange)
+             this.onChange("");
++        return result;
++    }
++    submitValue() {
++        const result = this.consumeSubmitValue();
+         if (this.onSubmit)
+             this.onSubmit(result);
+     }
      handleBackspace() {
          this.historyIndex = -1; // Exit history browsing mode
          this.lastAction = null;
@@ -329,7 +510,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          if (this.state.cursorCol > 0) {
              this.pushUndoSnapshot();
              // Delete grapheme before cursor (handles emojis, combining characters, etc.)
-@@ -1204,6 +1355,7 @@ export class Editor {
+@@ -1204,6 +1394,7 @@ export class Editor {
          this.setCursorCol(currentLine.length);
      }
      deleteToStartOfLine() {
@@ -337,7 +518,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          this.historyIndex = -1; // Exit history browsing mode
          const currentLine = this.state.lines[this.state.cursorLine] || "";
          if (this.state.cursorCol > 0) {
-@@ -1328,6 +1480,14 @@ export class Editor {
+@@ -1328,6 +1519,14 @@ export class Editor {
      handleForwardDelete() {
          this.historyIndex = -1; // Exit history browsing mode
          this.lastAction = null;
@@ -352,6 +533,31 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..09128e94abfe7d4ccdb29913e98aa749
          const currentLine = this.state.lines[this.state.cursorLine] || "";
          if (this.state.cursorCol < currentLine.length) {
              this.pushUndoSnapshot();
+@@ -1878,6 +2077,15 @@ export class Editor {
+             this.state.cursorCol === snapshotCol);
+     }
+     applyAutocompleteSuggestions(suggestions, state) {
++        const occurrences = new Map();
++        this.autocompleteItemIds = suggestions.items.map((item) => {
++            const identity = JSON.stringify([item.value, item.label, item.description ?? ""]);
++            const occurrence = occurrences.get(identity) ?? 0;
++            occurrences.set(identity, occurrence + 1);
++            return JSON.stringify([identity, occurrence]);
++        });
++        this.autocompleteGeneration += 1;
++        this.autocompleteRenderSnapshot = null;
+         this.autocompletePrefix = suggestions.prefix;
+         this.autocompleteList = this.createAutocompleteList(suggestions.prefix, suggestions.items);
+         const bestMatchIndex = this.getBestAutocompleteMatchIndex(suggestions.items, suggestions.prefix);
+@@ -1899,6 +2107,8 @@ export class Editor {
+         this.autocompleteState = null;
+         this.autocompleteList = undefined;
+         this.autocompletePrefix = "";
++        this.autocompleteItemIds = [];
++        this.autocompleteRenderSnapshot = null;
+     }
+     cancelAutocomplete() {
+         this.cancelAutocompleteRequest();
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
 index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9734a2654 100644
 --- a/dist/components/markdown.js
@@ -476,31 +682,131 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
-index 9db54d907f801e43208a462bca925f2905787b7a..186c8d12c3a753a377ad2e82077657f895482d4a 100644
+index 9db54d907f801e43208a462bca925f2905787b7a..4421dd1bcefd3dd87dae54442e06269ed4849bdb 100644
 --- a/dist/components/select-list.d.ts
 +++ b/dist/components/select-list.d.ts
-@@ -36,6 +36,7 @@ export declare class SelectList implements Component {
+@@ -23,6 +23,15 @@ export interface SelectListLayoutOptions {
+     maxPrimaryColumnWidth?: number;
+     truncatePrimary?: (context: SelectListTruncatePrimaryContext) => string;
+ }
++export interface SelectListRenderSnapshot {
++    selectedIndex: number;
++    startIndex: number;
++    visibleRows: Array<{
++        visualRow: number;
++        absoluteIndex: number;
++        item: SelectItem;
++    }>;
++}
+ export declare class SelectList implements Component {
+     private items;
+     private filteredItems;
+@@ -35,7 +44,11 @@ export declare class SelectList implements Component {
+     onSelectionChange?: (item: SelectItem) => void;
      constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions);
      setFilter(filter: string): void;
-     setSelectedIndex(index: number): void;
+-    setSelectedIndex(index: number): void;
++    private lastRenderSnapshot;
++    private pinnedStartIndex;
++    setSelectedIndex(index: number, preserveViewport?: boolean): void;
 +    getSelectedIndex(): number;
++    getRenderSnapshot(): SelectListRenderSnapshot | null;
      invalidate(): void;
      render(width: number): string[];
      handleInput(keyData: string): void;
 diff --git a/dist/components/select-list.js b/dist/components/select-list.js
-index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..38b1ca99cfc8c51401794f24bb2d1c91e8efdb32 100644
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..90f05dbd130301ba880e02ca2e15118ae6dc4709 100644
 --- a/dist/components/select-list.js
 +++ b/dist/components/select-list.js
-@@ -30,6 +30,9 @@ export class SelectList {
-     setSelectedIndex(index) {
-         this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
+@@ -10,6 +10,7 @@ export class SelectList {
+     filteredItems = [];
+     selectedIndex = 0;
+     maxVisible = 5;
++    lastRenderSnapshot = null;
+     theme;
+     layout;
+     onSelect;
+@@ -26,9 +27,27 @@ export class SelectList {
+         this.filteredItems = this.items.filter((item) => item.value.toLowerCase().startsWith(filter.toLowerCase()));
+         // Reset selection when filter changes
+         this.selectedIndex = 0;
++        this.pinnedStartIndex = undefined;
++        this.lastRenderSnapshot = null;
      }
+-    setSelectedIndex(index) {
++    setSelectedIndex(index, preserveViewport = false) {
++        const previousStartIndex = preserveViewport ? this.lastRenderSnapshot?.startIndex : undefined;
+         this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
++        if (previousStartIndex !== undefined &&
++            this.selectedIndex >= previousStartIndex &&
++            this.selectedIndex < previousStartIndex + this.maxVisible) {
++            this.pinnedStartIndex = previousStartIndex;
++        }
++        else {
++            this.pinnedStartIndex = undefined;
++        }
++    }
 +    getSelectedIndex() {
 +        return this.selectedIndex;
 +    }
++    pinnedStartIndex;
++    getRenderSnapshot() {
++        return this.lastRenderSnapshot;
+     }
      invalidate() {
          // No cached state to invalidate currently
+@@ -38,12 +57,21 @@ export class SelectList {
+         // If no items match filter, show message
+         if (this.filteredItems.length === 0) {
+             lines.push(this.theme.noMatch("  No matching commands"));
++            this.lastRenderSnapshot = { selectedIndex: -1, startIndex: 0, visibleRows: [] };
+             return lines;
+         }
+         const primaryColumnWidth = this.getPrimaryColumnWidth();
+         // Calculate visible range with scrolling
+-        const startIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible));
++        const centeredStartIndex = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible));
++        const pinnedStartIndex = this.pinnedStartIndex;
++        const startIndex = pinnedStartIndex !== undefined &&
++            this.selectedIndex >= pinnedStartIndex &&
++            this.selectedIndex < pinnedStartIndex + this.maxVisible
++            ? pinnedStartIndex
++            : centeredStartIndex;
++        this.pinnedStartIndex = undefined;
+         const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
++        const visibleRows = [];
+         // Render visible items
+         for (let i = startIndex; i < endIndex; i++) {
+             const item = this.filteredItems[i];
+@@ -52,6 +80,7 @@ export class SelectList {
+             const isSelected = i === this.selectedIndex;
+             const descriptionSingleLine = item.description ? normalizeToSingleLine(item.description) : undefined;
+             lines.push(this.renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth));
++            visibleRows.push({ visualRow: lines.length - 1, absoluteIndex: i, item });
+         }
+         // Add scroll indicators if needed
+         if (startIndex > 0 || endIndex < this.filteredItems.length) {
+@@ -59,17 +88,20 @@ export class SelectList {
+             // Truncate if too long for terminal
+             lines.push(this.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
+         }
++        this.lastRenderSnapshot = { selectedIndex: this.selectedIndex, startIndex, visibleRows };
+         return lines;
      }
+     handleInput(keyData) {
+         const kb = getKeybindings();
+         // Up arrow - wrap to bottom when at top
+         if (kb.matches(keyData, "tui.select.up")) {
++            this.pinnedStartIndex = undefined;
+             this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
+             this.notifySelectionChange();
+         }
+         // Down arrow - wrap to top when at bottom
+         else if (kb.matches(keyData, "tui.select.down")) {
++            this.pinnedStartIndex = undefined;
+             this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+             this.notifySelectionChange();
+         }
 diff --git a/dist/terminal.js b/dist/terminal.js
 index 3545b284ce2da594cc728803feb607a34cea5ca0..79bb3e8769594c1b8f70ef71304ab9032ed4ecd3 100644
 --- a/dist/terminal.js

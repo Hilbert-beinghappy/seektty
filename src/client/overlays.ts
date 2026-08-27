@@ -377,8 +377,9 @@ class SearchSelectOverlay implements Component {
       ? -1
       : this.filtered.findIndex(choice => choice.id === this.hoveredOptionId)
     const hoveredRow = hoveredIndex - window.start
-    if (hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
-      listLines[hoveredRow] = background.selection(listLines[hoveredRow] ?? '')
+    if (hoveredIndex !== this.list.getSelectedIndex()
+      && hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
+      listLines[hoveredRow] = background.hover(listLines[hoveredRow] ?? '')
     }
     lines.push(...listLines)
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
@@ -680,8 +681,9 @@ class MultiSelectOverlay implements Component {
       ? -1
       : this.filtered.findIndex(choice => choice.id === this.hoveredOptionId)
     const hoveredRow = hoveredIndex - window.start
-    if (hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
-      listLines[hoveredRow] = background.selection(listLines[hoveredRow] ?? '')
+    if (hoveredIndex !== this.list.getSelectedIndex()
+      && hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
+      listLines[hoveredRow] = background.hover(listLines[hoveredRow] ?? '')
     }
     this.lastHits = this.filtered.slice(window.start, window.end).map((choice, index) => ({
       id: `overlay:option:${choice.id}`,
