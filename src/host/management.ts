@@ -198,6 +198,11 @@ export const BehaviorSettingsSchema = z.object({
       zh: '完整鼠标模式提供应用内滚动和点击；原生模式关闭鼠标报告，供终端选择文本。',
       en: 'Full mouse mode provides in-app scrolling and clicks; native mode turns off mouse reporting so the terminal can select text.',
     })),
+  hoverFeedback: z.boolean().default(DEFAULT_TUI_BEHAVIOR.hoverFeedback)
+    .description(localeDescription({
+      zh: '完整鼠标模式下高亮当前指针所在的可交互目标。',
+      en: 'Highlight the interactive target under the pointer in full mouse mode.',
+    })),
   scrollbarVisibility: z.union(['always', 'hidden'])
     .default(DEFAULT_TUI_BEHAVIOR.scrollbarVisibility)
     .description(localeDescription({

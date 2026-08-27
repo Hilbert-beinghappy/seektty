@@ -48,8 +48,8 @@ describe('managed terminal session', () => {
     session.enter()
     expect(terminal.writes.join('')).toBe(
       '\u001B[?1049h\u001B[H'
-      + '\u001B[?1000l\u001B[?1003l\u001B[?1007l'
-      + '\u001B[?1002h\u001B[?1004h\u001B[?1006h',
+      + '\u001B[?1000l\u001B[?1002l\u001B[?1007l'
+      + '\u001B[?1003h\u001B[?1004h\u001B[?1006h',
     )
     expect(terminal.__seekttyManagedAlternateScreen).toBe(true)
 
@@ -105,15 +105,19 @@ describe('managed terminal session', () => {
     terminal.writes = []
     session.setMouseReporting('full')
     const full = terminal.writes.join('')
-    expect(full).toContain('\u001B[?1002h')
+    expect(full).toContain('\u001B[?1003h')
+    expect(full).toContain('\u001B[?1002l')
     expect(full).toContain('\u001B[?1004h')
     expect(full).toContain('\u001B[?1006h')
-    expect(full).not.toContain('\u001B[?1003h')
     expect(full).not.toContain('\u001B[?1049')
 
     terminal.writes = []
     session.setMouseReporting('full')
     expect(terminal.writes).toEqual([])
+
+    session.setMouseReporting('full', false)
+    expect(terminal.writes.join('')).toContain('\u001B[?1002h')
+    expect(terminal.writes.join('')).toContain('\u001B[?1003l')
   })
 
   it('restores pi-tui protocols synchronously and clears keyboard flags', () => {

@@ -12,6 +12,8 @@ export interface CellRect {
 }
 
 export type HitRole = 'text' | 'scrollbar' | 'button' | 'option' | 'input' | 'link' | 'passive'
+export type HitActivationPolicy = 'none' | 'select' | 'direct' | 'arm' | 'enter-only' | 'drag'
+export type HitHoverPolicy = 'none' | 'highlight'
 
 export type MouseAction =
   | { readonly kind: 'focus'; readonly targetId: string }
@@ -26,6 +28,8 @@ export interface HitRegion {
   readonly zIndex: number
   readonly role: HitRole
   readonly enabled: boolean
+  readonly activation?: HitActivationPolicy
+  readonly hover?: HitHoverPolicy
   readonly action: MouseAction
 }
 
@@ -117,6 +121,8 @@ export class HitMapBuilder {
         zIndex: OVERLAY_CAPTURE_Z_BAND,
         role: 'passive',
         enabled: true,
+        activation: 'none',
+        hover: 'none',
         action: { kind: 'overlay', command: 'consume' },
       })
     }
@@ -126,6 +132,8 @@ export class HitMapBuilder {
       zIndex: OVERLAY_CAPTURE_Z_BAND + 1 + options.zOrder,
       role: 'passive',
       enabled: true,
+      activation: 'none',
+      hover: 'none',
       action: { kind: 'overlay', command: 'consume' },
     })
     for (const child of options.children ?? []) {

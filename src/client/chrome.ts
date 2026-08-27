@@ -13,7 +13,7 @@ import type { CellRect } from './mouse-hit-map.ts'
 import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
-import { color, editorTheme } from './theme.ts'
+import { background, color, editorTheme } from './theme.ts'
 
 /** Pending composer image shown above the model rule. */
 export interface ComposerDraftAttachment {
@@ -358,6 +358,7 @@ export class StatusBar implements Component {
   private permission = 'workspace-write'
   private detail: string | undefined
   private tokens: readonly ChromeHitToken[] = []
+  private hoveredTokenId: string | undefined
 
   /**
    * Show the current permission projected by Harness.
@@ -376,6 +377,13 @@ export class StatusBar implements Component {
     return this.tokens
   }
 
+  /** Set a visual-only status token hover. */
+  setHoveredToken(id?: string): boolean {
+    if (this.hoveredTokenId === id) return false
+    this.hoveredTokenId = id
+    return true
+  }
+
   invalidate(): void { /* presentation is derived directly from state */ }
 
   render(width: number): string[] {
@@ -384,11 +392,14 @@ export class StatusBar implements Component {
       `使用权限：${permissionLabel(this.permission)}`,
       `Permission: ${permissionLabel(this.permission)}`,
     )
-    const permission = `${color.brand('▸▸')} ${
+    const permissionText = `${color.brand('▸▸')} ${
       this.permission === 'danger-full-access'
         ? color.danger(label)
         : this.permission === 'read-only' ? color.muted(label) : color.accent(label)
     }`
+    const permission = this.hoveredTokenId === 'permission'
+      ? background.selection(permissionText)
+      : permissionText
     if (this.detail === undefined || innerWidth - visibleWidth(permission) - visibleWidth(this.detail) < 1) {
       const clipped = fit(permission, innerWidth)
       this.tokens = [{
@@ -397,7 +408,7 @@ export class StatusBar implements Component {
       }]
       return [`${prefix}${clipped}`]
     }
-    const detail = this.detail
+    const detail = this.hoveredTokenId === 'detail' ? background.selection(this.detail) : this.detail
     const gap = innerWidth - visibleWidth(permission) - visibleWidth(detail)
     this.tokens = [
       { id: 'permission', rect: { col: prefix.length, row: 0, width: visibleWidth(permission), height: 1 } },
@@ -417,6 +428,7 @@ export class PromptEditor extends Editor {
   private submitSnapshot: string | undefined
   private localGeometry: PromptEditorLocalGeometry | undefined
   private factTokens: readonly ChromeHitToken[] = []
+  private hoveredTargetId: string | undefined
 
   constructor(tui: TUI) {
     super(tui, editorTheme, { paddingX: 3, autocompleteMaxVisible: 6 })
@@ -477,6 +489,13 @@ export class PromptEditor extends Editor {
     return this.factTokens
   }
 
+  /** Set visual-only hover for a composer fact or autocomplete area. */
+  setHoveredTarget(id?: string): boolean {
+    if (this.hoveredTargetId === id) return false
+    this.hoveredTargetId = id
+    return true
+  }
+
   override render(width: number): string[] {
     this.borderColor = this.focused ? color.brand : color.border
     if (width < 8) {
@@ -499,7 +518,9 @@ export class PromptEditor extends Editor {
     const lowerRule = lines.findIndex((line, index) => index > 0 && isHorizontalRule(line))
     const split = lowerRule < 0 ? lines.length - 1 : lowerRule
     const editorRows = lines.slice(1, split)
-    const autocompleteRows = lines.slice(split + 1)
+    const autocompleteRows = lines.slice(split + 1).map(row => (
+      this.hoveredTargetId === 'composer:autocomplete' ? background.selection(row) : row
+    ))
 
     if (this.getText() === '' && !this.isShowingAutocomplete() && editorRows.length > 0) {
       const cursor = this.focused ? `${CURSOR_MARKER}\u001B[7m \u001B[0m` : ''
@@ -521,8 +542,18 @@ export class PromptEditor extends Editor {
     const source: ChromeFactToken[] = this.facts === undefined
       ? []
       : [
-        ...(this.facts.model === '' ? [] : [{ id: 'model' as const, text: modelLabel(this.facts.model) }]),
-        { id: 'mode' as const, text: modeLabel(this.facts.mode) },
+        ...(this.facts.model === '' ? [] : [{
+          id: 'model' as const,
+          text: this.hoveredTargetId === 'chrome:model'
+            ? background.selection(modelLabel(this.facts.model))
+            : modelLabel(this.facts.model),
+        }]),
+        {
+          id: 'mode' as const,
+          text: this.hoveredTargetId === 'chrome:mode'
+            ? background.selection(modeLabel(this.facts.mode))
+            : modeLabel(this.facts.mode),
+        },
       ]
     const compacted = source.length === 0
       ? { text: ui('deepseek · 标准', 'deepseek · Standard'), tokens: [] as const }

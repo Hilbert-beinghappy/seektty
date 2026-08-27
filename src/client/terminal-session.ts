@@ -41,7 +41,7 @@ export interface ManagedTui {
 export interface TerminalSession {
   enter(): void
   restore(): void
-  setMouseReporting(mode: MouseReportingMode): void
+  setMouseReporting(mode: MouseReportingMode, hoverFeedback?: boolean): void
   mouseReporting(): MouseReportingMode
 }
 
@@ -62,12 +62,13 @@ export function createTerminalSession(
 ): TerminalSession {
   let active = false
   let mouseMode: MouseReportingMode = 'full'
+  let hoverFeedback = true
   return {
     enter: () => {
       if (!enabled || active) return
       active = true
       terminal.__seekttyManagedAlternateScreen = true
-      terminal.write(ENTER_ALTERNATE_SCREEN + encodeMouseReporting(mouseMode))
+      terminal.write(ENTER_ALTERNATE_SCREEN + encodeMouseReporting(mouseMode, hoverFeedback))
     },
     restore: () => {
       if (!active) return
@@ -83,11 +84,12 @@ export function createTerminalSession(
         }
       }
     },
-    setMouseReporting: (mode) => {
-      if (mouseMode === mode) return
+    setMouseReporting: (mode, nextHoverFeedback = hoverFeedback) => {
+      if (mouseMode === mode && hoverFeedback === nextHoverFeedback) return
       mouseMode = mode
+      hoverFeedback = nextHoverFeedback
       if (!enabled || !active) return
-      terminal.write(encodeMouseReporting(mode))
+      terminal.write(encodeMouseReporting(mode, hoverFeedback))
     },
     mouseReporting: () => mouseMode,
   }

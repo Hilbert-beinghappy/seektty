@@ -473,6 +473,11 @@ describe('Clarify OverlayQueue wrapping', () => {
       expect(plain(harness.component().render(80))).toContain('Enter full access')
     })
     harness.component().render(80)
+    const danger = harness.overlays.hitChildren().find(region =>
+      region.action.kind === 'overlay' && region.action.optionId === 'confirm'
+    )
+    expect(danger).toMatchObject({ activation: 'enter-only', hover: 'none' })
+    expect(harness.overlays.handleHover('confirm')).toBe(true)
     const first = harness.overlays.handleOptionClick('confirm')
     expect(first).toBe('danger')
     const second = harness.overlays.handleOptionClick('confirm')
@@ -496,6 +501,11 @@ describe('Clarify OverlayQueue wrapping', () => {
       expect(plain(harness.component().render(80))).toContain('Save')
     })
     harness.component().render(80)
+    const save = harness.overlays.hitChildren().find(region =>
+      region.action.kind === 'overlay' && region.action.optionId === 'save'
+    )
+    expect(save).toMatchObject({ activation: 'arm', hover: 'highlight' })
+    expect(harness.overlays.handleHover('save')).toBe(true)
     expect(harness.overlays.handleOptionClick('save')).toBe('focused')
     expect(harness.overlays.hitChildren().some(region => region.action.kind === 'overlay' && region.action.optionId === 'save')).toBe(true)
     expect(harness.overlays.handleOptionClick('save')).toBe('activated')

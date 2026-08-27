@@ -134,6 +134,7 @@ export function normalizeBehavior(value: unknown): TuiBehaviorSettings {
     diffContextLines: diffContextLinesOf(record.diffContextLines),
     dangerConfirmDefault: dangerConfirmDefaultOf(record.dangerConfirmDefault),
     mouseMode: mouseModeOf(record.mouseMode),
+    hoverFeedback: booleanOf(record.hoverFeedback, DEFAULT_TUI_BEHAVIOR.hoverFeedback),
     scrollbarVisibility: scrollbarVisibilityOf(record.scrollbarVisibility),
     copyOnSelect: booleanOf(record.copyOnSelect, DEFAULT_TUI_BEHAVIOR.copyOnSelect),
     wheelScrollLines: wheelScrollLinesOf(record.wheelScrollLines),

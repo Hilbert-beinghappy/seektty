@@ -1336,6 +1336,7 @@ export class Transcript implements Component, Focusable {
     readonly kind: 'tool' | 'example'
     readonly id: string
   }[] = []
+  private hoveredRegionId: string | undefined
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1463,12 +1464,22 @@ export class Transcript implements Component, Focusable {
       zIndex: 11,
       role: control.kind === 'tool' ? 'button' : 'option',
       enabled: true,
+      activation: control.kind === 'tool' ? 'direct' : 'arm',
+      hover: 'highlight',
       action: {
         kind: 'transcript',
         command: control.kind === 'tool' ? 'toggle' : 'example',
         targetKey: control.id,
       },
     }))
+  }
+
+  /** Set a visual-only transcript target hover without changing keyboard focus or card state. */
+  setHoveredRegion(id?: string): boolean {
+    const next = id?.startsWith('transcript:') === true ? id : undefined
+    if (this.hoveredRegionId === next) return false
+    this.hoveredRegionId = next
+    return true
   }
 
   /**
@@ -2150,7 +2161,14 @@ export class Transcript implements Component, Focusable {
       })
     }
     const totalRows = Math.max(1, Math.floor(this.viewportRows()))
-    const body = lines.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
+    const body = lines.map((line, row) => {
+      const content = line === '' ? '' : `${' '.repeat(inset)}${line}`
+      const control = this.lastPointerControls.find(candidate => candidate.row === row)
+      const controlId = control === undefined ? undefined : `transcript:${control.kind}:${control.id}`
+      return controlId !== undefined && controlId === this.hoveredRegionId
+        ? background.selection(content)
+        : content
+    })
     const withSearch = this.search === undefined
       ? body
       : (() => {
@@ -2174,7 +2192,10 @@ export class Transcript implements Component, Focusable {
       loadingOlder: this.loadingOlder,
     })
     this.lastScrollbar = model
-    return appendScrollbarColumn(withSearch, paintScrollbar(model), width)
+    const hoveredScrollbar = this.hoveredRegionId?.startsWith('transcript:scrollbar:') === true
+      ? this.hoveredRegionId.slice('transcript:scrollbar:'.length)
+      : undefined
+    return appendScrollbarColumn(withSearch, paintScrollbar(model, hoveredScrollbar), width)
   }
 
   private captureViewportMaps(

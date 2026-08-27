@@ -85,6 +85,12 @@ export type MouseSemanticEvent =
     readonly kind: 'focus'
     readonly focused: boolean
   }
+  | {
+    readonly kind: 'hover'
+    readonly point: CellPoint
+    readonly region?: HitRegion
+    readonly modifiers: MouseModifiers
+  }
 
 export interface MouseControllerCounters {
   parsedMouseEvents: number
@@ -105,7 +111,7 @@ export interface MouseControllerOutcome {
 
 export interface MouseControllerOptions {
   getHitMap: () => HitMapSnapshot | undefined
-  getBehavior: () => Pick<TuiBehaviorSettings, 'mouseMode' | 'wheelScrollLines' | 'wheelAcceleration'>
+  getBehavior: () => Pick<TuiBehaviorSettings, 'mouseMode' | 'hoverFeedback' | 'wheelScrollLines' | 'wheelAcceleration'>
   now?: () => number
   setTimeout?: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>
   clearTimeout?: (id: ReturnType<typeof setTimeout>) => void
@@ -148,6 +154,7 @@ export class MouseController {
   private wheelStreak = 1
   private lastWheelAt = 0
   private lastWheelDir = 0
+  private hoveredTarget: string | undefined
 
   constructor(private readonly options: MouseControllerOptions) {
     this.now = options.now ?? Date.now
@@ -189,9 +196,11 @@ export class MouseController {
     if (input.kind === 'focus') return this.handleFocus(input.focused)
     if (this.mode === 'native') {
       this.endGesture()
+      this.clearHover()
       return { consume: true }
     }
     if (input.kind === 'wheel') return this.handleWheel(input)
+    if (input.kind === 'move') return this.handleMove(input)
     if (input.kind === 'press') return this.handlePress(input)
     if (input.kind === 'drag') return this.handleDrag(input)
     return this.handleRelease(input)
@@ -203,6 +212,13 @@ export class MouseController {
 
   recordMouseRender(): void {
     this.counters.mouseRenderRequests += 1
+  }
+
+  /** Clear the last hover identity; returns whether presentation must be repainted. */
+  clearHover(): boolean {
+    if (this.hoveredTarget === undefined) return false
+    this.hoveredTarget = undefined
+    return true
   }
 
   endGesture(): void {
@@ -218,6 +234,7 @@ export class MouseController {
     this.clickCount = 0
     this.clickButton = undefined
     this.clickTarget = undefined
+    this.hoveredTarget = undefined
     this.counters.edgeScrollTimers = 0
   }
 
@@ -229,6 +246,7 @@ export class MouseController {
       this.clickTarget = undefined
       this.clearTimer('click')
       this.endGesture()
+      this.clearHover()
       return { consume: true, semantic: { kind: 'focus', focused: false } }
     }
     if (this.seenFocusOut) this.observedFocusCycle = true
@@ -272,6 +290,36 @@ export class MouseController {
       scrollTranscript: lines,
       requestRender: true,
       semantic,
+    }
+  }
+
+  private handleMove(input: Extract<MouseInput, { kind: 'move' }>): MouseControllerOutcome {
+    if (!this.options.getBehavior().hoverFeedback) {
+      const changed = this.clearHover()
+      return changed
+        ? {
+          consume: true,
+          requestRender: true,
+          semantic: { kind: 'hover', point: input.point, modifiers: input.modifiers },
+        }
+        : { consume: true }
+    }
+    const hit = this.lookup(input.point)
+    const region = hit?.region.enabled === true && hit.region.hover === 'highlight'
+      ? hit.region
+      : undefined
+    const target = region?.id
+    if (target === this.hoveredTarget) return { consume: true }
+    this.hoveredTarget = target
+    return {
+      consume: true,
+      requestRender: true,
+      semantic: {
+        kind: 'hover',
+        point: input.point,
+        ...(region === undefined ? {} : { region }),
+        modifiers: input.modifiers,
+      },
     }
   }
 
@@ -420,7 +468,6 @@ export class MouseController {
       this.clickTarget = undefined
     }, DOUBLE_CLICK_MS)
     const suppressed = now < this.suppressUntil
-      || (pressed.region?.role === 'button' && capped > 1)
     const hit = this.lookup(input.point)
     return {
       consume: true,

@@ -48,6 +48,7 @@ describe('seektty-behavior settings', () => {
       diffContextLines: 3,
       dangerConfirmDefault: 'cancel',
       mouseMode: 'full',
+      hoverFeedback: true,
       scrollbarVisibility: 'always',
       copyOnSelect: true,
       wheelScrollLines: 3,
@@ -78,12 +79,14 @@ describe('seektty-behavior settings', () => {
     })
     expect(normalizeBehavior({
       mouseMode: 'native',
+      hoverFeedback: false,
       scrollbarVisibility: 'hidden',
       copyOnSelect: false,
       wheelScrollLines: 1,
       wheelAcceleration: false,
     })).toMatchObject({
       mouseMode: 'native',
+      hoverFeedback: false,
       scrollbarVisibility: 'hidden',
       copyOnSelect: false,
       wheelScrollLines: 1,

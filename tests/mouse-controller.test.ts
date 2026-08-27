@@ -25,6 +25,8 @@ function snapshot(generation: number, role: 'text' | 'button' = 'text'): HitMapS
       zIndex: 10,
       role,
       enabled: true,
+      activation: role === 'button' ? 'direct' : 'select',
+      hover: role === 'button' ? 'highlight' : 'none',
       action: { kind: 'transcript', command: role === 'button' ? 'toggle' : 'select' },
     })
     .freeze(geometry)
@@ -46,6 +48,10 @@ function wheel(delta: 1 | -1, point = { col: 2, row: 2 }): MouseInput {
     point,
     modifiers: { shift: false, alt: false, ctrl: false },
   }
+}
+
+function move(point = { col: 2, row: 2 }): MouseInput {
+  return { kind: 'move', point, modifiers: { shift: false, alt: false, ctrl: false } }
 }
 
 describe('mouse controller skeleton', () => {
@@ -109,6 +115,76 @@ describe('mouse controller skeleton', () => {
     })
     const released = controller.handle(release({ col: 4, row: 4 }))
     expect(released.semantic?.kind).not.toBe('click')
+  })
+
+  it('does not suppress repeated direct button clicks', () => {
+    let now = 1_000
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1, 'button'),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      now: () => now,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+    controller.handle(press())
+    expect(controller.handle(release()).semantic).toMatchObject({ kind: 'click', count: 1, suppressed: false })
+    now += 10
+    controller.handle(press())
+    expect(controller.handle(release()).semantic).toMatchObject({ kind: 'click', count: 2, suppressed: false })
+  })
+
+  it('coalesces a thousand moves inside one hover target to one transition', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1, 'button'),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+    })
+    const outcomes = Array.from({ length: 1_000 }, (_, index) => (
+      controller.handle(move({ col: index % 80, row: 2 }))
+    ))
+    expect(outcomes.filter(outcome => outcome.semantic?.kind === 'hover')).toHaveLength(1)
+    expect(outcomes.filter(outcome => outcome.requestRender === true)).toHaveLength(1)
+    controller.handle({ kind: 'focus', focused: false })
+    expect(controller.handle(move()).semantic).toMatchObject({ kind: 'hover', region: { id: 'transcript:tool:a' } })
+  })
+
+  it('does not create hover transitions when hover feedback is disabled', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1, 'button'),
+      getBehavior: () => ({ ...DEFAULT_TUI_BEHAVIOR, hoverFeedback: false }),
+    })
+    expect(controller.handle(move())).toEqual({ consume: true })
+  })
+
+  it('emits a new visual transition only when the hovered target identity changes', () => {
+    const map = new HitMapBuilder(1)
+      .add({
+        id: 'chrome:model',
+        rect: { col: 0, row: 0, width: 10, height: 1 },
+        zIndex: 10,
+        role: 'button',
+        enabled: true,
+        activation: 'direct',
+        hover: 'highlight',
+        action: { kind: 'chrome', commandId: 'model' },
+      })
+      .add({
+        id: 'chrome:mode',
+        rect: { col: 10, row: 0, width: 10, height: 1 },
+        zIndex: 10,
+        role: 'button',
+        enabled: true,
+        activation: 'direct',
+        hover: 'highlight',
+        action: { kind: 'chrome', commandId: 'mode' },
+      })
+      .freeze(geometry)
+    const controller = createMouseController({
+      getHitMap: () => map,
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+    })
+    expect(controller.handle(move({ col: 2, row: 0 })).semantic).toMatchObject({ region: { id: 'chrome:model' } })
+    expect(controller.handle(move({ col: 3, row: 0 })).semantic).toBeUndefined()
+    expect(controller.handle(move({ col: 12, row: 0 })).semantic).toMatchObject({ region: { id: 'chrome:mode' } })
   })
 
   it('keeps the press origin and owner through the final selection release', () => {

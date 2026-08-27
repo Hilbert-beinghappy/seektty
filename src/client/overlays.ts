@@ -19,7 +19,7 @@ import {
 } from '@mariozechner/pi-tui'
 import { translateUiText, ui } from './locale.ts'
 import { formatBusyFooter, lastOutputLines } from './busy-status.ts'
-import { color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
+import { background, color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
 import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
 import type { HitRegion } from './mouse-hit-map.ts'
 
@@ -258,6 +258,7 @@ export type OverlayMouseClickResult = 'focused' | 'activated' | 'danger' | 'none
 
 interface OverlayMouseTarget {
   hitChildren(): readonly HitRegion[]
+  handleHover(optionId?: string): boolean
   handleOptionClick(optionId: string): OverlayMouseClickResult
   activateArmedOption(): OverlayMouseClickResult
 }
@@ -267,7 +268,8 @@ interface OverlayWheelTarget {
 }
 
 function isOverlayMouseTarget(value: Component): value is Component & OverlayMouseTarget {
-  return 'hitChildren' in value && 'handleOptionClick' in value && 'activateArmedOption' in value
+  return 'hitChildren' in value && 'handleHover' in value
+    && 'handleOptionClick' in value && 'activateArmedOption' in value
 }
 
 function isOverlayWheelTarget(value: Component): value is Component & OverlayWheelTarget {
@@ -322,6 +324,7 @@ class SearchSelectOverlay implements Component {
   private notice = ''
   private lastHits: readonly HitRegion[] = []
   private armedOptionId: string | undefined
+  private hoveredOptionId: string | undefined
 
   constructor(
     private request: SelectOverlayRequest,
@@ -367,21 +370,32 @@ class SearchSelectOverlay implements Component {
       lines.push(`${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
     }
     const listStart = lines.length
-    const listLines = this.list.render(safeWidth)
+    const listLines = [...this.list.render(safeWidth)]
+    const maxVisible = this.request.maxVisible ?? 10
+    const window = selectVisibleWindow(this.filtered.length, this.list.getSelectedIndex(), maxVisible)
+    const hoveredIndex = this.hoveredOptionId === undefined
+      ? -1
+      : this.filtered.findIndex(choice => choice.id === this.hoveredOptionId)
+    const hoveredRow = hoveredIndex - window.start
+    if (hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
+      listLines[hoveredRow] = background.selection(listLines[hoveredRow] ?? '')
+    }
     lines.push(...listLines)
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
     lines.push(color.muted(translateUiText(this.request.footer ?? ui(
       'Enter 选择 · Esc 返回',
       'Enter select · Esc back',
     ))))
-    const maxVisible = this.request.maxVisible ?? 10
-    const window = selectVisibleWindow(this.filtered.length, this.list.getSelectedIndex(), maxVisible)
     this.lastHits = this.filtered.slice(window.start, window.end).map((choice, index) => ({
       id: `overlay:option:${choice.id}`,
       rect: { col: 1, row: 1 + listStart + index, width: Math.max(1, width - 2), height: 1 },
       zIndex: 1,
       role: 'option',
       enabled: choice.disabledReason === undefined,
+      activation: this.request.mouseExecute === 'focus-only' ? 'enter-only' : 'arm',
+      hover: choice.disabledReason === undefined && this.request.mouseExecute !== 'focus-only'
+        ? 'highlight'
+        : 'none',
       action: { kind: 'overlay', command: 'focus', optionId: choice.id },
     }))
     return modalFrame(this.request.title, lines, width)
@@ -389,6 +403,12 @@ class SearchSelectOverlay implements Component {
 
   hitChildren(): readonly HitRegion[] {
     return this.lastHits
+  }
+
+  handleHover(optionId?: string): boolean {
+    if (this.hoveredOptionId === optionId) return false
+    this.hoveredOptionId = optionId
+    return true
   }
 
   handleOptionClick(optionId: string): OverlayMouseClickResult {
@@ -625,6 +645,7 @@ class MultiSelectOverlay implements Component {
   private notice = ''
   private lastHits: readonly HitRegion[] = []
   private armedOptionId: string | undefined
+  private hoveredOptionId: string | undefined
 
   constructor(
     private readonly request: SelectOverlayRequest,
@@ -652,15 +673,24 @@ class MultiSelectOverlay implements Component {
       ...(this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, safeWidth)),
       `${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
     ]
-    const listLines = this.list.render(safeWidth)
+    const listLines = [...this.list.render(safeWidth)]
     const maxVisible = this.request.maxVisible ?? 10
     const window = selectVisibleWindow(this.filtered.length, this.list.getSelectedIndex(), maxVisible)
+    const hoveredIndex = this.hoveredOptionId === undefined
+      ? -1
+      : this.filtered.findIndex(choice => choice.id === this.hoveredOptionId)
+    const hoveredRow = hoveredIndex - window.start
+    if (hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
+      listLines[hoveredRow] = background.selection(listLines[hoveredRow] ?? '')
+    }
     this.lastHits = this.filtered.slice(window.start, window.end).map((choice, index) => ({
       id: `overlay:option:${choice.id}`,
       rect: { col: 1, row: 1 + prefix.length + index, width: Math.max(1, width - 2), height: 1 },
       zIndex: 1,
       role: 'option',
       enabled: true,
+      activation: 'arm',
+      hover: 'highlight',
       action: { kind: 'overlay', command: 'focus', optionId: choice.id },
     }))
     return modalFrame(this.request.title, [
@@ -676,6 +706,12 @@ class MultiSelectOverlay implements Component {
 
   hitChildren(): readonly HitRegion[] {
     return this.lastHits
+  }
+
+  handleHover(optionId?: string): boolean {
+    if (this.hoveredOptionId === optionId) return false
+    this.hoveredOptionId = optionId
+    return true
   }
 
   handleOptionClick(optionId: string): OverlayMouseClickResult {
@@ -946,6 +982,13 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     return component !== undefined && isOverlayMouseTarget(component)
       ? component.handleOptionClick(optionId)
       : 'none'
+  }
+
+  handleHover(optionId?: string): boolean {
+    const component = this.current()?.component
+    return component !== undefined && isOverlayMouseTarget(component)
+      ? component.handleHover(optionId)
+      : false
   }
 
   handleWheel(lines: number): boolean {
@@ -1411,6 +1454,14 @@ export class OverlayQueue implements OverlayPrompts {
       const value = await navigation.secretInput(request)
       navigation.finish(value)
     }, request.options)
+  }
+
+  /** Apply a visual-only option hover without moving keyboard focus or arming an action. */
+  handleHover(optionId?: string): boolean {
+    const component = this.active?.component
+    return component !== undefined && isOverlayMouseTarget(component)
+      ? component.handleHover(optionId)
+      : false
   }
 
   secretTransaction<T>(request: SecretTransactionRequest<T>): Promise<T | undefined> {

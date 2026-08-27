@@ -96,7 +96,7 @@ import {
 import { MouseProtocolDecoder, type CellPoint } from './mouse-protocol.ts'
 import { createMouseController, type MouseSemanticEvent } from './mouse-controller.ts'
 import { mouseContextChoices } from './mouse-context-menu.ts'
-import { emptyHitMap, finalizeHitMap, HitMapBuilder } from './mouse-hit-map.ts'
+import { emptyHitMap, finalizeHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
 import { emptyFrameGeometry, editorMouseApi, tuiFrameApi } from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
@@ -205,7 +205,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
     applyKeyBindingOverrides(liveBehavior.get().keyBindings)
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
-    terminalSession.setMouseReporting(liveBehavior.get().mouseMode)
+    terminalSession.setMouseReporting(
+      liveBehavior.get().mouseMode,
+      liveBehavior.get().hoverFeedback,
+    )
     setTheme(initialTheme)
     const tui = new TUI(terminal, true)
     const requestTuiRender = tui.requestRender.bind(tui)
@@ -334,16 +337,19 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     tui.setFocus(editor)
 
     let mouseController!: ReturnType<typeof createMouseController>
+    let clearHoverPresentation = (): boolean => false
     let extendTranscriptPointerAtEdge = (_edge: 'older' | 'newer', _point: CellPoint): void => undefined
     const overlays = new OverlayQueue(tui, () => {
       mouseController.endGesture()
       clearTranscriptPointerGesture()
+      clearHoverPresentation()
     })
     const mouseDecoder = new MouseProtocolDecoder()
     let mouseInputFlushTimer: ReturnType<typeof setTimeout> | undefined
     let replayingMouseInput = false
     let hitMap = emptyHitMap(0, terminal.columns, terminal.rows)
     const freezeHitMap = (): void => {
+      const resized = hitMap.terminalWidth !== terminal.columns || hitMap.terminalHeight !== terminal.rows
       const geometry = tuiFrameApi(tui).getLastFrameGeometry?.()
         ?? emptyFrameGeometry(terminal.columns, terminal.rows)
       const builder = new HitMapBuilder(hitMap.generation + 1)
@@ -355,6 +361,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           zIndex: 10,
           role: 'passive',
           enabled: true,
+          activation: 'none',
+          hover: 'none',
           action: { kind: 'chrome', commandId: 'context' },
         })
         builder.add({
@@ -363,6 +371,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           zIndex: 10,
           role: 'text',
           enabled: true,
+          activation: 'select',
+          hover: 'none',
           action: { kind: 'transcript', command: 'select' },
         })
         for (const region of transcript.scrollbarHitRegions(slots.transcript)) {
@@ -380,6 +390,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             zIndex: 20,
             role: 'input',
             enabled: true,
+            activation: 'select',
+            hover: 'none',
             action: { kind: 'composer', command: 'focus' },
           })
         } else {
@@ -389,6 +401,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             zIndex: 20,
             role: 'input',
             enabled: true,
+            activation: 'select',
+            hover: 'none',
             action: { kind: 'composer', command: 'caret' },
           }, composerOrigin)
           if (local.autocomplete.height > 0) {
@@ -398,6 +412,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               zIndex: 21,
               role: 'option',
               enabled: true,
+              activation: 'arm',
+              hover: 'highlight',
               action: { kind: 'composer', command: 'autocomplete' },
             }, composerOrigin)
           }
@@ -408,6 +424,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               zIndex: 20,
               role: 'passive',
               enabled: true,
+              activation: 'none',
+              hover: 'none',
               action: { kind: 'composer', command: 'focus' },
             }, composerOrigin)
           }
@@ -417,6 +435,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             zIndex: 20,
             role: 'passive',
             enabled: true,
+            activation: 'none',
+            hover: 'none',
             action: { kind: 'chrome', commandId: 'composer-facts' },
           }, composerOrigin)
           for (const token of editor.lastFactTokens()) {
@@ -426,6 +446,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               zIndex: 21,
               role: 'button',
               enabled: true,
+              activation: 'direct',
+              hover: 'highlight',
               action: { kind: 'chrome', commandId: token.id },
             }, composerOrigin)
           }
@@ -436,6 +458,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           zIndex: 10,
           role: 'passive',
           enabled: true,
+          activation: 'none',
+          hover: 'none',
           action: { kind: 'chrome', commandId: 'status' },
         })
         for (const token of status.lastTokens()) {
@@ -445,6 +469,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             zIndex: 11,
             role: 'button',
             enabled: true,
+            activation: 'direct',
+            hover: 'highlight',
             action: { kind: 'chrome', commandId: token.id },
           }, { col: slots.status.col, row: slots.status.row })
         }
@@ -457,6 +483,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           ? undefined
           : { overlayId, children: [...overlays.hitChildren()] },
       )
+      if (resized) {
+        clearTranscriptPointerGesture()
+        if (clearHoverPresentation()) tui.requestRender()
+      }
     }
     tuiFrameApi(tui).onAfterRender = freezeHitMap
     mouseController = createMouseController({
@@ -488,6 +518,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const updateTranscript = (current: TuiActiveSession): void => {
+      clearHoverPresentation()
       performanceProbe.markSnapshot()
       transcript.update(current.session.getSnapshot(), async (attachment) => {
         const result = await current.session.readAttachment(attachment.attachmentId)
@@ -758,9 +789,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         liveBehavior.apply(behavior)
         applyKeyBindingOverrides(behavior.keyBindings)
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
-        terminalSession.setMouseReporting(behavior.mouseMode)
+        terminalSession.setMouseReporting(behavior.mouseMode, behavior.hoverFeedback)
         mouseController.endGesture()
         clearTranscriptPointerGesture()
+        clearHoverPresentation()
         transcript.setScrollbarVisibility(behavior.scrollbarVisibility)
         transcript.applyPresentationDefaults(
           behavior.toolCards,
@@ -1189,6 +1221,31 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       focusEditor()
     }
 
+    const applyHoverPresentation = (region: HitRegion | undefined): boolean => {
+      const id = region?.id
+      const transcriptChanged = transcript.setHoveredRegion(id)
+      const editorChanged = editor.setHoveredTarget(
+        id === 'composer:autocomplete' || id?.startsWith('chrome:model') === true
+          || id?.startsWith('chrome:mode') === true
+          ? id
+          : undefined,
+      )
+      const statusId = region?.action.kind === 'chrome'
+        && (region.action.commandId === 'permission' || region.action.commandId === 'detail')
+        ? region.action.commandId
+        : undefined
+      const statusChanged = status.setHoveredToken(statusId)
+      const overlayChanged = overlays.handleHover(
+        region?.action.kind === 'overlay' ? region.action.optionId : undefined,
+      )
+      return transcriptChanged || editorChanged || statusChanged || overlayChanged
+    }
+
+    clearHoverPresentation = (): boolean => {
+      const controllerChanged = mouseController.clearHover()
+      return applyHoverPresentation(undefined) || controllerChanged
+    }
+
     const dispatchMouseClick = (semantic: Extract<MouseSemanticEvent, { kind: 'click' }>): void => {
       clearTranscriptPointerGesture()
       const region = semantic.region
@@ -1298,6 +1355,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       let pendingWheel = 0
       let needMouseRender = false
       for (const event of decoded.events) {
+        if (event.kind !== 'move' && event.kind !== 'focus' && clearHoverPresentation()) {
+          needMouseRender = true
+        }
         const outcome = mouseController.handle(event)
         if (outcome.semantic?.kind === 'wheel') {
           const region = outcome.semantic.region
@@ -1332,8 +1392,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             applyTranscriptPointer(semantic.point, semantic.origin, 'character', semantic.ended === true)
           }
           if (semantic.ended === true && liveBehavior.get().copyOnSelect) copyActiveSelection()
+        } else if (outcome.semantic?.kind === 'hover') {
+          applyHoverPresentation(outcome.semantic.region)
         } else if (outcome.semantic?.kind === 'focus' && !outcome.semantic.focused) {
           clearTranscriptPointerGesture()
+          clearHoverPresentation()
         }
         if (outcome.requestRender === true) needMouseRender = true
       }
@@ -1363,6 +1426,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const payload = decoded.events.length > 0 ? decoded.leftover : data
       if (payload === '') return { consume: true }
       clearTranscriptPointerGesture()
+      if (clearHoverPresentation()) renderWhileOpen()
       if (matchesBinding('toggleMouseMode', payload)) {
         void actions.execute('mouse', 'toggle')
         return { consume: true }

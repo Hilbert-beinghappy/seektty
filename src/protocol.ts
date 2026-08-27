@@ -139,6 +139,7 @@ export interface TuiBehaviorSettings {
   readonly diffContextLines: number
   readonly dangerConfirmDefault: TuiDangerConfirmDefault
   readonly mouseMode: TuiMouseMode
+  readonly hoverFeedback: boolean
   readonly scrollbarVisibility: TuiScrollbarVisibility
   readonly copyOnSelect: boolean
   readonly wheelScrollLines: number
@@ -165,6 +166,7 @@ export const DEFAULT_TUI_BEHAVIOR: TuiBehaviorSettings = Object.freeze({
   diffContextLines: 3,
   dangerConfirmDefault: 'cancel',
   mouseMode: 'full',
+  hoverFeedback: true,
   scrollbarVisibility: 'always',
   copyOnSelect: true,
   wheelScrollLines: DEFAULT_WHEEL_SCROLL_LINES,

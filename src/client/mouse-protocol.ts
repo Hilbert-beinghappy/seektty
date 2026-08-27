@@ -47,6 +47,11 @@ export type MouseInput =
     readonly modifiers: MouseModifiers
   }
   | {
+    readonly kind: 'move'
+    readonly point: CellPoint
+    readonly modifiers: MouseModifiers
+  }
+  | {
     readonly kind: 'wheel'
     readonly axis: 'vertical' | 'horizontal'
     readonly delta: number
@@ -71,21 +76,23 @@ export const ENTER_ALTERNATE_SCREEN = `${CSI}?1049h${ESC}[H`
 export const LEAVE_ALTERNATE_SCREEN = `${CSI}?25h${CSI}?1049l`
 
 /**
- * Full mouse: drag reporting (`1002`) + SGR (`1006`) + focus (`1004`).
- * `1000` is disabled once `1002` is on; never enable `1003`.
+ * Full mouse uses all-motion `1003` only when hover feedback is enabled.
+ * Otherwise it keeps button-motion `1002`; both variants retain SGR and focus.
  */
-export function encodeFullMouseReporting(): string {
-  return `${CSI}?1000l${CSI}?1003l${CSI}?1007l${CSI}?1002h${CSI}?1004h${CSI}?1006h`
+export function encodeFullMouseReporting(hoverFeedback = true): string {
+  return hoverFeedback
+    ? `${CSI}?1000l${CSI}?1002l${CSI}?1007l${CSI}?1003h${CSI}?1004h${CSI}?1006h`
+    : `${CSI}?1000l${CSI}?1003l${CSI}?1007l${CSI}?1002h${CSI}?1004h${CSI}?1006h`
 }
 
-/** Close every mouse/focus private mode, including `1004`. Never enables `1003`. */
+/** Close every mouse/focus private mode, including `1003` and `1004`. */
 export function encodeDisableMouseReporting(): string {
   return `${CSI}?1000l${CSI}?1002l${CSI}?1003l${CSI}?1004l${CSI}?1006l${CSI}?1007l`
 }
 
 /** Encode the live mouse/focus private-mode sequence for one reporting mode. */
-export function encodeMouseReporting(mode: 'full' | 'native'): string {
-  return mode === 'native' ? encodeDisableMouseReporting() : encodeFullMouseReporting()
+export function encodeMouseReporting(mode: 'full' | 'native', hoverFeedback = true): string {
+  return mode === 'native' ? encodeDisableMouseReporting() : encodeFullMouseReporting(hoverFeedback)
 }
 
 function modifiersOf(code: number): MouseModifiers {
@@ -140,7 +147,10 @@ function decodeSgr(code: number, column: number, row: number, terminator: 'M' | 
     return { kind: 'release', button: buttonOf(base), point, modifiers }
   }
   if ((base & MOTION_BIT) !== 0) {
-    return { kind: 'drag', button: buttonOf(base), point, modifiers }
+    const button = buttonOf(base)
+    return button === 'none'
+      ? { kind: 'move', point, modifiers }
+      : { kind: 'drag', button, point, modifiers }
   }
   return { kind: 'press', button: buttonOf(base), point, modifiers }
 }

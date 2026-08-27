@@ -38,6 +38,9 @@ describe('settings schema locale metadata (review #57)', () => {
     const elapsed = settingsFields(behavior).find(field => field.path[0] === 'statusElapsed')
     expect(elapsed?.description).toContain('elapsed')
     expect(elapsed?.description).not.toMatch(HAN)
+    const hover = settingsFields(behavior).find(field => field.path[0] === 'hoverFeedback')
+    expect(hover?.description).toContain('pointer')
+    expect(hover?.description).not.toMatch(HAN)
 
     setUiLocale('zh')
     expect(settingsFields(appearance).find(field => field.path[0] === 'theme')?.description).toContain('界面主题')

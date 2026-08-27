@@ -12,14 +12,18 @@ const sgr = (code: number, col = 4, row = 8, release = false): string =>
   `\u001B[<${String(code)};${String(col)};${String(row)}${release ? 'm' : 'M'}`
 
 describe('mouse protocol encoding', () => {
-  it('never enables 1003 and uses 1002+1004+1006 for application-owned selection', () => {
+  it('uses 1003 for enabled hover and falls back to 1002 when hover is disabled', () => {
     const full = encodeFullMouseReporting()
-    expect(full).toContain('\u001B[?1002h')
+    expect(full).toContain('\u001B[?1003h')
+    expect(full).toContain('\u001B[?1002l')
     expect(full).toContain('\u001B[?1004h')
     expect(full).toContain('\u001B[?1006h')
     expect(full).toContain('\u001B[?1000l')
-    expect(full).not.toContain('\u001B[?1003h')
     expect(full).not.toContain('\u001B[?1049')
+    const noHover = encodeFullMouseReporting(false)
+    expect(noHover).toContain('\u001B[?1002h')
+    expect(noHover).toContain('\u001B[?1003l')
+    expect(noHover).not.toContain('\u001B[?1003h')
     expect(encodeDisableMouseReporting()).toContain('\u001B[?1004l')
     expect(encodeDisableMouseReporting()).not.toContain('\u001B[?1003h')
     expect(encodeMouseReporting('native')).toBe(encodeDisableMouseReporting())
@@ -49,6 +53,7 @@ describe('SGR classification', () => {
     expect(decodeMouseSequence(sgr(2))).toMatchObject({ kind: 'press', button: 'right' })
     expect(decodeMouseSequence(sgr(34))).toMatchObject({ kind: 'drag', button: 'right' })
     expect(decodeMouseSequence(sgr(36))).toMatchObject({ kind: 'drag', button: 'left', modifiers: { shift: true } })
+    expect(decodeMouseSequence(sgr(35))).toMatchObject({ kind: 'move', point: { col: 3, row: 7 } })
     expect(decodeMouseSequence(sgr(0, 4, 8, true))).toMatchObject({ kind: 'release', button: 'left' })
   })
 

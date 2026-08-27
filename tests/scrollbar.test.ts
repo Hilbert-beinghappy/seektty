@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   offsetForTrackRow,
   paintScrollbar,
@@ -6,6 +6,7 @@ import {
   scrollbarModel,
   SCROLLBAR_MIN_WIDTH,
 } from '../src/client/scrollbar.ts'
+import { color } from '../src/client/theme.ts'
 
 function strip(value: string): string {
   return value.replace(/\u001B\[[0-9;:]*m/gu, '')
@@ -109,6 +110,28 @@ describe('resident scrollbar geometry', () => {
     expect(regions.some(region => region.id === 'transcript:scrollbar:thumb')).toBe(true)
     expect(regions.every(region => region.rect.col === 79)).toBe(true)
     expect(regions.every(region => region.rect.width === 1)).toBe(true)
+    expect(regions.every(region => region.hover === 'highlight')).toBe(true)
+    expect(regions.find(region => region.id.endsWith(':thumb'))?.activation).toBe('drag')
+  })
+
+  it('changes only the hovered scrollbar part presentation', () => {
+    const brand = vi.spyOn(color, 'brand')
+    const model = scrollbarModel({
+      rows: 10,
+      contentWidth: 40,
+      startOffset: 20,
+      loadedTotal: 40,
+      estimated: false,
+      hasMore: true,
+      hasNewer: true,
+      loadingOlder: false,
+    })
+    const normal = paintScrollbar(model)
+    const hovered = paintScrollbar(model, 'cap-older')
+    expect(strip(hovered[0] ?? '')).toBe(strip(normal[0] ?? ''))
+    expect(brand).toHaveBeenCalledWith('▴')
+    expect(hovered.slice(1)).toEqual(normal.slice(1))
+    brand.mockRestore()
   })
 
   it('keeps the minimum terminal width at 12 columns', () => {

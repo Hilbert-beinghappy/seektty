@@ -144,8 +144,14 @@ describe('per-card tool expand', () => {
     const rendered = stripAnsi(transcript.render(80).join('\n'))
     expect(rendered).toContain('result-b')
     expect(rendered).not.toContain('result-a')
+    expect(transcript.pointerToggleTool('b')).toEqual({ kind: 'tool', key: 'b' })
+    expect(stripAnsi(transcript.render(80).join('\n'))).not.toContain('result-b')
     const origin = { col: 0, row: 0, width: 80, height: 12 }
     const hits = transcript.controlHitRegions(origin)
-    expect(hits.some(region => region.id === 'transcript:tool:b' && region.action.kind === 'transcript' && region.action.command === 'toggle')).toBe(true)
+    expect(hits.some(region => region.id === 'transcript:tool:b'
+      && region.activation === 'direct'
+      && region.hover === 'highlight'
+      && region.action.kind === 'transcript'
+      && region.action.command === 'toggle')).toBe(true)
   })
 })

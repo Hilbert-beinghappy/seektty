@@ -82,17 +82,24 @@ export function scrollbarModel(options: {
 }
 
 /** One cell per viewport row. End-caps replace the first/last track cells. */
-export function paintScrollbar(model: ScrollbarModel): readonly string[] {
+export function paintScrollbar(model: ScrollbarModel, hoveredPart?: string): readonly string[] {
   const cells: string[] = Array.from({ length: model.rows }, (_, row) => {
     const inThumb = row >= model.thumbTop && row < model.thumbTop + model.thumbSize
     const glyph = inThumb ? THUMB : TRACK
-    return color.muted(glyph)
+    const olderTrack = row > 0 && row < Math.max(1, model.thumbTop)
+    const newerTrack = row >= model.thumbTop + model.thumbSize && row < model.rows - 1
+    const hovered = hoveredPart === 'thumb' && inThumb
+      || hoveredPart === 'track-older' && olderTrack
+      || hoveredPart === 'track-newer' && newerTrack
+    return hovered ? color.brand(glyph) : color.muted(glyph)
   })
   if (model.rows === 0) return cells
-  cells[0] = color.muted(model.loadingOlder ? OLDER_LOADING : model.hasMore ? OLDER : (model.overflow ? TRACK : THUMB))
+  const older = model.loadingOlder ? OLDER_LOADING : model.hasMore ? OLDER : (model.overflow ? TRACK : THUMB)
+  cells[0] = hoveredPart === 'cap-older' ? color.brand(older) : color.muted(older)
   const last = model.rows - 1
   if (last > 0) {
-    cells[last] = color.muted(model.hasNewer ? NEWER : (model.overflow ? TRACK : THUMB))
+    const newer = model.hasNewer ? NEWER : (model.overflow ? TRACK : THUMB)
+    cells[last] = hoveredPart === 'cap-newer' ? color.brand(newer) : color.muted(newer)
   }
   return cells
 }
@@ -131,6 +138,8 @@ export function scrollbarHitRegions(
       zIndex: 11,
       role: 'scrollbar',
       enabled: true,
+      activation: command === 'drag-thumb' ? 'drag' : 'direct',
+      hover: 'highlight',
       action: { kind: 'transcript', command, targetKey: id },
     })
   }
