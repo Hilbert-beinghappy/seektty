@@ -5,6 +5,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/node-client'
 import { internals, Transcript } from '../src/client/transcript.ts'
 import type { TranscriptImagePayload } from '../src/client/transcript.ts'
+import { terminalMouseDelta } from '../src/client/terminal-session.ts'
 
 function assistant(key: string, text: string): ChatConversationViewNode {
   return {
@@ -321,6 +322,47 @@ describe('transcript block viewport', () => {
     expect(plain(transcript.render(80))).toContain('search-scroll-1')
     transcript.handleInput('\u001B[F')
     expect(plain(transcript.render(80))).toContain('search-scroll-29')
+    transcript.dispose()
+  })
+
+  it('keeps a searched Home viewport after one SGR wheel instead of jumping to the tail', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot(Array.from({ length: 40 }, (_, index) =>
+      assistant(`k-${String(index)}`, `token-${String(index)}`))))
+    transcript.render(80)
+    transcript.handleInput('/')
+    transcript.render(80)
+    transcript.handleInput('\u001B[H')
+    const afterHome = plain(transcript.render(80))
+    expect(afterHome).toContain('token-0')
+    expect(afterHome).not.toContain('token-39')
+
+    const downDelta = terminalMouseDelta('\u001B[<65;10;5M')
+    const upDelta = terminalMouseDelta('\u001B[<64;10;5M')
+    expect(downDelta).toBe(-3)
+    expect(upDelta).toBe(3)
+    expect(transcript.scrollBy(downDelta!)).toBe(true)
+    const afterWheel = plain(transcript.render(80))
+    expect(afterWheel).not.toContain('token-39')
+    expect(afterWheel).toContain('token-2')
+    expect(afterWheel).toMatch(/↑ 3 行更早内容/u)
+
+    const keyboard = new Transcript(() => 8)
+    keyboard.update(snapshot(Array.from({ length: 40 }, (_, index) =>
+      assistant(`k-${String(index)}`, `token-${String(index)}`))))
+    keyboard.render(80)
+    keyboard.handleInput('/')
+    keyboard.render(80)
+    keyboard.handleInput('\u001B[H')
+    expect(plain(keyboard.render(80))).toContain('token-0')
+    keyboard.handleInput('\u001B[B')
+    const afterKey = plain(keyboard.render(80))
+    expect(afterKey).toContain('token-1')
+    expect(afterKey).not.toContain('token-39')
+    keyboard.handleInput('\u001B[F')
+    expect(plain(keyboard.render(80))).toContain('token-39')
+    keyboard.dispose()
     transcript.dispose()
   })
 

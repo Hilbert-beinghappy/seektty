@@ -2250,7 +2250,11 @@ export class Transcript implements Component, Focusable {
     this.turnCursor = undefined
     const delta = Math.trunc(lines)
     if (!Number.isFinite(delta) || delta === 0) return false
-    if (this.search === undefined && !this.emptyState && this.viewportState !== undefined) {
+    if (this.search !== undefined) {
+      const rows = Math.max(1, Math.floor(this.viewportRows()) - 1)
+      return this.scrollSearchBy(delta, rows)
+    }
+    if (!this.emptyState && this.viewportState !== undefined) {
       if (delta < 0 && this.viewportAnchor.followLatest) return false
       const moved = this.moveViewportStart(
         this.viewportState.start,

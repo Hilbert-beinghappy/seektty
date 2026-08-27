@@ -66,6 +66,7 @@ describe('launcher arguments', () => {
   })
 
   it('rejects an empty Profile name', () => {
+    stubChineseLocale()
     expect(() => launcherArgs(['--profile'])).toThrow('--profile 需要一个 Profile 名称')
     expect(() => launcherArgs(['--profile='])).toThrow('--profile 需要一个 Profile 名称')
   })

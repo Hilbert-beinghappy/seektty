@@ -118,9 +118,7 @@ export const internals: {
       `deepseek: terminal cleanup failed: ${error.message}`,
     ))}\n`)
   },
-  reportPerformance: (snapshot) => {
-    process.stderr.write(`SEEKTTY_TUI_PERF ${JSON.stringify(snapshot)}\n`)
-  },
+  reportPerformance: () => undefined,
   startClient: startTuiClient,
 }
 
@@ -155,7 +153,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   const reportPerformance = (): void => {
     terminalInstrumentation.release()
     const snapshot = performanceProbe.finish()
-    if (snapshot !== undefined) internals.reportPerformance(snapshot)
+    if (snapshot === undefined) return
+    performanceProbe.reportFinal(snapshot)
+    internals.reportPerformance(snapshot)
   }
   let stopTuiRenderingSync = (): void => undefined
   const terminalSession = createTerminalSession(terminal, true, () => { stopTuiRenderingSync() })

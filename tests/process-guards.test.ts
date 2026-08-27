@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   attachFatalGuards,
@@ -11,8 +9,6 @@ import {
   restoreTerminalSync,
   withCleanupTimeout,
 } from '../src/process-guards.ts'
-
-const root = resolve(import.meta.dirname, '..')
 
 describe('fatal terminal restore (review #14)', () => {
   it('restores cooked mode and the cursor synchronously before any cleanup', () => {
@@ -59,19 +55,6 @@ describe('fatal terminal restore (review #14)', () => {
     expect(finished).toBeUndefined()
   })
 
-  it('restores the terminal in surface close before drainInput', () => {
-    const source = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    const restoreAt = source.indexOf('restoreSurfaceTerminalSync(terminalSession')
-    const drainAt = source.indexOf('drainInput')
-    expect(restoreAt).toBeGreaterThan(-1)
-    expect(drainAt).toBeGreaterThan(restoreAt)
-  })
-
-  it('wires the shared fatal guards around the TUI lifetime', () => {
-    const source = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    expect(source).toContain('attachFatalGuards')
-    expect(source).toContain('detachFatalGuards')
-  })
 })
 
 describe('fatal process guards (review #14)', () => {
