@@ -132,9 +132,12 @@ describe('out-of-tree Bundle contract', () => {
 
   it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')
+    const buildConfig = readFileSync(resolve(root, 'tsdown.config.ts'), 'utf8')
     expect(workflow).toContain('pnpm run check')
     expect(workflow).toContain('git diff --exit-code lib/')
     expect(workflow).toContain("'release/**'")
+    expect(buildConfig).toContain("attachDebugInfo: 'none'")
+    expect(readFileSync(resolve(root, 'lib/index.js'), 'utf8')).not.toContain('node_modules/.pnpm/')
   })
 
   it('tracks every packaged path so GitHub ref installs cannot omit files', () => {

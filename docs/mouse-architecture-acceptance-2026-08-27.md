@@ -3,7 +3,7 @@
 Rollback baseline: `9b8f712`
 Branch: `codex/complete-mouse-architecture`
 Candidate: SeekTTY `1.2.3`, official unmodified `@deepseek-ai/dsh@0.1.1-rc.2`, `@mariozechner/pi-tui@0.73.1`
-Candidate tarball: `seektty-1.2.3.tgz`, SHA-256 `E325C60803CAE6645FEF1AFAD4FAEC437DE914CC60022847D2783994E450808F`
+Candidate tarball: `seektty-1.2.3.tgz`, SHA-256 `1BC224EFFC06829641D33501AAC309CD3EC1C8AD9BC83F684838A43715EB54C7`
 Host: Windows NT 10.0.22631.0, Windows Terminal `1.24.11911.0`, Node `v26.1.0`
 Updated: 2026-08-28
 
@@ -15,7 +15,7 @@ This record contains no credential dumps, Session/Profile contents, raw terminal
 | --- | --- | --- |
 | `pnpm run typecheck` | Pass | `tsc --noEmit` |
 | `pnpm run test` | Pass | 103 files passed; 747 passed / 1 skipped. Includes separated-chunk click repaint, edge-drag dwell and a stable logical selection anchor across three viewports, visual-only hover distinct from selection, rendered autocomplete head/middle/tail windows, non-clickable scroll footer, stale-generation rejection, and a shared UTF-8 corpus for PowerShell, `pbcopy`, `wl-copy`, and `xclip`. |
-| `pnpm run build` | Pass | Tracked `lib/` rebuilt (`lib/index.js` 1487.38 kB) |
+| `pnpm run build` | Pass | Tracked `lib/` rebuilt reproducibly without local pnpm virtual-store paths (`lib/index.js` 1475.00 kB) |
 | `pnpm run pack:check` | Pass | 23 packaged entries; no `workspace:` deps; no credentials |
 | `pnpm run perf:tui` | Pass | Existing 100k-line structural TUI budget |
 | `pnpm run test:stock` | Pass | The exact hashed tarball completed isolated `DSH_HOME` install/boot/remove/reinstall/second boot and native `dsh plugin` reconciliation against unmodified official dsh `0.1.1-rc.2`. |
