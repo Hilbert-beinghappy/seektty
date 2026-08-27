@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   attachFatalGuards,
@@ -7,11 +5,10 @@ import {
   FATAL_SIGHUP_EXIT_CODE,
   FATAL_SIGTERM_EXIT_CODE,
   fatalLogHint,
+  restoreSurfaceTerminalSync,
   restoreTerminalSync,
   withCleanupTimeout,
 } from '../src/process-guards.ts'
-
-const root = resolve(import.meta.dirname, '..')
 
 describe('fatal terminal restore (review #14)', () => {
   it('restores cooked mode and the cursor synchronously before any cleanup', () => {
@@ -23,6 +20,33 @@ describe('fatal terminal restore (review #14)', () => {
     expect(order).toContain('cursor')
   })
 
+  it('restores managed modes before the original raw state', () => {
+    const order: string[] = []
+    const session = { restore: () => { order.push('mouse,paste,keyboard,cursor,alt') } }
+    const stdin = { setRawMode: (mode: boolean) => { order.push(`fallback-raw:${String(mode)}`) } }
+    const terminal = {
+      restoreRawModeSync: () => { order.push('original-raw') },
+      showCursor: () => { order.push('cursor-fallback') },
+    }
+
+    restoreSurfaceTerminalSync(session, stdin, chunk => { order.push(`write:${chunk}`) }, terminal)
+
+    expect(order[0]).toBe('mouse,paste,keyboard,cursor,alt')
+    expect(order[1]).toBe('original-raw')
+    expect(order).not.toContain('fallback-raw:false')
+  })
+
+  it('still restores raw and cursor state when managed-mode restoration throws', () => {
+    const order: string[] = []
+    expect(() => restoreSurfaceTerminalSync(
+      { restore: () => { throw new Error('mode restore failed') } },
+      { setRawMode: mode => { order.push(`raw:${String(mode)}`) } },
+      chunk => { order.push(`write:${chunk}`) },
+      { showCursor: () => { order.push('cursor') } },
+    )).toThrow('mode restore failed')
+    expect(order).toEqual(['raw:false', 'cursor', 'write:\u001B[?25h'])
+  })
+
   it('bounds hanging async cleanup so restore is never waited on', async () => {
     const finished = await withCleanupTimeout(async () => {
       await new Promise(() => undefined)
@@ -31,19 +55,6 @@ describe('fatal terminal restore (review #14)', () => {
     expect(finished).toBeUndefined()
   })
 
-  it('restores the terminal in surface close before drainInput', () => {
-    const source = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    const restoreAt = source.indexOf('restoreTerminalSync')
-    const drainAt = source.indexOf('drainInput')
-    expect(restoreAt).toBeGreaterThan(-1)
-    expect(drainAt).toBeGreaterThan(restoreAt)
-  })
-
-  it('wires the shared fatal guards around the TUI lifetime', () => {
-    const source = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    expect(source).toContain('attachFatalGuards')
-    expect(source).toContain('detachFatalGuards')
-  })
 })
 
 describe('fatal process guards (review #14)', () => {

@@ -143,7 +143,7 @@ export class BottomAnchoredLayout implements Component {
   /**
    * @param viewportRows - current terminal height in rows.
    * @param context - one-row execution context.
-   * @param transcript - conversation content that grows into terminal scrollback.
+   * @param transcript - conversation content constrained to its internal viewport.
    * @param composer - prompt editor and its autocomplete rows.
    * @param status - one-row permission and runtime status.
    * @param centerTranscript - whether spare conversation rows surround the transcript.
@@ -174,27 +174,35 @@ export class BottomAnchoredLayout implements Component {
     const transcriptRows = this.transcript.render(width)
     const composerRows = this.composer.render(width)
     const statusRows = this.status.render(width)
-    const naturalRows = contextRows.length + transcriptRows.length
-      + composerRows.length + statusRows.length + 2
     const requestedRows = Math.floor(this.viewportRows())
-    const minimumRows = Number.isFinite(requestedRows)
-      ? Math.max(1, requestedRows)
-      : naturalRows
-    const flexibleRows = Math.max(0, minimumRows - naturalRows)
+    const fixedRows = contextRows.length + composerRows.length + statusRows.length + 2
+    const minimumRows = Number.isFinite(requestedRows) ? Math.max(1, requestedRows) : undefined
+    const transcriptCapacity = minimumRows === undefined
+      ? transcriptRows.length
+      : Math.max(0, minimumRows - fixedRows)
+    const visibleTranscript = transcriptCapacity === 0
+      ? []
+      : transcriptRows.slice(-transcriptCapacity)
+    const naturalRows = fixedRows + visibleTranscript.length
+    const targetRows = minimumRows ?? naturalRows
+    const flexibleRows = Math.max(0, targetRows - naturalRows)
     const flexibleBefore = this.centerTranscript()
       ? Math.floor(flexibleRows / 2)
       : 0
     const flexibleAfter = flexibleRows - flexibleBefore
-    return [
+    const rendered = [
       ...contextRows,
       '',
       ...Array.from({ length: flexibleBefore }, () => ''),
-      ...transcriptRows,
+      ...visibleTranscript,
       ...Array.from({ length: flexibleAfter }, () => ''),
       '',
       ...composerRows,
       ...statusRows,
     ]
+    return minimumRows === undefined || rendered.length <= minimumRows
+      ? rendered
+      : rendered.slice(-minimumRows)
   }
 }
 

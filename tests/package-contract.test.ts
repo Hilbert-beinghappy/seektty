@@ -37,9 +37,9 @@ describe('out-of-tree Bundle contract', () => {
     }
   })
 
-  it('pins SeekTTY 1.2.1 to tested 0.1.1-rc.2 with a legacy union plus exact Host peer', () => {
-    expect(manifest.version).toBe('1.2.1')
-    expect(PACKAGE_VERSION).toBe('1.2.1')
+  it('pins SeekTTY 1.2.2 to tested 0.1.1-rc.2 with a legacy union plus exact Host peer', () => {
+    expect(manifest.version).toBe('1.2.2')
+    expect(PACKAGE_VERSION).toBe('1.2.2')
     expect(DSH_COMPATIBILITY).toEqual({ minimum: '0.1.0-rc.6', tested: '0.1.1-rc.2' })
     expect(AUTO_PERMITTED_DSH_MINIMUM).toBe(DSH_COMPATIBILITY.minimum)
     expect(AUTO_PERMITTED_DSH_EXACT).toBe(DSH_COMPATIBILITY.tested)
@@ -111,11 +111,14 @@ describe('out-of-tree Bundle contract', () => {
     expect(management).not.toContain('@deepseek-ai/dsh-tui-app')
   })
 
-  it('leaves text selection, copying, and scrollback under terminal control', () => {
+  it('keeps transcript scrolling inside a managed fixed terminal viewport', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
-    expect(surface).not.toContain("from './mouse.ts'")
-    expect(surface).not.toMatch(/\\u001B\[\?100[0-6]h/u)
-    expect(surface).toContain('Number.POSITIVE_INFINITY')
+    const session = readFileSync(resolve(root, 'src/client/terminal-session.ts'), 'utf8')
+    expect(surface).toContain('createTerminalSession')
+    expect(surface).toContain('terminalMouseDelta')
+    expect(surface).not.toContain('Number.POSITIVE_INFINITY')
+    expect(session).toContain('\\u001B[?1049h')
+    expect(session).toContain('\\u001B[?1000h\\u001B[?1006h')
   })
 
   it('gates pull requests on pnpm run check and a rebuilt lib/ tree', () => {
@@ -154,7 +157,7 @@ describe('out-of-tree Bundle contract', () => {
     expect(candidate.bundle).toBe(true)
     expect(candidate.patchValid).toBe(true)
     expect(candidate.diagnostics).toEqual([
-      '安装包声明脚本：build、typecheck、test、test:stock、test:clarify-doctor、pack:check、check',
+      '安装包声明脚本：build、typecheck、test、perf:tui、test:stock、test:clarify-doctor、pack:check、check',
     ])
   })
 
@@ -168,14 +171,14 @@ describe('out-of-tree Bundle contract', () => {
     expect(workflow).toContain("require('./package.json').dsh.compatibility.tested")
   })
 
-  it('states current 1.2.1 / rc.2 pins without inventing an unreleased download URL', () => {
+  it('states current 1.2.2 / rc.2 pins and links to available release assets', () => {
     for (const name of ['README.md', 'README.zh.md']) {
       const text = readFileSync(resolve(root, name), 'utf8')
-      expect(text).toContain('Version-1.2.1')
+      expect(text).toContain('Version-1.2.2')
       expect(text).toContain('DeepSeek%20Harness-0.1.1--rc.2')
       expect(text).toContain('https://github.com/Hilbert-beinghappy/seektty/releases')
-      expect(text).not.toContain('/releases/tag/v1.2.1')
-      expect(text).not.toContain('/releases/download/v1.2.1/')
+      expect(text).not.toContain('/releases/tag/v1.2.2')
+      expect(text).not.toContain('/releases/download/v1.2.2/')
       expect(text).toContain('/releases/download/v1.2.0/seektty-1.2.0.tgz')
       expect(text).toMatch(/Vision-Exp/)
       expect(text).toMatch(/self-first|SeekTTY 自更新优先|每轮只安装一个/u)
@@ -184,7 +187,7 @@ describe('out-of-tree Bundle contract', () => {
     const chinese = readFileSync(resolve(root, 'README.zh.md'), 'utf8')
     expect(english).toContain('The current tested Host is official `0.1.1-rc.2`')
     expect(chinese).toContain('当前已测 Host 是官方 `0.1.1-rc.2`')
-    expect(english).toContain('SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`')
-    expect(chinese).toContain('SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`')
+    expect(english).toContain('SeekTTY `1.2.2` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`')
+    expect(chinese).toContain('SeekTTY `1.2.2` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`')
   })
 })

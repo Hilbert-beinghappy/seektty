@@ -375,7 +375,7 @@ describe('conversation viewport', () => {
     ]))
 
     const rendered = transcript.render(40).join('\n')
-    expect(rendered).toContain('行更早内容 · 滚轮上翻')
+    expect(rendered).toContain('更早内容 · 滚轮上翻')
     expect(rendered).not.toContain('思考完成')
     expect(rendered).toContain('最新回答')
   })
@@ -391,7 +391,7 @@ describe('conversation viewport', () => {
     ]))
 
     const rendered = transcript.render(40).join('\n')
-    expect(rendered).toContain('行更早内容 · 滚轮上翻')
+    expect(rendered).toContain('更早内容 · 滚轮上翻')
     expect(rendered).not.toContain('不应悬在顶部的尾行')
     expect(rendered).toContain('> 最新问题')
     expect(rendered).toContain('最新回答第二行')
@@ -419,7 +419,7 @@ describe('conversation viewport', () => {
     const previousPage = transcript.render(40).join('\n')
     expect(requestRender).toHaveBeenCalledTimes(1)
     expect(previousPage).not.toBe(latest)
-    expect(previousPage).toContain('行更新内容 · PgDn/End')
+    expect(previousPage).toContain('有更新内容 · PgDn/End')
 
     transcript.handleInput('\u001B[H')
     expect(transcript.render(40).join('\n')).toContain('第一个问题')
@@ -427,7 +427,7 @@ describe('conversation viewport', () => {
     transcript.handleInput('\u001B[F')
     const returned = transcript.render(40).join('\n')
     expect(returned).toContain('最新回答')
-    expect(returned).toContain('行更早内容 · PgUp/Home')
+    expect(returned).toContain('更早内容 · PgUp/Home')
     expect(requestRender).toHaveBeenCalledTimes(3)
   })
 
@@ -738,6 +738,32 @@ describe('conversation viewport', () => {
     expect(stripAnsi(after)).toBe(stripAnsi(before))
     expect(after).not.toBe(before)
     expect(requestRender).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an explicitly scrolled viewport anchored while the tail grows', () => {
+    const transcript = new Transcript(() => 7)
+    const history = [
+      user('u1', '较早问题'),
+      assistant('a1', '锚点回答一\n锚点回答二\n锚点回答三'),
+      user('u2', '当前问题'),
+      assistant('a2', '当前回答一\n当前回答二\n当前回答三'),
+    ]
+    transcript.update(snapshot(history))
+    transcript.render(50)
+    expect(transcript.scrollBy(3)).toBe(true)
+    expect(stripAnsi(transcript.render(50).join('\n'))).toContain('锚点回答二')
+
+    transcript.update(snapshot([
+      ...history,
+      user('u3', '新增问题'),
+      assistant('a3', '新增回答一\n新增回答二'),
+    ]))
+    const anchored = stripAnsi(transcript.render(50).join('\n'))
+    expect(anchored).toContain('锚点回答二')
+    expect(anchored).not.toContain('新增回答二')
+
+    transcript.followLatest()
+    expect(stripAnsi(transcript.render(50).join('\n'))).toContain('新增回答二')
   })
 
   it('searches rendered lines from focus mode and jumps with n/N', () => {

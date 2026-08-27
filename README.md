@@ -7,7 +7,7 @@
 <p>A keyboard-first terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.1-orange" alt="Version 1.2.1"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.2-orange" alt="Version 1.2.2"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -88,7 +88,7 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.1` is currently a source candidate tested with official Harness `0.1.1-rc.2`; no `v1.2.1` release tarball is published. Build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball, or use a later asset listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases).
+SeekTTY `1.2.2` is a maintenance update targeting official Harness `0.1.1-rc.2`, with fixes for long-session rendering performance, terminal viewport scrolling, and intermittent white blocks. Use the package listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases), or build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball.
 
 ## Interface
 
@@ -100,7 +100,7 @@ SeekTTY `1.2.1` is currently a source candidate tested with official Harness `0.
 | --- | --- |
 | ![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png) | ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png) |
 
-The live view fills the terminal, keeps the composer and status at the bottom, and lets longer conversations continue into native scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
+The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. The mouse wheel and transcript navigation keys browse history inside SeekTTY; exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
 
 ## Clarify and Plan
 
@@ -177,8 +177,8 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 
 | Input | Action |
 | --- | --- |
-| Left-button drag, then the terminal copy shortcut | Select and copy visible TUI text using the terminal (`Command+C` on macOS; usually `Ctrl+Shift+C` on Linux and Windows) |
-| Mouse wheel / trackpad | Browse native terminal scrollback while the composer remains active |
+| Hold the terminal selection modifier while dragging, then copy | Use native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+| Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
 | `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm / insert a newline |
 | Tab / Escape | Switch between composer and transcript / return or close the active overlay |
@@ -264,7 +264,7 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Declared minimum Harness Host | `0.1.0-rc.6` |
 | Current tested Harness Host | `0.1.1-rc.2` |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current source candidate | SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`; not a Release or complete joint acceptance |
+| Current maintenance version | SeekTTY `1.2.2` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`; this patch does not establish new complete joint acceptance |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 

@@ -7,7 +7,7 @@
 <p>DeepSeek Harness 的键盘优先终端工作台。</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.1-orange" alt="Version 1.2.1"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.2-orange" alt="Version 1.2.2"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -88,7 +88,7 @@ deepseek --update
 
 `deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
-SeekTTY `1.2.1` 目前是已在官方 Harness `0.1.1-rc.2` 上测试的源码候选版，尚未发布 `v1.2.1` tarball。请运行 `pnpm run build && pnpm pack`，把 `SEEKTTY_SPEC` 指向生成的 tarball，或使用 [Releases 页面](https://github.com/Hilbert-beinghappy/seektty/releases)中后续列出的工件。
+SeekTTY `1.2.2` 是面向官方 Harness `0.1.1-rc.2` 的维护更新，修复长会话渲染性能、终端滚动越界和偶发白块问题。请使用 [Releases 页面](https://github.com/Hilbert-beinghappy/seektty/releases)列出的安装包，或运行 `pnpm run build && pnpm pack`，把 `SEEKTTY_SPEC` 指向生成的 tarball。
 
 ## 界面预览
 
@@ -100,7 +100,7 @@ SeekTTY `1.2.1` 目前是已在官方 Harness `0.1.1-rc.2` 上测试的源码候
 | --- | --- |
 | ![SeekTTY 亮色 TypeScript 语法高亮](assets/seektty-code-light.png) | ![SeekTTY 暗色工具调用与 Diff 语法高亮](assets/seektty-code-dark.png) |
 
-最新视图会铺满终端，把输入框和状态栏固定在底部，并让更长的对话自然进入终端原生滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
+最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。滚轮和 Transcript 导航键在 SeekTTY 内部浏览历史；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
 
 ## Clarify 与 Plan
 
@@ -177,8 +177,8 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 | 输入 | 操作 |
 | --- | --- |
-| 鼠标左键拖动，再按终端复制快捷键 | 使用终端选择并复制可见 TUI 文字（macOS 使用 `Command+C`；Linux 和 Windows 通常使用 `Ctrl+Shift+C`） |
-| 鼠标滚轮 / 触控板 | 输入框保持激活时浏览终端原生滚动记录 |
+| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键 |
+| 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
 | `/` | 打开命令与 Skill 候选 |
 | Enter / Shift+Enter | 发送或确认 / 输入换行 |
 | Tab / Escape | 在输入框与 transcript 间切换 / 返回或关闭当前弹窗 |
@@ -264,7 +264,7 @@ dsh plugin --profile tui remove seektty
 | 声明的最低 Harness Host | `0.1.0-rc.6` |
 | 当前已测 Harness Host | `0.1.1-rc.2` |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| 当前源码候选组合 | SeekTTY `1.2.1` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`；不是 Release，也不是完整联合验收 |
+| 当前维护版本 | SeekTTY `1.2.2` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`；本次补丁不代表新增完整联合验收 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 

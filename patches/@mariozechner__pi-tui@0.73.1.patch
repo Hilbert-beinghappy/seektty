@@ -134,32 +134,130 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..fc274db16b9779ecb525c0ebb921042c
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/terminal.js b/dist/terminal.js
-index 3545b284ce2da594cc728803feb607a34cea5ca0..9d56c55f99ecca559be9d12ced4ec38d4852ca73 100644
+index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a78768300f91d 100644
 --- a/dist/terminal.js
 +++ b/dist/terminal.js
-@@ -130,7 +130,7 @@ export class ProcessTerminal {
+@@ -16,6 +16,7 @@ export class ProcessTerminal {
+     resizeHandler;
+     _kittyProtocolActive = false;
+     _modifyOtherKeysActive = false;
++    _protocolsRestored = false;
+     stdinBuffer;
+     stdinDataHandler;
+     progressInterval;
+@@ -40,6 +41,7 @@ export class ProcessTerminal {
+     }
+     start(onInput, onResize) {
+         this.inputHandler = onInput;
++        this._protocolsRestored = false;
+         this.resizeHandler = onResize;
+         // Save previous state and enable raw mode
+         this.wasRaw = process.stdin.isRaw || false;
+@@ -82,7 +84,7 @@ export class ProcessTerminal {
+         // Forward individual sequences to the input handler
+         this.stdinBuffer.on("data", (sequence) => {
+             // Check for Kitty protocol response (only if not already enabled)
+-            if (!this._kittyProtocolActive) {
++            if (!this._protocolsRestored && !this._kittyProtocolActive) {
+                 const match = sequence.match(kittyResponsePattern);
+                 if (match) {
+                     this._kittyProtocolActive = true;
+@@ -130,7 +132,7 @@ export class ProcessTerminal {
          process.stdin.on("data", this.stdinDataHandler);
          process.stdout.write("\x1b[?u");
          setTimeout(() => {
 -            if (!this._kittyProtocolActive && !this._modifyOtherKeysActive) {
-+            if (this.inputHandler && !this._kittyProtocolActive && !this._modifyOtherKeysActive) {
++            if (!this._protocolsRestored && this.inputHandler && !this._kittyProtocolActive && !this._modifyOtherKeysActive) {
                  process.stdout.write("\x1b[>4;2m");
                  this._modifyOtherKeysActive = true;
              }
+@@ -165,6 +167,34 @@ export class ProcessTerminal {
+             // koffi not available — Shift+Tab won't be distinguishable from Tab
+         }
+     }
++    // SeekTTY fatal guards need protocol bytes restored before any async cleanup.
++    // Keep this method private to the pinned runtime contract via duck typing.
++    restoreProtocolsSync() {
++        this._protocolsRestored = true;
++        this.inputHandler = undefined;
++        if (this.stdinBuffer) {
++            this.stdinBuffer.destroy();
++            this.stdinBuffer = undefined;
++        }
++        if (this.stdinDataHandler) {
++            process.stdin.removeListener("data", this.stdinDataHandler);
++            this.stdinDataHandler = undefined;
++        }
++        process.stdout.write("\x1b[?2004l");
++        if (this._kittyProtocolActive) {
++            process.stdout.write("\x1b[<u");
++            this._kittyProtocolActive = false;
++            setKittyProtocolActive(false);
++        }
++        if (this._modifyOtherKeysActive) {
++            process.stdout.write("\x1b[>4;0m");
++            this._modifyOtherKeysActive = false;
++        }
++    }
++    restoreRawModeSync() {
++        if (process.stdin.setRawMode)
++            process.stdin.setRawMode(this.wasRaw);
++    }
+     async drainInput(maxMs = 1000, idleMs = 50) {
+         if (this._kittyProtocolActive) {
+             // Disable Kitty keyboard protocol first so any late key releases
 diff --git a/dist/tui.js b/dist/tui.js
-index b521ceb326eb8a25fc9ebc3feee4d39708296065..6f6cb549140045b94c47987c164c3a6cf64a197a 100644
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b6ff5b7b35e2d03d3614379596e4c2a4eccb0e3 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -756,23 +756,32 @@ export class TUI extends Container {
+@@ -307,13 +307,9 @@ export class TUI extends Container {
+         this.terminal.write("\x1b[16t");
+     }
+     stop() {
+-        this.stopped = true;
+-        if (this.renderTimer) {
+-            clearTimeout(this.renderTimer);
+-            this.renderTimer = undefined;
+-        }
++        this.stopRenderingSync();
+         // Move cursor to the end of the content to prevent overwriting/artifacts on exit
+-        if (this.previousLines.length > 0) {
++        if (!this.terminal.__seekttyManagedAlternateScreen && this.previousLines.length > 0) {
+             const targetRow = this.previousLines.length; // Line after the last content
+             const lineDiff = targetRow - this.hardwareCursorRow;
+             if (lineDiff > 0) {
+@@ -327,6 +323,16 @@ export class TUI extends Container {
+         this.terminal.showCursor();
+         this.terminal.stop();
+     }
++    // SeekTTY restores the main screen before asynchronous cleanup. Quiesce
++    // queued renders first so no frame can be painted after CSI ? 1049 l.
++    stopRenderingSync() {
++        this.stopped = true;
++        if (this.renderTimer) {
++            clearTimeout(this.renderTimer);
++            this.renderTimer = undefined;
++        }
++        this.renderRequested = false;
++    }
+     requestRender(force = false) {
+         if (force) {
+             this.previousLines = [];
+@@ -752,27 +758,54 @@ export class TUI extends Container {
+         if (this.overlayStack.length > 0) {
+             newLines = this.compositeOverlays(newLines, width, height);
+         }
++        if (newLines.length > height) {
++            newLines = newLines.slice(-height);
++        }
+         // Extract cursor position before applying line resets (marker must be found first)
          const cursorPos = this.extractCursorPosition(newLines, height);
          newLines = this.applyLineResets(newLines);
-         // Helper to clear scrollback and viewport and render all new lines
+-        // Helper to clear scrollback and viewport and render all new lines
 +        // Helper to restore the visible window. Tall buffers must never be
 +        // dumped from line 0: that replays older turns through the viewport.
          const fullRender = (clear) => {
              this.fullRedrawCount += 1;
-+            const tall = newLines.length > height;
-+            const paintStart = clear && tall ? Math.max(0, newLines.length - height) : 0;
              let buffer = "\x1b[?2026h"; // Begin synchronized output
              if (clear) {
                  buffer += this.deleteKittyImages(this.previousKittyImageIds);
@@ -168,18 +266,34 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..6f6cb549140045b94c47987c164c3a6c
 +                // (destroy native scrollback and force a history replay).
 +                buffer += "\x1b[H";
              }
--            for (let i = 0; i < newLines.length; i++) {
--                if (i > 0)
-+            for (let i = paintStart; i < newLines.length; i++) {
-+                if (i > paintStart)
+             for (let i = 0; i < newLines.length; i++) {
+                 if (i > 0)
                      buffer += "\r\n";
-+                if (clear)
++                if (clear && visibleWidth(newLines[i]) < width)
 +                    buffer += "\x1b[2K";
                  buffer += newLines[i];
              }
 -            buffer += "\x1b[?2026l"; // End synchronized output
-+            if (clear)
-+                buffer += "\x1b[0J";
++            // newLines is already sliced to height above. Do not apply ED0
++            // (CSI 0J) to a wrap-pending last content cell: xenl keeps the
++            // cursor on that cell, so 0J erases it. Clear leftover rows with
++            // the same CR / CUD / 2K / CUU pattern used for deleted lines.
++            if (clear && newLines.length < height) {
++                const extraLines = height - newLines.length;
++                if (newLines.length === 0) {
++                    buffer += "\x1b[0J";
++                }
++                else if (extraLines > 0) {
++                    buffer += "\r";
++                    buffer += "\x1b[1B";
++                    for (let i = 0; i < extraLines; i++) {
++                        buffer += "\r\x1b[2K";
++                        if (i < extraLines - 1)
++                            buffer += "\x1b[1B";
++                    }
++                    buffer += `\x1b[${extraLines}A`;
++                }
++            }
 +            buffer += "\x1b[?2026l";
              this.terminal.write(buffer);
              this.cursorRow = Math.max(0, newLines.length - 1);
@@ -188,7 +302,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..6f6cb549140045b94c47987c164c3a6c
              if (clear) {
                  this.maxLinesRendered = newLines.length;
              }
-@@ -844,6 +853,37 @@ export class TUI extends Container {
+@@ -844,6 +877,37 @@ export class TUI extends Container {
              }
              lastChanged = newLines.length - 1;
          }
@@ -226,3 +340,11 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..6f6cb549140045b94c47987c164c3a6c
          if (firstChanged !== -1) {
              lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
          }
+@@ -945,5 +1009,6 @@ export class TUI extends Container {
+             if (i > firstChanged)
+                 buffer += "\r\n";
+-            buffer += "\x1b[2K"; // Clear current line
+             const line = newLines[i];
++            if (visibleWidth(line) < width)
++                buffer += "\x1b[2K";
+             const isImage = isImageLine(line);
