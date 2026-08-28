@@ -195,6 +195,17 @@ async function oneCycle(index, home, env) {
     await log.waitFor(/API Key|输入消息|Type a message/u, 20_000)
     session.write('\u001B')
     await delay(100)
+    // First verify permission commands against this isolated, keyless Session.
+    for (const [permission, label] of [
+      ['read-only', /使用权限：只读|Permission: Read only/u],
+      ['workspace-write', /使用权限：工作区|Permission: Workspace/u],
+    ]) {
+      const since = log.text().length
+      session.write(`/permission ${permission}`)
+      await delay(100)
+      session.write('\r')
+      await log.waitFor(label, 10_000, since)
+    }
     // Exercise the packed slash-completion path without a Provider request:
     // an exact /help candidate survives Down wrapping and Enter opens Help.
     session.write('/help')

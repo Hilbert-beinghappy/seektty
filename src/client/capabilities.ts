@@ -582,7 +582,9 @@ export class HarnessTuiCapabilities {
           if (current === undefined || current.sessionId !== selected) return
           listener(current, current.session.getSnapshot())
         }
-        stopSession = active.session.subscribe(notify)
+        const stopSnapshot = active.session.subscribe(notify)
+        const stopPermissions = active.session.projections.faceOf('permissions').subscribe(notify)
+        stopSession = () => { stopSnapshot(); stopPermissions() }
       }
       listener(active, active.session.getSnapshot())
     }
@@ -872,16 +874,41 @@ export class HarnessTuiCapabilities {
    * Submit the existing Host /permission command; no local permission state is written.
    * @param id - Host permission value selected by the user.
    */
-  async selectPermission(id: string): Promise<void> {
-    const result = await this.requireActive().session.command(`/permission ${id}`)
+  async selectPermission(id: string, sessionId = this.requireActive().sessionId): Promise<void> {
+    const active = this.requireActive()
+    if (active.sessionId !== sessionId) {
+      throw new Error(ui('会话已切换，请重新选择权限', 'The session changed; select the permission again'))
+    }
+    if (!this.listPermissions().some(option => option.id === id)) {
+      throw new Error(ui(`未知权限预设 ${JSON.stringify(id)}`, `Unknown permission preset ${JSON.stringify(id)}`))
+    }
+    // Compatibility range: dsh 0.1.0-rc.6–rc.8 and 0.1.1-rc.2. The latter's
+    // tested contract includes images. Use the mounted descriptor, never retry a
+    // potentially executed permission command with another argument shape.
+    const fields = this.ctx.typert.remotes.get('commands/execute')?.parameters.map(parameter => parameter.wire).join(',')
+    const commands = this.ctx.remote.commands
+    const line = `/permission ${id}`
+    let result: Awaited<ReturnType<typeof commands.execute>>
+    if (fields === 'agentId,line,images') result = await commands.execute(sessionId, line, [])
+    else if (fields === 'agentId,line') {
+      result = await Reflect.apply(commands.execute, commands, [sessionId, line])
+    } else {
+      throw new Error(ui('Host 权限命令契约不兼容', 'The Host permission command contract is incompatible'))
+    }
     if (!result.ok) {
       throw new Error(ui(`切换权限失败：${result.error.message}`, `Failed to change permission: ${result.error.message}`))
     }
-    if (!result.value.matched) {
+    if (result.value === undefined) {
       throw new Error(ui(
         `Host 未识别权限预设 ${JSON.stringify(id)}`,
         `The Host did not recognize permission preset ${JSON.stringify(id)}`,
       ))
+    }
+    if (result.value.result?.kind !== 'success') {
+      const message = result.value.result?.kind === 'error'
+        ? result.value.result.text
+        : ui('Host 未返回有效的执行结果', 'The Host did not return a valid execution result')
+      throw new Error(ui(`切换权限失败：${message}`, `Failed to change permission: ${message}`))
     }
   }
 

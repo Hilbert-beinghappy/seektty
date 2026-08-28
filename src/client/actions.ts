@@ -1794,6 +1794,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async permission(args: string): Promise<void> {
+    const sessionId = this.capabilities.active()?.sessionId
     const options = this.capabilities.listPermissions()
     if (args !== '') {
       const target = options.find(option => option.id === args)
@@ -1811,8 +1812,16 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           description: permissionDescription(option),
         })),
       }, async (selected) => {
-        const target = options.find(option => option.id === selected.id)
-        if (target !== undefined) await this.selectPermission(target, navigation)
+        try {
+          const target = options.find(option => option.id === selected.id)
+          if (target !== undefined && await this.selectPermission(target, navigation, sessionId)) navigation.back()
+        } catch (error) {
+          const message = capabilityError(error)
+          this.host.notice(message, 'error')
+          navigation.updateChoices(options.map(option => ({
+            id: option.id, label: permissionLabel(option), description: permissionDescription(option),
+          })), message)
+        }
       })
     })
   }
@@ -1820,18 +1829,36 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   private async selectPermission(
     option: TuiPermissionOption,
     overlays: OverlayPrompts = this.host.overlays,
-  ): Promise<void> {
-    if (option.current) return
+    sessionId = this.capabilities.active()?.sessionId,
+  ): Promise<boolean> {
+    const checkSession = (): void => {
+      if (sessionId === undefined || this.capabilities.active()?.sessionId !== sessionId) {
+        throw new Error(ui('会话已切换，请重新选择权限', 'The session changed; select the permission again'))
+      }
+    }
+    checkSession()
+    const latest = this.capabilities.listPermissions().find(candidate => candidate.id === option.id)
+    if (latest === undefined) throw new Error(ui('权限预设已不可用，请重新打开权限菜单', 'The permission preset is unavailable; reopen the permission menu'))
+    option = latest
+    if (option.current) {
+      this.host.notice(ui(`当前已是${permissionLabel(option)}`, `Permission is already ${permissionLabel(option)}`), 'info')
+      return true
+    }
     if (option.needsConfirmation) {
       const confirmed = await overlays.confirm(
         option.id === 'danger-full-access' ? ui('进入完全访问？', "Enter full access?") : ui('切换到未知风险权限？', "Switch to a permission with unknown risk?"),
         ui(`${permissionLabel(option)}：${permissionDescription(option)}。切换后立即作用于当前会话。`, `${permissionLabel(option)}: ${permissionDescription(option)}. The change applies to the current session immediately.`),
         ui('确认切换', "Switch"),
       )
-      if (!confirmed) return
+      if (!confirmed) return false
     }
-    await this.capabilities.selectPermission(option.id)
+    checkSession()
+    await this.capabilities.selectPermission(option.id, sessionId)
+    checkSession()
+    await this.host.refreshHeader()
+    checkSession()
     this.host.notice(ui(`权限已切换为${permissionLabel(option)}`, `Permission changed to ${permissionLabel(option)}`), 'success')
+    return true
   }
 
   private async queue(): Promise<void> {
