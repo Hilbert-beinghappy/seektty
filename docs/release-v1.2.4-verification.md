@@ -1,10 +1,11 @@
-# SeekTTY 1.2.4 — owner review and release checklist
+# SeekTTY 1.2.4 — release verification and checklist
 
-Status: prepared for review; **not merged, tagged, or published by this work**.
+Release record for `v1.2.4`. The [GitHub Release](https://github.com/Hilbert-beinghappy/seektty/releases/tag/v1.2.4) is the source of truth for publication time and downloadable artifacts.
 
-- Base: `v1.2.3` / `04f2837` on upstream `main`.
-- Implementation: `81a0b86` (`fix(tui): stabilize overlay input and context-menu gestures`).
-- Candidate: `seektty-1.2.4.tgz`, built from this PR with pnpm `11.7.0`.
+- Previous release: `v1.2.3` / `04f2837`.
+- Merged code baseline: upstream `main` at `a2e3950`, including mouse/input fixes in PR #154, user-message rules in PR #155, and the existing README update in PR #156.
+- Finalization changes only the release documents; package inputs and README files remain identical to that baseline.
+- Artifact: `seektty-1.2.4.tgz`, built with pnpm `11.7.0`; SHA-256 recorded below and in the release's `SHA256SUMS` asset.
 - Tested Host: unmodified official `@deepseek-ai/dsh@0.1.1-rc.2`.
 - Release notes: [English and Chinese in one document](release-v1.2.4.md).
 
@@ -14,6 +15,7 @@ No credentials, Profile/Session contents, raw terminal logs, personal theme file
 
 | Area | Primary code and regression coverage |
 | --- | --- |
+| User-message top and bottom rules | `src/client/horizontal-rule.ts`, `chrome.ts`, `transcript.ts`; transcript and viewport tests cover themes, wrapping, resize, selection, and search |
 | Stable list viewport, focus guard, nested hover | `patches/@mariozechner__pi-tui@0.73.1.patch`, `src/client/overlays.ts`, `mouse-activation.ts`, `mouse-controller.ts`, `theme*.ts`; autocomplete, overlay-pointer, and theme tests |
 | Escape/SGR framing and undo | The pinned pi-tui patch, `src/client/chrome.ts`, `transcript.ts`; `tests/terminal-input-framing.test.ts`, `tests/input-undo.test.ts` |
 | Overlay selection and footer buttons | `src/client/overlay-text.ts`, `overlay-footer.ts`, `overlays.ts`; overlay text-selection and footer tests |
@@ -24,28 +26,28 @@ Review the pi-tui patch together with its lockfile hash and generated bundle. It
 
 ## Candidate evidence
 
-The following entries must describe the final 1.2.4 tarball, not the earlier locally installed 1.2.3 test build.
+The following results were collected on 2026-08-28 for the final 1.2.4 package inputs, including the user-message rules. They do not describe the earlier PR #154 candidate or the locally installed 1.2.3 test build. Release documents are not packaged, so documentation-only finalization does not change this artifact.
 
 | Gate | Result |
 | --- | --- |
 | Frozen dependency installation | Pass — pnpm `11.7.0`, lockfile unchanged |
-| `pnpm run check` | Pass — 109 files; 885 passed / 1 conditional skip; typecheck, build and 23-entry pack allowlist passed |
-| Reproducible tracked `lib/` and launcher `--version` | Pass — second build byte-identical; `seektty 1.2.4`; generated renamed chunk included |
+| `pnpm run check` | Pass — 109 files; 892 passed / 1 conditional skip; typecheck, build and 23-entry pack allowlist passed |
+| Tracked `lib/` and launcher `--version` | Pass — rebuilt bundle matches the merged code; `seektty 1.2.4` |
 | `pnpm run perf:tui` | Pass — 12 runs: 1k / 10k / 50k / 100k lines, three repeats, 80 columns × 24 rows |
 | Official dsh isolated add / boot / remove / re-add | Pass — exact 1.2.4 tarball on unmodified official dsh `0.1.1-rc.2`, including second boot and package/Host identity checks |
 | Windows ConPTY menu gestures and clean exit | Pass — one cycle of the exact 1.2.4 candidate, `contextMenuGestures: true`, 9588 bytes, exit code 0; not GUI-equivalent |
-| Credential-pattern / forbidden-path / pack allowlist checks | Pass — no detected credential patterns or forbidden staged paths; 23 packaged entries; personal themes excluded |
-| GitHub CI | Consult the checks on the final PR head; local checks do not substitute for CI |
+| Package allowlist | Pass — 23 packaged entries; no Profile, Session, `.env`, package caches, or personal themes included |
+| GitHub CI | Consult checks for the release tag's commit and its documentation PR; local checks do not substitute for CI |
 
-Local reviewed candidate SHA-256 (`seektty-1.2.4.tgz`): `BC194710C15416188C8DA6D4310DA5489D8A993C09FBFE79DC9D33386E1D04A5`.
+Release artifact SHA-256 (`seektty-1.2.4.tgz`): `63a0a3d692a0380affe7701c8a37fc79bb0f749ba903df9dc5ecaf83abbc41ba`.
 
-Environment: Windows `10.0.22631`, x64, Node.js `v26.1.0`. The package targets Node `22.19`; GitHub CI checks Node `22.x`. These are local pre-publication results; the owner must record the final published artifact's checksum after rebuilding the reviewed merge commit.
+Environment: Windows `10.0.22631`, x64, Node.js `v26.1.0`. The package targets Node `22.19`; GitHub CI checks Node `22.x`. Compare a freshly downloaded release asset with `SHA256SUMS` before installation.
 
 The optional Clarify doctor test is conditional. A skipped optional test is not a passed joint-plugin acceptance run. No paid Provider request is needed for the automated mouse checks. Legacy Host versions, optional plugin workflows, real clipboard contents, and 100 repeated PTY lifecycles are not claimed as newly accepted here.
 
-## Test the PR before release
+## Test the release in isolation
 
-Prerequisites: Node.js `^22.19.0 || >=24`, pnpm `11.7.0`, and official `dsh --version` reporting `0.1.1-rc.2`. Check out this PR, then use a **new terminal** so the isolated environment does not replace your normal `DSH_HOME`.
+Prerequisites: Node.js `^22.19.0 || >=24`, pnpm `11.7.0`, and official `dsh --version` reporting `0.1.1-rc.2`. Check out `v1.2.4`, then use a **new terminal** so the isolated environment does not replace your normal `DSH_HOME`.
 
 ### Windows PowerShell
 
@@ -84,6 +86,7 @@ To rerun lifecycle and PTY checks, set `DSH_BIN` to the official dsh executable 
 
 These items are intentionally **unchecked**. Record terminal/OS versions and observed results in the PR; synthetic tests and ConPTY injection are not GUI acceptance.
 
+- [ ] **User-message framing:** verify one pair of thin top/bottom rules matching the composer around historical user messages, including multiline prompts and resized terminals; copying and searching in-app must use message text, not decorative rules.
 - [ ] **Startup and nested pages:** without minimizing first, open Settings; first click selects a row, a later click enters it. Confirm hover and Select/Back buttons through at least three page levels. Keep dangerous confirmations keyboard-only.
 - [ ] **List scrolling:** in slash candidates and long settings lists, wheel-scroll to the middle, click a visible item, and verify no recentering. Up/Down should scroll only at an edge; Enter and a second click target the visible candidate correctly.
 - [ ] **Escape framing:** repeatedly press Esc while moving the mouse over a search field; no protocol fragments appear. Check both hover enabled and disabled.
@@ -103,15 +106,15 @@ These items are intentionally **unchecked**. Record terminal/OS versions and obs
 
 The owner decides whether remaining platform gaps block publication or require explicitly scoped follow-up. Do not mark unchecked environments as passed.
 
-## Publish only after approval
+## Release procedure
 
-This PR does not add an automatic publishing workflow or change repository visibility. The existing workflow runs Linux checks/stock boot and Windows launcher checks. The following steps are for the owner **after approval**, not actions already performed:
+The release request authorizes publication. No automatic publishing workflow or repository visibility change is introduced. The existing workflow runs Linux checks/stock boot and Windows launcher checks. Use this sequence for the authorized release:
 
-1. Review the final PR head, require successful GitHub CI, and record manual sign-off or explicit acceptance of remaining gaps.
-2. Merge the PR. In a clean checkout of the reviewed merge commit, run frozen install, `pnpm run check`, the performance gate, and candidate pack/lifecycle checks again. Confirm `git diff --exit-code -- lib/` and `node lib/bin.js --version` reports `seektty 1.2.4`.
-3. Pack `seektty-1.2.4.tgz` into a directory outside the checkout. Record its SHA-256 and verify the archive allowlist. Do not upload local Profile, Session, `.env`, logs, caches, or personal theme files.
-4. Create the `v1.2.4` tag at that exact reviewed merge commit. Create a **draft** GitHub Release with the tarball, `SHA256SUMS`, and [this bilingual release document](release-v1.2.4.md) as the notes. Confirm tag, package version, asset name, and checksum match.
-5. Publish the draft only with the owner's release approval. Verify the README's versioned download URL and a fresh isolated install from the published asset. There is no npm Registry publication step.
+1. Finalize and merge the bilingual release documents without changing the reviewed code or READMEs. Check GitHub CI and keep untested manual environments explicitly listed above.
+2. Verify frozen dependencies, `pnpm run check`, the performance gate, and the exact packaged artifact's lifecycle/PTY checks. Confirm rebuilt `lib/` matches the reviewed code and `node lib/bin.js --version` reports `seektty 1.2.4`.
+3. Keep `seektty-1.2.4.tgz` and `SHA256SUMS` outside the checkout. Verify that the tag's package inputs match the verified artifact. Do not upload local Profile, Session, `.env`, logs, caches, or personal theme files.
+4. Create `v1.2.4` at the exact release commit and a **draft** GitHub Release with the tarball, `SHA256SUMS`, and [this bilingual release document](release-v1.2.4.md) as the notes. Confirm tag, package version, asset name, and checksum match.
+5. Publish the authorized draft. Download the published assets, compare their SHA-256 values, and verify isolated installation from the downloaded package. There is no npm Registry publication step.
 
 ## Rollback
 
@@ -125,8 +128,8 @@ Keep automatic updates off during rollback testing. If the global `deepseek` lau
 
 ## 中文审核说明
 
-本次仅准备 1.2.4 并提 PR，不代替 owner 合并、打 tag 或正式发布。实现提交为 `81a0b86`，版本、双语 README、同文件中英文 Release 说明及本清单在发布准备提交中整理。
+本记录对应正式 1.2.4 发布：包内容基于已合并的 `main@a2e3950`，包含 PR #154 的鼠标与输入修复和 PR #155 的历史用户消息上下细线。最后仅完善发布文档，不再修改 README。中英文 Release 说明仍保存在同一文件。
 
-上面的安装命令使用新终端和隔离 `DSH_HOME`，不会覆盖日常 Profile；退出首次 API Key 提示即可测试本地界面。证据表只记录最终 1.2.4 候选包，不把旧 1.2.3 本机测试包、模拟事件或 Windows ConPTY 当作三端 GUI 验收。人工清单仍需 owner 签收，未测环境不能标绿。
+最终包通过 892 项测试（1 项条件跳过）、类型检查、构建、23 项打包白名单、十万行性能检查、官方 dsh 隔离插拔，以及 Windows ConPTY 手势和退出检查。上面的安装命令使用新终端和隔离 `DSH_HOME`，不会覆盖日常 Profile；退出首次 API Key 提示即可测试本地界面。自动测试和 Windows ConPTY 不等于三端 GUI／真实剪贴板验收，未测环境仍明确保留，不标绿。
 
-审核重点为：启动即用、多层 hover 与底栏按钮、列表不居中、Esc 不混入鼠标协议、弹窗选区与撤销、独立右键菜单、滚轮／拖选交接、右键松手定位，以及危险确认和隐私边界。通过审核和 CI 后，owner 从已合并提交重新构建、验包、打 tag、创建带同一双语说明的草稿 Release，最后决定发布。回滚通过原生插件安装替换旧包，不删除配置或会话。
+发布时固定 tag 和包内容，上传安装包及 `SHA256SUMS`，使用同一份双语说明；发布后重新下载、核对校验和并验证隔离安装。发布时间与附件以 GitHub Release 页面为准。回滚通过原生插件安装替换旧包，不删除配置或会话。
