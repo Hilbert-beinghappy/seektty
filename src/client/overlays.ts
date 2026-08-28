@@ -193,7 +193,15 @@ interface NavigationEntry {
   escapeHandler?: (() => void | Promise<void>) | undefined
 }
 
-function rowOf(choice: OverlayChoice, descriptionWidth: number): SelectItem {
+// Let SelectList align against actual labels, retaining the existing primary
+// column cap. Description truncation belongs only to its final row layout.
+const selectListLayout = {
+  minPrimaryColumnWidth: 1,
+  maxPrimaryColumnWidth: 32,
+  descriptionEllipsis: '…',
+} as const
+
+function rowOf(choice: OverlayChoice): SelectItem {
   const state = choice.active === true ? '● ' : choice.disabledReason === undefined ? '  ' : '× '
   const description = choice.disabledReason ?? choice.description
   return {
@@ -201,7 +209,7 @@ function rowOf(choice: OverlayChoice, descriptionWidth: number): SelectItem {
     label: escapeTerminalText(`${state}${translateUiText(choice.label)}`),
     ...description === undefined
       ? {}
-      : { description: truncateToWidth(escapeTerminalText(translateUiText(description)), descriptionWidth, '…') },
+      : { description: escapeTerminalText(translateUiText(description)) },
   }
 }
 
@@ -211,13 +219,6 @@ function escapeFrame(lines: readonly string[]): string[] {
 
 function frameContentWidth(width: number): number {
   return Math.max(1, width - 4)
-}
-
-function selectDescriptionWidth(width: number): number {
-  // pi-tui reserves a 32-cell primary column, a two-cell prefix, and two
-  // safety cells. Pre-truncate to the actual remainder so its final pass
-  // keeps our explicit ellipsis instead of cutting a word silently.
-  return Math.max(1, Math.min(60, width - 36))
 }
 
 function modalRule(title: string | undefined, width: number, top: boolean): string {
@@ -360,7 +361,6 @@ export class SearchSelectOverlay implements Component {
   private readonly input = new Input()
   private list: SelectList
   private filtered: readonly OverlayChoice[]
-  private descriptionWidth = 36
   private notice = ''
   private lastHits: readonly HitRegion[] = []
   private armedOptionId: string | undefined
@@ -398,14 +398,6 @@ export class SearchSelectOverlay implements Component {
 
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
-    const descriptionWidth = selectDescriptionWidth(safeWidth)
-    if (descriptionWidth !== this.descriptionWidth) {
-      const selectedId = this.list.getSelectedItem()?.value
-      const scrollOffset = this.list.getScrollOffset()
-      this.descriptionWidth = descriptionWidth
-      this.list = this.createList(this.filtered, selectedId)
-      this.list.setScrollOffset(scrollOffset)
-    }
     const lines: string[] = []
     if (this.request.detail !== undefined) {
       lines.push(...wrappedDetail(this.request.detail, safeWidth))
@@ -489,8 +481,8 @@ export class SearchSelectOverlay implements Component {
   }
 
   private createList(choices: readonly OverlayChoice[], preferredId?: string): SelectList {
-    const rows = choices.map(choice => rowOf(choice, this.descriptionWidth))
-    const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList)
+    const rows = choices.map(rowOf)
+    const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList, selectListLayout)
     const preferredIndex = preferredId === undefined ? 0 : rows.findIndex(row => row.value === preferredId)
     list.setSelectedIndex(Math.max(0, preferredIndex))
     list.onSelect = () => { this.choose() }
@@ -705,7 +697,6 @@ class MultiSelectOverlay implements Component {
   private filtered: readonly OverlayChoice[]
   private list: SelectList
   private readonly selected = new Set<string>()
-  private descriptionWidth = 36
   private notice = ''
   private lastHits: readonly HitRegion[] = []
   private armedOptionId: string | undefined
@@ -726,14 +717,6 @@ class MultiSelectOverlay implements Component {
 
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
-    const descriptionWidth = selectDescriptionWidth(safeWidth)
-    if (descriptionWidth !== this.descriptionWidth) {
-      const selectedId = this.list.getSelectedItem()?.value
-      const scrollOffset = this.list.getScrollOffset()
-      this.descriptionWidth = descriptionWidth
-      this.list = this.createList(selectedId)
-      this.list.setScrollOffset(scrollOffset)
-    }
     this.input.focused = this.focused
     const prefix = this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, safeWidth)
     const label = color.muted(ui('搜索 ', 'Search '))
@@ -828,9 +811,9 @@ class MultiSelectOverlay implements Component {
       label: escapeTerminalText(`${this.selected.has(choice.id) ? '[x]' : '[ ]'} ${translateUiText(choice.label)}`),
       ...(choice.description === undefined
         ? {}
-        : { description: truncateToWidth(escapeTerminalText(translateUiText(choice.description)), this.descriptionWidth, '…') }),
+        : { description: escapeTerminalText(translateUiText(choice.description)) }),
     }))
-    const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList)
+    const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList, selectListLayout)
     const index = preferredId === undefined ? 0 : rows.findIndex(row => row.value === preferredId)
     list.setSelectedIndex(Math.max(0, index))
     return list

@@ -84,7 +84,10 @@ function pointerHarness(hoverFeedback: boolean) {
     }
     const outcome = controller.handle(event)
     const semantic = outcome.semantic
-    if (semantic?.kind === 'hover') {
+    if (semantic?.kind === 'wheel' && semantic.region?.action.kind === 'overlay') {
+      armed = undefined
+      overlays.handleWheel(semantic.lines)
+    } else if (semantic?.kind === 'hover') {
       overlays.handleHover(
         semantic.region?.action.kind === 'overlay' ? semantic.region.action.optionId : undefined,
         semantic.region?.action.kind === 'overlay' ? semantic.region.action.command : undefined,
@@ -158,6 +161,36 @@ afterEach(() => {
 })
 
 describe('overlay pointer / frame integration', () => {
+  it.each(['select', 'multiSelect'] as const)('keeps %s description-row SGR targets through width changes and wheel browsing', async method => {
+    vi.useFakeTimers()
+    const h = pointerHarness(true)
+    const choices = Array.from({ length: 16 }, (_, index) => ({
+      id: `mode-${index}`, label: `Mode ${index}`, description: 'Long description 中文🙂 '.repeat(8),
+    }))
+    const pending = h.overlays[method]({ title: 'modes', maxVisible: 4, choices })
+    try {
+      await h.frame()
+      h.emit(h.region('mode-0'), 65) // Wheel down changes the viewport, not the selection.
+      await h.frame()
+      await h.click('mode-4')
+      if (method === 'multiSelect') h.terminal.input(' ')
+      await h.frame()
+      for (const columns of [240, 70, 180, 100]) {
+        h.terminal.columns = columns
+        await h.repaint()
+        const rect = h.region('mode-4').rect
+        await h.hover('mode-5')
+        expect(h.region('mode-4').rect).toEqual(rect)
+        expect(h.region('mode-4').rect.height).toBe(1)
+        expect(h.region('mode-5').rect.row).toBe(rect.row + 1)
+      }
+      await h.click('footer-confirm')
+      await expect(pending).resolves.toEqual(method === 'select' ? choices[4] : [choices[4]])
+      // Mouse reports must not become search text at any width.
+      expect(h.keyInputs).toEqual(method === 'select' ? [] : [' '])
+    } finally { h.close(); await pending }
+  })
+
   it.each(['dark', 'light'] as const)('single-clicks footer navigation through nested pages with %s hover and no focus cycle', async theme => {
     vi.useFakeTimers()
     vi.stubEnv('NO_COLOR', undefined)

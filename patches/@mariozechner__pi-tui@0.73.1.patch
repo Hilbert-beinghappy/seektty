@@ -963,9 +963,11 @@ diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
 index 9db54d907f801e43208a462bca925f2905787b7a..9c7d8757112767552afb732df006c2858610c101 100644
 --- a/dist/components/select-list.d.ts
 +++ b/dist/components/select-list.d.ts
-@@ -23,6 +23,15 @@ export interface SelectListLayoutOptions {
+@@ -23,6 +23,17 @@ export interface SelectListLayoutOptions {
      maxPrimaryColumnWidth?: number;
      truncatePrimary?: (context: SelectListTruncatePrimaryContext) => string;
++    /** Opt-in marker at the final description budget; other lists retain their default. */
++    descriptionEllipsis?: string;
  }
 +export interface SelectListRenderSnapshot {
 +    selectedIndex: number;
@@ -979,7 +981,7 @@ index 9db54d907f801e43208a462bca925f2905787b7a..9c7d8757112767552afb732df006c285
  export declare class SelectList implements Component {
      private items;
      private filteredItems;
-@@ -35,7 +44,14 @@ export declare class SelectList implements Component {
+@@ -35,7 +46,14 @@ export declare class SelectList implements Component {
      onSelectionChange?: (item: SelectItem) => void;
      constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions);
      setFilter(filter: string): void;
@@ -1099,6 +1101,15 @@ index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..8c1ff1a67dd3718129f81bf93a46f724
              this.notifySelectionChange();
          }
          // Enter
+@@ -99,7 +131,7 @@ export class SelectList {
+             const descriptionStart = prefixWidth + truncatedValueWidth + spacing.length;
+             const remainingWidth = width - descriptionStart - 2; // -2 for safety
+             if (remainingWidth > MIN_DESCRIPTION_WIDTH) {
+-                const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, "");
++                const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, this.layout.descriptionEllipsis ?? "");
+                 if (isSelected) {
+                     return this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`);
+                 }
 diff --git a/dist/keybindings.d.ts b/dist/keybindings.d.ts
 index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..1001bb8463e8ca59c31390dfb3d583d57501ceeb 100644
 --- a/dist/keybindings.d.ts
