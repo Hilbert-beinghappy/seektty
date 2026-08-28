@@ -111,7 +111,7 @@ import {
 } from './pi-tui-adapters.ts'
 import { applyKeyBindingOverrides, consumeRunningInterrupt, matchesBinding } from './keymap.ts'
 import { pendingInteractionStatus } from './pending-status.ts'
-import { attachFatalGuards, fatalLogHint, restoreSurfaceTerminalSync, withCleanupTimeout } from '../process-guards.ts'
+import { attachFatalGuards, attachSuspendGuards, fatalLogHint, restoreSurfaceTerminalSync, withCleanupTimeout } from '../process-guards.ts'
 import { measureStartup } from '../startup-trace.ts'
 import {
   instrumentTerminalWrites,
@@ -210,6 +210,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   let stopConstructedTui = (): void => undefined
   let disposeConstructedSyntax = (): void => undefined
   let detachFatalGuards = (): void => undefined
+  let detachSuspendGuards = (): void => undefined
   try {
     const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
     let liveTheme = initialTheme
@@ -221,6 +222,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       liveBehavior.get().hoverFeedback,
     )
     setTheme(initialTheme)
+    terminalSession.setBackgroundColor(initialTheme.colors.canvas)
     const tui = new TUI(terminal, true)
     const requestTuiRender = tui.requestRender.bind(tui)
     tui.requestRender = (force = false): void => {
@@ -785,6 +787,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
       detachFatalGuards()
       detachFatalGuards = () => undefined
+      detachSuspendGuards()
+      detachSuspendGuards = () => undefined
       if (stopping !== undefined) return stopping
       restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
       stopping = (async () => {
@@ -839,6 +843,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       applyTheme: (theme) => {
         liveTheme = theme
         setTheme(theme)
+        terminalSession.setBackgroundColor(theme.colors.canvas)
         syntax?.setTheme(theme)
         transcript.refreshPresentation()
         tui.invalidate()
@@ -1492,6 +1497,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     tui.addInputListener((data) => {
+      if (terminalSession.consumeInput(data)) return { consume: true }
       performanceProbe.markInput()
       // ProcessTerminal's StdinBuffer owns framing and Escape timeouts. Rebuffering
       // a resolved Escape here would join it to the next mouse report again.
@@ -1763,8 +1769,27 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       exit: (code) => { process.exit(code) },
     })
+    detachSuspendGuards = attachSuspendGuards({
+      suspend: () => {
+        contextMenu.close()
+        mouseController.endGesture()
+        clearTranscriptPointerGesture()
+        clearMouseArm(true)
+        clearHoverPresentation()
+        restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+        tui.stop()
+      },
+      resume: () => {
+        if (stopping !== undefined) return
+        terminalSession.enter()
+        tui.start()
+        terminalSession.startBackgroundSync()
+        tui.requestRender(true)
+      },
+    })
     terminalSession.enter()
     tui.start()
+    terminalSession.startBackgroundSync()
     refreshHeader(true)
     refresh()
     if (options.startupNotice !== undefined) setNotice(options.startupNotice, 'success')
@@ -1799,6 +1824,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     return { closed, stop: () => close({ kind: 'exit', code: 0 }) }
   } catch (error) {
     detachFatalGuards()
+    detachSuspendGuards()
     restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
     setCodeHighlighter(undefined)
     try { disposeConstructedSyntax() } catch { /* preserve the setup failure */ }

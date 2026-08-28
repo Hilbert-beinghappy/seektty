@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
 import {
   attachFatalGuards,
+  attachSuspendGuards,
   createFatalHandler,
   FATAL_SIGHUP_EXIT_CODE,
   FATAL_SIGTERM_EXIT_CODE,
@@ -9,6 +11,45 @@ import {
   restoreTerminalSync,
   withCleanupTimeout,
 } from '../src/process-guards.ts'
+
+describe('POSIX suspend guards', () => {
+  it.each(['linux', 'darwin'] as const)('restores before stopping and resumes once on %s', platform => {
+    const events = new EventEmitter()
+    const order: string[] = []
+    const detach = attachSuspendGuards({
+      suspend: () => { order.push('restore+stop') },
+      resume: () => { order.push('start+query+redraw') },
+    }, {
+      platform,
+      on: (signal, handler) => events.on(signal, handler),
+      off: (signal, handler) => events.off(signal, handler),
+      suspendSelf: () => { order.push('SIGSTOP') },
+    })
+    events.emit('SIGCONT')
+    expect(order).toEqual([])
+    events.emit('SIGTSTP')
+    events.emit('SIGTSTP')
+    expect(order).toEqual(['restore+stop', 'SIGSTOP'])
+    events.emit('SIGCONT')
+    events.emit('SIGCONT')
+    expect(order).toEqual(['restore+stop', 'SIGSTOP', 'start+query+redraw'])
+    detach()
+    detach()
+    expect(events.listenerCount('SIGTSTP')).toBe(0)
+    expect(events.listenerCount('SIGCONT')).toBe(0)
+  })
+
+  it('does not install unsupported job-control signals on Windows', () => {
+    const on = vi.fn()
+    const off = vi.fn()
+    const suspendSelf = vi.fn()
+    const detach = attachSuspendGuards({ suspend: vi.fn(), resume: vi.fn() }, { platform: 'win32', on, off, suspendSelf })
+    detach()
+    expect(on).not.toHaveBeenCalled()
+    expect(off).not.toHaveBeenCalled()
+    expect(suspendSelf).not.toHaveBeenCalled()
+  })
+})
 
 describe('fatal terminal restore (review #14)', () => {
   it('restores cooked mode and the cursor synchronously before any cleanup', () => {

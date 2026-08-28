@@ -1,5 +1,5 @@
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index fb224b9da697aab89a31336eae65071dc07d736e..e45d408b34e2163f7f18b12e3391256ca50bf7ae 100644
+index fb224b9da697aab89a31336eae65071dc07d736e..49afe6c1c0769e856eb2a2ce10e49fd391c1d2af 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
 @@ -30,6 +30,20 @@ export interface EditorOptions {
@@ -83,7 +83,7 @@ index fb224b9da697aab89a31336eae65071dc07d736e..e45d408b34e2163f7f18b12e3391256c
      private handleBackspace;
      /**
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..5117fc64d05296e15e7f3bf583c818828a3c667c 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..e9749bd069e0fef9ebaa2e5ef2c893e53d4c2953 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -171,6 +171,7 @@ export class Editor {
@@ -608,7 +608,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..5117fc64d05296e15e7f3bf583c81882
      cancelAutocomplete() {
          this.cancelAutocompleteRequest();
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..73fe4b6fdad88ce068a96c00eae31d3e70b08afe 100644
+index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..1f51d1bd61fd0228bb0d65c2bdc3fa3a7d63edd9 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -16,6 +16,12 @@ export declare class Input implements Component, Focusable {
@@ -625,7 +625,7 @@ index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..73fe4b6fdad88ce068a96c00eae31d3e
      private insertCharacter;
      private handleBackspace;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..091f5615f8c0b1b6e0e149610999ebeca7235285 100644
+index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..73a9e73bd15bdb38478c2661ca1b463f41402e54 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -1,5 +1,5 @@
@@ -960,7 +960,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
-index 9db54d907f801e43208a462bca925f2905787b7a..a42964427ae051bafe1348c51ac7c787b31fc6c4 100644
+index 9db54d907f801e43208a462bca925f2905787b7a..9c7d8757112767552afb732df006c2858610c101 100644
 --- a/dist/components/select-list.d.ts
 +++ b/dist/components/select-list.d.ts
 @@ -23,6 +23,15 @@ export interface SelectListLayoutOptions {
@@ -995,7 +995,7 @@ index 9db54d907f801e43208a462bca925f2905787b7a..a42964427ae051bafe1348c51ac7c787
      render(width: number): string[];
      handleInput(keyData: string): void;
 diff --git a/dist/components/select-list.js b/dist/components/select-list.js
-index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..7c5a32bd21f69bf1dc73f6d704e4e99334a03f1d 100644
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..8c1ff1a67dd3718129f81bf93a46f7243d0692f9 100644
 --- a/dist/components/select-list.js
 +++ b/dist/components/select-list.js
 @@ -10,6 +10,8 @@ export class SelectList {
@@ -1100,7 +1100,7 @@ index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..7c5a32bd21f69bf1dc73f6d704e4e993
          }
          // Enter
 diff --git a/dist/keybindings.d.ts b/dist/keybindings.d.ts
-index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..cf0293a2f89698f8a0a02aea1dab6fae6bd8784b 100644
+index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..1001bb8463e8ca59c31390dfb3d583d57501ceeb 100644
 --- a/dist/keybindings.d.ts
 +++ b/dist/keybindings.d.ts
 @@ -125,7 +125,7 @@ export declare const TUI_KEYBINDINGS: {
@@ -1113,7 +1113,7 @@ index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..cf0293a2f89698f8a0a02aea1dab6fae
      };
      readonly "tui.input.newLine": {
 diff --git a/dist/keybindings.js b/dist/keybindings.js
-index 60d400872183f1f6b754b61d3ccbf6708219215d..89faba6dbf55eb7449db25ce23d28f48988fe504 100644
+index 60d400872183f1f6b754b61d3ccbf6708219215d..c0161b806238f2bd05995136dd7fcacf347a1ff5 100644
 --- a/dist/keybindings.js
 +++ b/dist/keybindings.js
 @@ -62,7 +62,7 @@ export const TUI_KEYBINDINGS = {
@@ -1126,19 +1126,21 @@ index 60d400872183f1f6b754b61d3ccbf6708219215d..89faba6dbf55eb7449db25ce23d28f48
      "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
      "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
 diff --git a/dist/stdin-buffer.js b/dist/stdin-buffer.js
-index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..8c1e2368bdd2a39a63c6e9aa290de352215456a8 100644
+index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..dd1dacc511b9ff5aec86b2354eacfc89e40624db 100644
 --- a/dist/stdin-buffer.js
 +++ b/dist/stdin-buffer.js
-@@ -18,6 +18,8 @@
+@@ -18,6 +18,10 @@
   */
  import { EventEmitter } from "events";
  const ESC = "\x1b";
 +const SGR_MOUSE_PREFIX = "\x1b[<";
 +const MAX_MOUSE_SEQUENCE = 64;
++const OSC_PREFIX = "\x1b]";
++const MAX_OSC_SEQUENCE = 1024;
  const BRACKETED_PASTE_START = "\x1b[200~";
  const BRACKETED_PASTE_END = "\x1b[201~";
  /**
-@@ -163,6 +165,28 @@ function extractCompleteSequences(buffer) {
+@@ -163,6 +167,54 @@ function extractCompleteSequences(buffer) {
      let pos = 0;
      while (pos < buffer.length) {
          const remaining = buffer.slice(pos);
@@ -1147,6 +1149,32 @@ index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..8c1e2368bdd2a39a63c6e9aa290de352
 +        if (remaining.startsWith(ESC + ESC)) {
 +            sequences.push(ESC);
 +            pos++;
++            continue;
++        }
++        if (remaining.startsWith(OSC_PREFIX)) {
++            // Color-query replies may span stdin chunks well beyond the key
++            // timeout. Frame them atomically, without quadratic prefix scans.
++            let end = -1;
++            let restart = -1;
++            for (let index = OSC_PREFIX.length; index < remaining.length; index++) {
++                if (remaining[index] === "\x07") {
++                    end = index + 1;
++                    break;
++                }
++                if (remaining[index] === ESC) {
++                    if (index + 1 === remaining.length) break;
++                    if (remaining[index + 1] === "\\") end = index + 2;
++                    else restart = index;
++                    break;
++                }
++            }
++            if (restart !== -1) {
++                pos += restart;
++                continue;
++            }
++            if (end === -1) return { sequences, remainder: remaining };
++            if (end <= MAX_OSC_SEQUENCE) sequences.push(remaining.slice(0, end));
++            pos += end;
 +            continue;
 +        }
 +        if (remaining.startsWith(SGR_MOUSE_PREFIX)) {
@@ -1167,7 +1195,7 @@ index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..8c1e2368bdd2a39a63c6e9aa290de352
          // Try to extract a sequence starting at this position
          if (remaining.startsWith(ESC)) {
              // Find the end of this escape sequence
-@@ -263,6 +287,9 @@ export class StdinBuffer extends EventEmitter {
+@@ -263,6 +315,9 @@ export class StdinBuffer extends EventEmitter {
                  for (const sequence of result.sequences) {
                      this.emitDataSequence(sequence);
                  }
@@ -1177,7 +1205,7 @@ index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..8c1e2368bdd2a39a63c6e9aa290de352
              }
              this.pendingKittyPrintableCodepoint = undefined;
              this.buffer = this.buffer.slice(startIndex + BRACKETED_PASTE_START.length);
-@@ -288,6 +315,15 @@ export class StdinBuffer extends EventEmitter {
+@@ -288,6 +343,22 @@ export class StdinBuffer extends EventEmitter {
          for (const sequence of result.sequences) {
              this.emitDataSequence(sequence);
          }
@@ -1190,9 +1218,25 @@ index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..8c1e2368bdd2a39a63c6e9aa290de352
 +            return;
 +        }
 +        if (this.buffer.startsWith("\x1b[M")) return;
++        if (this.buffer.startsWith(OSC_PREFIX)) {
++            // Preserve a split ST while bounding malformed/oversized reports.
++            if (this.buffer.length > MAX_OSC_SEQUENCE) {
++                this.buffer = OSC_PREFIX + "!" + (this.buffer.endsWith(ESC) ? ESC : "");
++            }
++            return;
++        }
          if (this.buffer.length > 0) {
              this.timeout = setTimeout(() => {
                  const flushed = this.flush();
+@@ -311,7 +382,7 @@ export class StdinBuffer extends EventEmitter {
+             clearTimeout(this.timeout);
+             this.timeout = null;
+         }
+-        if (this.buffer.length === 0) {
++        if (this.buffer.length === 0 || this.buffer.startsWith(OSC_PREFIX)) {
+             return [];
+         }
+         const sequences = [this.buffer];
 diff --git a/dist/terminal.js b/dist/terminal.js
 index 3545b284ce2da594cc728803feb607a34cea5ca0..79bb3e8769594c1b8f70ef71304ab9032ed4ecd3 100644
 --- a/dist/terminal.js
