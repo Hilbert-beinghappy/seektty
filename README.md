@@ -274,6 +274,8 @@ Interface and code themes are independent. A palette of 3–16 HEX/RGB colors ca
 
 Hover styling is derived from the active interface theme, including existing custom themes, without adding required settings or altering saved colors. Indistinct or limited-color backgrounds use an underline cue; `NO_COLOR` remains respected.
 
+On supported truecolor terminals, SeekTTY queries the original terminal background and temporarily matches it to the interface theme, including live theme changes, so terminal padding does not show a different color. Exit restores the captured color. Unsupported or timed-out queries, `NO_COLOR`, limited-color terminals, and tmux/screen leave the terminal background untouched. Set `SEEKTTY_TERMINAL_BACKGROUND=off` to opt out. See [compatibility and verification](docs/terminal-background-compatibility.md); this does not change terminal settings, code highlighting, transparency, or window decorations.
+
 Use `/language` or a direct command to switch the terminal copy live:
 
 ```text

@@ -1,4 +1,5 @@
 import type { Terminal } from '@mariozechner/pi-tui'
+import { supportsTerminalBackground, TerminalBackground } from './terminal-background.ts'
 import {
   encodeDisableMouseReporting,
   encodeMouseReporting,
@@ -41,6 +42,9 @@ export interface ManagedTui {
 export interface TerminalSession {
   enter(): void
   restore(): void
+  setBackgroundColor(color: string): void
+  startBackgroundSync(): void
+  consumeInput(data: string): boolean
   setMouseReporting(mode: MouseReportingMode, hoverFeedback?: boolean): void
   mouseReporting(): MouseReportingMode
 }
@@ -59,7 +63,9 @@ export function createTerminalSession(
   terminal: Terminal & ManagedTerminal,
   enabled: boolean,
   beforeRestore: () => void = () => undefined,
+  env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): TerminalSession {
+  const background = new TerminalBackground(terminal, enabled && supportsTerminalBackground(env))
   let active = false
   let mouseMode: MouseReportingMode = 'full'
   let hoverFeedback = true
@@ -73,6 +79,7 @@ export function createTerminalSession(
     restore: () => {
       if (!active) return
       try { beforeRestore() } catch { /* terminal restoration must still run */ }
+      background.restore()
       try {
         terminal.write(encodeDisableMouseReporting())
       } finally {
@@ -84,6 +91,10 @@ export function createTerminalSession(
         }
       }
     },
+    setBackgroundColor: color => { background.setColor(color) },
+    // Must run after terminal.start() has installed its raw-mode input listener.
+    startBackgroundSync: () => { if (active) background.start() },
+    consumeInput: data => background.consumeInput(data),
     setMouseReporting: (mode, nextHoverFeedback = hoverFeedback) => {
       if (mouseMode === mode && hoverFeedback === nextHoverFeedback) return
       mouseMode = mode

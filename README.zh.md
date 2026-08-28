@@ -274,6 +274,8 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 会打开主题中心，�
 
 悬停样式由当前界面主题统一推导，兼容已有自定义主题，不新增必填设置、不修改保存的配色。背景过于接近或终端色彩有限时使用下划线辅助区分；仍遵守 `NO_COLOR`。
 
+在支持的真彩色终端中，SeekTTY 会查询原终端背景色，并临时同步为界面主题背景，实时换主题时也会更新，避免终端边距露出异色；退出时恢复读取到的原色。不支持或查询超时、`NO_COLOR`、低色彩终端以及 tmux/screen 均保留原背景。设置 `SEEKTTY_TERMINAL_BACKGROUND=off` 可关闭此功能。详见[兼容性与验证说明](docs/terminal-background-compatibility.md)；该功能不修改终端配置、代码高亮、透明度或窗口装饰。
+
 使用 `/language` 或直接命令实时切换终端文案：
 
 ```text

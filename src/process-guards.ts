@@ -133,3 +133,41 @@ export function attachFatalGuards(options: FatalGuardOptions): () => void {
     process.off('SIGHUP', onHup)
   }
 }
+
+interface SuspendRuntime {
+  readonly platform: NodeJS.Platform
+  on(signal: 'SIGTSTP' | 'SIGCONT', handler: () => void): unknown
+  off(signal: 'SIGTSTP' | 'SIGCONT', handler: () => void): unknown
+  suspendSelf(): void
+}
+
+/** POSIX job control; Ctrl+Z remains input undo, not a new suspend shortcut. */
+export function attachSuspendGuards(
+  options: { suspend(): void; resume(): void },
+  runtime: SuspendRuntime = {
+    platform: process.platform,
+    on: (signal, handler) => process.on(signal, handler),
+    off: (signal, handler) => process.off(signal, handler),
+    suspendSelf: () => { process.kill(process.pid, 'SIGSTOP') },
+  },
+): () => void {
+  if (runtime.platform === 'win32') return () => undefined
+  let suspended = false
+  const onSuspend = (): void => {
+    if (suspended) return
+    options.suspend()
+    suspended = true
+    runtime.suspendSelf()
+  }
+  const onResume = (): void => {
+    if (!suspended) return
+    suspended = false
+    options.resume()
+  }
+  runtime.on('SIGTSTP', onSuspend)
+  runtime.on('SIGCONT', onResume)
+  return () => {
+    runtime.off('SIGTSTP', onSuspend)
+    runtime.off('SIGCONT', onResume)
+  }
+}
