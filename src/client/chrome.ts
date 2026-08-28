@@ -10,6 +10,7 @@ import {
 } from '@mariozechner/pi-tui'
 import type { TuiHeaderFacts } from './capabilities.ts'
 import type { CellRect } from './mouse-hit-map.ts'
+import { horizontalRule } from './horizontal-rule.ts'
 import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
@@ -85,18 +86,6 @@ function permissionLabel(value: string): string {
     case 'custom': return ui('自定义', 'Custom')
     default: return value
   }
-}
-
-function horizontalRule(
-  label: string,
-  width: number,
-  paint: (text: string) => string,
-): string {
-  if (width <= 1) return paint('─'.repeat(Math.max(1, width)))
-  const labelWidth = Math.max(0, width - 2)
-  const safeLabel = labelWidth === 0 ? '' : truncateToWidth(label, labelWidth, '…')
-  const suffix = safeLabel === '' ? '' : ` ${safeLabel}`
-  return paint(`${'─'.repeat(Math.max(1, width - visibleWidth(suffix)))}${suffix}`)
 }
 
 function draftAttachmentLine(items: readonly ComposerDraftAttachment[]): string {

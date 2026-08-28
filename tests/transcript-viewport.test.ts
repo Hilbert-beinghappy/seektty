@@ -304,6 +304,74 @@ describe('transcript block viewport', () => {
     transcript.dispose()
   })
 
+  it('excludes user rules from selection and preserves copied newlines across resize', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 20)
+    const text = '123456789012345678\n中文第二行'
+    transcript.update(snapshot([user('framed', text)]))
+
+    for (const width of [24, 40]) {
+      const rows = transcript.render(width)
+      const borders = rows.flatMap((line, row) => /─{3}/u.test(line) ? [row] : [])
+      expect(borders).toHaveLength(2)
+      for (const row of borders) expect(transcript.hitAnchor(3, row, width)).toBeUndefined()
+      const maps = transcript.viewportMaps().filter(map => map.ownerKey === 'framed')
+      const first = maps.find(map => map.cellOffsets.some(offset => offset !== undefined))!
+      const last = maps.findLast(map => map.cellOffsets.some(offset => offset !== undefined))!
+      transcript.applyPointerSelection(
+        { surface: 'transcript', ownerKey: 'framed', textOffset: first.startOffset, affinity: 'before' },
+        { surface: 'transcript', ownerKey: 'framed', textOffset: last.startOffset + '中文第二行'.length, affinity: 'before' },
+        'character',
+      )
+      // Keep the existing Text component's padding while preserving the hard newline.
+      expect(transcript.copySelectionText()).toBe(`${'> 123456789012345678'.padEnd(width - 4)}\n中文第二行`)
+      expect(transcript.hitViewportEdgeAnchor(3, width, 'older')?.ownerKey).toBe('framed')
+      expect(transcript.hitViewportEdgeAnchor(3, width, 'newer')?.ownerKey).toBe('framed')
+    }
+    transcript.dispose()
+  })
+
+  it('omits both user borders when a selection crosses conversation blocks', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 20)
+    transcript.update(snapshot([
+      user('first', 'first question'),
+      assistant('answer', 'answer'),
+      user('last', 'last question'),
+    ]))
+    transcript.render(40)
+    transcript.applyPointerSelection(
+      { surface: 'transcript', ownerKey: 'first', textOffset: 0, affinity: 'before' },
+      { surface: 'transcript', ownerKey: 'last', textOffset: 100, affinity: 'before' },
+      'character',
+    )
+    const copied = transcript.copySelectionText()
+    expect(copied).toContain('> first question')
+    expect(copied).toContain('answer')
+    expect(copied).toContain('> last question')
+    expect(copied).not.toContain('─')
+    transcript.dispose()
+  })
+
+  it('encloses an image-first user message and its text in one frame', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript()
+    transcript.update(snapshot([{
+      ...user('image-prompt', ''),
+      data: {
+        kind: 'user', seq: 1, time: 1, source: null,
+        content: [{ type: 'image', attachment: imageAttachment }, { type: 'text', text: '描述图片' }],
+      },
+    }]))
+    const rows = transcript.render(60)
+    expect(rows.filter(row => /─{3}/u.test(row))).toHaveLength(2)
+    expect(rows[0]).toContain('─'.repeat(56))
+    expect(rows[1]).toContain('>')
+    expect(plain(rows.slice(2, -1))).toContain('描述图片')
+    expect(rows.at(-1)).toContain('─'.repeat(56))
+    transcript.dispose()
+  })
+
   it('copies a transcript selection without a full-history render', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 8)
@@ -421,6 +489,24 @@ describe('transcript block viewport', () => {
     transcript.handleInput('\r')
     expect(plain(transcript.render(80))).toContain('updated-middle-token')
     transcript.cancelSearch()
+    transcript.dispose()
+  })
+
+  it('searches framed user text without treating decorative rules as matches', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot(Array.from({ length: 40 }, (_, index) =>
+      user(`prompt-${String(index)}`, `question-${String(index)}-end`))))
+    transcript.render(80)
+    transcript.handleInput('/')
+    transcript.handleInput('question-0-end')
+    transcript.handleInput('\r')
+    expect(plain(transcript.render(80))).toContain('question-0-end')
+    transcript.cancelSearch()
+    transcript.handleInput('/')
+    transcript.handleInput('───')
+    transcript.handleInput('\r')
+    expect(plain(transcript.render(80))).toContain('无匹配')
     transcript.dispose()
   })
 
@@ -665,7 +751,9 @@ describe('transcript block viewport', () => {
     transcript.render(80)
 
     expect(transcript.navigateTurn(-1)).toBe(true)
-    expect(plain(transcript.render(80))).toContain('question-two')
+    const previous = transcript.render(80)
+    expect(previous[0]).toContain('─'.repeat(76))
+    expect(plain(previous)).toContain('question-two')
     expect(transcript.navigateTurn(1)).toBe(true)
     expect(plain(transcript.render(80))).toContain('question-three')
     transcript.dispose()

@@ -60,6 +60,7 @@ import { foldLineBlock } from './tool-output-limit.ts'
 import { unifiedHunks } from './line-diff.ts'
 import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 import { HeightIndex } from './height-index.ts'
+import { horizontalRule } from './horizontal-rule.ts'
 import {
   appendScrollbarColumn,
   paintScrollbar,
@@ -132,6 +133,9 @@ type TranscriptRow = ({
   readonly text: string
 } | {
   readonly format: 'plain'
+  readonly text: string
+} | {
+  readonly format: 'rule'
   readonly text: string
 } | {
   readonly format: 'code'
@@ -433,11 +437,14 @@ function userContentRows(content: readonly unknown[], steering = false): Transcr
     ? `${color.brand('>')} ${color.muted(ui('引导', 'Steering'))} `
     : `${color.brand('>')} `
   const first = rows[0]
-  if (first === undefined) return [{ format: 'plain', text: prefix.trimEnd(), userTurn: true }]
-  if (first.format === 'image') {
-    return [{ format: 'plain', text: prefix.trimEnd(), userTurn: true }, ...rows]
-  }
-  return [{ ...first, text: `${prefix}${first.text}`, userTurn: true }, ...rows.slice(1)]
+  const body: TranscriptRow[] = first === undefined || first.format === 'image'
+    ? [{ format: 'plain', text: prefix.trimEnd() }, ...rows]
+    : [{ ...first, text: `${prefix}${first.text}` }, ...rows.slice(1)]
+  return [
+    { format: 'rule', text: '', userTurn: true },
+    ...body,
+    { format: 'rule', text: '' },
+  ]
 }
 
 function assistantBlockText(block: AssistantBlock, preferences: TranscriptPreferences): string {
@@ -1208,7 +1215,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
   }
   const commandInputText = node.kind === 'command-input' ? textProperty(node.data) : undefined
   if (commandInputText !== undefined) {
-    return grouped([{ format: 'plain', text: `${color.brand('>')} ${commandInputText}`, userTurn: true }])
+    return grouped(userContentRows([{ type: 'text', text: commandInputText }]))
   }
   if (node.kind === 'workflow-run') {
     const rendered = workflowText(node.data)
@@ -1226,6 +1233,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
 
 interface TranscriptBlockLines {
   readonly lines: readonly string[]
+  readonly borderLines: readonly number[]
   readonly hardBreaks: readonly (boolean | undefined)[]
   readonly turnAnchors: readonly number[]
   readonly controls: readonly (TranscriptPointerControl | undefined)[]
@@ -1330,7 +1338,11 @@ export class Transcript implements Component, Focusable {
   private scrollbarVisible: 'always' | 'hidden' = DEFAULT_TUI_BEHAVIOR.scrollbarVisibility
   private pendingOlderAnchor: TranscriptCoordinate | undefined
   private lastScrollbar: ScrollbarModel | undefined
-  private readonly ownerCopy = new Map<string, { readonly text: string; readonly lineStarts: readonly number[] }>()
+  private readonly ownerCopy = new Map<string, {
+    readonly text: string
+    readonly lineStarts: readonly number[]
+    readonly borderLines: readonly number[]
+  }>()
   private lastViewportMaps: readonly ViewportCellMap[] = []
   private selection: TextSelection | undefined
   private readonly lineControls = new Map<string, readonly (TranscriptPointerControl | undefined)[]>()
@@ -1907,7 +1919,7 @@ export class Transcript implements Component, Focusable {
 
   private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
     const block = this.blocks[blockIndex]
-    if (block === undefined) return { lines: [], hardBreaks: [], turnAnchors: [], controls: [] }
+    if (block === undefined) return { lines: [], borderLines: [], hardBreaks: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
     const cacheKey = blockIndex === 0 ? -contentWidth : contentWidth
     if (block.dirty) {
@@ -1917,12 +1929,13 @@ export class Transcript implements Component, Focusable {
     const cachedBlock = block.metadata.dynamic ? undefined : block.linesByWidth.get(cacheKey)
     if (cachedBlock !== undefined) {
       this.heightIndex.setExact(block.key, cachedBlock.lines.length)
-      this.rememberOwnerCopy(block.key, cachedBlock.lines, contentWidth, cachedBlock.hardBreaks)
+      this.rememberOwnerCopy(block.key, cachedBlock, contentWidth)
       this.lineControls.set(block.key, cachedBlock.controls)
       this.syncHeightIndexCounters()
       return cachedBlock
     }
     const lines: string[] = []
+    const borderLines: number[] = []
     const hardBreaks: Array<boolean | undefined> = []
     const turnAnchors: number[] = []
     const controls: (TranscriptPointerControl | undefined)[] = []
@@ -1962,14 +1975,20 @@ export class Transcript implements Component, Focusable {
         const target = start + hardBreakIndex
         if (target >= start && target < lines.length) hardBreaks[target] = true
       }
-      if (lines.length > start && index < block.components.length - 1) {
-        hardBreaks[lines.length - 1] = true
+      if (row?.format === 'rule') borderLines.push(start)
+      if (lines.length > start) {
+        if (row?.format === 'rule' || block.rows[index + 1]?.format === 'rule') {
+          // Decoration must not add a newline to the copied message.
+          hardBreaks[lines.length - 1] = false
+        } else if (index < block.components.length - 1) {
+          hardBreaks[lines.length - 1] = true
+        }
       }
       for (let lineIndex = start; lineIndex < lines.length; lineIndex += 1) {
         controls[lineIndex] = control
       }
     }
-    const result = { lines, hardBreaks, turnAnchors, controls }
+    const result = { lines, borderLines, hardBreaks, turnAnchors, controls }
     if (!block.metadata.dynamic) {
       block.linesByWidth.set(cacheKey, result)
       while (block.linesByWidth.size > 4) {
@@ -1979,7 +1998,7 @@ export class Transcript implements Component, Focusable {
       }
     }
     this.heightIndex.setExact(block.key, result.lines.length)
-    this.rememberOwnerCopy(block.key, result.lines, contentWidth, result.hardBreaks)
+    this.rememberOwnerCopy(block.key, result, contentWidth)
     this.lineControls.set(block.key, result.controls)
     this.syncHeightIndexCounters()
     return result
@@ -1987,11 +2006,16 @@ export class Transcript implements Component, Focusable {
 
   private rememberOwnerCopy(
     key: string,
-    lines: readonly string[],
+    block: TranscriptBlockLines,
     contentWidth: number,
-    hardBreaks: readonly (boolean | undefined)[],
   ): void {
-    this.ownerCopy.set(key, ownerTextFromRenderedLines(lines, Math.abs(contentWidth), hardBreaks))
+    const lines = block.borderLines.length === 0
+      ? block.lines
+      : block.lines.map((line, index) => block.borderLines.includes(index) ? '' : line)
+    this.ownerCopy.set(key, {
+      ...ownerTextFromRenderedLines(lines, Math.abs(contentWidth), block.hardBreaks),
+      borderLines: block.borderLines,
+    })
   }
 
   private fillFrom(
@@ -2112,6 +2136,7 @@ export class Transcript implements Component, Focusable {
   }
 
   private logicalRowLines(row: TranscriptRow): readonly string[] {
+    if (row.format === 'rule') return []
     if (row.format === 'image') return [imageLabel(row.attachment)]
     return row.text.split('\n')
   }
@@ -2223,17 +2248,19 @@ export class Transcript implements Component, Focusable {
       const block = this.blocks[blockIndex]
       if (block === undefined) break
       const copy = this.ownerCopy.get(block.key)
-      const startOffset = copy?.lineStarts[lineOffset] ?? 0
-      const mapped = mapCopyableLine(lines[row] ?? '', startOffset, contentWidth)
-      maps.push({
-        row,
-        ownerKey: block.key,
-        surface: 'transcript',
-        startOffset,
-        endOffset: mapped.endOffset,
-        cellOffsets: mapped.cellOffsets,
-        hardBreakAfter: mapped.hardBreakAfter,
-      })
+      if (copy?.borderLines.includes(lineOffset) !== true) {
+        const startOffset = copy?.lineStarts[lineOffset] ?? 0
+        const mapped = mapCopyableLine(lines[row] ?? '', startOffset, contentWidth)
+        maps.push({
+          row,
+          ownerKey: block.key,
+          surface: 'transcript',
+          startOffset,
+          endOffset: mapped.endOffset,
+          cellOffsets: mapped.cellOffsets,
+          hardBreakAfter: mapped.hardBreakAfter,
+        })
+      }
       const control = this.lineControls.get(block.key)?.[lineOffset]
       if (control !== undefined) pointerControls.push({ row, kind: control.kind, id: control.id })
       lineOffset += 1
@@ -2764,6 +2791,12 @@ export class Transcript implements Component, Focusable {
   }
 
   private component(row: TranscriptRow): Component {
+    if (row.format === 'rule') {
+      return {
+        render: width => [horizontalRule(row.text, width, color.brand)],
+        invalidate: () => undefined,
+      }
+    }
     if (row.format === 'markdown') {
       internals.markdownCreated += 1
       return new Markdown(escapeTerminalText(row.text), 0, 0, markdownTheme)

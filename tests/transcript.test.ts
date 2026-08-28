@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { visibleWidth } from '@mariozechner/pi-tui'
 import type {
   ChatConversationViewNode,
   ConversationSnapshot,
@@ -346,22 +347,59 @@ describe('conversation viewport', () => {
 
     const rows = transcript.render(40)
     expect(rows).toHaveLength(8)
-    expect(rows.slice(0, 5).every(row => stripAnsi(row).replace(/[▐│▴▾⇡]/gu, '').trim() === '')).toBe(true)
-    expect(rows.at(-3)).toContain('> 问题')
+    expect(rows.slice(0, 3).every(row => stripAnsi(row).replace(/[▐│▴▾⇡]/gu, '').trim() === '')).toBe(true)
+    expect(rows.at(-4)).toContain('> 问题')
     expect(rows.join('\n')).not.toContain('❯ 问题')
     expect(rows.at(-1)).toContain('回答')
   })
 
-  it('renders a sent message as a plain prompt line without a background strip', () => {
+  it.each(['dark', 'light'] as const)('frames sent messages with open rules without a background in %s', (theme) => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm-256color')
     vi.stubEnv('COLORTERM', 'truecolor')
-    const transcript = new Transcript(() => 4)
+    setTheme(BUILT_IN_THEMES[theme])
+    const transcript = new Transcript()
     transcript.update(snapshot([user('u1', '问题'), assistant('a1', '回答')]))
 
-    const userRow = transcript.render(40).find(row => row.includes('问题'))
-    expect(userRow).toBeDefined()
-    expect(userRow).not.toContain('\u001B[48;')
+    const rows = transcript.render(40)
+    expect(rows.map(row => stripAnsi(row).trimEnd())).toEqual([
+      `  ${'─'.repeat(36)}`, '  > 问题', `  ${'─'.repeat(36)}`, '', '  回答',
+    ])
+    expect(rows.slice(0, 3).join('\n')).not.toContain('\u001B[48;')
+  })
+
+  it('keeps one pair of rules around wrapped multiline messages after resizing', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript()
+    transcript.update(snapshot([user('u1', '中文长消息 abcdefghijklmnopqrstuvwxyz\n第二行')]))
+
+    for (const width of [40, 12, 8, 1, 60]) {
+      const rows = transcript.render(width).map(stripAnsi)
+      const ruleWidth = width >= 12 ? width - 4 : width
+      expect(rows[0]?.trim()).toBe('─'.repeat(ruleWidth))
+      expect(rows.at(-1)?.trim()).toBe('─'.repeat(ruleWidth))
+      expect(rows.filter(row => /^\s*─+\s*$/u.test(row))).toHaveLength(2)
+      // A double-width CJK glyph cannot fit in a one-cell terminal.
+      if (width > 1) expect(rows.every(row => visibleWidth(row) <= width)).toBe(true)
+    }
+  })
+
+  it('frames empty prompts, steering, and submitted commands but not subagent notices', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript()
+    const command = { ...chatNode('cmd', { text: '/help' }), kind: 'command-input' }
+    transcript.update(snapshot([
+      user('empty', ''),
+      chatNode('steering', { kind: 'steering', seq: 2, time: 2, content: [{ type: 'text', text: '换个方向' }] }),
+      command,
+      chatNode('subagent', { kind: 'user', seq: 3, time: 3, source: { kind: 'subagent-settled' }, content: [] }),
+    ]))
+
+    const rows = transcript.render(40).map(stripAnsi)
+    expect(rows.filter(row => /^\s*─+\s*$/u.test(row))).toHaveLength(6)
+    expect(rows.join('\n')).toContain('> 引导 换个方向')
+    expect(rows.join('\n')).toContain('> /help')
+    expect(rows.at(-1)).toContain('◆ 子 Agent 已结束')
   })
 
   it('marks silently clipped history and removes settled thinking chrome', () => {
