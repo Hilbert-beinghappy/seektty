@@ -6,6 +6,7 @@ import type {
 import { internals, Transcript } from '../src/client/transcript.ts'
 import type { TranscriptImagePayload } from '../src/client/transcript.ts'
 import { terminalMouseDelta } from '../src/client/terminal-session.ts'
+import { background, setBackgroundMode } from '../src/client/theme.ts'
 
 function assistant(key: string, text: string): ChatConversationViewNode {
   return {
@@ -121,6 +122,7 @@ function plain(lines: readonly string[]): string {
 }
 
 afterEach(() => {
+  setBackgroundMode('theme')
   resetRenderCounters()
   internals.fingerprintsComputed = 0
   internals.markdownCreated = 0
@@ -131,6 +133,39 @@ afterEach(() => {
 })
 
 describe('transcript block viewport', () => {
+  it('preserves the historical viewport, selection, hit maps and render budget across background mode changes', () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('COLORTERM', 'truecolor')
+    vi.stubEnv('TERM', 'xterm-256color')
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot(Array.from({ length: 100 }, (_, index) =>
+      assistant(`background-${index}`, `line-${index}`))))
+    transcript.render(80)
+    transcript.scrollBy(20)
+    transcript.render(80)
+    const before = transcript.hitViewportEdgeAnchor(4, 80, 'older', 'before')
+    const after = transcript.hitViewportEdgeAnchor(20, 80, 'newer', 'after')
+    expect(before).toBeDefined()
+    expect(after).toBeDefined()
+    transcript.applyPointerSelection(before!, after!, 'character')
+    const selection = transcript.currentSelection()
+    const copied = transcript.copySelectionText()
+    const lines = plain(transcript.render(80))
+    const maps = transcript.viewportMaps()
+    resetRenderCounters()
+    for (const mode of ['terminal', 'explicit', 'theme'] as const) {
+      setBackgroundMode(mode)
+      transcript.invalidate()
+      expect(plain(transcript.render(80).map(background.canvas))).toBe(lines)
+      expect(transcript.currentSelection()).toEqual(selection)
+      expect(transcript.copySelectionText()).toBe(copied)
+      expect(transcript.viewportMaps()).toEqual(maps)
+    }
+    expect(internals.lastFullLinesCopied).toBe(0)
+    expect(internals.blocksVisited).toBeLessThan(40)
+    transcript.dispose()
+  })
+
   it('bounds editor-only render work by the viewport instead of history size', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 8)

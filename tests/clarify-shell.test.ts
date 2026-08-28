@@ -249,6 +249,7 @@ function host(overlayQueue: OverlayQueue, composer = ''): TuiActionHost & {
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyAppearance: vi.fn(),
     applyLocale: vi.fn(),
     setEditor: vi.fn<(text: string) => void>(),
     composerText: vi.fn(() => composer),

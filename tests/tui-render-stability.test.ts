@@ -696,7 +696,7 @@ describe('SeekTTY Box + BottomAnchoredLayout first-frame bytes (not native pixel
       const painted = tui.render(columns)
       expect(painted.length, label).toBe(rows)
       expect(painted.every(line => visibleWidth(line) === columns), label).toBe(true)
-      if (color) expect(first, label).toMatch(/\u001B\[48;/u)
+      if (color) expect(first, label).toContain('\u001B[49m')
       terminal.reset()
       tui.requestRender(true)
       await nextFrame()

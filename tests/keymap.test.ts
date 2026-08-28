@@ -67,6 +67,7 @@ function actionHarness(initial: TuiBehaviorSettings = DEFAULT_TUI_BEHAVIOR): {
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyAppearance: vi.fn(),
     applyLocale: vi.fn(),
     applyBehavior: vi.fn((behavior: TuiBehaviorSettings) => {
       applyKeyBindingOverrides(behavior.keyBindings)

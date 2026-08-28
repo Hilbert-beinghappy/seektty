@@ -19,6 +19,7 @@ import {
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
   type TuiAppearanceSettings,
+  type TuiBackgroundMode,
   type TuiBehaviorSettings,
   type TuiCodeThemeId,
   type TuiCustomTheme,
@@ -81,6 +82,7 @@ import {
   appearanceFromSettings,
   appearanceSettings,
   deleteCustomTheme,
+  saveBackgroundMode,
   saveCodeTheme,
   saveCustomTheme,
   saveTheme,
@@ -131,6 +133,7 @@ export interface TuiActionHost {
   refresh(): void
   refreshHeader(): void
   applyTheme(theme: ResolvedTuiTheme): void
+  applyAppearance(appearance: TuiAppearanceSettings): void
   applyLocale(locale: LocaleId): void
   applyBehavior?(behavior: TuiBehaviorSettings): void
   setEditor(text: string): void
@@ -1282,6 +1285,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
     choices.push(
       {
+        id: '__background__',
+        label: ui('背景模式', 'Background mode'),
+        description: ui('选择主画布背景；独立于主题文件', 'Choose the canvas background independently of theme files'),
+      },
+      {
         id: '__code__',
         label: ui('代码块主题', "Code-block theme"),
         description: ui(`${appearance.codeTheme === 'auto' ? '自动匹配' : '独立指定'} · 当前 ${activeCodeTheme.name}`, `${appearance.codeTheme === 'auto' ? 'Automatic' : 'Explicit'} · current ${activeCodeTheme.name}`),
@@ -1304,6 +1312,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         options,
       }, async (selected) => {
         if (selected.id === '__code__') await this.themeCode('', navigation)
+        else if (selected.id === '__background__') await this.editBackgroundMode(navigation)
         else if (selected.id === '__palette__') await this.themePalette('', navigation)
         else if (selected.id === '__import__') await this.themeImport('', navigation)
         else if (selected.id === '__export__') await this.themeExport('', navigation)
@@ -1325,6 +1334,40 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
     const updated = await saveTheme(bridge, document, target)
     await this.settingsChanged(updated, resolved.name)
+  }
+
+  /** Shared by /theme and the searchable Harness appearance field. No preview before saving. */
+  private async editBackgroundMode(overlays: OverlayPrompts): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
+    const current = appearanceFromSettings(document).backgroundMode
+    const selected = await overlays.select({
+      title: ui('背景模式', 'Background mode'),
+      detail: ui(
+        '仅主画布继承终端效果，不设置透明度。弹窗、代码块和高亮保留独立底色；保存后立即生效。',
+        'Only the canvas inherits terminal effects; opacity is not changed. Panels, code blocks and highlights keep their backgrounds. Saves apply immediately.',
+      ),
+      searchable: false,
+      initialChoiceId: current,
+      choices: [
+        {
+          id: 'theme', label: ui('主题颜色＋终端效果（默认）', 'Theme + terminal effects'),
+          description: ui('默认背景＋OSC 11 主题改色；保留终端透明、模糊和图片效果', 'Default: OSC 11 theme color; retain terminal transparency, blur and images'),
+        },
+        {
+          id: 'terminal', label: ui('跟随终端', 'Follow terminal'),
+          description: ui('使用终端默认背景，不改色；恢复本次运行捕获的原色', 'Use the terminal default background without recoloring; restore the captured original'),
+        },
+        {
+          id: 'explicit', label: ui('显式主题底色（兼容）', 'Explicit fill (compatibility)'),
+          description: ui('沿用 RGB 画布与主题改色；实际透明效果由终端决定', 'Keep the RGB canvas and theme color sync; the terminal still decides opacity'),
+        },
+      ].map(choice => ({ ...choice, active: choice.id === current })),
+      options: { width: 90, maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
+    if (selected === undefined || selected.id === current) return
+    const updated = await saveBackgroundMode(bridge, document, selected.id as TuiBackgroundMode)
+    await this.settingsChanged(updated, ui('背景模式', 'Background mode'), overlays)
   }
 
   private async themeUse(value: string): Promise<void> {
@@ -2343,6 +2386,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     document: TuiSettingsDocument,
     field: TuiSettingsField,
   ): Promise<void> {
+    if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE
+      && field.path.length === 1 && field.path[0] === 'backgroundMode') {
+      await this.editBackgroundMode(overlays)
+      return
+    }
     const bridge = this.capabilities.managementBridge().settings
     const actions: OverlayChoice[] = [
       { id: 'edit', label: field.control === 'secret' ? ui('写入新 Secret…', "Set new secret…") : ui('修改值…', "Edit value…"), description: ui(`控件：${field.control}`, `Control: ${field.control}`) },
@@ -2543,7 +2591,7 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
   ): Promise<void> {
     if (document.applies === 'live') {
       if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) {
-        this.host.applyTheme(themeFromAppearance(document))
+        this.host.applyAppearance(appearanceFromSettings(document))
       }
       if (document.namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
         this.host.applyBehavior?.(behaviorFromSettings(document))

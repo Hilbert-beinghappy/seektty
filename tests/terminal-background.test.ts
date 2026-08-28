@@ -8,6 +8,7 @@ import {
 } from '../src/client/terminal-background.ts'
 import { createTerminalSession, type ManagedTerminal } from '../src/client/terminal-session.ts'
 import { createFatalHandler } from '../src/process-guards.ts'
+import { OverlayQueue } from '../src/client/overlays.ts'
 
 const ESC = '\u001B'
 const ST = `${ESC}\\`
@@ -300,10 +301,28 @@ function inputHarness() {
   tui.showOverlay(search)
   tui.showOverlay(nestedSearch)
   session.startBackgroundSync()
-  return { terminal, session, keys, composer, search, nestedSearch, close: () => { session.restore(); tui.stop() } }
+  return { terminal, tui, session, keys, composer, search, nestedSearch, close: () => { session.restore(); tui.stop() } }
 }
 
 describe('OSC framing and nested input isolation', () => {
+  it.each(['theme', 'terminal', 'explicit'] as const)('keeps OSC replies out of an actual API-key overlay in %s mode', async mode => {
+    vi.useFakeTimers()
+    const harness = inputHarness()
+    const overlays = new OverlayQueue(harness.tui)
+    const secret = overlays.secretInput({ title: 'API key' })
+    try {
+      await vi.advanceTimersByTimeAsync(40)
+      harness.session.setBackgroundColor('#282C34', mode)
+      harness.terminal.stdin.process(`sk-fixture${reply()}${reply('invalid')}`)
+      vi.advanceTimersByTime(BACKGROUND_QUERY_TIMEOUT_MS + 1)
+      harness.terminal.stdin.process(`${reply('rgb:1/2/3')}-tail\r`)
+      expect(await secret).toBe('sk-fixture-tail')
+      expect(harness.search.getValue()).toBe('')
+      expect(harness.composer.getValue()).toBe('')
+      expect(harness.keys.join('')).not.toContain(']11;')
+    } finally { overlays.dispose(); harness.close() }
+  })
+
   it.each([ST, '\u0007'])('handles every split, including slow fragments after the OSC opener (%j)', end => {
     vi.useFakeTimers()
     const data = reply(ORIGINAL, end)

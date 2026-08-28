@@ -6,6 +6,7 @@ import {
   type MarkdownTheme,
 } from '@mariozechner/pi-tui'
 import { BUILT_IN_THEMES, resolveHoverStyle, type ResolvedTuiTheme } from './theme-config.ts'
+import { DEFAULT_TUI_BACKGROUND_MODE, type TuiBackgroundMode } from '@deepseek-ai/dsh-tui-protocol'
 import { ui } from './locale.ts'
 
 const RESET = '\u001B[0m'
@@ -99,6 +100,7 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
 }
 
 let selectedTheme: ResolvedTuiTheme = BUILT_IN_THEMES.dark
+let backgroundMode: TuiBackgroundMode = DEFAULT_TUI_BACKGROUND_MODE
 let palette = runtimePalette(selectedTheme)
 const hoverUnderlineByLevel = new Map<TerminalColorLevel, boolean>()
 let codeHighlighter: ((code: string, lang?: string) => string[]) | undefined
@@ -266,10 +268,10 @@ function paint(entry: SemanticColor, text: string): string {
   return `${foregroundSequence(entry, level)}${safeText}${RESET}`
 }
 
-function layer(background: SemanticColor, text: string, foreground = palette.text): string {
+function layer(background: SemanticColor | undefined, text: string, foreground = palette.text): string {
   const level = terminalColorLevel()
   if (level === 0) return text
-  const prefix = `${backgroundSequence(background, level)}${foregroundSequence(foreground, level)}`
+  const prefix = `${background === undefined ? '\u001B[49m' : backgroundSequence(background, level)}${foregroundSequence(foreground, level)}`
   const restored = text.replace(/\u001B\[(?:0)?m/gu, `${RESET}${prefix}`)
   return `${prefix}${restored}${RESET}`
 }
@@ -336,6 +338,9 @@ export function setTheme(theme: ResolvedTuiTheme): void {
 /** Return the complete theme currently used by renderers. */
 export function currentTheme(): ResolvedTuiTheme { return selectedTheme }
 
+/** Independent of theme previews/imports; only the main canvas inherits terminal effects. */
+export function setBackgroundMode(mode: TuiBackgroundMode): void { backgroundMode = mode }
+
 /**
  * Connect the asynchronously prepared syntax highlighter to Markdown rendering.
  * @param highlighter - synchronous cached renderer, or undefined during teardown.
@@ -376,7 +381,7 @@ export const color = {
 
 /** Background layers shared by the full frame, panels, and selected rows. */
 export const background = {
-  canvas: (text: string): string => layer(palette.canvas, text),
+  canvas: (text: string): string => layer(backgroundMode === 'explicit' ? palette.canvas : undefined, text),
   surface: (text: string): string => layer(palette.surface, text),
   hover: hoverLayer,
   selection: (text: string): string => layer(palette.selection, text),

@@ -207,6 +207,7 @@ function actionHost(overlays: OverlayQueueType, composer: { getText(): string; s
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyAppearance: vi.fn(),
     applyLocale: vi.fn(),
     setEditor: (text) => { composer.setText(text) },
     composerText: () => composer.getText(),

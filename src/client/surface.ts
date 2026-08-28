@@ -13,6 +13,7 @@ import {
   MAX_WHEEL_SCROLL_LINES,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
+  type TuiBackgroundMode,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
@@ -43,7 +44,8 @@ import {
   StatusBar,
   transcriptViewportRows,
 } from './chrome.ts'
-import { appearanceSettings, themeFromAppearance } from './appearance.ts'
+import { appearanceFromSettings, appearanceSettings } from './appearance.ts'
+import { resolveAppearanceTheme, type ResolvedTuiTheme } from './theme-config.ts'
 import { behaviorFromSettings, behaviorSettings, createLiveBehavior } from './behavior.ts'
 import { clearIdleComposerDraft } from './composer-draft.ts'
 import {
@@ -64,7 +66,7 @@ import {
   type ProviderOnboardingResult,
 } from './provider-onboarding.ts'
 import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
-import { background, color, escapeTerminalText, setCodeHighlighter, setTheme } from './theme.ts'
+import { background, color, escapeTerminalText, setBackgroundMode, setCodeHighlighter, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { canReadClipboardText, readClipboardText, writeClipboard } from './clipboard.ts'
 import { graphemeRangeAt, type SelectionAnchor } from './text-selection.ts'
@@ -192,7 +194,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     internals.reportPerformance(snapshot)
   }
   let stopTuiRenderingSync = (): void => undefined
-  const terminalSession = createTerminalSession(terminal, true, () => { stopTuiRenderingSync() })
+  let reportBackgroundUnavailable = (): void => undefined
+  const terminalSession = createTerminalSession(terminal, true, () => { stopTuiRenderingSync() }, process.env,
+    () => { reportBackgroundUnavailable() })
   const startup = await (async () => {
     try {
       return await measureStartup('settings+client', () => Promise.all([
@@ -212,8 +216,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   let detachFatalGuards = (): void => undefined
   let detachSuspendGuards = (): void => undefined
   try {
-    const initialTheme = themeFromAppearance(appearanceSettings(settingsDocuments))
+    const initialAppearance = appearanceFromSettings(appearanceSettings(settingsDocuments))
+    const initialTheme = resolveAppearanceTheme(initialAppearance)
     let liveTheme = initialTheme
+    let liveBackgroundMode = initialAppearance.backgroundMode
     const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
     applyKeyBindingOverrides(liveBehavior.get().keyBindings)
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
@@ -222,7 +228,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       liveBehavior.get().hoverFeedback,
     )
     setTheme(initialTheme)
-    terminalSession.setBackgroundColor(initialTheme.colors.canvas)
+    setBackgroundMode(liveBackgroundMode)
+    terminalSession.setBackgroundColor(initialTheme.colors.canvas, liveBackgroundMode)
     const tui = new TUI(terminal, true)
     const requestTuiRender = tui.requestRender.bind(tui)
     tui.requestRender = (force = false): void => {
@@ -618,6 +625,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       renderWhileOpen()
     }
 
+    reportBackgroundUnavailable = () => {
+      setNotice(ui(
+        '终端背景改色不可用，继续使用终端背景效果；可在 /theme 选择显式底色（兼容）。',
+        'Terminal recoloring is unavailable; using terminal background effects. /theme offers an explicit-fill compatibility mode.',
+      ), 'warning')
+    }
+
     const dismissNotice = (): void => {
       notices.dismiss()
     }
@@ -834,6 +848,22 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return stopping
     }
 
+    const applyRenderedAppearance = (theme: ResolvedTuiTheme, mode: TuiBackgroundMode): void => {
+      const themeChanged = JSON.stringify(theme) !== JSON.stringify(liveTheme)
+      liveTheme = theme
+      liveBackgroundMode = mode
+      setTheme(theme)
+      setBackgroundMode(mode)
+      terminalSession.setBackgroundColor(theme.colors.canvas, mode)
+      // Background-only changes must not rebuild transcript nodes or disturb selection/anchors.
+      if (themeChanged) {
+        syntax?.setTheme(theme)
+        transcript.refreshPresentation()
+      }
+      tui.invalidate()
+      tui.requestRender(true)
+    }
+
     actions = new TuiActions(capabilities, {
       overlays,
       transcript,
@@ -841,13 +871,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       refresh,
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
-        liveTheme = theme
-        setTheme(theme)
-        terminalSession.setBackgroundColor(theme.colors.canvas)
-        syntax?.setTheme(theme)
-        transcript.refreshPresentation()
-        tui.invalidate()
-        tui.requestRender(true)
+        applyRenderedAppearance(theme, liveBackgroundMode)
+      },
+      applyAppearance: (appearance) => {
+        applyRenderedAppearance(resolveAppearanceTheme(appearance), appearance.backgroundMode)
       },
       applyLocale: (locale) => {
         setUiLocale(locale)
