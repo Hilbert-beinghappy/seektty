@@ -22,7 +22,7 @@ import {
   type TuiSettingsPathOp,
 } from '../src/protocol.ts'
 
-function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocument {
+function document(value: Omit<TuiAppearanceSettings, 'backgroundMode'>, revision = 0): TuiSettingsDocument {
   return {
     namespace: TUI_APPEARANCE_SETTINGS_NAMESPACE,
     schema: {},

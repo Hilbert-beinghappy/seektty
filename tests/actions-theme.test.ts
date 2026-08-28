@@ -15,7 +15,10 @@ import {
   type TuiSettingsPathOp,
 } from '../src/protocol.ts'
 
-function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocument {
+// Keep legacy persisted fixtures without the new field to exercise migration.
+type StoredAppearance = Omit<TuiAppearanceSettings, 'backgroundMode'> & Partial<Pick<TuiAppearanceSettings, 'backgroundMode'>>
+
+function document(value: StoredAppearance, revision = 0): TuiSettingsDocument {
   return {
     namespace: TUI_APPEARANCE_SETTINGS_NAMESPACE,
     schema: {},
@@ -26,7 +29,7 @@ function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocume
   }
 }
 
-function settingsState(initial: TuiAppearanceSettings): {
+function settingsState(initial: StoredAppearance): {
   readonly settings: TuiManagementBridge['settings']
   readonly mutate: ReturnType<typeof vi.fn>
   current(): TuiSettingsDocument

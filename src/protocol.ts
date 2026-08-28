@@ -86,10 +86,17 @@ export interface TuiCustomTheme {
   readonly tokenColors: readonly TuiTextMateRule[]
 }
 
+/** How the main canvas uses the terminal's default background. */
+export type TuiBackgroundMode = 'theme' | 'terminal' | 'explicit'
+
+/** Keep theme colors while inheriting the terminal's background effects. */
+export const DEFAULT_TUI_BACKGROUND_MODE: TuiBackgroundMode = 'theme'
+
 /** Complete appearance value owned by the SeekTTY Settings namespace. */
 export interface TuiAppearanceSettings {
   readonly theme: TuiThemeId
   readonly codeTheme: TuiCodeThemeId
+  readonly backgroundMode: TuiBackgroundMode
   readonly customThemes: readonly TuiCustomTheme[]
 }
 

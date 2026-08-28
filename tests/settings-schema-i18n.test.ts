@@ -35,6 +35,9 @@ describe('settings schema locale metadata (review #57)', () => {
     const theme = settingsFields(appearance).find(field => field.path[0] === 'theme')
     expect(theme?.description).toContain('interface theme')
     expect(theme?.description).not.toMatch(HAN)
+    const background = settingsFields(appearance).find(field => field.path[0] === 'backgroundMode')
+    expect(background?.description).toContain('terminal effects')
+    expect(background?.description).not.toMatch(HAN)
     const elapsed = settingsFields(behavior).find(field => field.path[0] === 'statusElapsed')
     expect(elapsed?.description).toContain('elapsed')
     expect(elapsed?.description).not.toMatch(HAN)
@@ -44,6 +47,17 @@ describe('settings schema locale metadata (review #57)', () => {
 
     setUiLocale('zh')
     expect(settingsFields(appearance).find(field => field.path[0] === 'theme')?.description).toContain('界面主题')
+    expect(settingsFields(appearance).find(field => field.path[0] === 'backgroundMode')?.description).toContain('终端效果')
+  })
+
+  it('defaults the Harness schema for old profiles and rejects unknown background modes', () => {
+    expect(AppearanceSettingsSchema({}).backgroundMode).toBe('theme')
+    expect(AppearanceSettingsSchema({ theme: 'light' }).backgroundMode).toBe('theme')
+    for (const backgroundMode of ['theme', 'terminal', 'explicit'] as const) {
+      expect(AppearanceSettingsSchema({ backgroundMode }).backgroundMode).toBe(backgroundMode)
+    }
+    // @ts-expect-error external persisted settings can contain invalid values
+    expect(() => AppearanceSettingsSchema({ backgroundMode: 'unknown' })).toThrow()
   })
 
   it('keeps the pnpm PATH warning as a stable machine string', () => {
