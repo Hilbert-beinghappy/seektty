@@ -147,7 +147,7 @@ Clarify 一次提出一个聚焦问题，把已确认的决定带入后续问题
 | 子 Agent 与后台工作 | 查看或停止直接子 Agent；检查任务、工作流阶段、结果、失败、Token、耗时和结构化轨迹 |
 | Profile 与 Settings | 创建、复制、切换和诊断 Profile；通过 Schema 回退、revision 检查和只写 Secret 编辑全部设置命名空间 |
 | 插件、Skill 与 MCP | 插件中心、原生 Bundle 协调、动态 Skill 命令、MCP 实例、加载状态、设置与风险信息 |
-| 主题与语言 | 界面／代码主题独立切换、配色生成、VS Code 主题导入、对比度检查、`NO_COLOR` 和中英文实时切换 |
+| 主题与语言 | 界面／代码主题独立切换、继承终端背景效果、配色生成、VS Code 主题导入、对比度检查、`NO_COLOR` 和中英文实时切换 |
 | 诊断与反馈 | 运行状态、可执行的 `/doctor` 检查、Session 反馈、助手消息评分与反馈删除 |
 
 SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可选能力会安全降级，专用终端界面则可以持续演进。
@@ -274,7 +274,17 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 会打开主题中心，�
 
 悬停样式由当前界面主题统一推导，兼容已有自定义主题，不新增必填设置、不修改保存的配色。背景过于接近或终端色彩有限时使用下划线辅助区分；仍遵守 `NO_COLOR`。
 
-在支持的真彩色终端中，SeekTTY 会查询原终端背景色，并临时同步为界面主题背景，实时换主题时也会更新，避免终端边距露出异色；退出时恢复读取到的原色。不支持或查询超时、`NO_COLOR`、低色彩终端以及 tmux/screen 均保留原背景。设置 `SEEKTTY_TERMINAL_BACKGROUND=off` 可关闭此功能。详见[兼容性与验证说明](docs/terminal-background-compatibility.md)；该功能不修改终端配置、代码高亮、透明度或窗口装饰。
+主画布现在默认采用**主题颜色＋终端效果**，不再显式铺满 RGB 底色，而是使用终端默认背景，让终端应用已有的透明、模糊或背景图片效果。在 `/theme` 或 `/settings seektty-appearance` 中选择**背景模式**，两处共用同一个编辑器，保存成功后立即生效。
+
+| `backgroundMode` | 主画布 | 终端颜色 |
+| --- | --- | --- |
+| `theme`（默认，兼容缺少该字段的旧设置） | 终端默认背景 | 通过 OSC 11 临时同步界面主题颜色 |
+| `terminal` | 终端默认背景 | 不改色；如果本次运行改过色，恢复捕获的原色 |
+| `explicit`（兼容） | 保留原有显式主题底色 | 保留原有 OSC 11 同步行为 |
+
+弹窗、代码块、选区和 hover 保留独立底色与高亮，透明效果可能与主画布不同；`explicit` 也不保证一定不透明。背景模式属于 Harness 的 `seektty-appearance` 设置，不属于主题文件，切换、预览、导入或导出主题均不会覆盖它。
+
+改色需要支持的真彩色终端，并在一次 500 ms 异步查询内收到有效回复。不支持、查询超时、`NO_COLOR`、低色彩及 tmux/screen 均不改色。`theme` 模式同步不可用时保留终端默认背景，给一次非阻塞提示，不自动回退成 RGB 铺底。`SEEKTTY_TERMINAL_BACKGROUND=off` 只禁止改色，不改变所选模式。退出时恢复捕获的原色。SeekTTY 不读取／设置透明度，不修改终端配置或窗口装饰。详见[兼容性说明](docs/terminal-background-compatibility.md)与[验收记录](docs/background-inheritance-acceptance.md)。
 
 使用 `/language` 或直接命令实时切换终端文案：
 
