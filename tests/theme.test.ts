@@ -60,7 +60,7 @@ describe('terminal themes', () => {
 
     setTheme(BUILT_IN_THEMES.dark)
     expect(background.canvas('frame')).toContain('\u001B[48;2;9;14;27m')
-    expect(background.hover('option')).toContain('\u001B[48;2;17;24;39m')
+    expect(background.hover('option')).not.toBe(background.surface('option'))
     expect(background.hover('option')).not.toBe(background.selection('option'))
     expect(color.brand('brand')).toContain('\u001B[38;2;102;130;255m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;52;65;95m')
@@ -69,6 +69,8 @@ describe('terminal themes', () => {
     setTheme(BUILT_IN_THEMES.light)
     expect(currentTheme().id).toBe('light')
     expect(background.canvas('frame')).toContain('\u001B[48;2;246;248;253m')
+    expect(background.hover('option')).not.toBe(background.surface('option'))
+    expect(background.hover('option')).not.toBe(background.selection('option'))
     expect(color.brand('brand')).toContain('\u001B[38;2;49;86;216m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;198;208;231m')
     expect(color.pulse('◆', 4)).toContain('\u001B[38;2;65;95;201m')
@@ -87,6 +89,28 @@ describe('terminal themes', () => {
     const row = surfaceRow('主题', 10)
     expect(row).not.toContain('\u001B[')
     expect(visibleWidth(row)).toBe(10)
+  })
+
+  it('keeps hover distinguishable when colors quantize to the same ANSI-16 background', () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm')
+    vi.stubEnv('COLORTERM', undefined)
+    vi.stubEnv('TERM_PROGRAM', undefined)
+    vi.stubEnv('WT_SESSION', undefined)
+    expect(background.hover('option')).toContain('\u001B[4m')
+    expect(background.hover('option')).not.toBe(background.surface('option'))
+  })
+
+  it('invalidates derived hover when switching custom themes without changing their definitions', () => {
+    enableTruecolor()
+    const base = editableTheme(BUILT_IN_THEMES.dark, 'mono', 'Monochrome')
+    const mono = { ...base, colors: { ...base.colors, surface: '#111111', selection: '#111111' } }
+    const saved = structuredClone(mono)
+    setTheme(themeFromAppearance(appearance('custom:mono', 0, [mono])))
+    expect(background.hover('option')).toContain('\u001B[4m')
+    expect(mono).toEqual(saved)
+    setTheme(BUILT_IN_THEMES.dark)
+    expect(background.hover('option')).not.toContain('\u001B[4m')
   })
 
   it('quantizes arbitrary theme colors for 256-color and ANSI-16 terminals', () => {

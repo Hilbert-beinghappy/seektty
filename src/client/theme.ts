@@ -5,7 +5,7 @@ import {
   type EditorTheme,
   type MarkdownTheme,
 } from '@mariozechner/pi-tui'
-import { BUILT_IN_THEMES, type ResolvedTuiTheme } from './theme-config.ts'
+import { BUILT_IN_THEMES, resolveHoverStyle, type ResolvedTuiTheme } from './theme-config.ts'
 import { ui } from './locale.ts'
 
 const RESET = '\u001B[0m'
@@ -36,6 +36,8 @@ interface ThemePalette {
   readonly danger: SemanticColor
   readonly canvas: SemanticColor
   readonly surface: SemanticColor
+  readonly hover: SemanticColor
+  readonly hoverUnderline: boolean
   readonly selection: SemanticColor
   readonly codeBackground: SemanticColor
   readonly codeForeground: SemanticColor
@@ -62,6 +64,7 @@ function mixColor(left: SemanticColor, right: SemanticColor, amount: number): Se
 }
 
 function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
+  const hover = resolveHoverStyle(theme.colors)
   const brand = semanticColor(theme.colors.brand)
   const accent = semanticColor(theme.colors.accent)
   const border = semanticColor(theme.colors.border)
@@ -87,6 +90,8 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
     danger: semanticColor(theme.colors.danger),
     canvas: semanticColor(theme.colors.canvas),
     surface: semanticColor(theme.colors.surface),
+    hover: semanticColor(hover.background),
+    hoverUnderline: hover.underline,
     selection: semanticColor(theme.colors.selection),
     codeBackground: semanticColor(theme.syntax.background),
     codeForeground: semanticColor(theme.syntax.foreground),
@@ -95,6 +100,7 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
 
 let selectedTheme: ResolvedTuiTheme = BUILT_IN_THEMES.dark
 let palette = runtimePalette(selectedTheme)
+const hoverUnderlineByLevel = new Map<TerminalColorLevel, boolean>()
 let codeHighlighter: ((code: string, lang?: string) => string[]) | undefined
 
 function controlStringEnd(text: string, start: number): number {
@@ -273,6 +279,20 @@ function ansi(code: number, text: string): string {
   return terminalColorLevel() === 0 ? safeText : `\u001B[${String(code)}m${safeText}${RESET}`
 }
 
+function hoverLayer(text: string): string {
+  const level = terminalColorLevel()
+  if (level === 0) return text
+  let needsUnderline = hoverUnderlineByLevel.get(level)
+  if (needsUnderline === undefined) {
+    const hover = backgroundSequence(palette.hover, level)
+    // Resolve once per theme/color depth, not for every pointer motion or rendered row.
+    needsUnderline = palette.hoverUnderline || [palette.canvas, palette.surface, palette.selection]
+      .some(entry => backgroundSequence(entry, level) === hover)
+    hoverUnderlineByLevel.set(level, needsUnderline)
+  }
+  return layer(palette.hover, needsUnderline ? ansi(4, text) : text)
+}
+
 /** Styling request for one syntax token or generated preview fragment. */
 export interface TerminalTextStyle {
   readonly foreground?: string
@@ -310,6 +330,7 @@ export function styleTerminalText(text: string, style: TerminalTextStyle): strin
 export function setTheme(theme: ResolvedTuiTheme): void {
   selectedTheme = theme
   palette = runtimePalette(theme)
+  hoverUnderlineByLevel.clear()
 }
 
 /** Return the complete theme currently used by renderers. */
@@ -357,7 +378,7 @@ export const color = {
 export const background = {
   canvas: (text: string): string => layer(palette.canvas, text),
   surface: (text: string): string => layer(palette.surface, text),
-  hover: (text: string): string => layer(palette.surface, text),
+  hover: hoverLayer,
   selection: (text: string): string => layer(palette.selection, text),
   code: (text: string): string => layer(palette.codeBackground, text, palette.codeForeground),
 } as const

@@ -181,29 +181,78 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 
 `/plugin`, `/workspace`, and `/profile` provide interactive centers and direct subcommands. Unknown commands stay inside the command surface and show nearby suggestions.
 
-The rendered candidate window is authoritative: the wheel and arrow keys move its highlight, pointer hover is preview-only, and the first click visibly selects the exact candidate under the pointer. Enter or a safe second click completes and runs a slash command once; Tab only completes it. File and path completions never auto-submit, and the scroll-position footer is not clickable.
+Autocomplete and overlay lists keep their scroll position: the wheel browses without moving the selection, clicking a visible row does not recenter it, and arrow keys scroll only when the selection crosses a visible edge. Hover is preview-only. The first click selects; a later click on the same armed item has no double-click deadline. Enter or a safe second click completes and runs a slash command once; Tab only completes it. File and path completions never auto-submit, and the scroll-position footer is not clickable.
+
+Overlay footers have single-click Select/Confirm/Save and Back/Close buttons, with theme-aware hover. They share keyboard validation and navigation; dangerous confirmations remain keyboard-only. Ordinary mouse actions work immediately after startup without minimizing the terminal. Focus reports, when available, protect against accidental activation for 250 ms after refocusing.
 
 Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerShell `Set-Clipboard` writer, macOS runs `pbcopy` under a UTF-8 locale, Wayland declares `text/plain;charset=utf-8`, and X11 requests `UTF8_STRING`; OSC 52 remains available for terminal, SSH, and tmux paths.
 
 ## Common controls
 
+F1 → **Keyboard shortcuts** shows the current bindings grouped by purpose, including any `/keymap` overrides. Defaults:
+
+### Input and editing
+
 | Input | Action |
 | --- | --- |
-| Full mouse mode | Wheel, resident scrollbar, in-app selection, copy-on-select, stable hover feedback, and target-aware clicks on tool cards, examples, autocomplete, overlays, and remaining model/mode/permission chrome. Dangerous confirmations still require Enter. |
-| Hold the terminal selection modifier while dragging, then copy | Native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere. Switch with F3 or `/mouse native`. |
-| Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
-| Ctrl+Shift+C / F3 | Copy the in-app selection / toggle full and native mouse modes |
-| `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm; a selected slash candidate completes and runs once / insert a newline |
-| Tab / Escape | Complete the selected candidate without submitting / return or close the active overlay |
-| PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
-| Shift+Tab | Cycle permission presets, confirming full access first |
-| Shift+Left / Shift+Right | Jump to the previous or next user turn |
+| Ctrl+Z (also Ctrl+-) | Undo edits in the focused input, including typing, paste, and selection replacement |
+| Ctrl+R | Search composer history |
+| Enter / Ctrl+Enter in a multiline overlay | Insert a newline / submit |
+
+Undo is local to each input, including search and masked secret fields. It does not recall sent messages or reverse saved settings.
+
+### Commands and overlays
+
+| Input | Action |
+| --- | --- |
+| `/` in the composer | Open command and Skill candidates |
+| Up / Down | Move through candidates or list options |
+| Tab with candidates open | Complete the selected candidate without submitting |
+| Escape | Dismiss candidates, or return or close the active overlay |
+| Space in a multi-select overlay | Toggle the current option |
 | F1 / Ctrl+P | Open help / open the command palette |
-| Ctrl+M / Ctrl+S | Open model selection / open Session resume |
-| Ctrl+O / Ctrl+T | Cycle tool-card display / show or hide reasoning |
 | F2 / Ctrl+, / Cmd+, | Open Settings |
+
+### Transcript browsing
+
+| Input | Action |
+| --- | --- |
+| Tab | Browse from an empty composer; return to the composer while browsing |
+| Up / Down | Scroll or move card selection while browsing |
+| PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
+| Shift+Left / Shift+Right | Jump to the previous or next user turn |
+| `/`, then Enter, then n / N | Find in the transcript, confirm the query, then visit the next / previous match |
+| Escape | Leave Find, then card focus, then return to the composer |
+| Ctrl+O / Ctrl+T | Cycle tool-card display / show or hide reasoning |
+
+### Sessions and running turns
+
+| Input | Action |
+| --- | --- |
+| Ctrl+S | Open Session resume |
+| Ctrl+M | Open model selection (requires an extended keyboard protocol; otherwise use `/model`) |
+| Shift+Tab | Cycle permission presets, confirming full access first |
 | Ctrl+C | Stop the active turn, clear a draft, or confirm exit with a second press |
+
+### Mouse and selection
+
+| Input | Action |
+| --- | --- |
+| F3 or `/mouse toggle` | Toggle full mouse mode and native terminal selection |
+| Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
+| Ctrl+Shift+C | Copy the active in-app selection |
+| Ctrl+X in a non-secret overlay input | Cut the selection |
+| Backspace / Delete in an editable input | Delete the selection |
+| Hold the terminal selection modifier while dragging, then copy | Native selection: hold `Fn` in Terminal.app or `Option` in iTerm2, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+
+Full mouse mode also provides a resident scrollbar, in-app selection, copy-on-select, hover feedback, and target-aware clicks on cards, examples, candidates, overlays, and model/mode/permission controls. Dangerous confirmations still require Enter.
+
+Modal pages support dragging over visible text to select and copy it. Search fields and non-secret inputs also support replacing a selection by typing, Backspace, or Delete; Ctrl+X cuts it. Their right-click menu provides Copy, Cut, Delete selection, Paste, and Select all. Ctrl+Shift+C copies the active page's selection; Ctrl+C keeps its interrupt behavior. Masked secrets are never exposed through clipboard actions.
+
+Context menus float above the current page without joining its navigation stack. Left-click outside or press Esc to dismiss only the menu; an outside right-click reopens it for the new target. Menu actions take one left-click, while the covered page keeps its draft and selection.
+
+Wheel scrolling or a left-button drag dismisses the menu and immediately continues scrolling or selecting on the underlying page. A right-button drag opens the menu at the release position. An outside single-click only dismisses; it never activates a control underneath. Parent dialogs still capture input.
 
 ## Themes and language
 
@@ -221,6 +270,8 @@ SeekTTY starts with its DeepSeek dark theme. `/theme` opens the theme center; di
 ```
 
 Interface and code themes are independent. A palette of 3–16 HEX/RGB colors can generate light and dark candidates. `/theme import` reads local VS Code JSON/JSONC themes, resolves relative `include` files, and preserves portable TextMate colors and styles. Every customization path previews changes and flags low contrast before saving. Definitions live in the revision-protected `seektty-appearance` Harness Settings namespace.
+
+Hover styling is derived from the active interface theme, including existing custom themes, without adding required settings or altering saved colors. Indistinct or limited-color backgrounds use an underline cue; `NO_COLOR` remains respected.
 
 Use `/language` or a direct command to switch the terminal copy live:
 

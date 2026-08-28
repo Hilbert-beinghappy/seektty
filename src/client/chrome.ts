@@ -457,8 +457,8 @@ export class PromptEditor extends Editor {
     this.drafts = []
   }
 
-  override setText(text: string): void {
-    super.setText(isBlankMultiline(text) ? '' : text)
+  override setText(text: string, options?: { recordUndo?: boolean }): void {
+    super.setText(isBlankMultiline(text) ? '' : text, options)
   }
 
   override handleInput(data: string): void {
@@ -469,7 +469,8 @@ export class PromptEditor extends Editor {
     try {
       super.handleInput(data)
       const text = this.getText()
-      if (isBlankMultiline(text)) super.setText('')
+      // Collapsing invisible blank lines is presentation normalization, not another user edit.
+      if (isBlankMultiline(text)) super.setText('', { recordUndo: false })
     } finally {
       this.submitSnapshot = undefined
     }

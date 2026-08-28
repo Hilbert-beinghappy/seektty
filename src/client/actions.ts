@@ -1301,7 +1301,6 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           ...choice,
           label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
         })),
-        footer: ui('Enter 选择 · Esc 返回', "Enter select · Esc back"),
         options,
       }, async (selected) => {
         if (selected.id === '__code__') await this.themeCode('', navigation)
@@ -1377,7 +1376,6 @@ The directory, user files, and all session logs are kept; sessions become ungrou
             description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${theme.source === 'vscode' ? ui('VS Code 导入', "VS Code import") : ui('自定义', "Custom")}`,
           })),
         ],
-        footer: ui('Enter 选择 · Esc 返回', "Enter select · Esc back"),
         options: { width: 72, maxHeight: '90%', anchor: 'center', margin: 1 },
       })
       target = selected?.id as TuiCodeThemeId | undefined
@@ -2000,8 +1998,8 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       await navigation.selectPage({
         title: ui('快捷键', 'Key bindings'),
         detail: ui(
-          '选择一项以改绑或恢复默认。Enter、换行和对话查找不可改。',
-          'Choose a shortcut to rebind or restore. Enter, newline, and transcript search stay fixed.',
+          '选择一项以改绑或恢复默认。撤销、Enter、换行和对话查找不可改。',
+          'Choose a shortcut to rebind or restore. Undo, Enter, newline, and transcript search stay fixed.',
         ),
         choices: SURFACE_KEYMAP.filter(binding => binding.configurable !== false).map(binding => ({
           id: binding.id,

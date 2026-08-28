@@ -67,13 +67,16 @@ describe('mouse controller skeleton', () => {
   })
 
   it('consumes native-mode wheels without scrolling', () => {
+    const prepareGesture = vi.fn()
     const controller = createMouseController({
       getHitMap: () => snapshot(1),
       getBehavior: () => ({ ...DEFAULT_TUI_BEHAVIOR, mouseMode: 'native' }),
+      prepareGesture,
     })
     const outcome = controller.handle(wheel(1))
     expect(outcome.consume).toBe(true)
     expect(outcome.scrollTranscript).toBeUndefined()
+    expect(prepareGesture).not.toHaveBeenCalled()
   })
 
   it('emits one semantic click per release and counts double/triple clicks', () => {
@@ -265,11 +268,15 @@ describe('mouse controller skeleton', () => {
       point: { col: 6, row: 3 },
       modifiers: { shift: false, alt: false, ctrl: false },
     })
-    expect(controller.gesture).toBe('pressed')
+    expect(controller.gesture).toBe('dragging-context')
     expect(dragged.semantic).toBeUndefined()
+    expect(controller.handle({
+      kind: 'release', button: 'right', point: { col: 12, row: 4 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    }).semantic).toMatchObject({ kind: 'click', button: 'right', count: 1, point: { col: 12, row: 4 }, suppressed: false })
   })
 
-  it('drops a release when the hit-map generation changed', () => {
+  it('keeps a click when a cosmetic frame changes between press and release', () => {
     let generation = 1
     const controller = createMouseController({
       getHitMap: () => snapshot(generation),
@@ -280,11 +287,11 @@ describe('mouse controller skeleton', () => {
     controller.handle(press())
     generation = 2
     const released = controller.handle(release())
-    expect(released.semantic).toBeUndefined()
+    expect(released.semantic).toMatchObject({ kind: 'click', suppressed: false })
     expect(released.consume).toBe(true)
   })
 
-  it('drops the final selection release when its hit-map generation is stale', () => {
+  it('finishes selection across repaints instead of dropping the final release', () => {
     let generation = 1
     const controller = createMouseController({
       getHitMap: () => snapshot(generation),
@@ -300,8 +307,104 @@ describe('mouse controller skeleton', () => {
       modifiers: { shift: false, alt: false, ctrl: false },
     })
     generation = 2
-    expect(controller.handle(release({ col: 5, row: 2 })).semantic).toBeUndefined()
+    expect(controller.handle(release({ col: 5, row: 2 })).semantic).toMatchObject({ kind: 'drag', ended: true })
     expect(controller.gesture).toBe('idle')
+  })
+
+  it.each(['left', 'right'] as const)('never hands off a guarded %s press even after the focus timer expires', button => {
+    let now = 1_000
+    const prepareGesture = vi.fn()
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1), getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      now: () => now, setTimeout: vi.fn(), clearTimeout: vi.fn(), prepareGesture,
+    })
+    const modifiers = { shift: false, alt: false, ctrl: false }
+    controller.handle({ kind: 'focus', focused: true })
+    controller.handle({ kind: 'press', button, point: { col: 2, row: 2 }, modifiers })
+    now += FOCUS_GUARD_MS + 1
+    expect(controller.handle({ kind: 'drag', button, point: { col: 5, row: 3 }, modifiers }).semantic).toBeUndefined()
+    expect(controller.handle({ kind: 'release', button, point: { col: 5, row: 3 }, modifiers }).semantic).toBeUndefined()
+    expect(prepareGesture).not.toHaveBeenCalled()
+  })
+
+  it('re-hits the original scrollbar grab cell after a transient layer closes', () => {
+    const base = new HitMapBuilder(1).add({
+      id: 'thumb', rect: { col: 79, row: 4, width: 1, height: 4 },
+      zIndex: 11, role: 'scrollbar', enabled: true, action: { kind: 'transcript', command: 'drag-thumb' },
+    }).freeze(geometry)
+    let map = snapshot(2, 'button')
+    const controller = createMouseController({
+      getHitMap: () => map, getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+      prepareGesture: () => { controller.endGesture(); map = base; return 'retarget' },
+    })
+    const origin = { col: 79, row: 5 }
+    const point = { col: 79, row: 9 }
+    controller.handle(press(origin))
+    expect(controller.handle({ kind: 'drag', button: 'left', point, modifiers: { shift: false, alt: false, ctrl: false } }).semantic)
+      .toMatchObject({ kind: 'drag', origin, point, grabOffset: 1, region: { id: 'thumb' } })
+    expect(controller.handle(release(point)).semantic).toMatchObject({ kind: 'drag', ended: true, grabOffset: 1 })
+  })
+
+  it('keeps edge-scrolling alive after handoff and clears its timer on release', () => {
+    vi.useFakeTimers()
+    const onEdgeScroll = vi.fn()
+    let map = snapshot(1, 'button')
+    const controller = createMouseController({
+      getHitMap: () => map, getBehavior: () => DEFAULT_TUI_BEHAVIOR, onEdgeScroll,
+      prepareGesture: () => { controller.endGesture(); map = snapshot(2); return 'retarget' },
+    })
+    try {
+      const origin = { col: 4, row: 5 }
+      const point = { col: 8, row: 0 }
+      controller.handle(press(origin))
+      controller.handle({ kind: 'drag', button: 'left', point, modifiers: { shift: false, alt: false, ctrl: false } })
+      vi.advanceTimersByTime(EDGE_SCROLL_MS * 3)
+      expect(onEdgeScroll).toHaveBeenCalledTimes(3)
+      expect(controller.handle(release(point)).semantic).toMatchObject({ kind: 'drag', ended: true, origin, point })
+      vi.advanceTimersByTime(EDGE_SCROLL_MS * 3)
+      expect(onEdgeScroll).toHaveBeenCalledTimes(3)
+      expect(controller.metrics.edgeScrollTimers).toBe(0)
+    } finally { controller.dispose(); vi.useRealTimers() }
+  })
+
+  it.each(['identity', 'action', 'position', 'disabled', 'removed'] as const)(
+    'drops a click when the pressed target changes: %s', change => {
+      let map = snapshot(1, 'button')
+      const controller = createMouseController({
+        getHitMap: () => map,
+        getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+        setTimeout: vi.fn(),
+        clearTimeout: vi.fn(),
+      })
+      controller.handle(press())
+      map = {
+        ...map,
+        generation: 2,
+        regions: change === 'removed' ? [] : map.regions.map(region => ({
+          ...region,
+          ...(change === 'identity' ? { id: 'transcript:tool:b' } : {}),
+          ...(change === 'action' ? { action: { kind: 'transcript' as const, command: 'other' } } : {}),
+          ...(change === 'position' ? { rect: { ...region.rect, row: 1 } } : {}),
+          ...(change === 'disabled' ? { enabled: false } : {}),
+        })),
+      }
+      expect(controller.handle(release()).semantic).toBeUndefined()
+      expect(controller.gesture).toBe('idle')
+    },
+  )
+
+  it('does not finish a selection after its owner explicitly invalidates the gesture', () => {
+    const controller = createMouseController({
+      getHitMap: () => snapshot(1),
+      getBehavior: () => DEFAULT_TUI_BEHAVIOR,
+    })
+    controller.handle(press())
+    controller.handle({
+      kind: 'drag', button: 'left', point: { col: 8, row: 4 },
+      modifiers: { shift: false, alt: false, ctrl: false },
+    })
+    controller.endGesture()
+    expect(controller.handle(release({ col: 8, row: 4 })).semantic).toBeUndefined()
   })
 
   it('suppresses the first click after FocusOut then FocusIn', () => {
@@ -476,11 +579,11 @@ describe('mouse controller skeleton', () => {
       point: { col: 6, row: 6 },
       modifiers: { shift: false, alt: false, ctrl: false },
     })
-    expect(controller.gesture).toBe('pressed')
+    expect(controller.gesture).toBe('dragging-passive')
     expect(dragged.semantic).toBeUndefined()
   })
 
-  it('resets click count on FocusOut and withholds sensitive execute until a focus cycle', () => {
+  it('allows startup activation without focus reports and only guards actual refocus', () => {
     let now = 8_000
     const controller = createMouseController({
       getHitMap: () => snapshot(1),
@@ -489,15 +592,20 @@ describe('mouse controller skeleton', () => {
       setTimeout: vi.fn(),
       clearTimeout: vi.fn(),
     })
-    expect(controller.allowsSensitiveMouse).toBe(false)
+    expect(controller.hasReliableFocusProtocol).toBe(false)
+    expect(controller.allowsMouseActivation).toBe(true)
     controller.handle(press())
     controller.handle(release())
     controller.handle({ kind: 'focus', focused: false })
     expect(controller.gesture).toBe('idle')
     controller.handle({ kind: 'focus', focused: true })
-    now += FOCUS_GUARD_MS + 1
-    expect(controller.allowsSensitiveMouse).toBe(true)
+    expect(controller.allowsMouseActivation).toBe(false)
     controller.handle(press())
-    expect(controller.handle(release()).semantic).toMatchObject({ kind: 'click', count: 1 })
+    now += FOCUS_GUARD_MS + 1
+    expect(controller.allowsMouseActivation).toBe(true)
+    expect(controller.handle(release()).semantic).toMatchObject({ kind: 'click', suppressed: true })
+    now += DOUBLE_CLICK_MS + 1
+    controller.handle(press())
+    expect(controller.handle(release()).semantic).toMatchObject({ kind: 'click', count: 1, suppressed: false })
   })
 })
