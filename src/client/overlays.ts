@@ -21,7 +21,9 @@ import { translateUiText, ui } from './locale.ts'
 import { formatBusyFooter, lastOutputLines } from './busy-status.ts'
 import { background, color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
 import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
-import type { HitRegion } from './mouse-hit-map.ts'
+import type { CellPoint, HitRegion } from './mouse-hit-map.ts'
+import { editorEditable, inputEditable, OverlayTextSelection, type OverlayEditable, type OverlayTextTarget } from './overlay-text.ts'
+import { renderOverlayFooter, type OverlayFooterAction, type OverlayFooterCommand, type OverlayPrimaryAction } from './overlay-footer.ts'
 
 let dangerConfirmDefault: TuiDangerConfirmDefault = 'cancel'
 
@@ -179,6 +181,7 @@ interface QueueEntry<T> {
 
 interface DisposableComponent extends Component {
   dispose?(): void
+  primaryAction?(): OverlayPrimaryAction
 }
 
 interface NavigationEntry {
@@ -228,13 +231,24 @@ function modalRule(title: string | undefined, width: number, top: boolean): stri
   return color.border(`${start}${lead}${'─'.repeat(Math.max(0, width - 2 - visibleWidth(lead)))}${end}`)
 }
 
-function modalFrame(title: string, lines: readonly string[], width: number): string[] {
+function modalContentRows(lines: readonly string[], width: number): string[] {
   const contentWidth = frameContentWidth(width)
   const vertical = color.border('│')
-  const content = escapeFrame(lines.map(line => truncateToWidth(line, contentWidth, '…')))
+  return escapeFrame(lines.map(line => truncateToWidth(line, contentWidth, '…')))
     .map(line => `${vertical} ${line}${' '.repeat(Math.max(0, contentWidth - visibleWidth(line)))} ${vertical}`)
-  return [modalRule(translateUiText(title), width, true), ...content, modalRule(undefined, width, false)]
     .map(line => surfaceRow(line, width))
+}
+
+function modalFrame(title: string, lines: readonly string[], width: number): string[] {
+  return [
+    surfaceRow(modalRule(translateUiText(title), width, true), width),
+    ...modalContentRows(lines, width),
+    surfaceRow(modalRule(undefined, width, false), width),
+  ]
+}
+
+function footerHint(footer: string | undefined): string[] {
+  return footer === undefined ? [] : [color.muted(translateUiText(footer))]
 }
 
 function modalOptions(options: OverlayOptions | undefined): OverlayOptions {
@@ -248,19 +262,49 @@ function modalOptions(options: OverlayOptions | undefined): OverlayOptions {
   }
 }
 
-function selectVisibleWindow(length: number, selected: number, maxVisible: number): { start: number; end: number } {
-  if (length <= 0) return { start: 0, end: 0 }
-  const start = Math.max(0, Math.min(selected - Math.floor(maxVisible / 2), length - maxVisible))
-  return { start, end: Math.min(start + maxVisible, length) }
+/** Use the rendered rows for both hover and hit testing, never a second window calculation. */
+function renderChoiceList(
+  list: SelectList,
+  choices: readonly OverlayChoice[],
+  hoveredOptionId: string | undefined,
+  width: number,
+  firstRow: number,
+  mouseExecute: SelectOverlayRequest['mouseExecute'],
+): { lines: string[]; hits: readonly HitRegion[] } {
+  const lines = [...list.render(frameContentWidth(width))]
+  const snapshot = list.getRenderSnapshot()
+  const hits: HitRegion[] = []
+  for (const row of snapshot?.visibleRows ?? []) {
+    const choice = choices[row.absoluteIndex]
+    if (choice === undefined) continue
+    const enabled = choice.disabledReason === undefined
+    if (enabled && choice.id === hoveredOptionId && row.absoluteIndex !== snapshot?.selectedIndex) {
+      const line = lines[row.visualRow] ?? ''
+      lines[row.visualRow] = background.hover(`${line}${' '.repeat(Math.max(0, frameContentWidth(width) - visibleWidth(line)))}`)
+    }
+    hits.push({
+      id: `overlay:option:${choice.id}`,
+      rect: { col: 1, row: firstRow + row.visualRow, width: Math.max(1, width - 2), height: 1 },
+      zIndex: 1,
+      role: 'option',
+      enabled,
+      activation: mouseExecute === 'focus-only' ? 'enter-only' : 'arm',
+      // Previewing a confirmation is harmless; execution still requires Enter.
+      hover: enabled ? 'highlight' : 'none',
+      action: { kind: 'overlay', command: 'focus', optionId: choice.id },
+    })
+  }
+  return { lines, hits }
 }
 
 export type OverlayMouseClickResult = 'focused' | 'activated' | 'danger' | 'none'
 
 interface OverlayMouseTarget {
   hitChildren(): readonly HitRegion[]
-  handleHover(optionId?: string): boolean
+  handleHover(optionId?: string, command?: string): boolean
   handleOptionClick(optionId: string): OverlayMouseClickResult
   activateArmedOption(): OverlayMouseClickResult
+  resetMouseState(): void
 }
 
 interface OverlayWheelTarget {
@@ -269,20 +313,15 @@ interface OverlayWheelTarget {
 
 function isOverlayMouseTarget(value: Component): value is Component & OverlayMouseTarget {
   return 'hitChildren' in value && 'handleHover' in value
-    && 'handleOptionClick' in value && 'activateArmedOption' in value
+    && 'handleOptionClick' in value && 'activateArmedOption' in value && 'resetMouseState' in value
 }
 
 function isOverlayWheelTarget(value: Component): value is Component & OverlayWheelTarget {
   return 'handleWheel' in value && typeof value.handleWheel === 'function'
 }
 
-function moveListByWheel(list: SelectList, length: number, lines: number): boolean {
-  const delta = Math.trunc(lines)
-  if (delta === 0 || length <= 0) return false
-  const steps = Math.min(12, Math.abs(delta))
-  const next = list.getSelectedIndex() - Math.sign(delta) * steps
-  list.setSelectedIndex(Math.max(0, Math.min(length - 1, next)))
-  return true
+function scrollListByWheel(list: SelectList, lines: number): boolean {
+  return list.scrollBy(-Math.trunc(lines))
 }
 
 const MULTILINE_VISIBLE_ROWS = 12
@@ -315,8 +354,9 @@ function wrappedDetail(detail: string, width: number, maxLines = 4): string[] {
 }
 
 /** Search input plus SelectList; the owning navigator handles Escape and abort. */
-class SearchSelectOverlay implements Component {
+export class SearchSelectOverlay implements Component {
   focused = false
+  textInput: OverlayEditable | undefined
   private readonly input = new Input()
   private list: SelectList
   private filtered: readonly OverlayChoice[]
@@ -342,9 +382,12 @@ class SearchSelectOverlay implements Component {
    */
   updateChoices(choices: readonly OverlayChoice[], notice = ''): void {
     const selectedId = this.list.getSelectedItem()?.value
+    const scrollOffset = this.list.getScrollOffset()
     this.request = { ...this.request, choices }
     this.filtered = this.filterChoices(this.input.getValue())
     this.list = this.createList(this.filtered, selectedId)
+    if (this.list.getSelectedItem()?.value === selectedId) this.list.setScrollOffset(scrollOffset)
+    this.resetMouseState()
     this.notice = notice
   }
 
@@ -358,8 +401,10 @@ class SearchSelectOverlay implements Component {
     const descriptionWidth = selectDescriptionWidth(safeWidth)
     if (descriptionWidth !== this.descriptionWidth) {
       const selectedId = this.list.getSelectedItem()?.value
+      const scrollOffset = this.list.getScrollOffset()
       this.descriptionWidth = descriptionWidth
       this.list = this.createList(this.filtered, selectedId)
+      this.list.setScrollOffset(scrollOffset)
     }
     const lines: string[] = []
     if (this.request.detail !== undefined) {
@@ -367,38 +412,21 @@ class SearchSelectOverlay implements Component {
     }
     if (this.request.searchable !== false) {
       this.input.focused = this.focused
-      lines.push(`${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`)
+      const label = color.muted(ui('搜索 ', 'Search '))
+      const inputWidth = Math.max(1, safeWidth - visibleWidth(label))
+      this.textInput = inputEditable(this.input, {
+        col: 2 + visibleWidth(label), row: 1 + lines.length, width: inputWidth, height: 1,
+      }, () => { this.applyFilter(this.input.getValue()) })
+      lines.push(`${label}${this.input.render(inputWidth)[0] ?? ''}`)
     }
     const listStart = lines.length
-    const listLines = [...this.list.render(safeWidth)]
-    const maxVisible = this.request.maxVisible ?? 10
-    const window = selectVisibleWindow(this.filtered.length, this.list.getSelectedIndex(), maxVisible)
-    const hoveredIndex = this.hoveredOptionId === undefined
-      ? -1
-      : this.filtered.findIndex(choice => choice.id === this.hoveredOptionId)
-    const hoveredRow = hoveredIndex - window.start
-    if (hoveredIndex !== this.list.getSelectedIndex()
-      && hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
-      listLines[hoveredRow] = background.hover(listLines[hoveredRow] ?? '')
-    }
-    lines.push(...listLines)
+    const rendered = renderChoiceList(
+      this.list, this.filtered, this.hoveredOptionId, width, 1 + listStart, this.request.mouseExecute,
+    )
+    lines.push(...rendered.lines)
     if (this.notice !== '') lines.push(color.warning(truncateToWidth(this.notice, safeWidth, '…')))
-    lines.push(color.muted(translateUiText(this.request.footer ?? ui(
-      'Enter 选择 · Esc 返回',
-      'Enter select · Esc back',
-    ))))
-    this.lastHits = this.filtered.slice(window.start, window.end).map((choice, index) => ({
-      id: `overlay:option:${choice.id}`,
-      rect: { col: 1, row: 1 + listStart + index, width: Math.max(1, width - 2), height: 1 },
-      zIndex: 1,
-      role: 'option',
-      enabled: choice.disabledReason === undefined,
-      activation: this.request.mouseExecute === 'focus-only' ? 'enter-only' : 'arm',
-      hover: choice.disabledReason === undefined && this.request.mouseExecute !== 'focus-only'
-        ? 'highlight'
-        : 'none',
-      action: { kind: 'overlay', command: 'focus', optionId: choice.id },
-    }))
+    lines.push(...footerHint(this.request.footer))
+    this.lastHits = rendered.hits
     return modalFrame(this.request.title, lines, width)
   }
 
@@ -414,7 +442,7 @@ class SearchSelectOverlay implements Component {
 
   handleOptionClick(optionId: string): OverlayMouseClickResult {
     const index = this.filtered.findIndex(choice => choice.id === optionId)
-    if (index < 0) return 'none'
+    if (index < 0 || this.filtered[index]?.disabledReason !== undefined) return 'none'
     this.list.setSelectedIndex(index)
     if (this.request.mouseExecute === 'focus-only') return 'danger'
     if (this.armedOptionId === optionId) return 'activated'
@@ -431,6 +459,7 @@ class SearchSelectOverlay implements Component {
   }
 
   handleInput(data: string): void {
+    this.resetMouseState()
     if (matchesKey(data, Key.home)) {
       this.list.setSelectedIndex(0)
       return
@@ -444,13 +473,19 @@ class SearchSelectOverlay implements Component {
       return
     }
     if (this.request.searchable === false) return
+    const before = this.input.getValue()
     this.input.handleInput(data)
-    this.applyFilter(this.input.getValue())
+    if (this.input.getValue() !== before) this.applyFilter(this.input.getValue())
   }
 
   handleWheel(lines: number): boolean {
+    this.resetMouseState()
+    return scrollListByWheel(this.list, lines)
+  }
+
+  resetMouseState(): void {
     this.armedOptionId = undefined
-    return moveListByWheel(this.list, this.filtered.length, lines)
+    this.hoveredOptionId = undefined
   }
 
   private createList(choices: readonly OverlayChoice[], preferredId?: string): SelectList {
@@ -470,6 +505,7 @@ class SearchSelectOverlay implements Component {
   }
 
   private applyFilter(query: string): void {
+    this.resetMouseState()
     this.filtered = this.filterChoices(query)
     this.list = this.createList(this.filtered)
     this.notice = ''
@@ -487,11 +523,22 @@ class SearchSelectOverlay implements Component {
     }
     this.submit(choice)
   }
+
+  primaryAction(): OverlayPrimaryAction {
+    const choice = this.filtered.find(candidate => candidate.id === this.list.getSelectedItem()?.value)
+    const keyboardOnly = this.request.mouseExecute === 'focus-only'
+    return {
+      label: ui('选择', 'Select'), key: 'Enter', keyboardOnly,
+      enabled: !keyboardOnly && choice !== undefined && choice.disabledReason === undefined,
+      run: () => { this.choose() },
+    }
+  }
 }
 
 /** Single-line input overlay for titles, paths, custom answers, and queue edits. */
 class TextInputOverlay implements Component {
   focused = false
+  textInput: OverlayEditable | undefined
   private readonly input = new Input()
   private notice = ''
 
@@ -500,14 +547,7 @@ class TextInputOverlay implements Component {
     private readonly submit: (value: string) => void,
   ) {
     this.input.setValue(escapeTerminalText(request.initialValue ?? ''))
-    this.input.onSubmit = (value) => {
-      const safe = escapeTerminalText(value)
-      if (request.requireText === true && safe.trim() === '') {
-        this.notice = ui('请输入内容', 'Enter a value')
-        return
-      }
-      submit(safe)
-    }
+    this.input.onSubmit = () => { this.confirm() }
   }
 
   invalidate(): void { this.input.invalidate() }
@@ -515,15 +555,15 @@ class TextInputOverlay implements Component {
   render(width: number): string[] {
     const safeWidth = frameContentWidth(width)
     this.input.focused = this.focused
+    const detail = this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, safeWidth)
+    this.textInput = inputEditable(this.input, {
+      col: 2, row: 1 + detail.length, width: safeWidth, height: 1,
+    }, () => { this.notice = '' })
     return modalFrame(this.request.title, [
-      ...(this.request.detail === undefined
-        ? []
-        : wrappedDetail(this.request.detail, safeWidth)),
+      ...detail,
       this.input.render(safeWidth)[0] ?? color.muted(translateUiText(this.request.placeholder ?? '')),
       ...(this.notice === '' ? [] : [color.warning(truncateToWidth(this.notice, safeWidth, '…'))]),
-      color.muted(this.request.footer === undefined
-        ? ui('Enter 确认 · Esc 返回/关闭', 'Enter confirm · Esc back/close')
-        : translateUiText(this.request.footer)),
+      ...footerHint(this.request.footer),
     ], width)
   }
 
@@ -534,11 +574,25 @@ class TextInputOverlay implements Component {
   }
 
   handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
+
+  primaryAction(): OverlayPrimaryAction {
+    return { label: ui('确认', 'Confirm'), key: 'Enter', enabled: true, run: () => { this.confirm() } }
+  }
+
+  private confirm(): void {
+    const safe = escapeTerminalText(this.input.getValue())
+    if (this.request.requireText === true && safe.trim() === '') {
+      this.notice = ui('请输入内容', 'Enter a value')
+      return
+    }
+    this.submit(safe)
+  }
 }
 
 /** Multiline editor overlay: Enter inserts a newline, Ctrl+Enter submits. */
 class MultilineEditorOverlay implements Component {
   focused = false
+  textInput: OverlayEditable | undefined
   private readonly editor: Editor
 
   constructor(
@@ -548,7 +602,7 @@ class MultilineEditorOverlay implements Component {
   ) {
     this.editor = new Editor(tui, editorTheme, { paddingX: 0, autocompleteMaxVisible: 3 })
     this.editor.disableSubmit = true
-    this.editor.setText(escapeTerminalText(request.initialValue ?? ''))
+    this.editor.setText(escapeTerminalText(request.initialValue ?? ''), { recordUndo: false })
   }
 
   invalidate(): void { this.editor.invalidate() }
@@ -562,18 +616,21 @@ class MultilineEditorOverlay implements Component {
       rendered,
       cursorLine === -1 ? this.editor.getCursor().line : cursorLine,
     )
+    const detail = this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, safeWidth)
+    const sliceStart = rendered.length <= body.length ? 0 : Math.max(0, Math.min(
+      (cursorLine < 0 ? 0 : cursorLine) - Math.floor((MULTILINE_VISIBLE_ROWS - 1) / 2), rendered.length - body.length,
+    ))
+    this.textInput = editorEditable(this.editor, { col: 2, row: 1 + detail.length }, safeWidth, sliceStart, body.length)
     return modalFrame(this.request.title, [
-      ...(this.request.detail === undefined
-        ? []
-        : wrappedDetail(this.request.detail, safeWidth)),
+      ...detail,
       ...body,
-      color.muted(ui('Enter 换行 · Ctrl+Enter 提交 · Esc 返回/关闭', 'Enter newline · Ctrl+Enter submit · Esc back/close')),
+      ...footerHint(this.request.footer ?? ui('Enter 换行', 'Enter newline')),
     ], width)
   }
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.ctrl(Key.enter))) {
-      this.submit(escapeTerminalText(this.editor.getExpandedText()))
+      this.confirm()
       return
     }
     if (matchesKey(data, Key.enter) || data === '\r' || data === '\n') {
@@ -584,6 +641,12 @@ class MultilineEditorOverlay implements Component {
   }
 
   handleWheel(lines: number): boolean { return Math.trunc(lines) !== 0 }
+
+  primaryAction(): OverlayPrimaryAction {
+    return { label: ui('提交', 'Submit'), key: 'Ctrl+Enter', enabled: true, run: () => { this.confirm() } }
+  }
+
+  private confirm(): void { this.submit(escapeTerminalText(this.editor.getExpandedText())) }
 }
 
 /** Write-only secret input: the underlying value is never returned by render(). */
@@ -612,12 +675,7 @@ class SecretInputOverlay implements Component {
         ? []
         : wrappedDetail(this.request.detail, safeWidth)),
       truncateToWidth(masked, safeWidth, '…'),
-      color.muted(this.request.footer === undefined
-        ? ui(
-          '输入内容不会回显或写入日志 · Enter 保存 · Esc 返回/关闭',
-          'Input is never displayed or logged · Enter save · Esc back/close',
-        )
-        : translateUiText(this.request.footer)),
+      ...footerHint(this.request.footer ?? ui('输入内容不会回显或写入日志', 'Input is never displayed or logged')),
     ], width)
   }
 
@@ -629,6 +687,10 @@ class SecretInputOverlay implements Component {
 
   dispose(): void { this.input.setValue('') }
 
+  primaryAction(): OverlayPrimaryAction {
+    return { label: ui('保存', 'Save'), key: 'Enter', enabled: true, run: () => { this.finish(this.input.getValue()) } }
+  }
+
   private finish(value: string): void {
     this.input.setValue('')
     this.submit(value)
@@ -638,6 +700,7 @@ class SecretInputOverlay implements Component {
 /** Multi-select question overlay; Space toggles, Enter commits. */
 class MultiSelectOverlay implements Component {
   focused = false
+  textInput: OverlayEditable | undefined
   private readonly input = new Input()
   private filtered: readonly OverlayChoice[]
   private list: SelectList
@@ -666,43 +729,28 @@ class MultiSelectOverlay implements Component {
     const descriptionWidth = selectDescriptionWidth(safeWidth)
     if (descriptionWidth !== this.descriptionWidth) {
       const selectedId = this.list.getSelectedItem()?.value
+      const scrollOffset = this.list.getScrollOffset()
       this.descriptionWidth = descriptionWidth
       this.list = this.createList(selectedId)
+      this.list.setScrollOffset(scrollOffset)
     }
     this.input.focused = this.focused
-    const prefix = [
-      ...(this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, safeWidth)),
-      `${color.muted(ui('搜索 ', 'Search '))}${this.input.render(Math.max(1, safeWidth - 5))[0] ?? ''}`,
-    ]
-    const listLines = [...this.list.render(safeWidth)]
-    const maxVisible = this.request.maxVisible ?? 10
-    const window = selectVisibleWindow(this.filtered.length, this.list.getSelectedIndex(), maxVisible)
-    const hoveredIndex = this.hoveredOptionId === undefined
-      ? -1
-      : this.filtered.findIndex(choice => choice.id === this.hoveredOptionId)
-    const hoveredRow = hoveredIndex - window.start
-    if (hoveredIndex !== this.list.getSelectedIndex()
-      && hoveredRow >= 0 && hoveredRow < window.end - window.start && listLines[hoveredRow] !== undefined) {
-      listLines[hoveredRow] = background.hover(listLines[hoveredRow] ?? '')
-    }
-    this.lastHits = this.filtered.slice(window.start, window.end).map((choice, index) => ({
-      id: `overlay:option:${choice.id}`,
-      rect: { col: 1, row: 1 + prefix.length + index, width: Math.max(1, width - 2), height: 1 },
-      zIndex: 1,
-      role: 'option',
-      enabled: true,
-      activation: 'arm',
-      hover: 'highlight',
-      action: { kind: 'overlay', command: 'focus', optionId: choice.id },
-    }))
+    const prefix = this.request.detail === undefined ? [] : wrappedDetail(this.request.detail, safeWidth)
+    const label = color.muted(ui('搜索 ', 'Search '))
+    const inputWidth = Math.max(1, safeWidth - visibleWidth(label))
+    this.textInput = inputEditable(this.input, {
+      col: 2 + visibleWidth(label), row: 1 + prefix.length, width: inputWidth, height: 1,
+    }, () => { this.applyFilter(this.input.getValue()) })
+    prefix.push(`${label}${this.input.render(inputWidth)[0] ?? ''}`)
+    const rendered = renderChoiceList(
+      this.list, this.filtered, this.hoveredOptionId, width, 1 + prefix.length, this.request.mouseExecute,
+    )
+    this.lastHits = rendered.hits
     return modalFrame(this.request.title, [
       ...prefix,
-      ...listLines,
+      ...rendered.lines,
       ...(this.notice === '' ? [] : [color.warning(truncateToWidth(this.notice, safeWidth, '…'))]),
-      color.muted(translateUiText(this.request.footer ?? ui(
-        'Space 勾选 · Enter 选择 · Esc 返回',
-        'Space toggle · Enter select · Esc back',
-      ))),
+      ...footerHint(this.request.footer ?? ui('Space 勾选', 'Space toggle')),
     ], width)
   }
 
@@ -718,7 +766,7 @@ class MultiSelectOverlay implements Component {
 
   handleOptionClick(optionId: string): OverlayMouseClickResult {
     const index = this.filtered.findIndex(choice => choice.id === optionId)
-    if (index < 0) return 'none'
+    if (index < 0 || this.filtered[index]?.disabledReason !== undefined) return 'none'
     this.list.setSelectedIndex(index)
     if (this.request.mouseExecute === 'focus-only') return 'danger'
     if (this.armedOptionId === optionId) return 'activated'
@@ -736,6 +784,7 @@ class MultiSelectOverlay implements Component {
   }
 
   handleInput(data: string): void {
+    this.resetMouseState()
     if (matchesKey(data, Key.space)) {
       const item = this.list.getSelectedItem()
       if (item === null) return
@@ -743,12 +792,7 @@ class MultiSelectOverlay implements Component {
       return
     }
     if (matchesKey(data, Key.enter)) {
-      const selected = this.request.choices.filter(choice => this.selected.has(choice.id))
-      if (this.request.requireSelection === true && selected.length === 0) {
-        this.notice = ui('请至少选择一项', 'Select at least one option')
-        return
-      }
-      this.submit(selected)
+      this.confirm()
       return
     }
     if (matchesKey(data, Key.home)) {
@@ -763,13 +807,19 @@ class MultiSelectOverlay implements Component {
       this.list.handleInput(data)
       return
     }
+    const before = this.input.getValue()
     this.input.handleInput(data)
-    this.applyFilter(this.input.getValue())
+    if (this.input.getValue() !== before) this.applyFilter(this.input.getValue())
   }
 
   handleWheel(lines: number): boolean {
+    this.resetMouseState()
+    return scrollListByWheel(this.list, lines)
+  }
+
+  resetMouseState(): void {
     this.armedOptionId = undefined
-    return moveListByWheel(this.list, this.filtered.length, lines)
+    this.hoveredOptionId = undefined
   }
 
   private createList(preferredId?: string): SelectList {
@@ -787,18 +837,36 @@ class MultiSelectOverlay implements Component {
   }
 
   private toggleSelected(id: string): void {
+    if (this.filtered.find(choice => choice.id === id)?.disabledReason !== undefined) return
+    const scrollOffset = this.list.getScrollOffset()
     this.notice = ''
     if (this.selected.has(id)) this.selected.delete(id)
     else this.selected.add(id)
     this.list = this.createList(id)
+    this.list.setScrollOffset(scrollOffset)
   }
 
   private applyFilter(query: string): void {
+    this.resetMouseState()
     this.filtered = query === ''
       ? this.request.choices
       : fuzzyFilter([...this.request.choices], query, choice =>
         `${choice.label} ${choice.description ?? ''} ${choice.id}`)
     this.list = this.createList()
+  }
+
+  primaryAction(): OverlayPrimaryAction {
+    const keyboardOnly = this.request.mouseExecute === 'focus-only'
+    return { label: ui('选择', 'Select'), key: 'Enter', enabled: !keyboardOnly, keyboardOnly, run: () => { this.confirm() } }
+  }
+
+  private confirm(): void {
+    const selected = this.request.choices.filter(choice => this.selected.has(choice.id))
+    if (this.request.requireSelection === true && selected.length === 0) {
+      this.notice = ui('请至少选择一项', 'Select at least one option')
+      return
+    }
+    this.submit(selected)
   }
 }
 
@@ -834,8 +902,8 @@ class ScrollableDetailOverlay implements Component {
     return modalFrame(this.request.title, [
       ...lines.slice(this.offset, end),
       color.muted(translateUiText(this.request.footer ?? ui(
-        `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · Enter/q 关闭 · Esc 返回`,
-        `${position} · ↑↓ scroll · PgUp/PgDn page · Home/End · Enter/q close · Esc back`,
+        `${position} · ↑↓ 滚动 · PgUp/PgDn 翻页 · Home/End · q 关闭`,
+        `${position} · ↑↓ scroll · PgUp/PgDn page · Home/End · q close`,
       ))),
     ], width)
   }
@@ -860,6 +928,10 @@ class ScrollableDetailOverlay implements Component {
     const maxOffset = Math.max(0, this.lineCount - this.viewportRows)
     this.offset = Math.max(0, Math.min(maxOffset, this.offset - delta))
     return true
+  }
+
+  primaryAction(): OverlayPrimaryAction {
+    return { label: ui('关闭', 'Close'), key: 'Enter', enabled: true, run: () => { this.settle() } }
   }
 }
 
@@ -899,7 +971,6 @@ class ProgressOverlay implements Component {
         escapeTerminalText(body === '' ? ui('等待输出…', 'Waiting for output…') : body),
         frameContentWidth(width),
       ).map(line => color.muted(line)),
-      color.muted(ui('Esc 中止', 'Esc abort')),
     ], width)
   }
 
@@ -941,6 +1012,23 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   private closed = false
   private pendingBack: NavigationEntry | undefined
   private readonly controller = new AbortController()
+  private readonly textPages = new WeakMap<Component, OverlayTextSelection>()
+  private lastWidth = 0
+  private lastHeight = 0
+  private footerHits: readonly HitRegion[] = []
+  private hoveredFooter: OverlayFooterCommand | undefined
+
+  private textPage(component: Component): OverlayTextSelection {
+    let page = this.textPages.get(component)
+    if (page === undefined) { page = new OverlayTextSelection(); this.textPages.set(component, page) }
+    return page
+  }
+
+  private editable(): OverlayEditable | undefined {
+    const entry = this.current()
+    if (entry === undefined || entry.busy || !('textInput' in entry.component)) return undefined
+    return entry.component.textInput as OverlayEditable | undefined
+  }
 
   constructor(
     private readonly tui: TUI,
@@ -948,6 +1036,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     private readonly settle: (value: TResult | undefined) => void,
     private readonly reject: (error: unknown) => void,
     private readonly requestRender: () => void,
+    private readonly onPageChange: () => void,
   ) {
     this.signal = this.controller.signal
     try {
@@ -966,44 +1055,165 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   invalidate(): void { this.current()?.component.invalidate() }
 
   render(width: number): string[] {
-    const component = this.current()?.component
-    if (component === undefined) return []
+    const entry = this.current()
+    this.footerHits = []
+    if (entry === undefined) return []
+    const component = entry.component
     if ('focused' in component) {
       (component as Component & { focused: boolean }).focused = this.focused
     }
-    return component.render(width)
+    const body = component.render(width)
+    const footer = renderOverlayFooter(this.footerActions(entry), width, this.hoveredFooter)
+    const footerRow = Math.max(0, body.length - 1)
+    this.footerHits = footer.hits.map(hit => ({ ...hit, rect: { ...hit.rect, row: footerRow + hit.rect.row } }))
+    const lines = this.textPage(component).render([
+      ...body.slice(0, footerRow), ...modalContentRows(footer.lines, width), ...body.slice(footerRow),
+    ])
+    this.lastWidth = width
+    this.lastHeight = lines.length
+    return lines
   }
 
   hitChildren(): readonly HitRegion[] {
-    const component = this.current()?.component
-    return component !== undefined && isOverlayMouseTarget(component) ? component.hitChildren() : []
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
+    const input = this.editable()
+    return [
+      ...this.footerHits,
+      ...(input === undefined ? [] : [{
+        id: 'overlay:input', rect: input.rect, zIndex: 2, role: 'input' as const,
+        enabled: true, activation: 'select' as const, hover: 'none' as const,
+        action: { kind: 'overlay' as const, command: 'input' },
+      }]),
+      ...(component !== undefined && isOverlayMouseTarget(component) ? component.hitChildren() : []),
+      {
+        id: 'overlay:text', rect: { col: 2, row: 1, width: Math.max(0, this.lastWidth - 4), height: Math.max(0, this.lastHeight - 2) },
+        zIndex: 0, role: 'text', enabled: true, activation: 'select', hover: 'none',
+        action: { kind: 'overlay', command: 'select-text' },
+      },
+    ]
   }
 
-  handleOptionClick(optionId: string): OverlayMouseClickResult {
+  handleTextPointer(point: CellPoint, origin: CellPoint | undefined, input: boolean, count: number, ended: boolean): void {
     const component = this.current()?.component
+    if (component === undefined) return
+    const editable = this.editable()
+    if (!input && editable?.selection() !== undefined) editable.cursor(editable.position())
+    this.textPage(component).pointer(point, origin, count, ended, input ? editable : undefined)
+    this.requestRender()
+  }
+
+  textTarget(preference?: 'input' | 'body'): OverlayTextTarget | undefined {
+    const entry = this.current()
+    if (entry === undefined) return undefined
+    const page = this.textPage(entry.component)
+    const selected = page.selectedText()
+    const active = () => !this.closed && this.current() === entry
+    const input = this.editable()
+    if (preference === 'body' || (preference !== 'input' && selected !== '') || input === undefined) return {
+      text: selected, editable: false, valid: active, replace: () => false, selectAll: () => undefined,
+    }
+    const value = input.text()
+    const selection = input.selection()
+    const cursor = input.position()
+    const valid = () => active() && input.text() === value && input.position() === cursor
+      && input.selection()?.anchor === selection?.anchor && input.selection()?.focus === selection?.focus
+    return {
+      text: selection === undefined ? '' : value.slice(Math.min(selection.anchor, selection.focus), Math.max(selection.anchor, selection.focus)),
+      editable: true, valid,
+      replace: text => {
+        if (!valid()) return false
+        input.replace(text)
+        this.requestRender()
+        return true
+      },
+      selectAll: () => {
+        if (!valid()) return
+        input.select(0, value.length)
+        this.requestRender()
+      },
+    }
+  }
+
+  allowsContextMenu(): boolean { return this.current()?.busy === false }
+
+  handleOptionClick(optionId: string): OverlayMouseClickResult {
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
+    if (component !== undefined) this.textPage(component).clear()
     return component !== undefined && isOverlayMouseTarget(component)
       ? component.handleOptionClick(optionId)
       : 'none'
   }
 
-  handleHover(optionId?: string): boolean {
+  handleHover(optionId?: string, command?: string): boolean {
+    const entry = this.current()
+    const hovered = entry === undefined ? undefined
+      : this.footerActions(entry).find(action => action.command === command && action.enabled)?.command
+    const changed = this.hoveredFooter !== hovered
+    this.hoveredFooter = hovered
     const component = this.current()?.component
-    return component !== undefined && isOverlayMouseTarget(component)
+    const optionChanged = component !== undefined && isOverlayMouseTarget(component)
       ? component.handleHover(optionId)
       : false
+    return changed || optionChanged
+  }
+
+  handleFooterClick(command: string): boolean {
+    const entry = this.current()
+    if (entry === undefined) return false
+    // Recheck the live state; a render-time hit cannot authorize a busy or dangerous action.
+    const action = this.footerActions(entry).find(candidate => candidate.command === command)
+    if (action?.enabled !== true) return false
+    this.resetMouseState()
+    action.run()
+    this.requestRender()
+    return true
+  }
+
+  private footerActions(entry: NavigationEntry): OverlayFooterAction[] {
+    const primary = entry.component.primaryAction?.()
+    return [
+      ...(primary === undefined ? [] : [{
+        ...primary, command: 'footer-confirm' as const, enabled: primary.enabled && !entry.busy,
+      }]),
+      {
+        command: 'footer-back', key: 'Esc',
+        label: entry.busy ? ui('中止', 'Abort')
+          : this.stack.length > 1 || entry.escapeHandler !== undefined ? ui('返回', 'Back') : ui('关闭', 'Close'),
+        enabled: !entry.busy || (entry.abortOnEscape !== false && !this.signal.aborted),
+        run: () => { this.escape(entry) },
+      },
+    ]
   }
 
   handleWheel(lines: number): boolean {
-    const component = this.current()?.component
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
     if (component === undefined) return false
     return isOverlayWheelTarget(component) ? component.handleWheel(lines) : Math.trunc(lines) !== 0
   }
 
   activateArmedOption(): OverlayMouseClickResult {
-    const component = this.current()?.component
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
     return component !== undefined && isOverlayMouseTarget(component)
       ? component.activateArmedOption()
       : 'none'
+  }
+
+  resetMouseState(): void {
+    this.hoveredFooter = undefined
+    for (const entry of this.stack) {
+      if (isOverlayMouseTarget(entry.component)) entry.component.resetMouseState()
+    }
+  }
+
+  private pageChanged(): void {
+    this.footerHits = []
+    this.resetMouseState()
+    this.onPageChange()
+    this.requestRender()
   }
 
   handleInput(data: string): void {
@@ -1014,22 +1224,28 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     const current = this.current()
     if (current === undefined) return
     if (matchesKey(data, Key.escape)) {
-      if (current.busy) {
-        if (current.abortOnEscape === false) return
-        this.abort()
-        this.pendingBack = current
-        return
-      }
-      if (current.escapeHandler !== undefined) {
-        this.dispatch(current, current.escapeHandler)
-        return
-      }
-      if (this.stack.length <= 1) this.finish()
-      else this.back()
+      this.escape(current)
       return
     }
     if (current.busy) return
+    this.textPage(current.component).clear()
     current.component.handleInput?.(data)
+  }
+
+  /** One Back owner for keyboard and pointer, including custom handlers and busy cancellation. */
+  private escape(current: NavigationEntry): void {
+    if (current.busy) {
+      if (current.abortOnEscape === false) return
+      this.abort()
+      this.pendingBack = current
+      return
+    }
+    if (current.escapeHandler !== undefined) {
+      this.dispatch(current, current.escapeHandler)
+      return
+    }
+    if (this.stack.length <= 1) this.finish()
+    else this.back()
   }
 
   selectPage(
@@ -1049,7 +1265,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
         escapeHandler: request.onEscape,
       }
       this.stack.push(entry)
-      this.requestRender()
+      this.pageChanged()
     })
   }
 
@@ -1064,7 +1280,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     entry.component = new SearchSelectOverlay(request, choice => {
       this.dispatch(entry, () => onSelect(choice))
     })
-    this.requestRender()
+    this.pageChanged()
   }
 
   updateChoices(choices: readonly OverlayChoice[], notice?: string): void {
@@ -1074,7 +1290,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       throw new Error(ui('没有可更新的选择页', 'No select page to update'))
     }
     entry.component.updateChoices(choices, notice ?? '')
-    this.requestRender()
+    this.pageChanged()
   }
 
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined> {
@@ -1132,7 +1348,6 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       searchable: false,
       choices,
       initialChoiceId,
-      footer: ui('Enter 选择 · Esc 返回', 'Enter select · Esc back'),
       mouseExecute: 'focus-only',
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
@@ -1149,7 +1364,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       active: true,
     }
     this.stack.push(entry)
-    this.requestRender()
+    this.pageChanged()
     try {
       return await request.work((chunk) => { overlay.append(chunk) }, this.signal)
     } catch (error) {
@@ -1203,7 +1418,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
         escapeHandler,
       }
       this.stack.push(entry)
-      this.requestRender()
+      this.pageChanged()
     })
   }
 
@@ -1221,7 +1436,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       active: true,
     }
     this.stack.push(entry)
-    this.requestRender()
+    this.pageChanged()
     try {
       return await request.work(value, this.signal)
     } catch {
@@ -1256,7 +1471,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     if (this.pendingBack === entry) this.pendingBack = undefined
     entry.active = false
     this.disposeComponent(entry.component)
-    this.requestRender()
+    this.pageChanged()
     return true
   }
 
@@ -1266,7 +1481,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       this.disposeComponent(entry.component)
       entry.dismiss()
     }
-    this.requestRender()
+    this.pageChanged()
   }
 
   private fail(error: unknown): void {
@@ -1311,8 +1526,8 @@ export class OverlayQueue implements OverlayPrompts {
   hasActive(): boolean { return this.active !== undefined }
 
   /**
-   * Scroll the capturing overlay by keyboard-equivalent steps.
-   * Positive lines move toward the start of the list or detail (Key.up).
+   * Scroll the capturing viewport without changing its selected item.
+   * Positive lines move toward the start of the list or detail.
    */
   handleWheel(lines: number): boolean {
     const component = this.active?.component
@@ -1329,10 +1544,34 @@ export class OverlayQueue implements OverlayPrompts {
     return this.active === undefined ? undefined : String(this.generation)
   }
 
+  handleTextPointer(point: CellPoint, origin: CellPoint | undefined, input: boolean, count = 1, ended = false): void {
+    const component = this.active?.component
+    if (component instanceof NavigationOverlay) component.handleTextPointer(point, origin, input, count, ended)
+  }
+
+  textTarget(preference?: 'input' | 'body'): OverlayTextTarget | undefined {
+    const component = this.active?.component
+    return component instanceof NavigationOverlay ? component.textTarget(preference) : undefined
+  }
+
+  /** Transient menus may cover a page, but must not interrupt a busy transaction. */
+  allowsContextMenu(): boolean {
+    const component = this.active?.component
+    return this.active === undefined || (component instanceof NavigationOverlay && component.allowsContextMenu())
+  }
+
+  /** Single-click the current page's typed action; never inject synthetic Enter/Escape. */
+  handleFooterClick(command: string): boolean {
+    const component = this.active?.component
+    return component instanceof NavigationOverlay ? component.handleFooterClick(command) : false
+  }
+
   /** Overlay-local option regions from the last render of the capturing page. */
   hitChildren(): readonly HitRegion[] {
     const component = this.active?.component
-    return component !== undefined && isOverlayMouseTarget(component) ? component.hitChildren() : []
+    return component !== undefined && isOverlayMouseTarget(component)
+      ? component.hitChildren().map(region => ({ ...region, id: `${this.generation}:${region.id}` }))
+      : []
   }
 
   /**
@@ -1366,6 +1605,9 @@ export class OverlayQueue implements OverlayPrompts {
     return this.enqueue(
       (settle, reject) => new NavigationOverlay(this.tui, run, settle, reject, () => {
         this.tui.requestRender()
+      }, () => {
+        this.generation += 1
+        this.onSessionChange()
       }),
       options,
     )
@@ -1458,11 +1700,11 @@ export class OverlayQueue implements OverlayPrompts {
     }, request.options)
   }
 
-  /** Apply a visual-only option hover without moving keyboard focus or arming an action. */
-  handleHover(optionId?: string): boolean {
+  /** Apply visual-only option/button hover without moving keyboard focus or arming an action. */
+  handleHover(optionId?: string, command?: string): boolean {
     const component = this.active?.component
     return component !== undefined && isOverlayMouseTarget(component)
-      ? component.handleHover(optionId)
+      ? component.handleHover(optionId, command)
       : false
   }
 
@@ -1510,7 +1752,6 @@ export class OverlayQueue implements OverlayPrompts {
       searchable: false,
       choices,
       initialChoiceId,
-      footer: ui('Enter 选择 · Esc 返回', 'Enter select · Esc back'),
       mouseExecute: 'focus-only',
       options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })

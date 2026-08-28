@@ -1,7 +1,10 @@
 /** Harness ConversationSnapshot presentation for the terminal Surface. */
 
 import {
+  decodeKittyPrintable,
+  getKeybindings,
   Image,
+  Input,
   Key,
   Markdown,
   matchesKey,
@@ -1314,7 +1317,7 @@ export class Transcript implements Component, Focusable {
   private lastFullLines: readonly string[] = []
   private blockGeneration = 0
   private searchIndex: TranscriptSearchIndex | undefined
-  private search: { query: string; composing: boolean; matchIndex: number } | undefined
+  private search: { input: Input; query: string; composing: boolean; matchIndex: number } | undefined
   private exampleCursor = 0
   private toolCursor = 0
   private toolFocus = false
@@ -2394,7 +2397,7 @@ export class Transcript implements Component, Focusable {
   }
 
   private beginSearch(): void {
-    this.search = { query: '', composing: true, matchIndex: 0 }
+    this.search = { input: new Input(), query: '', composing: true, matchIndex: 0 }
     this.ensureSearchIndex()
     this.requestRender()
   }
@@ -2433,14 +2436,6 @@ export class Transcript implements Component, Focusable {
       }
       return
     }
-    if (data === '\x7f' || data === '\b') {
-      const chars = Array.from(this.search?.query ?? '')
-      chars.pop()
-      this.search = { query: chars.join(''), composing: true, matchIndex: 0 }
-      this.revealCurrentMatch()
-      this.requestRender()
-      return
-    }
     if (matchesKey(data, Key.up) || matchesKey(data, Key.down)
       || matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown)
       || matchesKey(data, Key.home) || matchesKey(data, Key.end)) {
@@ -2464,14 +2459,24 @@ export class Transcript implements Component, Focusable {
         return
       }
       if (data === '/') {
-        this.search = { query: '', composing: true, matchIndex: 0 }
-        this.requestRender()
+        this.beginSearch()
         return
       }
     }
-    if (data.includes('\u001B') || [...data].some(character => character < ' ')) return
+    // Find keeps its transcript navigation keys; query edits share the input undo stack.
+    const kb = getKeybindings()
+    const paste = /^\u001B\[200~([\s\S]*)\u001B\[201~$/u.exec(data)
+    const printable = !/[\u0000-\u001F\u007F-\u009F]/u.test(data) || decodeKittyPrintable(data) !== undefined
+    if (!printable && paste === null && !kb.matches(data, 'tui.editor.undo')
+      && !kb.matches(data, 'tui.editor.deleteCharBackward')) return
+    if (this.search === undefined) return
+    const before = this.search.query
+    this.search.input.handleInput(paste === null ? data : `\u001B[200~${escapeTerminalText(paste[1] ?? '')}\u001B[201~`)
+    const query = this.search.input.getValue()
+    if (query === before) return
     this.search = {
-      query: `${this.search?.query ?? ''}${data}`,
+      ...this.search,
+      query,
       composing: true,
       matchIndex: 0,
     }

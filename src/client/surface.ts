@@ -93,7 +93,7 @@ import {
   supportsManagedTerminal,
   type ManagedTerminal,
 } from './terminal-session.ts'
-import { MouseProtocolDecoder, type CellPoint } from './mouse-protocol.ts'
+import { decodeMouseSequence, type CellPoint } from './mouse-protocol.ts'
 import { createMouseController, type MouseSemanticEvent } from './mouse-controller.ts'
 import {
   armMouseActivation,
@@ -101,7 +101,7 @@ import {
   type MouseArmedActivation,
   type MouseArmedKind,
 } from './mouse-activation.ts'
-import { mouseContextChoices } from './mouse-context-menu.ts'
+import { ContextMenuController, mouseContextChoices } from './mouse-context-menu.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
 import {
   autocompleteTargetId,
@@ -367,15 +367,22 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let mouseController!: ReturnType<typeof createMouseController>
     let clearHoverPresentation = (): boolean => false
     let extendTranscriptPointerAtEdge = (_edge: 'older' | 'newer', _point: CellPoint): void => undefined
+    const contextMenu = new ContextMenuController(tui, () => {
+      mouseController.endGesture()
+      clearTranscriptPointerGesture()
+      clearMouseArm()
+      clearHoverPresentation()
+      hitMap = emptyHitMap(hitMap.generation + 1, terminal.columns, terminal.rows)
+    })
     const overlays = new OverlayQueue(tui, () => {
+      contextMenu.close()
       mouseController.endGesture()
       clearTranscriptPointerGesture()
       clearMouseArm(true)
       clearHoverPresentation()
+      // A logical child page can change before its first paint. Never use the old hits.
+      hitMap = emptyHitMap(hitMap.generation + 1, terminal.columns, terminal.rows)
     })
-    const mouseDecoder = new MouseProtocolDecoder()
-    let mouseInputFlushTimer: ReturnType<typeof setTimeout> | undefined
-    let replayingMouseInput = false
     let hitMap = emptyHitMap(0, terminal.columns, terminal.rows)
     const freezeHitMap = (): void => {
       const resized = hitMap.terminalWidth !== terminal.columns || hitMap.terminalHeight !== terminal.rows
@@ -531,14 +538,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       const overlayId = overlays.activeOverlayId()
-      hitMap = finalizeHitMap(
+      hitMap = contextMenu.decorateHitMap(finalizeHitMap(
         builder,
         geometry,
         overlayId === undefined || !overlays.hasActive()
           ? undefined
           : { overlayId, children: [...overlays.hitChildren()] },
-      )
+      ), geometry)
       if (resized) {
+        mouseController.endGesture()
         clearTranscriptPointerGesture()
         clearMouseArm(true)
         if (clearHoverPresentation()) tui.requestRender()
@@ -548,6 +556,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     mouseController = createMouseController({
       getHitMap: () => hitMap,
       getBehavior: () => liveBehavior.get(),
+      prepareGesture: () => {
+        const underlay = contextMenu.dismissForGesture()
+        if (underlay === undefined) return undefined
+        if (underlay === null) return 'cancel'
+        hitMap = underlay
+        return 'retarget'
+      },
       onEdgeScroll: (lines, point) => {
         extendTranscriptPointerAtEdge(lines > 0 ? 'older' : 'newer', point)
         transcript.scrollBy(lines)
@@ -771,11 +786,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       detachFatalGuards()
       detachFatalGuards = () => undefined
       if (stopping !== undefined) return stopping
-      if (mouseInputFlushTimer !== undefined) {
-        clearTimeout(mouseInputFlushTimer)
-        mouseInputFlushTimer = undefined
-      }
-      mouseDecoder.reset()
       restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
       stopping = (async () => {
         const failures: unknown[] = []
@@ -784,6 +794,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           elapsedTimer = undefined
         }
         notices.dispose()
+        contextMenu.close()
         overlays.dispose()
         mouseController.dispose()
         transcript.dispose()
@@ -843,6 +854,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         tui.requestRender(true)
       },
       applyBehavior: (behavior) => {
+        contextMenu.close()
         liveBehavior.apply(behavior)
         applyKeyBindingOverrides(behavior.keyBindings)
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
@@ -905,6 +917,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const unsubscribeActive = capabilities.subscribeActive((current, snapshot) => {
       if (stopping !== undefined) return
       if (current === undefined || snapshot === undefined) {
+        contextMenu.close()
+        mouseController.endGesture()
         active = undefined
         clearTranscriptPointerGesture()
         latestSessionId = ''
@@ -925,6 +939,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       actions.syncPending(snapshot)
       editor.disableSubmit = false
       if (latestSessionId !== current.sessionId) {
+        contextMenu.close()
         latestSessionId = current.sessionId
         mouseController.endGesture()
         clearTranscriptPointerGesture()
@@ -1080,22 +1095,25 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         : sliceEditorSelection(editor.getText(), editorSelection)
     }
 
-    const copyText = (text: string): void => {
-      if (text === '') return
-      void writeClipboard(text, {
+    const writeSelectedText = async (text: string): Promise<boolean> => {
+      if (text === '') return false
+      return writeClipboard(text, {
         fallback: liveBehavior.get().clipboardFallback,
         platform: process.platform,
         writeOsc52: sequence => { terminal.write(sequence) },
-      }).catch((error: unknown) => {
+      }).then(() => true).catch((error: unknown) => {
         setNotice(ui(
           `复制失败：${capabilityError(error)}`,
           `Copy failed: ${capabilityError(error)}`,
         ), 'warning')
+        return false
       })
     }
+    const copyText = (text: string): void => { void writeSelectedText(text) }
     editor.onSubmit = dispatchSubmittedComposer
 
     const copyActiveSelection = (): void => {
+      if (overlays.hasActive()) { copyText(overlays.textTarget()?.text ?? ''); return }
       const transcriptText = transcript.copySelectionText()
       copyText(transcriptText !== '' ? transcriptText : composerSelectionText())
     }
@@ -1104,34 +1122,49 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       semantic: Extract<MouseSemanticEvent, { kind: 'click' }>,
     ): Promise<void> => {
       const region = semantic.region
-      if (region?.action.kind === 'overlay') return
+      if (region === undefined || region.action.kind === 'context-menu' || !overlays.allowsContextMenu()) return
+      const inOverlay = region?.action.kind === 'overlay'
+      if (inOverlay && region.role === 'passive') return
+      restoreMouseFocus(region)
+      const overlayTarget = inOverlay ? overlays.textTarget(region.role === 'input' ? 'input' : 'body') : undefined
       const composer = region?.role === 'input' || region?.action.kind === 'composer'
-      const selectionText = composer ? composerSelectionText() : transcript.copySelectionText()
-      const pasteSupported = composer && canReadClipboardText(process.platform)
+      const selectionText = inOverlay ? overlayTarget?.text ?? '' : composer ? composerSelectionText() : transcript.copySelectionText()
+      const pasteSupported = (inOverlay ? overlayTarget?.editable === true : composer) && canReadClipboardText(process.platform)
       const choices = mouseContextChoices({
-        target: composer ? 'composer' : 'transcript',
+        target: inOverlay ? overlayTarget?.editable === true ? 'overlay-input' : 'overlay' : composer ? 'composer' : 'transcript',
         hasSelection: selectionText !== '',
         pasteSupported,
       })
-      const selected = await overlays.select({
-        title: ui('文本操作', 'Text actions'),
-        searchable: false,
-        maxVisible: 4,
+      const owner = active?.session
+      const pageGeneration = overlays.activeGeneration()
+      const composerText = editor.getText()
+      const composerCursor = editorMouseApi(editor).getCursor()
+      const valid = (): boolean => stopping === undefined && active?.session === owner
+        && overlays.activeGeneration() === pageGeneration && overlays.allowsContextMenu()
+        && (inOverlay ? overlayTarget?.valid() === true : !composer || (
+          editor.getText() === composerText && composerSelectionText() === selectionText
+          && editorMouseApi(editor).getCursor().line === composerCursor.line
+          && editorMouseApi(editor).getCursor().col === composerCursor.col
+        ))
+      const selected = await contextMenu.open({
+        point: semantic.point,
         choices,
-        options: {
-          width: 38,
-          minWidth: 28,
-          maxHeight: 9,
-          row: semantic.point.row,
-          col: semantic.point.col,
-          margin: 1,
-        },
+        valid,
       })
-      if (selected === undefined || selected.id === 'cancel' || stopping !== undefined) return
+      if (selected === undefined || selected.id === 'cancel' || !valid()) return
       if (selected.id === 'copy') {
         copyText(selectionText)
         return
       }
+      if (selected.id === 'cut' && overlayTarget?.editable === true) {
+        if (await writeSelectedText(selectionText) && valid()) overlayTarget.replace('')
+        return
+      }
+      if (selected.id === 'delete' && overlayTarget?.editable === true) {
+        overlayTarget.replace('')
+        return
+      }
+      if (selected.id === 'select-all') { overlayTarget?.selectAll(); return }
       if (selected.id === 'native') {
         await actions.execute('mouse', 'native')
         return
@@ -1139,8 +1172,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (selected.id !== 'paste') return
       try {
         const pasted = await readClipboardText({ platform: process.platform })
+        if (!valid()) return
         if (pasted === '') {
           setNotice(ui('剪贴板中没有文本', 'The clipboard contains no text'), 'info')
+          return
+        }
+        if (inOverlay) {
+          overlayTarget?.replace(escapeTerminalText(pasted))
           return
         }
         focusEditor()
@@ -1270,6 +1308,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       setNotice(ui('请按 Enter 执行。', 'Press Enter to run this action.'), 'info')
     }
 
+    const applyOverlayPointer = (point: CellPoint, origin: CellPoint | undefined, input: boolean, count = 1, ended = false): void => {
+      const body = hitMap.regions.find(region => region.id === `overlay:${overlays.activeOverlayId()}:body`)
+      if (body === undefined) return
+      const local = (value: CellPoint): CellPoint => ({ col: value.col - body.rect.col, row: value.row - body.rect.row })
+      overlays.handleTextPointer(local(point), origin === undefined ? undefined : local(origin), input, count, ended)
+    }
+
     const restoreMouseFocus = (region: { readonly action: { readonly kind: string } } | undefined): void => {
       if (region?.action.kind === 'transcript') {
         transcriptFocused = true
@@ -1296,8 +1341,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const statusChanged = status.setHoveredToken(statusId)
       const overlayChanged = overlays.handleHover(
         region?.action.kind === 'overlay' ? region.action.optionId : undefined,
+        region?.action.kind === 'overlay' ? region.action.command : undefined,
       )
-      return transcriptChanged || editorChanged || statusChanged || overlayChanged
+      const menuChanged = contextMenu.handleHover(region)
+      return transcriptChanged || editorChanged || statusChanged || overlayChanged || menuChanged
     }
 
     clearHoverPresentation = (): boolean => {
@@ -1308,8 +1355,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const dispatchMouseClick = (semantic: Extract<MouseSemanticEvent, { kind: 'click' }>): void => {
       clearTranscriptPointerGesture()
       const region = semantic.region
-      restoreMouseFocus(region)
       if (semantic.suppressed) return
+      if (contextMenu.handleClick(semantic, (point, target) => {
+        if (target !== undefined) void openMouseContextMenu({ ...semantic, point, region: target })
+      })) return
+      if (region?.action.kind === 'context-menu') return // A removed menu's last-painted hits are inert.
+      restoreMouseFocus(region)
       if (semantic.button === 'right') {
         void openMouseContextMenu(semantic)
         return
@@ -1331,10 +1382,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             armMouseTarget('option', optionId, contentGeneration)
             return
           }
-          if (!mouseController.allowsSensitiveMouse) {
-            hintEnter()
-            return
-          }
+          // Ordinary menus can navigate immediately. Confirmations are Enter-only above.
           overlays.activateArmedOption()
           clearMouseArm()
           return
@@ -1342,7 +1390,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (result === 'focused') armMouseTarget('option', optionId, contentGeneration)
         return
       }
-      if (region?.action.kind === 'overlay') return
+      if (region?.action.kind === 'overlay') {
+        if (region.role === 'button') {
+          overlays.handleFooterClick(region.action.command)
+        } else if (region.role === 'input' || region.role === 'text') {
+          applyOverlayPointer(semantic.point, undefined, region.role === 'input', semantic.count)
+        }
+        return
+      }
       if (region?.role === 'scrollbar') {
         const origin = layout.lastContentGeometry()?.transcript
         if (origin !== undefined) transcript.handleScrollbarClick(region, semantic.point, origin)
@@ -1360,7 +1415,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           armMouseTarget('example', id, mouseContentGeneration)
           return
         }
-        if (!mouseController.allowsSensitiveMouse) {
+        if (!mouseController.allowsMouseActivation) {
           hintEnter()
           return
         }
@@ -1391,7 +1446,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           armMouseTarget('autocomplete', itemId, generation)
           return
         }
-        if (!mouseController.allowsSensitiveMouse) {
+        if (!mouseController.allowsMouseActivation) {
           hintEnter()
           return
         }
@@ -1416,18 +1471,36 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
     }
 
+    const dispatchMouseDrag = (semantic: Extract<MouseSemanticEvent, { kind: 'drag' }>): void => {
+      if (contextMenu.hasActive() || semantic.region?.action.kind === 'context-menu') return
+      clearMouseArm()
+      restoreMouseFocus(semantic.region)
+      if (semantic.grabOffset !== undefined || mouseController.gesture === 'dragging-scrollbar') {
+        clearTranscriptPointerGesture()
+        const origin = layout.lastContentGeometry()?.transcript
+        if (origin !== undefined) transcript.dragThumb(semantic.point.row - origin.row, semantic.grabOffset ?? 0)
+      } else if (semantic.region?.action.kind === 'overlay') {
+        clearTranscriptPointerGesture()
+        applyOverlayPointer(semantic.point, semantic.origin, semantic.region.role === 'input', 1, semantic.ended === true)
+      } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
+        clearTranscriptPointerGesture()
+        applyComposerPointer(semantic.point, semantic.origin, true)
+      } else {
+        applyTranscriptPointer(semantic.point, semantic.origin, 'character', semantic.ended === true)
+      }
+      if (semantic.ended === true && liveBehavior.get().copyOnSelect) copyActiveSelection()
+    }
+
     tui.addInputListener((data) => {
       performanceProbe.markInput()
-      if (mouseInputFlushTimer !== undefined) {
-        clearTimeout(mouseInputFlushTimer)
-        mouseInputFlushTimer = undefined
-      }
-      const decoded = replayingMouseInput
-        ? { events: [], leftover: data, pending: '' }
-        : mouseDecoder.push(data)
+      // ProcessTerminal's StdinBuffer owns framing and Escape timeouts. Rebuffering
+      // a resolved Escape here would join it to the next mouse report again.
+      // Bracketed paste is one opaque input and must not be parsed for mouse bytes.
+      const mouseEvent = decodeMouseSequence(data)
       let pendingWheel = 0
       let needMouseRender = false
-      for (const event of decoded.events) {
+      if (mouseEvent != null) {
+        const event = mouseEvent
         if (event.kind !== 'move' && event.kind !== 'focus' && clearHoverPresentation()) {
           needMouseRender = true
         }
@@ -1440,7 +1513,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           } else if (region?.action.kind === 'composer' && region.action.command.startsWith('autocomplete')) {
             const api = editorMouseApi(editor)
             clearMouseArm()
-            api.moveAutocompleteSelection?.(-Math.sign(outcome.semantic.lines))
+            api.scrollAutocomplete?.(-outcome.semantic.lines)
           } else if (region?.action.kind === 'composer' || region?.role === 'input') {
             // A mouse wheel is a semantic navigation gesture, never keyboard bytes.
             // Inputs consume it without changing text or cursor state.
@@ -1451,24 +1524,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         } else if (outcome.semantic?.kind === 'click') {
           dispatchMouseClick(outcome.semantic)
         } else if (outcome.semantic?.kind === 'drag') {
-          clearMouseArm()
-          const semantic = outcome.semantic
-          if (semantic.grabOffset !== undefined || mouseController.gesture === 'dragging-scrollbar') {
-            clearTranscriptPointerGesture()
-            const origin = layout.lastContentGeometry()?.transcript
-            if (origin !== undefined) {
-              transcript.dragThumb(semantic.point.row - origin.row, semantic.grabOffset ?? 0)
-            }
-          } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
-            clearTranscriptPointerGesture()
-            applyComposerPointer(semantic.point, semantic.origin, true)
-          } else {
-            applyTranscriptPointer(semantic.point, semantic.origin, 'character', semantic.ended === true)
-          }
-          if (semantic.ended === true && liveBehavior.get().copyOnSelect) copyActiveSelection()
+          dispatchMouseDrag(outcome.semantic)
         } else if (outcome.semantic?.kind === 'hover') {
           applyHoverPresentation(outcome.semantic.region)
         } else if (outcome.semantic?.kind === 'focus' && !outcome.semantic.focused) {
+          contextMenu.close()
           clearTranscriptPointerGesture()
           clearMouseArm(true)
           clearHoverPresentation()
@@ -1479,31 +1539,21 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         transcript.scrollBy(Math.max(-MAX_WHEEL_SCROLL_LINES, Math.min(MAX_WHEEL_SCROLL_LINES, pendingWheel)))
         needMouseRender = true
       }
-      if (decoded.events.length > 0 && needMouseRender) {
+      if (mouseEvent != null && needMouseRender) {
         mouseController.recordMouseRender()
         renderWhileOpen()
       }
-      if (decoded.pending !== '') {
-        mouseInputFlushTimer = setTimeout(() => {
-          mouseInputFlushTimer = undefined
-          const pending = mouseDecoder.flushPending()
-          if (pending === '' || stopping !== undefined) return
-          replayingMouseInput = true
-          try {
-            ;(tui as unknown as { handleInput(input: string): void }).handleInput(pending)
-          } finally {
-            replayingMouseInput = false
-          }
-        }, 30)
-        return { consume: true }
-      }
-      if (decoded.events.length > 0 && decoded.leftover === '') return { consume: true }
-      const payload = decoded.events.length > 0 ? decoded.leftover : data
+      // null includes malformed/legacy mouse frames: consume them, never fall
+      // back to forwarding the original protocol bytes to a text field.
+      if (mouseEvent !== undefined) return { consume: true }
+      const payload = data
       if (payload === '') return { consume: true }
       clearTranscriptPointerGesture()
       clearMouseArm()
+      mouseController.endGesture()
       if (clearHoverPresentation()) renderWhileOpen()
       if (matchesBinding('toggleMouseMode', payload)) {
+        contextMenu.close()
         void actions.execute('mouse', 'toggle')
         return { consume: true }
       }
@@ -1512,8 +1562,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       const interrupt = consumeRunningInterrupt(payload, capabilities.active()?.session)
-      if (interrupt !== undefined) return interrupt
-      if (overlays.hasActive()) return payload === data ? undefined : { data: payload }
+      if (interrupt !== undefined) { contextMenu.close(); return interrupt }
+      if (contextMenu.handleInput(payload)) return { consume: true }
+      if (overlays.hasActive() && matchesKey(payload, Key.ctrl('x'))) {
+        const target = overlays.textTarget()
+        if (target?.editable === true && target.text !== '') {
+          void writeSelectedText(target.text).then(copied => { if (copied) target.replace('') })
+          return { consume: true }
+        }
+      }
+      if (overlays.hasActive()) return undefined
       const pasted = imagePathFromPasteText(payload)
       if (!transcriptFocused && pasted !== undefined) {
         return attachPastedImage(pasted.path, pasted.raw, pasted.rest)
@@ -1665,7 +1723,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
         return { consume: true }
       }
-      if (!matchesBinding('interrupt', payload)) return payload === data ? undefined : { data: payload }
+      if (!matchesBinding('interrupt', payload)) return undefined
       if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
         setNotice(clearIdleComposerDraft(
           editor,

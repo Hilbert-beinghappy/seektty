@@ -26,6 +26,7 @@ export type MouseAction =
       readonly autocompleteItemId?: string
     }
   | { readonly kind: 'overlay'; readonly command: string; readonly optionId?: string }
+  | { readonly kind: 'context-menu'; readonly menuId: number; readonly optionId?: string }
   | { readonly kind: 'chrome'; readonly commandId: string }
 
 export interface HitRegion {

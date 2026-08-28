@@ -155,11 +155,11 @@ function collect(session) {
   session.onData(chunk => { output += chunk })
   return {
     text: () => output,
-    waitFor(pattern, ms = 15_000) {
+    waitFor(pattern, ms = 15_000, since = 0) {
       const started = Date.now()
       return new Promise((resolveWait, reject) => {
         const timer = setInterval(() => {
-          if (pattern.test(output)) {
+          if (pattern.test(output.slice(since))) {
             clearInterval(timer)
             resolveWait()
           } else if (Date.now() - started > ms) {
@@ -204,6 +204,39 @@ async function oneCycle(index, home, env) {
     await log.waitFor(/键位速查|Keyboard shortcuts/u, 10_000)
     session.write('\u001B')
     await delay(100)
+    // Exercise the packaged transient popup, outside-left dismissal and outside-right replacement.
+    // These gestures do not select a menu action or make a Provider request.
+    for (const [col, row] of [[10, 6], [65, 18]]) {
+      const since = log.text().length
+      session.write(sgr(2, col, row))
+      session.write(sgr(2, col, row, false, true))
+      await log.waitFor(/文本操作|Text actions/u, 10_000, since)
+    }
+    session.write(sgr(0, 2, 2))
+    session.write(sgr(0, 2, 2, false, true))
+    await delay(100)
+    const openContextMenu = async () => {
+      const since = log.text().length
+      session.write(sgr(2, 10, 6))
+      session.write(sgr(2, 10, 6, false, true))
+      await log.waitFor(/文本操作|Text actions/u, 10_000, since)
+    }
+    await openContextMenu()
+    session.write(encodeWheelUp(10, 6))
+    await delay(100)
+    // Reopening at the same point would be an ignored inside-right-click if
+    // the previous gesture had left the popup open.
+    await openContextMenu()
+    session.write(sgr(0, 10, 6) + sgr(0, 18, 8, true) + sgr(0, 18, 8, false, true))
+    await delay(100)
+    await openContextMenu()
+    session.write(sgr(2, 10, 6) + sgr(2, 30, 10, true))
+    await delay(100)
+    const sinceRelease = log.text().length
+    session.write(sgr(2, 45, 12, false, true))
+    await log.waitFor(/文本操作|Text actions/u, 10_000, sinceRelease)
+    session.write(sgr(0, 2, 2) + sgr(0, 2, 2, false, true))
+    await delay(100)
     session.write(encodeWheelUp())
     session.write(encodeWheelUp())
     session.write(sgr(0, 10, 6))
@@ -228,7 +261,11 @@ async function oneCycle(index, home, env) {
     } else {
       session.write('\u001B')
       await delay(100)
+      const beforeExit = log.text().length
       for (let press = 0; press < 3; press += 1) {
+        // Once TUI restoration starts, another Ctrl+C can hit cmd.exe instead
+        // of dsh and leave Windows waiting at "Terminate batch job (Y/N)?".
+        if (exited || /\?1004l|\?1049l/u.test(log.text().slice(beforeExit))) break
         session.write('\u0003')
         await delay(100)
       }
@@ -275,6 +312,8 @@ const report = `${JSON.stringify({
   script: 'scripts/mouse-pty-harness.mjs',
   cycles,
   pty: true,
+  contextMenus: true,
+  contextMenuGestures: true,
   guiEquivalent: false,
   urlLaunchCount: 0,
   results: results.map(entry => ({

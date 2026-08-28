@@ -8,7 +8,7 @@ export type HelpSectionId = 'keys' | 'flows' | 'doctor'
 
 export function helpSectionChoices(): readonly { id: HelpSectionId; label: string; description: string }[] {
   return [
-    { id: 'keys', label: ui('键位速查', 'Keyboard shortcuts'), description: ui('与当前 TUI 绑定共用一张表', 'Same table as the live TUI bindings') },
+    { id: 'keys', label: ui('键位速查', 'Keyboard shortcuts'), description: ui('按用途分组，显示当前绑定与适用场景', 'Grouped by purpose, with live bindings and context') },
     { id: 'flows', label: ui('常用流程', 'Common workflows'), description: ui('输入、停止、会话、审批和浏览', 'Input, stop, sessions, approvals, and browsing') },
     { id: 'doctor', label: ui('/doctor 与安装', '/doctor and setup'), description: ui('环境检查和 QUICKSTART', 'Environment checks and QUICKSTART') },
   ]

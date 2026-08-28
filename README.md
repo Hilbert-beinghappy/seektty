@@ -7,7 +7,7 @@
 <p>A keyboard-first terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.3-orange" alt="Version 1.2.3"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -42,35 +42,35 @@ For requirements that still need definition, the optional [Clarify Host plugin](
 
 ## Quick start
 
-The last jointly accepted Clarify stack uses official DeepSeek Harness `0.1.0-rc.8`, SeekTTY `1.2.0`, [Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) `0.1.0`, and Clarify `0.2.1`:
+Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
 
 ```sh
-pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
+pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.1/dsh-plugin-clarify-0.2.1.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 
 dsh --profile tui
 ```
 
-These commands install prebuilt tarballs through native `dsh plugin` reconciliation. SeekTTY works on its own; the two Host plugins add `/clarify` and its separately accounted model runtime.
+These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
+
+Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.4 review and release checklist](docs/release-v1.2.4-verification.md).
 
 ### Bare `deepseek` launcher
 
 After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to that tarball:
 
 ```sh
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
 
 PowerShell uses the same package URL:
 
 ```powershell
-pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 deepseek
 ```
 
@@ -88,15 +88,16 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.3` adds complete application-owned mouse interaction while retaining native terminal selection as an escape hatch. It targets official Harness `0.1.1-rc.2`. Use the package listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases), or build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball.
+SeekTTY `1.2.4` improves mouse navigation and input editing on official Harness `0.1.1-rc.2`, retaining native terminal selection as a fallback. No Settings or Session migration is required.
 
-### What's new in 1.2.3
+### What's new in 1.2.4
 
-- A resident transcript scrollbar and viewport-bound wheel handling keep scrolling out of the composer and make short and long conversations behave consistently.
-- In-app text selection persists after release, supports word and line selection, and auto-scrolls across loaded transcript pages. Copy-on-select and right-click Copy/Paste use explicit UTF-8 paths on Windows, macOS, Wayland, and X11.
-- Stable hover feedback and target-aware clicks cover tool cards, examples, autocomplete, overlays, and the model, mode, and permission controls.
-- Autocomplete hit testing follows the candidates actually rendered after scrolling. The first click selects; Enter or a safe second click executes a slash command once; Tab only completes it.
-- F3 or `/mouse` switches between full mouse mode and native terminal selection. Dangerous confirmations remain keyboard-only.
+- Lists keep their viewport instead of recentering on selection; ordinary mouse actions work at startup, and nested overlays share theme-aware hover and clickable footer buttons.
+- Overlay text and non-secret inputs support selection and clipboard editing. Ctrl+Z undoes edits in each input; the shortcut reference is grouped by purpose.
+- Context menus are independent of the page stack. Wheel and left-drag gestures dismiss the menu and continue immediately; right-drag opens it at the release position.
+- Escape followed by a mouse report no longer types protocol fragments into search fields. Dangerous confirmations remain keyboard-only, and F3 or `/mouse` retains native selection.
+
+See the [release notes](docs/release-v1.2.4.md) for changes and the [review checklist](docs/release-v1.2.4-verification.md) for verification limits.
 
 ## Interface
 
@@ -181,29 +182,78 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 
 `/plugin`, `/workspace`, and `/profile` provide interactive centers and direct subcommands. Unknown commands stay inside the command surface and show nearby suggestions.
 
-The rendered candidate window is authoritative: the wheel and arrow keys move its highlight, pointer hover is preview-only, and the first click visibly selects the exact candidate under the pointer. Enter or a safe second click completes and runs a slash command once; Tab only completes it. File and path completions never auto-submit, and the scroll-position footer is not clickable.
+Autocomplete and overlay lists keep their scroll position: the wheel browses without moving the selection, clicking a visible row does not recenter it, and arrow keys scroll only when the selection crosses a visible edge. Hover is preview-only. The first click selects; a later click on the same armed item has no double-click deadline. Enter or a safe second click completes and runs a slash command once; Tab only completes it. File and path completions never auto-submit, and the scroll-position footer is not clickable.
+
+Overlay footers have single-click Select/Confirm/Save and Back/Close buttons, with theme-aware hover. They share keyboard validation and navigation; dangerous confirmations remain keyboard-only. Ordinary mouse actions work immediately after startup without minimizing the terminal. Focus reports, when available, protect against accidental activation for 250 ms after refocusing.
 
 Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerShell `Set-Clipboard` writer, macOS runs `pbcopy` under a UTF-8 locale, Wayland declares `text/plain;charset=utf-8`, and X11 requests `UTF8_STRING`; OSC 52 remains available for terminal, SSH, and tmux paths.
 
 ## Common controls
 
+F1 → **Keyboard shortcuts** shows the current bindings grouped by purpose, including any `/keymap` overrides. Defaults:
+
+### Input and editing
+
 | Input | Action |
 | --- | --- |
-| Full mouse mode | Wheel, resident scrollbar, in-app selection, copy-on-select, stable hover feedback, and target-aware clicks on tool cards, examples, autocomplete, overlays, and remaining model/mode/permission chrome. Dangerous confirmations still require Enter. |
-| Hold the terminal selection modifier while dragging, then copy | Native selection for visible TUI text: hold `Fn` in Terminal.app or `Option` in iTerm2, drag, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere. Switch with F3 or `/mouse native`. |
-| Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
-| Ctrl+Shift+C / F3 | Copy the in-app selection / toggle full and native mouse modes |
-| `/` | Open command and Skill candidates |
 | Enter / Shift+Enter | Submit or confirm; a selected slash candidate completes and runs once / insert a newline |
-| Tab / Escape | Complete the selected candidate without submitting / return or close the active overlay |
-| PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
-| Shift+Tab | Cycle permission presets, confirming full access first |
-| Shift+Left / Shift+Right | Jump to the previous or next user turn |
+| Ctrl+Z (also Ctrl+-) | Undo edits in the focused input, including typing, paste, and selection replacement |
+| Ctrl+R | Search composer history |
+| Enter / Ctrl+Enter in a multiline overlay | Insert a newline / submit |
+
+Undo is local to each input, including search and masked secret fields. It does not recall sent messages or reverse saved settings.
+
+### Commands and overlays
+
+| Input | Action |
+| --- | --- |
+| `/` in the composer | Open command and Skill candidates |
+| Up / Down | Move through candidates or list options |
+| Tab with candidates open | Complete the selected candidate without submitting |
+| Escape | Dismiss candidates, or return or close the active overlay |
+| Space in a multi-select overlay | Toggle the current option |
 | F1 / Ctrl+P | Open help / open the command palette |
-| Ctrl+M / Ctrl+S | Open model selection / open Session resume |
-| Ctrl+O / Ctrl+T | Cycle tool-card display / show or hide reasoning |
 | F2 / Ctrl+, / Cmd+, | Open Settings |
+
+### Transcript browsing
+
+| Input | Action |
+| --- | --- |
+| Tab | Browse from an empty composer; return to the composer while browsing |
+| Up / Down | Scroll or move card selection while browsing |
+| PgUp / PgDn / Home / End | Page through the transcript, jump to the oldest content, or return to the latest |
+| Shift+Left / Shift+Right | Jump to the previous or next user turn |
+| `/`, then Enter, then n / N | Find in the transcript, confirm the query, then visit the next / previous match |
+| Escape | Leave Find, then card focus, then return to the composer |
+| Ctrl+O / Ctrl+T | Cycle tool-card display / show or hide reasoning |
+
+### Sessions and running turns
+
+| Input | Action |
+| --- | --- |
+| Ctrl+S | Open Session resume |
+| Ctrl+M | Open model selection (requires an extended keyboard protocol; otherwise use `/model`) |
+| Shift+Tab | Cycle permission presets, confirming full access first |
 | Ctrl+C | Stop the active turn, clear a draft, or confirm exit with a second press |
+
+### Mouse and selection
+
+| Input | Action |
+| --- | --- |
+| F3 or `/mouse toggle` | Toggle full mouse mode and native terminal selection |
+| Mouse wheel / trackpad | Browse the internal transcript without moving composer focus, draft, selection, or cursor |
+| Ctrl+Shift+C | Copy the active in-app selection |
+| Ctrl+X in a non-secret overlay input | Cut the selection |
+| Backspace / Delete in an editable input | Delete the selection |
+| Hold the terminal selection modifier while dragging, then copy | Native selection: hold `Fn` in Terminal.app or `Option` in iTerm2, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+
+Full mouse mode also provides a resident scrollbar, in-app selection, copy-on-select, hover feedback, and target-aware clicks on cards, examples, candidates, overlays, and model/mode/permission controls. Dangerous confirmations still require Enter.
+
+Modal pages support dragging over visible text to select and copy it. Search fields and non-secret inputs also support replacing a selection by typing, Backspace, or Delete; Ctrl+X cuts it. Their right-click menu provides Copy, Cut, Delete selection, Paste, and Select all. Ctrl+Shift+C copies the active page's selection; Ctrl+C keeps its interrupt behavior. Masked secrets are never exposed through clipboard actions.
+
+Context menus float above the current page without joining its navigation stack. Left-click outside or press Esc to dismiss only the menu; an outside right-click reopens it for the new target. Menu actions take one left-click, while the covered page keeps its draft and selection.
+
+Wheel scrolling or a left-button drag dismisses the menu and immediately continues scrolling or selecting on the underlying page. A right-button drag opens the menu at the release position. An outside single-click only dismisses; it never activates a control underneath. Parent dialogs still capture input.
 
 ## Themes and language
 
@@ -221,6 +271,8 @@ SeekTTY starts with its DeepSeek dark theme. `/theme` opens the theme center; di
 ```
 
 Interface and code themes are independent. A palette of 3–16 HEX/RGB colors can generate light and dark candidates. `/theme import` reads local VS Code JSON/JSONC themes, resolves relative `include` files, and preserves portable TextMate colors and styles. Every customization path previews changes and flags low contrast before saving. Definitions live in the revision-protected `seektty-appearance` Harness Settings namespace.
+
+Hover styling is derived from the active interface theme, including existing custom themes, without adding required settings or altering saved colors. Indistinct or limited-color backgrounds use an underline cue; `NO_COLOR` remains respected.
 
 Use `/language` or a direct command to switch the terminal copy live:
 
@@ -250,8 +302,8 @@ Replace the former `deepseek-tui` global package once:
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
 
@@ -259,7 +311,7 @@ Custom Profiles migrate independently on first launch. Native dsh-only installat
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 ```
 
 Removing SeekTTY changes only the target Profile, never the dsh installation:
@@ -278,17 +330,18 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Declared minimum Harness Host | `0.1.0-rc.6` |
 | Current tested Harness Host | `0.1.1-rc.2` |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current mouse release | SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`; this release does not establish new complete joint acceptance |
+| Current mouse/input release | SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
-Verification includes:
+The 1.2.4 release checks cover:
 
-- Isolated stock-dsh add, boot, remove, and re-add lifecycle checks, including the declared minimum.
-- Type checking, unit tests, production build, packed-content checks, and duplicate-Host-package rejection.
-- Real PTY coverage for startup, navigation, dark/light/custom themes, 80/120/160-column layouts, locale switching, and restart restoration; installation and terminal interaction are supported on macOS, Linux, and Windows.
-- First-run credential setup and a real multi-turn Provider session without credential leakage into output, screenshots, or the repository.
-- Candidate observations on stock `0.1.1-rc.2` for Clarify, separate usage, PNG/JFIF attachments, Vision-Exp selection, and restart restoration. These observations do not establish full Web UI, GIF/WebP, over-limit, interruption-recovery, or cost/cache coverage.
+- Type checking, unit/integration tests, production build, packed-content checks, and duplicate-Host-package rejection.
+- Isolated add, boot, remove, and re-add on unmodified official dsh `0.1.1-rc.2` using the exact candidate tarball.
+- Windows ConPTY startup, slash navigation, context-menu gesture handoff, resize, and clean exit. Injected PTY input and synthetic renderer tests are not equivalent to real GUI-terminal mouse or clipboard testing.
+- The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [release checklist](docs/release-v1.2.4-verification.md).
+
+Earlier Clarify, attachment, Vision-Exp, and Provider observations are historical evidence, not renewed acceptance of those optional workflows in 1.2.4. The declared Host range is unchanged; this release's stock lifecycle rerun targets `0.1.1-rc.2`, not every legacy version.
 
 Reusable checks:
 

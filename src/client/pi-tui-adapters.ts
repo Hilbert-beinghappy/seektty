@@ -45,9 +45,11 @@ interface PatchedEditor {
   clearSelection?(): void
   replaceSelection?(text: string): boolean
   getVisualLineMap?(width?: number): readonly VisualLine[]
+  getVisibleLineMap?(): readonly { readonly row: number; readonly col: number; readonly logicalLine: number; readonly startCol: number; readonly text: string }[]
   isShowingAutocomplete(): boolean
   getAutocompleteSnapshot?(): AutocompleteSnapshot | undefined
   moveAutocompleteSelection?(delta: number): boolean
+  scrollAutocomplete?(delta: number): boolean
   selectAutocompleteItem?(generation: number, itemId: string): boolean
   completeAutocompleteSelection?(): boolean
   activateAutocompleteSelection?(source: 'enter' | 'mouse'): AutocompleteActivation

@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { visibleWidth, type Component, type OverlayHandle, type TUI } from '@mariozechner/pi-tui'
 import { OverlayQueue, visibleEditorWindow, type OverlayNavigation } from '../src/client/overlays.ts'
 
 const ESCAPE = '\u001B'
 const ENTER = '\r'
 const CTRL_C = '\u0003'
+
+afterEach(() => { vi.unstubAllEnvs() })
 
 function plain(lines: readonly string[]): string {
   return lines.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
@@ -74,11 +76,12 @@ describe('overlay navigation', () => {
     await expect(secret).resolves.toBe('synthetic-secret')
   })
 
-  it('moves selector and detail state through typed wheel methods', async () => {
+  it('scrolls selector and detail viewports through typed wheel methods', async () => {
     const selectHarness = overlayHarness()
     const selected = selectHarness.overlays.select({
       title: 'wheel picker',
       searchable: false,
+      maxVisible: 2,
       choices: [
         { id: 'a', label: 'alpha' },
         { id: 'b', label: 'bravo' },
@@ -86,8 +89,10 @@ describe('overlay navigation', () => {
       ],
     })
     expect(selectHarness.overlays.handleWheel(-2)).toBe(true)
+    expect(plain(selectHarness.component().render(80))).toContain('charlie')
+    expect(plain(selectHarness.component().render(80))).not.toContain('alpha')
     selectHarness.component().handleInput(ENTER)
-    await expect(selected).resolves.toMatchObject({ id: 'c' })
+    await expect(selected).resolves.toMatchObject({ id: 'a' })
 
     const detailHarness = overlayHarness()
     const detail = detailHarness.overlays.detail({
@@ -432,6 +437,92 @@ describe('overlay navigation', () => {
   })
 })
 
+describe('stable selector viewports', () => {
+  it.each(['select', 'multiSelect'] as const)('%s uses edge scrolling and keeps the viewport through clicks, hover, and resize', async method => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const harness = overlayHarness()
+    const choices = Array.from({ length: 20 }, (_, index) => ({ id: `item-${index}`, label: `row-${index}` }))
+    const pending = harness.overlays[method]({ title: 'viewport', maxVisible: 6, choices })
+    const ids = (width = 80): string[] => {
+      harness.component().render(width)
+      return harness.overlays.hitChildren().filter(hit => hit.role === 'option').map(hit => hit.action.kind === 'overlay' ? hit.action.optionId ?? '' : '')
+    }
+    expect(ids()).toEqual(choices.slice(0, 6).map(choice => choice.id))
+    expect(harness.overlays.handleOptionClick('item-4')).toBe('focused')
+    for (const width of [80, 80, 100, 50, 80]) {
+      expect(ids(width)).toEqual(choices.slice(0, 6).map(choice => choice.id))
+    }
+    harness.component().handleInput('\u001B[B')
+    expect(ids()).toEqual(choices.slice(0, 6).map(choice => choice.id))
+    harness.component().handleInput('\u001B[B')
+    expect(ids()).toEqual(choices.slice(1, 7).map(choice => choice.id))
+    expect(plain(harness.component().render(80))).toMatch(/→ .*row-6/u)
+    for (let index = 0; index < 6; index++) harness.component().handleInput('\u001B[A')
+    expect(ids()).toEqual(choices.slice(0, 6).map(choice => choice.id))
+
+    expect(harness.overlays.handleWheel(-8)).toBe(true)
+    expect(ids()).toEqual(choices.slice(8, 14).map(choice => choice.id))
+    // The keyboard selection stayed at zero, outside this window.
+    expect(plain(harness.component().render(80))).not.toContain('→')
+    expect(harness.overlays.handleOptionClick('item-9')).toBe('focused')
+    const beforeHover = harness.component().render(80)
+    expect(harness.overlays.handleHover('item-12')).toBe(true)
+    expect(harness.component().render(80)).not.toEqual(beforeHover)
+    expect(ids()).toEqual(choices.slice(8, 14).map(choice => choice.id))
+    expect(plain(harness.component().render(80))).toMatch(/→ .*row-9/u)
+    if (method === 'multiSelect') {
+      harness.component().handleInput(' ')
+      expect(plain(harness.component().render(80))).toContain('[x] row-9')
+      expect(ids()).toEqual(choices.slice(8, 14).map(choice => choice.id))
+    }
+    harness.component().handleInput(ESCAPE)
+    await pending
+  })
+
+  it('preserves the viewport on data refresh but invalidates mouse arming and page hits', async () => {
+    const harness = overlayHarness()
+    let navigation: OverlayNavigation | undefined
+    const choices = Array.from({ length: 20 }, (_, index) => ({ id: `item-${index}`, label: `row-${index}` }))
+    const pending = harness.overlays.navigate(async nav => {
+      navigation = nav
+      await nav.selectPage({ title: 'refresh', maxVisible: 6, choices }, () => undefined)
+    })
+    harness.component().render(80)
+    harness.overlays.handleWheel(-8)
+    harness.component().render(80)
+    harness.overlays.handleOptionClick('item-9')
+    const generation = harness.overlays.activeGeneration()
+    const oldId = harness.overlays.hitChildren()[0]?.id
+    navigation?.updateChoices(choices.map(choice => ({ ...choice, label: `${choice.label} updated` })))
+    harness.component().render(80)
+    expect(harness.overlays.activeGeneration()).toBeGreaterThan(generation)
+    expect(harness.overlays.hitChildren()[0]?.id).not.toBe(oldId)
+    expect(plain(harness.component().render(80))).toMatch(/→ .*row-9 updated/u)
+    expect(harness.overlays.hitChildren().find(hit => hit.role === 'option')?.action).toMatchObject({ optionId: 'item-8' })
+    expect(harness.overlays.handleOptionClick('item-9')).toBe('focused')
+    harness.component().handleInput(ESCAPE)
+    await pending
+  })
+
+  it('invalidates the selected mouse action after keyboard navigation and rejects disabled choices', async () => {
+    const harness = overlayHarness()
+    const pending = harness.overlays.select({ title: 'keys', choices: [
+      { id: 'a', label: 'alpha' },
+      { id: 'b', label: 'bravo' },
+      { id: 'c', label: 'disabled', disabledReason: 'unavailable' },
+    ] })
+    harness.component().render(80)
+    expect(harness.overlays.handleOptionClick('a')).toBe('focused')
+    harness.component().handleInput('\u001B[B')
+    expect(harness.overlays.handleOptionClick('a')).toBe('focused')
+    expect(harness.overlays.handleOptionClick('c')).toBe('none')
+    harness.component().handleInput(ESCAPE)
+    await pending
+  })
+})
+
 describe('Clarify OverlayQueue wrapping', () => {
   it('renders a long ask overlay inside 40 and 80 columns via OverlayQueue.component.render', async () => {
     const harness = overlayHarness()
@@ -476,7 +567,7 @@ describe('Clarify OverlayQueue wrapping', () => {
     const danger = harness.overlays.hitChildren().find(region =>
       region.action.kind === 'overlay' && region.action.optionId === 'confirm'
     )
-    expect(danger).toMatchObject({ activation: 'enter-only', hover: 'none' })
+    expect(danger).toMatchObject({ activation: 'enter-only', hover: 'highlight' })
     expect(harness.overlays.handleHover('confirm')).toBe(true)
     const first = harness.overlays.handleOptionClick('confirm')
     expect(first).toBe('danger')

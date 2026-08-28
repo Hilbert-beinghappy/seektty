@@ -20,6 +20,8 @@ export const WHEEL_RESET_MS = 120
 
 type GestureState =
   | { readonly kind: 'idle' }
+  | { readonly kind: 'dragging-passive' }
+  | { readonly kind: 'dragging-context'; readonly suppressed: boolean }
   | {
     readonly kind: 'pressed'
     readonly button: MouseButton
@@ -28,6 +30,7 @@ type GestureState =
     readonly generation: number
     readonly time: number
     readonly grabOffset: number
+    readonly suppressed: boolean
   }
   | {
     readonly kind: 'selecting'
@@ -112,6 +115,8 @@ export interface MouseControllerOutcome {
 export interface MouseControllerOptions {
   getHitMap: () => HitMapSnapshot | undefined
   getBehavior: () => Pick<TuiBehaviorSettings, 'mouseMode' | 'hoverFeedback' | 'wheelScrollLines' | 'wheelAcceleration'>
+  /** Dismiss a transient layer before wheel/drag routing. Retarget keeps the original press. */
+  prepareGesture?: () => 'retarget' | 'cancel' | undefined
   now?: () => number
   setTimeout?: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>
   clearTimeout?: (id: ReturnType<typeof setTimeout>) => void
@@ -121,6 +126,18 @@ export interface MouseControllerOptions {
 function clampWheelLines(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TUI_BEHAVIOR.wheelScrollLines
   return Math.min(MAX_WHEEL_SCROLL_LINES, Math.max(1, Math.floor(value)))
+}
+
+/** Cosmetic frames may change while a button is held; its semantic target may not. */
+function sameClickTarget(before: HitRegion | undefined, after: HitRegion | undefined): boolean {
+  if (before === undefined || after === undefined) return before === after
+  return before.id === after.id
+    && before.role === after.role
+    && before.enabled === after.enabled
+    && before.activation === after.activation
+    && before.rect.col === after.rect.col && before.rect.row === after.rect.row
+    && before.rect.width === after.rect.width && before.rect.height === after.rect.height
+    && JSON.stringify(before.action) === JSON.stringify(after.action)
 }
 
 function emptyCounters(): MouseControllerCounters {
@@ -182,9 +199,9 @@ export class MouseController {
     return this.now() < this.suppressUntil
   }
 
-  /** Sensitive mouse execute (submit/delete) requires a seen FocusOut→FocusIn cycle. */
-  get allowsSensitiveMouse(): boolean {
-    return this.observedFocusCycle && !this.isFocusGuarded
+  /** Usable at startup, including terminals without focus reports. Danger policy belongs to the action. */
+  get allowsMouseActivation(): boolean {
+    return !this.isFocusGuarded
   }
 
   noteSelectionCells(count: number): void {
@@ -199,7 +216,10 @@ export class MouseController {
       this.clearHover()
       return { consume: true }
     }
-    if (input.kind === 'wheel') return this.handleWheel(input)
+    if (input.kind === 'wheel') {
+      if (this.options.prepareGesture?.() === 'cancel') return { consume: true }
+      return this.handleWheel(input)
+    }
     if (input.kind === 'move') return this.handleMove(input)
     if (input.kind === 'press') return this.handlePress(input)
     if (input.kind === 'drag') return this.handleDrag(input)
@@ -362,6 +382,7 @@ export class MouseController {
       generation,
       time: this.now(),
       grabOffset,
+      suppressed: this.isFocusGuarded,
     }
     return { consume: true }
   }
@@ -370,11 +391,37 @@ export class MouseController {
     input: Extract<MouseInput, { kind: 'drag' }>,
   ): MouseControllerOutcome {
     if (this.state.kind === 'pressed' && !sameCell(this.state.origin, input.point)) {
+      const pressed = this.state
+      // A refocus press cannot become an action by being held past the guard.
+      if (pressed.suppressed || this.isFocusGuarded) {
+        this.endGesture()
+        return { consume: true }
+      }
+      const preparation = this.options.prepareGesture?.()
+      if (preparation === 'cancel') {
+        this.endGesture()
+        return { consume: true }
+      }
+      if (preparation === 'retarget') {
+        // Closing a popup resets gestures. Restore only this intentional drag,
+        // using the uncovered frame at the original press, not the first motion.
+        const region = this.lookup(pressed.origin)?.region
+        this.state = {
+          kind: 'pressed', button: pressed.button, origin: pressed.origin,
+          time: pressed.time, suppressed: pressed.suppressed,
+          ...(region === undefined ? {} : { region }),
+          generation: this.options.getHitMap()?.generation ?? 0,
+          grabOffset: region?.role === 'scrollbar' ? pressed.origin.row - region.rect.row : 0,
+        }
+      }
       const primary = this.state.button === 'left'
       const scrollbar = primary && this.state.region?.role === 'scrollbar'
       const selectable = primary
-        && (this.state.region?.role === 'text' || this.state.region?.role === 'input')
-      if (scrollbar) {
+        && (this.state.region?.role === 'text' || this.state.region?.role === 'input'
+          || (this.state.region?.role === 'option' && this.state.region.action.kind === 'overlay'))
+      if (this.state.button === 'right') {
+        this.state = { kind: 'dragging-context', suppressed: this.state.suppressed }
+      } else if (scrollbar) {
         this.state = {
           kind: 'dragging-scrollbar',
           origin: this.state.origin,
@@ -390,6 +437,9 @@ export class MouseController {
           ...(this.state.region === undefined ? {} : { region: this.state.region }),
           generation: this.state.generation,
         }
+      } else {
+        // Dragging off a button and back must not turn dismissal into a click.
+        this.state = { kind: 'dragging-passive' }
       }
     }
     if (this.state.kind === 'selecting' || this.state.kind === 'edge-scrolling') {
@@ -420,18 +470,29 @@ export class MouseController {
   private handleRelease(
     input: Extract<MouseInput, { kind: 'release' }>,
   ): MouseControllerOutcome {
+    // Some terminals coalesce motion reports; the final coordinate still counts.
+    if (this.state.kind === 'pressed' && !sameCell(this.state.origin, input.point)) {
+      this.handleDrag({ ...input, kind: 'drag' })
+    }
     const gesture = this.state
     const pressed = gesture.kind === 'pressed' ? gesture : undefined
     const wasDrag = gesture.kind === 'selecting' || gesture.kind === 'dragging-scrollbar'
       || gesture.kind === 'edge-scrolling'
-    const generation = this.options.getHitMap()?.generation ?? 0
-    if (gesture.kind !== 'idle' && gesture.generation !== generation) {
-      this.endGesture()
-      return { consume: true }
-    }
     const grabOffset = gesture.kind === 'dragging-scrollbar' ? gesture.grabOffset : undefined
     this.clearTimer('edge')
     this.state = { kind: 'idle' }
+    if (gesture.kind === 'dragging-context') {
+      const region = this.lookup(input.point)?.region
+      return {
+        consume: true,
+        requestRender: true,
+        semantic: {
+          kind: 'click', button: 'right', count: 1, point: input.point,
+          ...(region === undefined ? {} : { region }),
+          modifiers: input.modifiers, suppressed: gesture.suppressed || this.isFocusGuarded,
+        },
+      }
+    }
     if (wasDrag) {
       return {
         consume: true,
@@ -450,6 +511,8 @@ export class MouseController {
     }
     if (pressed === undefined) return { consume: true }
     if (!sameCell(pressed.origin, input.point)) return { consume: true }
+    const hit = this.lookup(input.point)
+    if (!sameClickTarget(pressed.region, hit?.region)) return { consume: true }
     const now = this.now()
     const target = pressed.region?.id
     const sameTarget = this.clickButton === input.button
@@ -468,8 +531,8 @@ export class MouseController {
       this.clickButton = undefined
       this.clickTarget = undefined
     }, DOUBLE_CLICK_MS)
-    const suppressed = now < this.suppressUntil
-    const hit = this.lookup(input.point)
+    // Holding the refocus click beyond the guard must not turn it into an action.
+    const suppressed = pressed.suppressed || this.isFocusGuarded
     return {
       consume: true,
       requestRender: true,
@@ -497,7 +560,8 @@ export class MouseController {
     if (this.state.kind !== 'selecting' && this.state.kind !== 'edge-scrolling') return
     const region = this.state.region
     const rect = region?.rect
-    const transcript = region?.role === 'text' || region?.action.kind === 'transcript'
+    const transcript = region?.action.kind === 'transcript'
+      || (region?.role === 'text' && region.action.kind !== 'overlay')
     if (rect === undefined || !transcript) {
       this.stopEdgeScroll()
       return

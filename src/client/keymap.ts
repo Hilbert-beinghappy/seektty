@@ -3,11 +3,23 @@
 import { Key, matchesKey, type KeyId } from '@mariozechner/pi-tui'
 import { ui } from './locale.ts'
 
-export interface SurfaceKeyBinding {
-  readonly id: string
+const KEYMAP_GROUPS = [
+  { id: 'input', zh: '输入与编辑', en: 'Input & editing' },
+  { id: 'commands', zh: '命令与弹窗', en: 'Commands & overlays' },
+  { id: 'transcript', zh: '对话浏览', en: 'Transcript browsing' },
+  { id: 'session', zh: '会话与运行', en: 'Sessions & running turns' },
+  { id: 'selection', zh: '鼠标与选区', en: 'Mouse & selection' },
+] as const
+
+interface KeymapHelpRow {
+  readonly group: (typeof KEYMAP_GROUPS)[number]['id']
   readonly keys: readonly string[]
   readonly zh: string
   readonly en: string
+}
+
+export interface SurfaceKeyBinding extends KeymapHelpRow {
+  readonly id: string
   readonly match: (data: string) => boolean
   readonly configurable?: boolean
 }
@@ -16,6 +28,7 @@ export interface SurfaceKeyBinding {
 export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   {
     id: 'help',
+    group: 'commands',
     keys: ['F1'],
     zh: '打开帮助',
     en: 'Open help',
@@ -23,6 +36,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'commandPalette',
+    group: 'commands',
     keys: ['Ctrl+P'],
     zh: '打开命令面板',
     en: 'Open the command palette',
@@ -30,6 +44,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'historySearch',
+    group: 'input',
     keys: ['Ctrl+R'],
     zh: '搜索输入历史',
     en: 'Search input history',
@@ -37,6 +52,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'sessions',
+    group: 'session',
     keys: ['Ctrl+S'],
     zh: '打开会话列表',
     en: 'Open the session list',
@@ -44,6 +60,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'model',
+    group: 'session',
     keys: ['Ctrl+M'],
     zh: '打开模型选择（需扩展键盘协议）',
     en: 'Open model selection (extended keyboard protocol)',
@@ -51,6 +68,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'toolsDisplay',
+    group: 'transcript',
     keys: ['Ctrl+O'],
     zh: '循环工具卡片显示',
     en: 'Cycle tool-card display',
@@ -58,6 +76,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'reasoning',
+    group: 'transcript',
     keys: ['Ctrl+T'],
     zh: '显示或隐藏推理',
     en: 'Show or hide reasoning',
@@ -65,6 +84,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'settings',
+    group: 'commands',
     keys: ['F2', 'Ctrl+,', 'Cmd+,'],
     zh: '打开设置',
     en: 'Open Settings',
@@ -74,6 +94,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'toggleMouseMode',
+    group: 'selection',
     keys: ['F3'],
     zh: '切换完整鼠标模式与终端原生选择',
     en: 'Toggle full mouse mode and native terminal selection',
@@ -81,6 +102,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'cyclePermission',
+    group: 'session',
     keys: ['Shift+Tab'],
     zh: '循环当前权限',
     en: 'Cycle the current permission',
@@ -88,13 +110,15 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'focusToggle',
+    group: 'transcript',
     keys: ['Tab'],
-    zh: '在输入区和对话区之间切换',
-    en: 'Switch between composer and transcript',
+    zh: '空输入框进入对话浏览；浏览时返回输入框',
+    en: 'Browse from an empty composer; return from browsing',
     match: data => matchesKey(data, Key.tab),
   },
   {
     id: 'previousTurn',
+    group: 'transcript',
     keys: ['Shift+Left'],
     zh: '跳到上一个用户轮次',
     en: 'Jump to the previous user turn',
@@ -102,6 +126,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'nextTurn',
+    group: 'transcript',
     keys: ['Shift+Right'],
     zh: '跳到下一个用户轮次',
     en: 'Jump to the next user turn',
@@ -109,6 +134,7 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'interrupt',
+    group: 'session',
     keys: ['Ctrl+C'],
     zh: '停止当前轮次、清空草稿，或再按一次退出',
     en: 'Stop the active turn, clear a draft, or press again to exit',
@@ -116,21 +142,33 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'copySelection',
+    group: 'selection',
     keys: ['Ctrl+Shift+C'],
     zh: '复制当前选区',
     en: 'Copy the current selection',
     match: data => matchesKey(data, Key.ctrlShift('c')) || matchesKey(data, Key.shiftCtrl('c')),
   },
   {
+    id: 'undoInput',
+    group: 'input',
+    keys: ['Ctrl+Z', 'Ctrl+-'],
+    zh: '撤销当前输入框内的编辑',
+    en: 'Undo edits in the focused input',
+    match: () => false,
+    configurable: false,
+  },
+  {
     id: 'submit',
+    group: 'input',
     keys: ['Enter'],
-    zh: '提交或确认',
-    en: 'Submit or confirm',
+    zh: '发送消息或确认；斜杠候选选中后直接执行',
+    en: 'Send or confirm; run the selected slash candidate',
     match: () => false,
     configurable: false,
   },
   {
     id: 'newline',
+    group: 'input',
     keys: ['Shift+Enter'],
     zh: '在输入区插入换行',
     en: 'Insert a newline in the composer',
@@ -139,12 +177,30 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
   },
   {
     id: 'transcriptSearch',
+    group: 'transcript',
     keys: ['/'],
     zh: '对话浏览时增量查找',
     en: 'Incremental search while browsing the transcript',
     match: () => false,
     configurable: false,
   },
+]
+
+// Context-specific keys are documentation, not global reservations or dispatch rules.
+const CONTEXT_KEYMAP: readonly KeymapHelpRow[] = [
+  { group: 'input', keys: ['Enter / Ctrl+Enter'], zh: '多行弹窗：换行 / 提交', en: 'Multiline overlay: newline / submit' },
+  { group: 'commands', keys: ['/'], zh: '输入框：打开命令与 Skill 候选', en: 'Composer: open command and Skill candidates' },
+  { group: 'commands', keys: ['Up / Down'], zh: '候选或列表：移动选择', en: 'Candidates or lists: move selection' },
+  { group: 'commands', keys: ['Tab'], zh: '候选显示时：只补全，不执行', en: 'With candidates open: complete without running' },
+  { group: 'commands', keys: ['Space'], zh: '多选弹窗：勾选或取消当前项', en: 'Multi-select overlay: toggle the current item' },
+  { group: 'commands', keys: ['Esc'], zh: '弹窗：返回或关闭；候选：取消补全', en: 'Overlay: back or close; candidates: dismiss' },
+  { group: 'transcript', keys: ['Up / Down'], zh: '浏览时：逐行滚动或移动卡片选择', en: 'While browsing: scroll or move card selection' },
+  { group: 'transcript', keys: ['PgUp / PgDn'], zh: '浏览时：上一页 / 下一页', en: 'While browsing: previous / next page' },
+  { group: 'transcript', keys: ['Home / End'], zh: '浏览时：最早内容 / 最新内容', en: 'While browsing: oldest / latest content' },
+  { group: 'transcript', keys: ['n / N'], zh: '查找确认后：下一个 / 上一个匹配', en: 'After confirming Find: next / previous match' },
+  { group: 'transcript', keys: ['Esc'], zh: '依次退出查找、卡片聚焦，再返回输入区', en: 'Leave Find, then card focus, then return to composer' },
+  { group: 'selection', keys: ['Ctrl+X'], zh: '非密钥弹窗输入框：剪切选区', en: 'Non-secret overlay input: cut selection' },
+  { group: 'selection', keys: ['Backspace / Delete'], zh: '可编辑输入框：删除选区', en: 'Editable input: delete selection' },
 ]
 
 const byId = new Map(SURFACE_KEYMAP.map(binding => [binding.id, binding]))
@@ -441,9 +497,21 @@ export function bindingKeysLabel(id: string): string {
 }
 
 /**
- * Render the shared keymap for the help overlay.
+ * Render grouped help using live chords, keeping context-only keys out of global dispatch.
  */
 export function helpKeymapText(): string {
-  return SURFACE_KEYMAP.map(binding =>
-    `${bindingKeysLabel(binding.id)} · ${ui(binding.zh, binding.en)}`).join('\n')
+  const rows = [
+    ...SURFACE_KEYMAP.map(binding => ({ ...binding, label: bindingKeysLabel(binding.id) })),
+    ...CONTEXT_KEYMAP.map(row => ({ ...row, label: row.keys.join(' / ') })),
+  ]
+  const keyWidth = Math.max(...rows.map(row => row.label.length))
+  const sections = KEYMAP_GROUPS.map(group => [
+    `[${ui(group.zh, group.en)}]`,
+    ...rows.filter(row => row.group === group.id).map(row =>
+      `  ${row.label.padEnd(keyWidth)}  ${ui(row.zh, row.en)}`),
+  ].join('\n'))
+  return [...sections, ui(
+    '显示当前绑定；可改绑项见 /keymap。Ctrl+Z 仅撤销当前框内编辑，不撤回已发送消息或已保存设置。',
+    'Shows current bindings; see /keymap to rebind supported actions. Ctrl+Z undoes field edits, not sent messages or saved settings.',
+  )].join('\n\n')
 }

@@ -60,13 +60,16 @@ describe('key binding overrides', () => {
     })
     expect(matchesBinding('submit', '\u000b')).toBe(false)
     expect(SURFACE_KEYMAP.filter(binding => binding.configurable === false).map(binding => binding.id))
-      .toEqual(['submit', 'newline', 'transcriptSearch'])
+      .toEqual(['undoInput', 'submit', 'newline', 'transcriptSearch'])
   })
 
   it('reports conflicts against the effective keymap', () => {
     expect(bindingConflict('commandPalette', 'ctrl+s')).toBe('sessions')
     expect(bindingConflict('commandPalette', 'Ctrl+P')).toBeUndefined()
     expect(bindingConflict('commandPalette', 'Enter')).toBe('submit')
+    expect(bindingConflict('commandPalette', 'Ctrl+Z')).toBe('undoInput')
+    expect(bindingConflict('commandPalette', 'Ctrl+-')).toBe('undoInput')
+    expect(keyBindingsIssue({ commandPalette: 'Ctrl+Z' })).toMatch(/undoInput/u)
     applyKeyBindingOverrides({ sessions: 'ctrl+k' })
     expect(bindingConflict('commandPalette', 'ctrl+k')).toBe('sessions')
     expect(bindingConflict('historySearch', 'ctrl+s')).toBeUndefined()

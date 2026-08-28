@@ -104,7 +104,7 @@ describe('navigation noise', () => {
   it('keeps selector footers short and names Esc abort on progress pages', () => {
     const overlays = new OverlayQueue({
       showOverlay: vi.fn((component: Component) => {
-        expect(plain(component.render(80))).toContain('Enter 选择 · Esc 返回')
+        expect(plain(component.render(80))).toContain('[Enter 选择]  [Esc 关闭]')
         return { hide: vi.fn() } as unknown as OverlayHandle
       }),
       requestRender: vi.fn(),

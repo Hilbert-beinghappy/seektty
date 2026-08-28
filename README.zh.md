@@ -7,7 +7,7 @@
 <p>DeepSeek Harness 的键盘优先终端工作台。</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.3-orange" alt="Version 1.2.3"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -42,35 +42,35 @@
 
 ## 快速开始
 
-最近一次联合验收的 Clarify 组合使用官方 DeepSeek Harness `0.1.0-rc.8`、SeekTTY `1.2.0`、[Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) `0.1.0` 和 Clarify `0.2.1`：
+在已测的官方 DeepSeek Harness `0.1.1-rc.2` 上安装 SeekTTY：
 
 ```sh
-pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
+pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.1/dsh-plugin-clarify-0.2.1.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 
 dsh --profile tui
 ```
 
-这些命令通过原生 `dsh plugin` 协调机制安装预构建 tarball。SeekTTY 可以单独运行；两个 Host 插件负责加入 `/clarify` 及其独立计量的模型运行时。
+这些命令通过原生 `dsh plugin` 协调机制安装预构建 Bundle。Clarify 与 Auxiliary Runtime 均为可选插件，不是默认依赖；历史联合验收组合见[兼容性](#兼容与验证)。
+
+带版本号的下载地址仅在对应版本正式发布后可用。发布前请按 [1.2.4 审核与发布清单](docs/release-v1.2.4-verification.md)中的本地 tarball 方式测试。
 
 ### 裸 `deepseek` 启动器
 
 安装 `dsh` 后，可全局安装同一个 SeekTTY Release，并把 Profile 协调固定到该 tarball：
 
 ```sh
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
 
 PowerShell 使用相同的包地址：
 
 ```powershell
-pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 deepseek
 ```
 
@@ -88,15 +88,16 @@ deepseek --update
 
 `deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
-SeekTTY `1.2.3` 在保留原生终端选择作为备用通道的同时，加入完整的应用内鼠标交互，目标 Host 为官方 Harness `0.1.1-rc.2`。请使用 [Releases 页面](https://github.com/Hilbert-beinghappy/seektty/releases)列出的安装包，或运行 `pnpm run build && pnpm pack`，把 `SEEKTTY_SPEC` 指向生成的 tarball。
+SeekTTY `1.2.4` 在官方 Harness `0.1.1-rc.2` 上改进鼠标导航与输入编辑，并保留原生终端选择作为备用通道，无需迁移 Settings 或 Session。
 
-### 1.2.3 新增内容
+### 1.2.4 新增内容
 
-- 常驻 Transcript 滚动条和受视口约束的滚轮处理可避免滚轮事件进入输入框，让短会话和长会话拥有一致的滚动行为。
-- 应用内文本选区会在松开鼠标后保留，支持按词、按行选择，并可跨已加载的 Transcript 页面自动滚动。选后复制和右键复制／粘贴在 Windows、macOS、Wayland 与 X11 上使用明确的 UTF-8 路径。
-- 稳定的悬停反馈和目标感知点击覆盖工具卡、示例、自动补全、弹窗以及模型、模式和权限控件。
-- 自动补全命中测试始终对应滚动后实际渲染的候选项。首次单击选中；按 Enter 或安全地再次单击只执行一次斜杠命令；Tab 仅补全。
-- F3 或 `/mouse` 可在完整鼠标模式与原生终端选择之间切换。危险确认仍只能通过键盘完成。
+- 列表选中不再强制居中；普通鼠标操作启动即可使用，多层弹窗共享适配主题的悬停反馈与可点击底栏按钮。
+- 弹窗文字与非密钥输入框支持选区及剪贴板编辑。Ctrl+Z 可撤销每个输入框内的编辑；键位速查按用途归类。
+- 右键菜单独立于页面返回栈。滚轮和左键拖动可关闭菜单并立即继续操作；右键拖动在松手位置打开菜单。
+- Esc 后紧接鼠标报告不再把协议残片输入搜索框。危险确认继续要求键盘操作，F3 或 `/mouse` 保留原生选择通道。
+
+完整变更见[发布说明](docs/release-v1.2.4.md)，验证边界见[审核清单](docs/release-v1.2.4-verification.md)。
 
 ## 界面预览
 
@@ -181,29 +182,78 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 `/plugin`、`/workspace` 和 `/profile` 同时提供交互中心与直接子命令。未知命令不会作为普通消息发送，而会留在命令界面并显示相近建议。
 
-实际渲染的候选窗口是唯一权威：滚轮和方向键移动高亮，鼠标悬停只做预览，首次单击会立即、清晰地选中指针下的可见候选。按 Enter 或安全地再次点击会补全并且只执行一次斜杠命令；Tab 只补全。文件和路径补全永不自动提交，滚动位置提示行不可点击。
+自动补全与弹窗列表保持滚动位置：滚轮只浏览、不改变选中项，点击可见行不会让它居中，方向键仅在选中项越过可见边缘时滚动。悬停只做预览。首次单击选中；之后再次点击同一个仍待激活的选项，不受双击时间限制。按 Enter 或安全地再次点击会补全并且只执行一次斜杠命令；Tab 只补全。文件和路径补全永不自动提交，滚动位置提示行不可点击。
+
+弹窗底部提供单击生效的选择／确认／保存和返回／关闭按钮，悬停样式跟随主题。按钮与键盘共用校验、导航逻辑；危险确认仍只能通过键盘完成。普通鼠标操作启动后即可使用，无需先最小化终端。终端支持焦点上报时，恢复焦点后的 250ms 内会防止误触执行。
 
 完整鼠标模式复制会把文本统一编码一次为 UTF-8。Windows 使用固定的 PowerShell `Set-Clipboard` writer，macOS 在 UTF-8 locale 下运行 `pbcopy`，Wayland 明确声明 `text/plain;charset=utf-8`，X11 明确请求 `UTF8_STRING`；OSC 52 继续服务于终端、SSH 与 tmux 路径。
 
 ## 常用操作
 
+F1 → **键位速查** 按用途展示当前绑定，并反映 `/keymap` 自定义。以下为默认键位：
+
+### 输入与编辑
+
 | 输入 | 操作 |
 | --- | --- |
-| 完整鼠标模式 | 滚轮、常驻滚动条、应用内选区、选后复制、稳定悬停反馈，以及工具卡、示例、补全、弹窗和仍可见的模型/模式/权限 chrome 精确点击。危险确认仍需 Enter。 |
-| 按住终端选择修饰键并拖动，再复制 | 使用原生选区复制当前可见文字：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键。F3 或 `/mouse native` 切换。 |
-| 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
-| Ctrl+Shift+C / F3 | 复制应用内选区 / 切换完整鼠标模式与终端原生选择 |
-| `/` | 打开命令与 Skill 候选 |
 | Enter / Shift+Enter | 发送或确认；选中的斜杠候选会补全并只执行一次 / 输入换行 |
-| Tab / Escape | 只补全选中的候选而不提交 / 返回或关闭当前弹窗 |
-| PgUp / PgDn / Home / End | 在 transcript 中翻页、跳到最早内容或回到最新 |
-| Shift+Tab | 循环权限预设，进入完全访问前确认 |
-| Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |
+| Ctrl+Z（兼容 Ctrl+-） | 撤销当前输入框内的编辑，包括输入、粘贴和选区替换 |
+| Ctrl+R | 搜索输入历史 |
+| 多行弹窗中的 Enter / Ctrl+Enter | 换行 / 提交 |
+
+各输入框独立保留撤销记录，包括搜索框和遮蔽的密钥输入框。撤销不会撤回已发送消息或回退已保存设置。
+
+### 命令与弹窗
+
+| 输入 | 操作 |
+| --- | --- |
+| 输入框中的 `/` | 打开命令与 Skill 候选 |
+| Up / Down | 移动候选或列表中的选择 |
+| 候选显示时按 Tab | 只补全选中的候选而不提交 |
+| Escape | 取消候选，或返回／关闭当前弹窗 |
+| 多选弹窗中的 Space | 勾选或取消当前项 |
 | F1 / Ctrl+P | 打开帮助 / 打开命令面板 |
-| Ctrl+M / Ctrl+S | 打开模型选择 / 打开 Session 恢复 |
-| Ctrl+O / Ctrl+T | 切换工具卡片显示 / 显示或隐藏推理 |
 | F2 / Ctrl+, / Cmd+, | 打开 Settings |
+
+### 对话浏览
+
+| 输入 | 操作 |
+| --- | --- |
+| Tab | 空输入框进入对话浏览；浏览时返回输入框 |
+| Up / Down | 浏览时逐行滚动或移动卡片选择 |
+| PgUp / PgDn / Home / End | 在 transcript 中翻页、跳到最早内容或回到最新 |
+| Shift+Left / Shift+Right | 跳到上一个或下一个用户轮次 |
+| `/`，再按 Enter，然后 n / N | 查找对话、确认查询，再跳到下一个 / 上一个匹配 |
+| Escape | 依次退出查找、卡片聚焦，再返回输入区 |
+| Ctrl+O / Ctrl+T | 切换工具卡片显示 / 显示或隐藏推理 |
+
+### 会话与运行
+
+| 输入 | 操作 |
+| --- | --- |
+| Ctrl+S | 打开 Session 恢复 |
+| Ctrl+M | 打开模型选择（需扩展键盘协议，否则使用 `/model`） |
+| Shift+Tab | 循环权限预设，进入完全访问前确认 |
 | Ctrl+C | 停止当前轮次、清空草稿，或二次确认退出 |
+
+### 鼠标与选区
+
+| 输入 | 操作 |
+| --- | --- |
+| F3 或 `/mouse toggle` | 切换完整鼠标模式与终端原生选择 |
+| 鼠标滚轮 / 触控板 | 在 SeekTTY 内部浏览 Transcript，不改变输入框焦点、草稿、选区或光标 |
+| Ctrl+Shift+C | 复制当前应用内选区 |
+| 非密钥弹窗输入框中的 Ctrl+X | 剪切选区 |
+| 可编辑输入框中的 Backspace / Delete | 删除选区 |
+| 按住终端选择修饰键并拖动，再复制 | 原生选择：Terminal.app 按住 `Fn`、iTerm2 按住 `Option` 后拖选，再按 `Command+C`；其他终端或 tmux 使用外层终端的选择修饰键 |
+
+完整鼠标模式还提供常驻滚动条、应用内选区、选后复制、悬停反馈，以及卡片、示例、候选、弹窗和模型／模式／权限控件的精确点击。危险确认仍需 Enter。
+
+弹窗中的可见文字支持拖选和复制。搜索框与非密钥输入框还支持通过输入文字、Backspace 或 Delete 替换／删除选区，Ctrl+X 剪切；右键菜单提供复制、剪切、删除选区、粘贴和全选。Ctrl+Shift+C 复制当前弹窗的选区，Ctrl+C 保留中断行为。剪贴板操作不会暴露被遮蔽的密钥。
+
+右键菜单独立浮在当前页面上，不进入页面返回栈。左键点击菜单外或按 Esc 只关闭菜单；右键点击菜单外则针对新目标重新打开。菜单项单击左键即可执行，底层页面保留草稿和选区。
+
+滚动滚轮或按住左键拖动会关闭菜单，并立即在下层页面继续滚动或选中文字；按住右键拖动则在松手位置打开菜单。左键单击菜单外仍只关闭菜单，不会误触底层控件；父弹窗继续拦截输入，不会穿透到会话。
 
 ## 主题与语言
 
@@ -221,6 +271,8 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 会打开主题中心，�
 ```
 
 界面主题与代码主题彼此独立。输入 3–16 个 HEX/RGB 颜色即可生成亮色与暗色候选。`/theme import` 会读取本地 VS Code JSON/JSONC，解析相对 `include`，并保留可移植的 TextMate 颜色与样式。所有自定义路径都会先预览，并在保存前标出低对比度。定义保存在带 revision 保护的 `seektty-appearance` Harness Settings 命名空间中。
+
+悬停样式由当前界面主题统一推导，兼容已有自定义主题，不新增必填设置、不修改保存的配色。背景过于接近或终端色彩有限时使用下划线辅助区分；仍遵守 `NO_COLOR`。
 
 使用 `/language` 或直接命令实时切换终端文案：
 
@@ -250,8 +302,8 @@ TUI `/plugin` 与原生 `dsh plugin` 会协调同一份 Profile 依赖、Bundle 
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
 
@@ -259,7 +311,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 ```
 
 移除 SeekTTY 只影响目标 Profile，不会修改 dsh 本体：
@@ -278,17 +330,18 @@ dsh plugin --profile tui remove seektty
 | 声明的最低 Harness Host | `0.1.0-rc.6` |
 | 当前已测 Harness Host | `0.1.1-rc.2` |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| 当前鼠标功能版本 | SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`；本次发布不代表新增完整联合验收 |
+| 当前鼠标与输入版本 | SeekTTY `1.2.4` + 官方 dsh `0.1.1-rc.2`；本次发布不扩展可选插件的联合验收范围 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 
-验证范围包括：
+1.2.4 发布检查覆盖：
 
-- 隔离 stock dsh 下的 add、boot、remove、re-add 生命周期，包括声明的最低版本；
-- typecheck、单元测试、生产构建、打包内容检查和重复 Host 包拒绝；
-- 真实 PTY 的启动、导航、暗色／亮色／自定义主题、80／120／160 列布局、语言切换与重启恢复；安装和终端交互支持 macOS、Linux 与 Windows；
-- 首次凭据配置与真实 Provider 多轮对话，且凭据未进入输出、截图或仓库；
-- 在 stock `0.1.1-rc.2` 上对 Clarify、独立用量、PNG/JFIF 附件、Vision-Exp 选择和重启恢复的候选版观察。这些观察不代表 Web UI、GIF/WebP、超限、中断恢复或成本／缓存已经完整覆盖。
+- typecheck、单元／集成测试、生产构建、打包内容检查和重复 Host 包拒绝；
+- 使用同一候选 tarball，在未修改的官方 dsh `0.1.1-rc.2` 上隔离执行 add、boot、remove、re-add；
+- Windows ConPTY 的启动、斜杠导航、右键菜单手势交接、resize 与正常退出。注入的 PTY 输入和模拟渲染测试不等价于真实 GUI 终端鼠标或剪贴板测试；
+- 十万行结构性 TUI 性能门禁。各平台人工签收状态在[发布清单](docs/release-v1.2.4-verification.md)中单独列明。
+
+此前的 Clarify、附件、Vision-Exp 与 Provider 观察属于历史证据，不代表 1.2.4 对这些可选工作流重新验收。声明的 Host 范围不变；本次 stock 生命周期复测针对 `0.1.1-rc.2`，并非所有旧版 Host。
 
 可复用检查：
 
