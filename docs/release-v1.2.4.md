@@ -2,7 +2,12 @@
 
 ## English
 
-SeekTTY 1.2.4 improves the mouse navigation and input editing introduced in 1.2.3. It keeps the fixed transcript viewport and native terminal selection fallback, without changing Harness-owned runtime state.
+SeekTTY 1.2.4 improves conversation readability, mouse navigation, and input editing. It keeps the fixed transcript viewport and native terminal selection fallback, without changing Harness-owned runtime state.
+
+### Conversation readability
+
+- Historical user messages now have thin top and bottom rules matching the input composer, making conversation turns easier to distinguish as responses stream.
+- The rules follow the current theme and terminal width, including wrapped and multiline messages. These decorative lines are excluded from in-app copied text and transcript search.
 
 ### Mouse navigation
 
@@ -23,7 +28,6 @@ SeekTTY 1.2.4 improves the mouse navigation and input editing introduced in 1.2.
 - Escape immediately followed by an SGR mouse report no longer inserts fragments such as `[<35;20;13M` into search fields. Partial mouse reports remain separate from text and bracketed paste.
 - Ctrl+Z undoes edits in the focused input, including composer, search, single-line, multiline, and masked-secret fields; Ctrl+- remains available. Undo does not restore sent messages or reverse saved Settings.
 - The shortcut reference is grouped by editing, commands, transcript navigation, sessions, and selection, and reflects configured key overrides.
-- English and Chinese READMEs now use the current standalone SeekTTY installation instead of the historical Clarify plugin stack.
 
 ### Compatibility and verification
 
@@ -37,7 +41,12 @@ SeekTTY 1.2.4 improves the mouse navigation and input editing introduced in 1.2.
 
 ## 中文
 
-SeekTTY 1.2.4 改进了 1.2.3 引入的鼠标导航和输入编辑，保留固定 Transcript 视口与原生终端选择备用通道，不改变由 Harness 持有的运行状态。
+SeekTTY 1.2.4 改善对话的视觉观感、鼠标导航和输入编辑，保留固定 Transcript 视口与原生终端选择备用通道，不改变由 Harness 持有的运行状态。
+
+### 对话视觉优化
+
+- 历史用户消息新增与输入框一致的上下细线，让不同轮次的对话在回答持续输出时更易区分，改善阅读观感。
+- 细线适配当前主题和终端宽度，兼容自动换行及多行消息；这些装饰线不会混入应用内复制的文本，也不参与对话搜索。
 
 ### 鼠标导航
 
@@ -58,7 +67,6 @@ SeekTTY 1.2.4 改进了 1.2.3 引入的鼠标导航和输入编辑，保留固�
 - Esc 后紧接 SGR 鼠标报告不再把 `[<35;20;13M` 一类残片输入搜索框；不完整鼠标报告继续与文本、括号粘贴隔离。
 - Ctrl+Z 可撤销当前输入框内的编辑，覆盖主输入框、搜索、单行、多行及遮蔽密钥字段；保留 Ctrl+-。撤销不会找回已发送消息，也不会回滚已保存 Settings。
 - 键位速查按编辑、命令、对话浏览、会话和选择归类，并显示实际改绑后的快捷键。
-- 中英文 README 的安装示例改为当前独立 SeekTTY 版本，不再默认安装历史 Clarify 插件组合。
 
 ### 兼容与验证
 
