@@ -7,7 +7,7 @@
 <p>A keyboard-first terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.3-orange" alt="Version 1.2.3"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -42,35 +42,35 @@ For requirements that still need definition, the optional [Clarify Host plugin](
 
 ## Quick start
 
-The last jointly accepted Clarify stack uses official DeepSeek Harness `0.1.0-rc.8`, SeekTTY `1.2.0`, [Auxiliary Runtime](https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime) `0.1.0`, and Clarify `0.2.1`:
+Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
 
 ```sh
-pnpm add --global @deepseek-ai/dsh@0.1.0-rc.8
+pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-auxiliary-runtime/releases/download/v0.1.0/dsh-plugin-auxiliary-runtime-0.1.0.tgz
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/dsh-plugin-clarify/releases/download/v0.2.1/dsh-plugin-clarify-0.2.1.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 
 dsh --profile tui
 ```
 
-These commands install prebuilt tarballs through native `dsh plugin` reconciliation. SeekTTY works on its own; the two Host plugins add `/clarify` and its separately accounted model runtime.
+These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
+
+Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.4 review and release checklist](docs/release-v1.2.4-verification.md).
 
 ### Bare `deepseek` launcher
 
 After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to that tarball:
 
 ```sh
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
 
 PowerShell uses the same package URL:
 
 ```powershell
-pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz'
+pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 deepseek
 ```
 
@@ -88,15 +88,16 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.3` adds complete application-owned mouse interaction while retaining native terminal selection as an escape hatch. It targets official Harness `0.1.1-rc.2`. Use the package listed on the [Releases page](https://github.com/Hilbert-beinghappy/seektty/releases), or build it with `pnpm run build && pnpm pack` and point `SEEKTTY_SPEC` to the resulting tarball.
+SeekTTY `1.2.4` improves mouse navigation and input editing on official Harness `0.1.1-rc.2`, retaining native terminal selection as a fallback. No Settings or Session migration is required.
 
-### What's new in 1.2.3
+### What's new in 1.2.4
 
-- A resident transcript scrollbar and viewport-bound wheel handling keep scrolling out of the composer and make short and long conversations behave consistently.
-- In-app text selection persists after release, supports word and line selection, and auto-scrolls across loaded transcript pages. Copy-on-select and right-click Copy/Paste use explicit UTF-8 paths on Windows, macOS, Wayland, and X11.
-- Stable hover feedback and target-aware clicks cover tool cards, examples, autocomplete, overlays, and the model, mode, and permission controls.
-- Autocomplete hit testing follows the candidates actually rendered after scrolling. The first click selects; Enter or a safe second click executes a slash command once; Tab only completes it.
-- F3 or `/mouse` switches between full mouse mode and native terminal selection. Dangerous confirmations remain keyboard-only.
+- Lists keep their viewport instead of recentering on selection; ordinary mouse actions work at startup, and nested overlays share theme-aware hover and clickable footer buttons.
+- Overlay text and non-secret inputs support selection and clipboard editing. Ctrl+Z undoes edits in each input; the shortcut reference is grouped by purpose.
+- Context menus are independent of the page stack. Wheel and left-drag gestures dismiss the menu and continue immediately; right-drag opens it at the release position.
+- Escape followed by a mouse report no longer types protocol fragments into search fields. Dangerous confirmations remain keyboard-only, and F3 or `/mouse` retains native selection.
+
+See the [release notes](docs/release-v1.2.4.md) for changes and the [review checklist](docs/release-v1.2.4-verification.md) for verification limits.
 
 ## Interface
 
@@ -301,8 +302,8 @@ Replace the former `deepseek-tui` global package once:
 
 ```sh
 pnpm remove --global deepseek-tui
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
 
@@ -310,7 +311,7 @@ Custom Profiles migrate independently on first launch. Native dsh-only installat
 
 ```sh
 dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.0/seektty-1.2.0.tgz
+dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 ```
 
 Removing SeekTTY changes only the target Profile, never the dsh installation:
@@ -329,17 +330,18 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Declared minimum Harness Host | `0.1.0-rc.6` |
 | Current tested Harness Host | `0.1.1-rc.2` |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current mouse release | SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`; this release does not establish new complete joint acceptance |
+| Current mouse/input release | SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
-Verification includes:
+The 1.2.4 release checks cover:
 
-- Isolated stock-dsh add, boot, remove, and re-add lifecycle checks, including the declared minimum.
-- Type checking, unit tests, production build, packed-content checks, and duplicate-Host-package rejection.
-- Real PTY coverage for startup, navigation, dark/light/custom themes, 80/120/160-column layouts, locale switching, and restart restoration; installation and terminal interaction are supported on macOS, Linux, and Windows.
-- First-run credential setup and a real multi-turn Provider session without credential leakage into output, screenshots, or the repository.
-- Candidate observations on stock `0.1.1-rc.2` for Clarify, separate usage, PNG/JFIF attachments, Vision-Exp selection, and restart restoration. These observations do not establish full Web UI, GIF/WebP, over-limit, interruption-recovery, or cost/cache coverage.
+- Type checking, unit/integration tests, production build, packed-content checks, and duplicate-Host-package rejection.
+- Isolated add, boot, remove, and re-add on unmodified official dsh `0.1.1-rc.2` using the exact candidate tarball.
+- Windows ConPTY startup, slash navigation, context-menu gesture handoff, resize, and clean exit. Injected PTY input and synthetic renderer tests are not equivalent to real GUI-terminal mouse or clipboard testing.
+- The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [release checklist](docs/release-v1.2.4-verification.md).
+
+Earlier Clarify, attachment, Vision-Exp, and Provider observations are historical evidence, not renewed acceptance of those optional workflows in 1.2.4. The declared Host range is unchanged; this release's stock lifecycle rerun targets `0.1.1-rc.2`, not every legacy version.
 
 Reusable checks:
 

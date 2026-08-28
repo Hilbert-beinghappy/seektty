@@ -37,9 +37,9 @@ describe('out-of-tree Bundle contract', () => {
     }
   })
 
-  it('pins SeekTTY 1.2.3 to tested 0.1.1-rc.2 with a legacy union plus exact Host peer', () => {
-    expect(manifest.version).toBe('1.2.3')
-    expect(PACKAGE_VERSION).toBe('1.2.3')
+  it('pins SeekTTY 1.2.4 to tested 0.1.1-rc.2 with a legacy union plus exact Host peer', () => {
+    expect(manifest.version).toBe('1.2.4')
+    expect(PACKAGE_VERSION).toBe('1.2.4')
     expect(DSH_COMPATIBILITY).toEqual({ minimum: '0.1.0-rc.6', tested: '0.1.1-rc.2' })
     expect(AUTO_PERMITTED_DSH_MINIMUM).toBe(DSH_COMPATIBILITY.minimum)
     expect(AUTO_PERMITTED_DSH_EXACT).toBe(DSH_COMPATIBILITY.tested)
@@ -184,15 +184,19 @@ describe('out-of-tree Bundle contract', () => {
     expect(workflow).toContain("require('./package.json').dsh.compatibility.tested")
   })
 
-  it('states current 1.2.3 / rc.2 pins and links to available release assets', () => {
+  it('keeps both READMEs on the release version and explains pre-publication testing', () => {
     for (const name of ['README.md', 'README.zh.md']) {
       const text = readFileSync(resolve(root, name), 'utf8')
-      expect(text).toContain('Version-1.2.3')
+      expect(text).toContain(`Version-${PACKAGE_VERSION}`)
       expect(text).toContain('DeepSeek%20Harness-0.1.1--rc.2')
       expect(text).toContain('https://github.com/Hilbert-beinghappy/seektty/releases')
-      expect(text).not.toContain('/releases/tag/v1.2.3')
-      expect(text).not.toContain('/releases/download/v1.2.3/')
-      expect(text).toContain('/releases/download/v1.2.0/seektty-1.2.0.tgz')
+      expect(text).toContain(`/releases/download/v${PACKAGE_VERSION}/seektty-${PACKAGE_VERSION}.tgz`)
+      expect(text).not.toContain('/releases/download/v1.2.0/')
+      expect(text).toContain('pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2')
+      expect(text).toContain(`docs/release-v${PACKAGE_VERSION}.md`)
+      expect(text).toContain(`docs/release-v${PACKAGE_VERSION}-verification.md`)
+      expect(text).toMatch(/Before publication|发布前/u)
+      expect(text).toMatch(/optional, not default dependencies|可选插件，不是默认依赖/u)
       expect(text).toMatch(/Vision-Exp/)
       expect(text).toMatch(/self-first|SeekTTY 自更新优先|每轮只安装一个/u)
     }
@@ -200,7 +204,13 @@ describe('out-of-tree Bundle contract', () => {
     const chinese = readFileSync(resolve(root, 'README.zh.md'), 'utf8')
     expect(english).toContain('The current tested Host is official `0.1.1-rc.2`')
     expect(chinese).toContain('当前已测 Host 是官方 `0.1.1-rc.2`')
-    expect(english).toContain('SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`')
-    expect(chinese).toContain('SeekTTY `1.2.3` + Auxiliary Runtime `0.1.1` + Clarify `0.2.2`')
+    expect(english).toContain('SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`')
+    expect(chinese).toContain('SeekTTY `1.2.4` + 官方 dsh `0.1.1-rc.2`')
+    const release = readFileSync(resolve(root, `docs/release-v${PACKAGE_VERSION}.md`), 'utf8')
+    expect(release).toContain(`# SeekTTY ${PACKAGE_VERSION}`)
+    expect(release).toContain('## English')
+    expect(release).toContain('## 中文')
+    expect(release.indexOf('## English')).toBeLessThan(release.indexOf('## 中文'))
+    expect(existsSync(resolve(root, `docs/release-v${PACKAGE_VERSION}-verification.md`))).toBe(true)
   })
 })
