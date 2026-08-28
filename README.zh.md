@@ -4,7 +4,7 @@
 
 <h1>SeekTTY</h1>
 
-<p>DeepSeek Harness 的键盘优先终端工作台。</p>
+<p>DeepSeek Harness 的终端工作台。</p>
 
 <p>
   <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>

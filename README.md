@@ -4,7 +4,7 @@
 
 <h1>SeekTTY</h1>
 
-<p>A keyboard-first terminal workspace for DeepSeek Harness.</p>
+<p>A terminal workspace for DeepSeek Harness.</p>
 
 <p>
   <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>
