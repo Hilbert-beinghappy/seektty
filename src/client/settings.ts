@@ -209,6 +209,7 @@ const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: 
   'permission.default': { zh: '默认权限', en: 'Default permission' },
   [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.theme`]: { zh: '界面主题', en: 'Interface theme' },
   [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.codeTheme`]: { zh: '代码块主题', en: 'Code theme' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.backgroundMode`]: { zh: '背景模式', en: 'Background mode' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.toolCards`]: { zh: '工具卡片默认形态', en: 'Default tool-card shape' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.showReasoning`]: { zh: '推理默认显示', en: 'Show reasoning by default' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.desktopNotifications`]: { zh: '完成/审批桌面通知', en: 'Desktop notifications' },

@@ -8,6 +8,7 @@ import {
 } from '../src/client/terminal-background.ts'
 import { createTerminalSession, type ManagedTerminal } from '../src/client/terminal-session.ts'
 import { createFatalHandler } from '../src/process-guards.ts'
+import { OverlayQueue } from '../src/client/overlays.ts'
 
 const ESC = '\u001B'
 const ST = `${ESC}\\`
@@ -19,9 +20,10 @@ const paste = (text: string): string => `${ESC}[200~${text}${ESC}[201~`
 
 function controller(enabled = true) {
   const writes: string[] = []
-  const background = new TerminalBackground({ write: data => { writes.push(data) } }, enabled)
+  const notice = vi.fn()
+  const background = new TerminalBackground({ write: data => { writes.push(data) } }, enabled, notice)
   background.setColor('#282C34')
-  return { background, writes }
+  return { background, writes, notice }
 }
 
 afterEach(() => { vi.useRealTimers() })
@@ -52,6 +54,85 @@ describe('terminal background capability policy', () => {
 })
 
 describe('background ownership', () => {
+  it('defers its single query until input is ready and a synchronizing mode is selected', () => {
+    const { background, writes } = controller()
+    background.setColor('#282C34', 'terminal')
+    background.start()
+    expect(writes).toEqual([])
+    background.setColor('#282C34', 'explicit')
+    background.start()
+    expect(writes).toEqual([BACKGROUND_QUERY])
+    background.consumeInput(reply())
+    background.setColor('#282C34', 'theme')
+    expect(writes).toEqual([BACKGROUND_QUERY, desired])
+    background.restore()
+  })
+
+  it('restores on terminal mode and reuses the same exact snapshot across all mode switches', () => {
+    const { background, writes } = controller()
+    background.start()
+    background.consumeInput(reply())
+    background.setColor('#282C34', 'explicit')
+    background.setColor('#FFFFFF', 'terminal')
+    background.setColor('#123456', 'terminal')
+    expect(writes).toEqual([BACKGROUND_QUERY, desired, reply()])
+    background.setColor('#123456', 'theme')
+    background.setColor('#123456', 'explicit')
+    background.restore()
+    expect(writes).toEqual([BACKGROUND_QUERY, desired, reply(), reply('rgb:12/34/56'), reply()])
+  })
+
+  it('captures a pending reply in terminal mode without recoloring or re-querying', () => {
+    const { background, writes } = controller()
+    background.start()
+    background.setColor('#FFFFFF', 'terminal')
+    background.consumeInput(reply())
+    background.consumeInput(reply('rgb:1/2/3'))
+    expect(writes).toEqual([BACKGROUND_QUERY])
+    background.setColor('#FFFFFF', 'theme')
+    expect(writes).toEqual([BACKGROUND_QUERY, reply('rgb:ff/ff/ff')])
+    background.setColor('#FFFFFF', 'terminal')
+    background.restore()
+    expect(writes.at(-1)).toBe(reply())
+    expect(writes).toHaveLength(3)
+  })
+
+  it('never retries an expired query and reports unavailable theme sync once, even after mode changes', () => {
+    vi.useFakeTimers()
+    const { background, writes, notice } = controller()
+    background.start()
+    background.setColor('#FFFFFF', 'terminal')
+    vi.advanceTimersByTime(BACKGROUND_QUERY_TIMEOUT_MS)
+    expect(notice).not.toHaveBeenCalled()
+    background.consumeInput(reply())
+    background.setColor('#FFFFFF', 'explicit')
+    expect(notice).not.toHaveBeenCalled()
+    for (let i = 0; i < 3; i++) {
+      background.setColor('#FFFFFF', 'theme')
+      background.setColor('#FFFFFF', 'terminal')
+      background.start()
+    }
+    expect(notice).toHaveBeenCalledExactlyOnceWith('timeout')
+    expect(writes).toEqual([BACKGROUND_QUERY])
+    background.restore()
+  })
+
+  it('reports disabled sync only in theme mode and resets notice/probe ownership on resume', () => {
+    const { background, writes, notice } = controller(false)
+    background.setColor('#282C34', 'terminal')
+    background.start()
+    background.setColor('#282C34', 'explicit')
+    expect(notice).not.toHaveBeenCalled()
+    background.setColor('#282C34', 'theme')
+    background.start()
+    expect(notice).toHaveBeenCalledExactlyOnceWith('unsupported')
+    background.restore()
+    background.start()
+    expect(notice).toHaveBeenCalledTimes(2)
+    expect(writes).toEqual([])
+    background.restore()
+  })
+
   it('waits for a valid reply, follows theme changes and restores exact original precision once', () => {
     vi.useFakeTimers()
     const { background, writes } = controller()
@@ -220,10 +301,28 @@ function inputHarness() {
   tui.showOverlay(search)
   tui.showOverlay(nestedSearch)
   session.startBackgroundSync()
-  return { terminal, session, keys, composer, search, nestedSearch, close: () => { session.restore(); tui.stop() } }
+  return { terminal, tui, session, keys, composer, search, nestedSearch, close: () => { session.restore(); tui.stop() } }
 }
 
 describe('OSC framing and nested input isolation', () => {
+  it.each(['theme', 'terminal', 'explicit'] as const)('keeps OSC replies out of an actual API-key overlay in %s mode', async mode => {
+    vi.useFakeTimers()
+    const harness = inputHarness()
+    const overlays = new OverlayQueue(harness.tui)
+    const secret = overlays.secretInput({ title: 'API key' })
+    try {
+      await vi.advanceTimersByTimeAsync(40)
+      harness.session.setBackgroundColor('#282C34', mode)
+      harness.terminal.stdin.process(`sk-fixture${reply()}${reply('invalid')}`)
+      vi.advanceTimersByTime(BACKGROUND_QUERY_TIMEOUT_MS + 1)
+      harness.terminal.stdin.process(`${reply('rgb:1/2/3')}-tail\r`)
+      expect(await secret).toBe('sk-fixture-tail')
+      expect(harness.search.getValue()).toBe('')
+      expect(harness.composer.getValue()).toBe('')
+      expect(harness.keys.join('')).not.toContain(']11;')
+    } finally { overlays.dispose(); harness.close() }
+  })
+
   it.each([ST, '\u0007'])('handles every split, including slow fragments after the OSC opener (%j)', end => {
     vi.useFakeTimers()
     const data = reply(ORIGINAL, end)

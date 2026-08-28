@@ -13,6 +13,7 @@ import type {
   TuiSettingsDocument,
 } from '@deepseek-ai/dsh-tui-protocol'
 import {
+  DEFAULT_TUI_BACKGROUND_MODE,
   DEFAULT_TUI_BEHAVIOR,
   DEFAULT_TUI_CODE_THEME,
   DEFAULT_TUI_THEME,
@@ -128,6 +129,12 @@ export const AppearanceSettingsSchema = z.object({
     .description(localeDescription({
       zh: '代码块独立主题；auto 跟随当前界面主题。',
       en: 'Independent code-block theme; auto follows the current interface theme.',
+    })),
+  backgroundMode: z.union(['theme', 'terminal', 'explicit'])
+    .default(DEFAULT_TUI_BACKGROUND_MODE)
+    .description(localeDescription({
+      zh: '主背景模式：主题颜色＋终端效果、完全跟随终端，或显式主题底色（兼容）。不改变终端透明度；弹窗和代码块保留底色。',
+      en: 'Canvas background: theme colors with terminal effects, terminal background, or explicit theme fill (compatibility). Does not change terminal opacity; panels and code blocks keep their backgrounds.',
     })),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
     .description(localeDescription({

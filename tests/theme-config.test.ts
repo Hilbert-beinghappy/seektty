@@ -86,11 +86,23 @@ describe('theme colors and generated palettes', () => {
 describe('durable custom theme validation', () => {
   it('migrates legacy dark/light values and resolves named themes', () => {
     expect(normalizeAppearance({ theme: 'light' })).toEqual({
-      theme: 'light', codeTheme: 'auto', customThemes: [],
+      theme: 'light', codeTheme: 'auto', backgroundMode: 'theme', customThemes: [],
     })
     const ocean = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
     const appearance = normalizeAppearance({ theme: 'custom:ocean', customThemes: [ocean] })
     expect(resolveTheme(appearance).name).toBe('Ocean')
+  })
+
+  it.each(['theme', 'terminal', 'explicit'])('accepts the independent %s background mode', backgroundMode => {
+    const appearance = normalizeAppearance({ theme: 'dark', backgroundMode })
+    expect(appearance.backgroundMode).toBe(backgroundMode)
+    expect(resolveAppearanceTheme(appearance)).not.toHaveProperty('backgroundMode')
+  })
+
+  it.each([null, '', 'auto', 0, false, {}])('rejects invalid background mode %j', backgroundMode => {
+    expect(() => normalizeAppearance({ theme: 'dark', backgroundMode })).toThrow('背景模式')
+    setUiLocale('en')
+    expect(() => normalizeAppearance({ theme: 'dark', backgroundMode })).toThrow('background mode')
   })
 
   it('pairs DeepSeek light with light code by default and accepts an explicit dark code theme', () => {

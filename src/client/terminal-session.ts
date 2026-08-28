@@ -1,5 +1,6 @@
 import type { Terminal } from '@mariozechner/pi-tui'
-import { supportsTerminalBackground, TerminalBackground } from './terminal-background.ts'
+import type { TuiBackgroundMode } from '@deepseek-ai/dsh-tui-protocol'
+import { supportsTerminalBackground, TerminalBackground, type BackgroundSyncUnavailable } from './terminal-background.ts'
 import {
   encodeDisableMouseReporting,
   encodeMouseReporting,
@@ -42,7 +43,7 @@ export interface ManagedTui {
 export interface TerminalSession {
   enter(): void
   restore(): void
-  setBackgroundColor(color: string): void
+  setBackgroundColor(color: string, mode?: TuiBackgroundMode): void
   startBackgroundSync(): void
   consumeInput(data: string): boolean
   setMouseReporting(mode: MouseReportingMode, hoverFeedback?: boolean): void
@@ -64,8 +65,9 @@ export function createTerminalSession(
   enabled: boolean,
   beforeRestore: () => void = () => undefined,
   env: Readonly<NodeJS.ProcessEnv> = process.env,
+  onBackgroundUnavailable?: (reason: BackgroundSyncUnavailable) => void,
 ): TerminalSession {
-  const background = new TerminalBackground(terminal, enabled && supportsTerminalBackground(env))
+  const background = new TerminalBackground(terminal, enabled && supportsTerminalBackground(env), onBackgroundUnavailable)
   let active = false
   let mouseMode: MouseReportingMode = 'full'
   let hoverFeedback = true
@@ -91,7 +93,7 @@ export function createTerminalSession(
         }
       }
     },
-    setBackgroundColor: color => { background.setColor(color) },
+    setBackgroundColor: (color, mode) => { background.setColor(color, mode) },
     // Must run after terminal.start() has installed its raw-mode input listener.
     startBackgroundSync: () => { if (active) background.start() },
     consumeInput: data => background.consumeInput(data),

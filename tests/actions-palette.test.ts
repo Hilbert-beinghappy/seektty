@@ -29,6 +29,7 @@ function host(overlays: Partial<OverlayQueue>): TuiActionHost & {
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyAppearance: vi.fn(),
     applyLocale: vi.fn(),
     setEditor,
     copy: vi.fn(),

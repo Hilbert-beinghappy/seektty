@@ -15,7 +15,10 @@ import {
   type TuiSettingsPathOp,
 } from '../src/protocol.ts'
 
-function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocument {
+// Keep legacy persisted fixtures without the new field to exercise migration.
+type StoredAppearance = Omit<TuiAppearanceSettings, 'backgroundMode'> & Partial<Pick<TuiAppearanceSettings, 'backgroundMode'>>
+
+function document(value: StoredAppearance, revision = 0): TuiSettingsDocument {
   return {
     namespace: TUI_APPEARANCE_SETTINGS_NAMESPACE,
     schema: {},
@@ -26,7 +29,7 @@ function document(value: TuiAppearanceSettings, revision = 0): TuiSettingsDocume
   }
 }
 
-function settingsState(initial: TuiAppearanceSettings): {
+function settingsState(initial: StoredAppearance): {
   readonly settings: TuiManagementBridge['settings']
   readonly mutate: ReturnType<typeof vi.fn>
   current(): TuiSettingsDocument
@@ -75,6 +78,7 @@ function actionHarness(
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyAppearance: vi.fn(),
     applyLocale: vi.fn(),
     setEditor: vi.fn(),
     copy: vi.fn(),
@@ -101,10 +105,8 @@ describe('/theme commands', () => {
       ],
       0,
     )
-    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'light' }))
-    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({
-      syntax: BUILT_IN_THEMES.light.syntax,
-    }))
+    expect(host.applyAppearance).toHaveBeenCalledWith(expect.objectContaining({ theme: 'light', codeTheme: 'auto', backgroundMode: 'theme' }))
+    expect(host.applyTheme).not.toHaveBeenCalled()
   })
 
   it('restores matching light code when the light interface is selected again', async () => {
@@ -114,9 +116,8 @@ describe('/theme commands', () => {
     await actions.execute('theme', 'light')
 
     expect(state.current().value).toEqual({ theme: 'light', codeTheme: 'auto', customThemes: [] })
-    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'light',
-      syntax: BUILT_IN_THEMES.light.syntax,
+    expect(host.applyAppearance).toHaveBeenCalledWith(expect.objectContaining({
+      theme: 'light', codeTheme: 'auto', backgroundMode: 'theme',
     }))
   })
 
@@ -132,9 +133,8 @@ describe('/theme commands', () => {
       [{ op: 'set', path: ['codeTheme'], value: 'dark' }],
       0,
     )
-    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'light',
-      syntax: BUILT_IN_THEMES.dark.syntax,
+    expect(host.applyAppearance).toHaveBeenCalledWith(expect.objectContaining({
+      theme: 'light', codeTheme: 'dark', backgroundMode: 'theme',
     }))
   })
 
@@ -162,11 +162,12 @@ describe('/theme commands', () => {
       ],
       0,
     )
-    expect(host.applyTheme).toHaveBeenCalledTimes(2)
+    expect(host.applyTheme).toHaveBeenCalledTimes(1)
+    expect(host.applyAppearance).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ theme: 'custom:ocean', backgroundMode: 'theme' }))
   })
 
   it('restores the original theme when a palette preview is cancelled', async () => {
-    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', backgroundMode: 'terminal', customThemes: [] })
     const input = vi.fn()
       .mockResolvedValueOnce('Ocean')
       .mockResolvedValueOnce('#071426 #F4F8FF #6682FF')
@@ -178,6 +179,21 @@ describe('/theme commands', () => {
     expect(state.mutate).not.toHaveBeenCalled()
     expect(host.applyTheme).toHaveBeenCalledTimes(2)
     expect(host.applyTheme).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'dark' }))
+    expect(host.applyAppearance).not.toHaveBeenCalled()
+    expect(state.current().value).toMatchObject({ backgroundMode: 'terminal' })
+  })
+
+  it('restores the preview on save failure without applying a different background mode', async () => {
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', backgroundMode: 'explicit', customThemes: [] })
+    state.mutate.mockRejectedValueOnce(new Error('save failed'))
+    const input = vi.fn().mockResolvedValueOnce('Ocean').mockResolvedValueOnce('#071426 #F4F8FF #6682FF')
+    const select = vi.fn().mockResolvedValue({ id: 'apply', label: '应用并保存' })
+    const { actions, host } = actionHarness(state.settings, { input, select })
+    await actions.execute('theme', 'palette')
+    expect(host.applyTheme).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'dark' }))
+    expect(host.applyAppearance).not.toHaveBeenCalled()
+    expect(state.current().value).toMatchObject({ theme: 'dark', backgroundMode: 'explicit' })
+    expect(host.notice).toHaveBeenCalledWith(expect.stringContaining('save failed'), 'error')
   })
 
   it('imports a local VS Code JSONC theme and saves it through Harness Settings', async () => {
@@ -208,7 +224,8 @@ describe('/theme commands', () => {
         source: 'vscode',
         tokenColors: [{ scope: ['keyword'], foreground: '#91A7FF', fontStyle: ['bold'] }],
       })
-      expect(host.applyTheme).toHaveBeenCalledTimes(2)
+      expect(host.applyTheme).toHaveBeenCalledTimes(1)
+      expect(host.applyAppearance).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ theme: 'light', codeTheme: 'custom:ocean-imported', backgroundMode: 'theme' }))
       expect(host.applyTheme).toHaveBeenLastCalledWith(expect.objectContaining({
         id: 'light',
         syntaxTone: 'dark',
@@ -246,6 +263,6 @@ describe('/theme commands', () => {
 
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(state.current().value).toEqual({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
-    expect(host.applyTheme).toHaveBeenCalledWith(expect.objectContaining({ id: 'dark' }))
+    expect(host.applyAppearance).toHaveBeenCalledWith(expect.objectContaining({ theme: 'dark', backgroundMode: 'theme' }))
   })
 })

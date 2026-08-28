@@ -129,6 +129,7 @@ function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
     refresh: vi.fn(),
     refreshHeader: vi.fn(),
     applyTheme: vi.fn(),
+    applyAppearance: vi.fn(),
     applyLocale: vi.fn(),
     setEditor: vi.fn(),
     copy: vi.fn(),

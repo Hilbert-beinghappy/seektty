@@ -20,6 +20,7 @@ import {
   background,
   color,
   currentTheme,
+  setBackgroundMode,
   setTheme,
   styleTerminalText,
   surfaceRow,
@@ -51,12 +52,14 @@ function enableTruecolor(): void {
 
 afterEach(() => {
   setTheme(BUILT_IN_THEMES.dark)
+  setBackgroundMode('theme')
   vi.unstubAllEnvs()
 })
 
 describe('terminal themes', () => {
   it('switches every semantic layer between DeepSeek dark and light palettes', () => {
     enableTruecolor()
+    setBackgroundMode('explicit')
 
     setTheme(BUILT_IN_THEMES.dark)
     expect(background.canvas('frame')).toContain('\u001B[48;2;9;14;27m')
@@ -145,7 +148,7 @@ describe('appearance settings', () => {
     enableTruecolor()
     setTheme(themeFromAppearance(appearance('light')))
 
-    expect(background.canvas('interface')).toContain('\u001B[48;2;246;248;253m')
+    expect(background.canvas('interface')).toContain('\u001B[49m')
     expect(background.code('const answer = 42')).toContain('\u001B[48;2;255;255;255m')
     expect(background.code('const answer = 42')).toContain('\u001B[38;2;29;36;51m')
   })

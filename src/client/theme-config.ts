@@ -1,11 +1,13 @@
 /** Pure theme validation, color conversion, and palette generation. */
 
 import {
+  DEFAULT_TUI_BACKGROUND_MODE,
   DEFAULT_TUI_CODE_THEME,
   MAX_CUSTOM_THEMES,
   MAX_TEXTMATE_RULES,
   type TuiCodeThemeId,
   type TuiAppearanceSettings,
+  type TuiBackgroundMode,
   type TuiCustomTheme,
   type TuiSyntaxThemeColors,
   type TuiTextMateRule,
@@ -653,6 +655,7 @@ export function normalizeCustomTheme(value: unknown): TuiCustomTheme {
  */
 export function normalizeAppearance(value: unknown): TuiAppearanceSettings {
   const record = recordOf(value, 'SeekTTY appearance')
+  const backgroundMode = normalizeBackgroundMode(record.backgroundMode)
   const rawTheme = stringOf(record, 'theme', 'SeekTTY appearance')
   if (!/^(?:dark|light|custom:[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?)$/u.test(rawTheme)) {
     throw new Error(ui(
@@ -710,7 +713,17 @@ export function normalizeAppearance(value: unknown): TuiAppearanceSettings {
       `The current custom code theme ${JSON.stringify(codeTheme)} does not exist`,
     ))
   }
-  return { theme, codeTheme, customThemes }
+  return { theme, codeTheme, backgroundMode, customThemes }
+}
+
+/** Validate the independent canvas policy, including legacy settings without it. */
+export function normalizeBackgroundMode(value: unknown): TuiBackgroundMode {
+  if (value === undefined) return DEFAULT_TUI_BACKGROUND_MODE
+  if (value === 'theme' || value === 'terminal' || value === 'explicit') return value
+  throw new Error(ui(
+    `SeekTTY 背景模式 ${JSON.stringify(value)} 不受支持`,
+    `SeekTTY background mode ${JSON.stringify(value)} is not supported`,
+  ))
 }
 
 /**

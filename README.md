@@ -147,7 +147,7 @@ See [Compatibility and verification](#compatibility-and-verification) for the ac
 | Subagents and background work | Inspect or stop direct subagents; view jobs, workflow phases, results, failures, token use, duration, and structured trajectory data |
 | Profiles and Settings | Create, copy, switch, and diagnose Profiles; edit every registered Settings namespace with Schema fallbacks, revision checks, and write-only secrets |
 | Plugins, Skills, and MCP | Plugin center, native Bundle reconciliation, dynamic Skill commands, MCP instances, load state, settings, and risk information |
-| Themes and language | Independent interface/code themes, palette generation, VS Code theme import, contrast checks, `NO_COLOR`, and live Chinese/English switching |
+| Themes and language | Independent interface/code themes, terminal background effects, palette generation, VS Code theme import, contrast checks, `NO_COLOR`, and live Chinese/English switching |
 | Diagnostics and feedback | Runtime status, actionable `/doctor` checks, Session feedback, Assistant-message ratings, and feedback removal |
 
 SeekTTY reads these catalogs from the active Harness Profile. Unsupported optional capabilities degrade safely while dedicated terminal views continue to evolve.
@@ -274,7 +274,17 @@ Interface and code themes are independent. A palette of 3–16 HEX/RGB colors ca
 
 Hover styling is derived from the active interface theme, including existing custom themes, without adding required settings or altering saved colors. Indistinct or limited-color backgrounds use an underline cue; `NO_COLOR` remains respected.
 
-On supported truecolor terminals, SeekTTY queries the original terminal background and temporarily matches it to the interface theme, including live theme changes, so terminal padding does not show a different color. Exit restores the captured color. Unsupported or timed-out queries, `NO_COLOR`, limited-color terminals, and tmux/screen leave the terminal background untouched. Set `SEEKTTY_TERMINAL_BACKGROUND=off` to opt out. See [compatibility and verification](docs/terminal-background-compatibility.md); this does not change terminal settings, code highlighting, transparency, or window decorations.
+The main canvas now defaults to **theme colors + terminal effects**, instead of an explicit RGB fill. It uses the terminal's default background so the terminal can apply its configured transparency, blur, or background image. Choose **Background mode** in `/theme` or `/settings seektty-appearance`; both open the same editor and apply successful saves immediately.
+
+| `backgroundMode` | Main canvas | Terminal color |
+| --- | --- | --- |
+| `theme` (default, including older settings) | Terminal default background | Temporarily synchronize the interface theme with OSC 11 |
+| `terminal` | Terminal default background | Leave unchanged; restore the captured original if SeekTTY changed it |
+| `explicit` (compatibility) | Explicit theme fill, as before | Keep the previous OSC 11 synchronization behavior |
+
+Panels, code blocks, selections and hover keep their independent backgrounds and highlighting. Their transparency can differ from the canvas; even `explicit` is not guaranteed opaque. Background mode belongs to Harness `seektty-appearance` settings, not theme files: theme switching, previews, import and export do not overwrite it.
+
+Color synchronization requires a supported truecolor terminal and a valid reply to one 500 ms asynchronous query. Unsupported or timed-out queries, `NO_COLOR`, limited colors, and tmux/screen do not recolor the terminal. In `theme` mode, an unavailable sync leaves the default background in place with one non-blocking notice, not an automatic RGB fallback. `SEEKTTY_TERMINAL_BACKGROUND=off` disables recoloring only; it does not change the selected mode. Exit restores the captured color. SeekTTY does not read/set opacity, edit terminal configuration, or alter window decorations. See [compatibility](docs/terminal-background-compatibility.md) and [acceptance results](docs/background-inheritance-acceptance.md).
 
 Use `/language` or a direct command to switch the terminal copy live:
 

@@ -1,73 +1,58 @@
-# Terminal background synchronization / 终端背景同步
+# Terminal background inheritance / 终端背景继承
 
-## Scope
+## Behavior and scope
 
-Terminal padding and leftover pixels outside the character grid use the terminal's own background. Painting more characters cannot reach them. SeekTTY now uses one platform-neutral OSC 11 controller to temporarily match that background to the **interface** theme's `colors.canvas`. Code-theme colors and highlighting are unchanged.
+The main canvas defaults to `theme`: interface colors with terminal-owned background effects. Older settings without `backgroundMode` use this default too. This changes the previous explicitly painted canvas; choose `explicit` to retain that rendering behavior.
 
-- Start listening for input before issuing one asynchronous `OSC 11 ; ? ST` query. Startup never waits for a reply.
-- Require a valid `rgb:r/g/b` reply within 500 ms before changing the background. Each channel may contain 1–4 hex digits; retain the original precision for restoration.
-- Use the current theme if it changed while the query was pending. Deduplicate repeated colors; do not poll or write background commands on mouse movement or repaint.
-- Restore the captured color synchronously before normal/fatal teardown. Do **not** use OSC 111: resetting the configured profile color can lose a color previously selected by the shell or an enclosing application.
-- On POSIX `SIGTSTP`, restore terminal modes and background before suspending. On `SIGCONT`, re-enter, re-query, and redraw. Ctrl+Z remains input undo. Uncatchable termination (`SIGKILL`, forced termination, or a terminal crash) cannot guarantee cleanup.
-- Unsupported/expired queries never set or reset a color. Late, malformed, duplicate, and unsolicited OSC replies do not enter editors or overlays. Bracketed paste remains opaque.
+| Harness `seektty-appearance.backgroundMode` | Canvas background | OSC 11 policy |
+| --- | --- | --- |
+| `theme` (default) | Default background (`SGR 49`) | Synchronize the interface theme's `colors.canvas` when safe |
+| `terminal` | Default background (`SGR 49`) | Do not recolor; restore an original captured earlier in this lifetime |
+| `explicit` (compatibility) | Explicit theme background, quantized to the terminal's color depth | Same synchronization policy as before |
 
-The pinned `@mariozechner/pi-tui@0.73.1` patch keeps OSC frames together across reads, supports BEL and ESC-backslash terminators, bounds incomplete buffers, and lets a new escape-prefixed event cancel a truncated frame. The ordinary lone-Escape key timeout is unchanged; after the OSC opener is recognized, the frame no longer expires into text.
+`/theme` → **Background mode** and `/settings seektty-appearance` → **Background mode** share one three-choice editor. Changes are persisted through revision-protected Harness Settings before applying; cancellation or failure leaves the current appearance unchanged. Successful changes redraw the full viewport without restarting, moving scroll anchors, clearing selection, or changing hit geometry. Theme previews retain the mode, and theme switching/import/export never writes it.
 
-## Safe defaults
+The canvas and its full-width/full-height blank filling remain in place. Foreground resets restore the selected background semantics. This is not a different layout or a full-history renderer. Panels, code blocks, selections and hover retain their existing independent backgrounds and syntax colors; those regions may have different transparency from the main canvas.
 
-Automatic synchronization requires the existing truecolor detection. It is disabled with:
+No dependencies, alpha-percentage probes, terminal-specific opacity APIs, or terminal configuration writes are added. Opacity, blur, background images, and OS window decorations remain terminal/compositor responsibilities. `explicit` describes escape sequences, not a promise of opacity. For example, [Kitty applies opacity to cells matching its default background](https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.background_opacity), while [Ghostty can optionally apply opacity to explicitly colored cells](https://ghostty.org/docs/config/reference#background-opacity-cells). [Windows Terminal owns its profile opacity, acrylic and background-image settings](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/profile-appearance#transparency). SeekTTY does not change these options.
 
-- `NO_COLOR`, `TERM=dumb`, or limited-color rendering;
-- `TMUX`, `STY`, or a `screen*` / `tmux*` terminal type;
-- `SEEKTTY_TERMINAL_BACKGROUND=off` (also accepts `0` or `false`).
+## Color ownership and cleanup
 
-Direct SSH is not disabled merely because it is SSH: its terminal must still answer before the deadline. Multiplexers are deliberately excluded because a reply may be cached and changing the outer terminal may affect other panes. No passthrough is forced.
+- Start listening for input before the first needed `OSC 11 ; ? ST` query. A startup in `terminal` mode does not query; entering `theme` or `explicit` later may initiate the one query for that active lifetime.
+- The query is asynchronous and expires after 500 ms. Only a valid `rgb:r/g/b` reply with 1–4 hex digits per channel authorizes a color change. Preserve original channel precision.
+- Switching between synchronizing modes with the same color does not repeat a write. Repaints and mode switches never repeat the query.
+- Entering `terminal` restores the captured original immediately if this run changed it, but retains the snapshot for later switches. If a reply arrives while `terminal` is selected, capture it without recoloring. A later synchronizing mode uses the latest requested theme.
+- Missing, expired, or disabled synchronization in `theme` mode leaves the default canvas background in place with one non-blocking notice per active lifetime. Do not silently switch to explicit RGB. If foreground contrast is poor against an unrelated terminal background, select a matching interface theme or opt into `explicit`.
+- Restore the captured color synchronously before normal/fatal teardown. Do not use OSC 111: it resets the profile color, which may differ from a color previously chosen by the shell. Write failures are handled best-effort, without breaking cleanup.
+- POSIX suspend restores the background and protocols. Resume starts a new active lifetime, installs input first, then re-queries if needed. Ctrl+Z remains input undo. Uncatchable termination (`SIGKILL`, forced process termination, or terminal crash) cannot guarantee restoration.
 
-This preserves Settings/Profile ownership, introduces no runtime dependencies, and never edits terminal configuration files or changes opacity/background images. Transparent or image-backed terminals may still look different from an opaque TUI; opt out when preserving that appearance is preferred. OS title bars, borders, and shadows are not part of this fix.
+The existing pinned `@mariozechner/pi-tui@0.73.1` input framing is reused unchanged. Malformed, late, duplicate, unsolicited and oversized OSC frames are consumed before chat, search, or secret inputs; bracketed paste remains opaque. A new escape-prefixed event can cancel a truncated frame without changing the ordinary lone-Escape timeout.
+
+## Safe fallback
+
+Color synchronization still requires an interactive managed terminal and the existing truecolor detection. It is disabled by `NO_COLOR`, limited color depth, `TERM=dumb`, `TMUX`, `STY`, a `screen*`/`tmux*` terminal type, or `SEEKTTY_TERMINAL_BACKGROUND=off` (`0` and `false` also work). The environment switch disables recoloring only: `theme`/`terminal` still use the default background and `explicit` still uses a theme fill where colors are enabled. `NO_COLOR` retains unstyled output. Non-interactive and dumb terminals retain the existing headless guidance.
+
+Direct SSH uses the same bounded query; network latency may cause safe fallback. Multiplexers are excluded because cached replies or outer-window mutations could affect other panes. No passthrough is forced. A successful protocol test cannot prove compositor effects or pixel-perfect padding in every emulator.
 
 ## Verification
 
-Automated coverage is in `tests/terminal-background.test.ts`, `tests/terminal-input-framing.test.ts`, `tests/terminal-session.test.ts`, and `tests/process-guards.test.ts`. It covers capability policy, exact-color restoration, live changes, timeout/late replies, write failures, nested inputs, split replies, malformed/oversized frames, bracketed paste, fatal cleanup, and simulated POSIX suspend/resume signals. Synthetic terminal tests are **not** real GUI-terminal acceptance.
+See [dated acceptance results and manual checklist](background-inheritance-acceptance.md). Unit/synthetic frame tests, real PTY/ConPTY tests, official packaged lifecycle checks, and real GUI-terminal acceptance are recorded separately. Missing devices remain **untested**.
 
-Run the focused checks with:
+Focused checks:
 
 ```sh
-pnpm exec vitest run tests/terminal-background.test.ts tests/terminal-input-framing.test.ts tests/terminal-session.test.ts tests/process-guards.test.ts
+pnpm exec vitest run tests/appearance-background.test.ts tests/actions-background.test.ts tests/background-inheritance.test.ts tests/terminal-background.test.ts tests/theme-config.test.ts tests/actions-theme.test.ts tests/transcript-viewport.test.ts tests/terminal-input-framing.test.ts tests/terminal-session.test.ts tests/process-guards.test.ts
+pnpm run check
 ```
 
-Use an isolated `DSH_HOME` and an unmodified official dsh `0.1.1-rc.2` for packaged installation/boot/removal/reinstallation checks. Compatibility adapters retain the existing declared Host range: `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`.
-
-### Local automated results
-
-- Frozen pnpm `11.7.0` installation: passed; only the pinned pi-tui patch hash changed, not dependency versions.
-- `pnpm run check`: 110 test files; **929 passed / 1 conditional skip**, plus typecheck, build, and the 23-entry package allowlist.
-- Exact candidate on unmodified official dsh `0.1.1-rc.2`: isolated install, boot, remove, reinstall, second boot, and Host module-identity checks passed.
-- Windows ConPTY mouse/context-menu regression: one cycle, 9588 captured characters, exit code 0. This harness sets `NO_COLOR`, so it verifies the unchanged fallback and mouse path, **not** successful background synchronization in a GUI terminal.
-- Candidate SHA-256: `127fcdac44c1d39ebafda705f7161857dc62ae12d5ef84c2b456826e54647e0d`. This is a local development package still numbered `1.2.4`, not the published release asset; the public release was not replaced.
-
-The local Windows Terminal installation reports `1.24.11911.0`; its presence is not a manual background/exit acceptance result. Packaged compatibility checks used an isolated `DSH_HOME`; deploying a candidate into an everyday Profile is a separate, user-requested action and does not count as manual acceptance. The feature never edits terminal configuration files.
-
-### Manual matrix — not yet signed off
-
-| Environment | Expected policy | Manual result |
-| --- | --- | --- |
-| Windows Terminal, VS Code terminal | Probe when truecolor; synchronize only on a valid reply | Pending |
-| macOS iTerm2, Kitty, Ghostty | Same shared protocol and capability policy | Pending |
-| macOS Terminal.app | Existing limited-color detection leaves background unchanged | Pending fallback check |
-| Linux Kitty, Ghostty, GNOME Terminal / Konsole under Wayland or X11 | Probe when truecolor; synchronize only on a valid reply | Pending |
-| tmux / screen | No background query or mutation | Pending fallback check |
-| Direct SSH | Probe with the same bounded deadline | Pending latency/exit check |
-
-For each accepted terminal, record its version, OS, transparency, and color mode. Check a custom interface theme, light/dark changes, resizing to non-cell-aligned dimensions, nested overlay typing while starting, normal exit, SIGTERM, and (on POSIX) suspend/resume. The shell background after exit must match the color from before launch, including when it differs from the profile's configured default. Repeat with `SEEKTTY_TERMINAL_BACKGROUND=off` and `NO_COLOR`.
-
-Protocol references: [Kitty padding FAQ](https://sw.kovidgoyal.net/kitty/faq/#why-is-there-padding-between-the-text-area-and-the-window-border), [Ghostty OSC reference](https://ghostty.org/docs/vt/reference), [Windows Terminal dynamic-color query support](https://github.com/microsoft/terminal/discussions/17809).
+Packaged checks require an isolated `DSH_HOME` and an unmodified official dsh `0.1.1-rc.2`. The declared compatibility-adapter range is unchanged: `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`. Nothing in this feature changes Harness's ownership of settings, Profiles, Sessions or persistence, or native `dsh plugin` reconciliation.
 
 ## 中文说明
 
-该修复统一处理字符网格外的终端背景色差，不扩大鼠标架构，也不改代码主题。启动后异步查询原色，500 ms 内收到有效回复才同步界面主题；换主题时更新，退出时恢复原始精度的颜色，而不是重置成终端默认配色。POSIX 暂停前恢复、继续后重新查询；Ctrl+Z 仍用于撤销。
+默认从“显式 RGB 铺底”改为 `theme`：主画布使用终端默认背景（SGR 49），通过原有 OSC 11 同步界面主题颜色，让终端保留其背景效果。旧设置缺少字段时同样默认 `theme`。`terminal` 只跟随终端，不改色；`explicit` 保留旧铺底与原有改色行为，透明与否仍取决于终端。
 
-无回复、超时、`NO_COLOR`、低色彩模式和 tmux/screen 安全降级，不强制改色；`SEEKTTY_TERMINAL_BACKGROUND=off` 可关闭。OSC 回复在输入分帧层完整接收，不进入普通输入框或多层搜索弹窗，粘贴内容不被当作回复解析。
+`/theme` 与 `/settings seektty-appearance` 的“背景模式”共用三选项编辑器，保存成功立即生效，失败／取消不改变状态。模式由 Harness 管理，主题切换、预览及取消、导入和导出均不覆盖它。只切模式不重建会话节点、不改变视口、选区、滚动锚点及鼠标命中；弹窗、代码块、选区与 hover 仍有独立底色。
 
-自动协议／虚拟终端测试、Windows ConPTY 与真实桌面终端验收分别记录。上表人工结果均未签收，不能宣称三端所有终端均已实测。透明背景、背景图片、操作系统窗口装饰及不可捕获的强制结束也不在“完全无色边、必定恢复”的保证范围内。
+每个活动终端生命周期最多一次 500 ms 异步查询；输入监听就绪、首次需要改色时才发起。切到 `terminal` 会恢复本次运行捕获的原色并保留快照，查询中的回复可记录但不可改色。超时、无效、迟到回复不进入输入框。同步不可用时 `theme` 保留默认背景并提示一次，不自动改成显式铺底。`SEEKTTY_TERMINAL_BACKGROUND=off` 只禁止改色；tmux/screen、低色彩和非交互环境沿用现有限制。
 
-本地全量检查为 929 项通过、1 项条件跳过，并通过类型检查、构建、23 项包白名单及官方 dsh 隔离插拔。Windows ConPTY 鼠标回归通过，但该脚本使用 `NO_COLOR`，不能算作背景同步实测。候选包仍使用开发中的 `1.2.4` 版本号，未覆盖已发布版本。打包兼容性检查均使用隔离的 `DSH_HOME`；按用户要求部署到日常 Profile 是另一步操作，不代表人工验收通过。该功能不会修改终端配置文件。
+该功能不读取或设置透明度，不调用终端专用透明 API，不修改终端配置，不新增依赖。实际效果由终端与桌面合成器决定；不保证所有彩色区域一样透明，也不保证强杀进程后恢复。实机、PTY、单元与插拔测试分别记录，未测设备不冒充通过。

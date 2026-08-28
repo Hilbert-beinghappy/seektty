@@ -4,6 +4,7 @@ import {
   DEFAULT_TUI_THEME,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   type TuiAppearanceSettings,
+  type TuiBackgroundMode,
   type TuiCodeThemeId,
   type TuiCustomTheme,
   type TuiManagementBridge,
@@ -13,6 +14,7 @@ import {
 import { ui } from './locale.ts'
 import {
   normalizeAppearance,
+  normalizeBackgroundMode,
   resolveAppearanceTheme,
   resolveTheme,
   type ResolvedTuiTheme,
@@ -112,6 +114,24 @@ export async function saveCodeTheme(
       `Harness 保存了意外代码主题 ${JSON.stringify(stored.codeTheme)}`,
       `Harness saved an unexpected code theme ${JSON.stringify(stored.codeTheme)}`,
     ))
+  }
+  return updated
+}
+
+/** Persist only the canvas policy; imported/exported themes do not own it. */
+export async function saveBackgroundMode(
+  settings: TuiManagementBridge['settings'],
+  document: TuiSettingsDocument,
+  mode: TuiBackgroundMode,
+): Promise<TuiSettingsDocument> {
+  const value = normalizeBackgroundMode(mode)
+  const updated = await settings.mutate(
+    TUI_APPEARANCE_SETTINGS_NAMESPACE,
+    [{ op: 'set', path: ['backgroundMode'], value }],
+    document.revision,
+  )
+  if (appearanceFromSettings(updated).backgroundMode !== value) {
+    throw new Error(ui('Harness 未保存所选背景模式', 'Harness did not save the selected background mode'))
   }
   return updated
 }
