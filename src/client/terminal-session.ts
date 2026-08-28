@@ -66,8 +66,9 @@ export function createTerminalSession(
   beforeRestore: () => void = () => undefined,
   env: Readonly<NodeJS.ProcessEnv> = process.env,
   onBackgroundUnavailable?: (reason: BackgroundSyncUnavailable) => void,
+  onBackgroundColorChanged?: (color: string | undefined) => void,
 ): TerminalSession {
-  const background = new TerminalBackground(terminal, enabled && supportsTerminalBackground(env), onBackgroundUnavailable)
+  const background = new TerminalBackground(terminal, enabled && supportsTerminalBackground(env), onBackgroundUnavailable, onBackgroundColorChanged)
   let active = false
   let mouseMode: MouseReportingMode = 'full'
   let hoverFeedback = true

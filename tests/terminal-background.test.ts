@@ -54,6 +54,51 @@ describe('terminal background capability policy', () => {
 })
 
 describe('background ownership', () => {
+  it('reports applied, restored and unknown colors without another query or precision loss', () => {
+    const writes: string[] = []
+    const changed = vi.fn()
+    const background = new TerminalBackground({ write: data => { writes.push(data) } }, true, undefined, changed)
+    background.setColor('#282c34')
+    background.start()
+    expect(changed).not.toHaveBeenCalled()
+    background.consumeInput(reply('rgb:f/8000/00'))
+    expect(changed).toHaveBeenLastCalledWith('#282c34')
+    background.setColor('#282c34', 'terminal')
+    expect(changed).toHaveBeenLastCalledWith('#ff8000')
+    expect(writes.at(-1)).toBe(reply('rgb:f/8000/00'))
+    background.restore()
+    expect(changed).toHaveBeenLastCalledWith(undefined)
+    expect(writes.filter(value => value === BACKGROUND_QUERY)).toHaveLength(1)
+  })
+
+  it.each(['disabled', 'timeout', 'write-failed'] as const)('does not report a guessed background after %s', reason => {
+    vi.useFakeTimers()
+    const changed = vi.fn()
+    const background = new TerminalBackground({ write: () => {
+      if (reason === 'write-failed') throw new Error('write failed')
+    } }, reason !== 'disabled', undefined, changed)
+    background.setColor('#282c34')
+    background.start()
+    vi.advanceTimersByTime(BACKGROUND_QUERY_TIMEOUT_MS)
+    background.consumeInput(reply())
+    expect(changed).not.toHaveBeenCalled()
+    background.restore()
+  })
+
+  it('invalidates a known background when a later write or restoration fails', () => {
+    let fail = false
+    const changed = vi.fn()
+    const background = new TerminalBackground({ write: () => { if (fail) throw new Error('write failed') } }, true, undefined, changed)
+    background.setColor('#282c34')
+    background.start()
+    background.consumeInput(reply())
+    expect(changed).toHaveBeenLastCalledWith('#282c34')
+    fail = true
+    background.setColor('#ffffff')
+    expect(changed).toHaveBeenLastCalledWith(undefined)
+    background.restore()
+  })
+
   it('defers its single query until input is ready and a synchronizing mode is selected', () => {
     const { background, writes } = controller()
     background.setColor('#282C34', 'terminal')

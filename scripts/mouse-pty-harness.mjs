@@ -204,6 +204,20 @@ async function oneCycle(index, home, env) {
     await log.waitFor(/键位速查|Keyboard shortcuts/u, 10_000)
     session.write('\u001B')
     await delay(100)
+    // Keep the theme menu open across two saves; its current marker must follow
+    // authoritative Settings without reopening or making a Provider request.
+    session.write('/theme')
+    await delay(100)
+    session.write('\r')
+    await log.waitFor(/当前 · DeepSeek 暗色|Current · DeepSeek dark/u, 10_000)
+    for (const marker of [/当前 · DeepSeek 亮色|Current · DeepSeek light/u, /当前 · DeepSeek 暗色|Current · DeepSeek dark/u]) {
+      const since = log.text().length
+      session.write('\u001B[B')
+      session.write('\r')
+      await log.waitFor(marker, 10_000, since)
+    }
+    session.write('\u001B')
+    await delay(100)
     // Exercise the packaged transient popup, outside-left dismissal and outside-right replacement.
     // These gestures do not select a menu action or make a Provider request.
     for (const [col, row] of [[10, 6], [65, 18]]) {

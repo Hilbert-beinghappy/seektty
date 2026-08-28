@@ -330,7 +330,8 @@ function mix(left: string, right: string, amount: number): string {
   })
 }
 
-function ensureContrast(color: string, background: string, minimum: number): string {
+/** Derive a readable foreground without mutating the saved palette. */
+export function ensureContrast(color: string, background: string, minimum: number): string {
   const normalized = normalizeThemeColor(color)
   if (themeContrast(normalized, background) >= minimum) return normalized
   const targets = ['#000000', '#FFFFFF'] as const

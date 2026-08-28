@@ -1270,55 +1270,67 @@ The directory, user files, and all session logs are kept; sessions become ungrou
 
   private async themeCenter(): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
-    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
-    const appearance = appearanceFromSettings(document)
-    const activeCodeTheme = resolveCodeTheme(appearance)
-    const choices: OverlayChoice[] = [
-      { id: 'dark', label: ui('DeepSeek 暗色', "DeepSeek dark"), description: ui('内置 · 深灰蓝画布', "Built in · deep blue-gray canvas") },
-      { id: 'light', label: ui('DeepSeek 亮色', "DeepSeek light"), description: ui('内置 · 柔和冷白画布', "Built in · soft cool-white canvas") },
-      ...appearance.customThemes.map(theme => ({
-        id: customThemeId(theme),
-        label: theme.name,
-        description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${theme.source === 'palette' ? ui('颜色组生成', "Generate from palette") : theme.source === 'vscode' ? ui('VS Code 导入', "VS Code import") : ui('手动配色', "Manual colors")}`,
-      })),
-    ]
-    choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
-    choices.push(
-      {
-        id: '__background__',
-        label: ui('背景模式', 'Background mode'),
-        description: ui('选择主画布背景；独立于主题文件', 'Choose the canvas background independently of theme files'),
-      },
-      {
-        id: '__code__',
-        label: ui('代码块主题', "Code-block theme"),
-        description: ui(`${appearance.codeTheme === 'auto' ? '自动匹配' : '独立指定'} · 当前 ${activeCodeTheme.name}`, `${appearance.codeTheme === 'auto' ? 'Automatic' : 'Explicit'} · current ${activeCodeTheme.name}`),
-      },
-      { id: '__edit__', label: ui('自定义颜色与代码高亮', "Custom colors and syntax highlighting"), description: ui('修改背景、文字和语法颜色', "Edit backgrounds, text, and syntax colors") },
-      { id: '__palette__', label: ui('用颜色组合自动配置', "Generate automatically from a color palette"), description: ui('输入 3–16 个 HEX/RGB 颜色代码', "Enter 3–16 HEX/RGB colors") },
-      { id: '__import__', label: ui('导入 VS Code 主题', "Import VS Code theme"), description: ui('本地 JSON/JSONC · 支持相对 include', "Local JSON/JSONC · relative includes supported") },
-      { id: '__export__', label: ui('导出主题 JSON', "Export theme JSON"), description: ui('写出可分享的 SeekTTY 主题文件', "Write a shareable SeekTTY theme file") },
-      { id: '__delete__', label: ui('删除主题', "Delete theme"), description: ui('管理命名自定义主题', "Manage named custom themes") },
-    )
+    const readChoices = async (): Promise<OverlayChoice[]> => {
+      const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE, { bypassCache: true }))
+      const appearance = appearanceFromSettings(document)
+      const activeCodeTheme = resolveCodeTheme(appearance)
+      const choices: OverlayChoice[] = [
+        { id: 'dark', label: ui('DeepSeek 暗色', "DeepSeek dark"), description: ui('内置 · 深灰蓝画布', "Built in · deep blue-gray canvas") },
+        { id: 'light', label: ui('DeepSeek 亮色', "DeepSeek light"), description: ui('内置 · 柔和冷白画布', "Built in · soft cool-white canvas") },
+        ...appearance.customThemes.map(theme => ({
+          id: customThemeId(theme),
+          label: theme.name,
+          description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${theme.source === 'palette' ? ui('颜色组生成', "Generate from palette") : theme.source === 'vscode' ? ui('VS Code 导入', "VS Code import") : ui('手动配色', "Manual colors")}`,
+        })),
+      ]
+      choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
+      choices.push(
+        {
+          id: '__background__',
+          label: ui('背景模式', 'Background mode'),
+          description: ui('选择主画布背景；独立于主题文件', 'Choose the canvas background independently of theme files'),
+        },
+        {
+          id: '__code__',
+          label: ui('代码块主题', "Code-block theme"),
+          description: ui(`${appearance.codeTheme === 'auto' ? '自动匹配' : '独立指定'} · 当前 ${activeCodeTheme.name}`, `${appearance.codeTheme === 'auto' ? 'Automatic' : 'Explicit'} · current ${activeCodeTheme.name}`),
+        },
+        { id: '__edit__', label: ui('自定义颜色与代码高亮', "Custom colors and syntax highlighting"), description: ui('修改背景、文字和语法颜色', "Edit backgrounds, text, and syntax colors") },
+        { id: '__palette__', label: ui('用颜色组合自动配置', "Generate automatically from a color palette"), description: ui('输入 3–16 个 HEX/RGB 颜色代码', "Enter 3–16 HEX/RGB colors") },
+        { id: '__import__', label: ui('导入 VS Code 主题', "Import VS Code theme"), description: ui('本地 JSON/JSONC · 支持相对 include', "Local JSON/JSONC · relative includes supported") },
+        { id: '__export__', label: ui('导出主题 JSON', "Export theme JSON"), description: ui('写出可分享的 SeekTTY 主题文件', "Write a shareable SeekTTY theme file") },
+        { id: '__delete__', label: ui('删除主题', "Delete theme"), description: ui('管理命名自定义主题', "Manage named custom themes") },
+      )
+      return choices.map(choice => ({
+        ...choice,
+        label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
+      }))
+    }
     const options = { width: 68, maxHeight: '90%', anchor: 'center', margin: 1 } as const
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('主题', "Theme"),
         detail: ui('手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC', "Edit colors, generate from a palette, or import VS Code JSON/JSONC"),
-        choices: choices.map(choice => ({
-          ...choice,
-          label: `${currentMark(choice.id === appearance.theme)}${choice.label}`,
-        })),
+        choices: await readChoices(),
         options,
       }, async (selected) => {
-        if (selected.id === '__code__') await this.themeCode('', navigation)
-        else if (selected.id === '__background__') await this.editBackgroundMode(navigation)
-        else if (selected.id === '__palette__') await this.themePalette('', navigation)
-        else if (selected.id === '__import__') await this.themeImport('', navigation)
-        else if (selected.id === '__export__') await this.themeExport('', navigation)
-        else if (selected.id === '__edit__') await this.themeEdit('', navigation)
-        else if (selected.id === '__delete__') await this.themeDelete('', navigation)
-        else await this.activateTheme(selected.id as TuiThemeId)
+        let notice: string | undefined
+        try {
+          if (selected.id === '__code__') await this.themeCode('', navigation)
+          else if (selected.id === '__background__') await this.editBackgroundMode(navigation)
+          else if (selected.id === '__palette__') await this.themePalette('', navigation)
+          else if (selected.id === '__import__') await this.themeImport('', navigation)
+          else if (selected.id === '__export__') await this.themeExport('', navigation)
+          else if (selected.id === '__edit__') await this.themeEdit('', navigation)
+          else if (selected.id === '__delete__') await this.themeDelete('', navigation)
+          else await this.activateTheme(selected.id as TuiThemeId)
+        } catch (error) {
+          notice = capabilityError(error)
+          this.host.notice(notice, 'error')
+        }
+        if (navigation.signal.aborted) return
+        const refreshed = await readChoices()
+        if (!navigation.signal.aborted) navigation.updateChoices(refreshed, notice)
       })
     }, options)
   }

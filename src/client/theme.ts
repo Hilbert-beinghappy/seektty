@@ -8,6 +8,7 @@ import {
 import { BUILT_IN_THEMES, resolveHoverStyle, type ResolvedTuiTheme } from './theme-config.ts'
 import { DEFAULT_TUI_BACKGROUND_MODE, type TuiBackgroundMode } from '@deepseek-ai/dsh-tui-protocol'
 import { ui } from './locale.ts'
+import { readableCanvas } from './canvas-foreground.ts'
 
 const RESET = '\u001B[0m'
 const ESC = 0x1B
@@ -341,6 +342,11 @@ export function currentTheme(): ResolvedTuiTheme { return selectedTheme }
 /** Independent of theme previews/imports; only the main canvas inherits terminal effects. */
 export function setBackgroundMode(mode: TuiBackgroundMode): void { backgroundMode = mode }
 
+let terminalCanvasBackground: string | undefined
+
+/** Actual background reported by the managed terminal, never persisted as a theme. */
+export function setTerminalCanvasBackground(color?: string): void { terminalCanvasBackground = color }
+
 /**
  * Connect the asynchronously prepared syntax highlighter to Markdown rendering.
  * @param highlighter - synchronous cached renderer, or undefined during teardown.
@@ -381,7 +387,12 @@ export const color = {
 
 /** Background layers shared by the full frame, panels, and selected rows. */
 export const background = {
-  canvas: (text: string): string => layer(backgroundMode === 'explicit' ? palette.canvas : undefined, text),
+  canvas: (text: string): string => {
+    const row = layer(backgroundMode === 'explicit' ? palette.canvas : undefined, text)
+    if (terminalColorLevel() === 0 || backgroundMode === 'explicit'
+      || terminalCanvasBackground?.toLowerCase() === selectedTheme.colors.canvas.toLowerCase()) return row
+    return readableCanvas(row, terminalColorLevel() === 3 ? terminalCanvasBackground : undefined)
+  },
   surface: (text: string): string => layer(palette.surface, text),
   hover: hoverLayer,
   selection: (text: string): string => layer(palette.selection, text),
