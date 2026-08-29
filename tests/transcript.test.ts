@@ -557,7 +557,7 @@ describe('conversation viewport', () => {
     expect(requestOlder).toHaveBeenCalledTimes(1)
   })
 
-  it('fills Markdown code rows with one continuous theme background', () => {
+  it('fills Markdown code rows with one continuous inherited background', () => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm-256color')
     vi.stubEnv('COLORTERM', 'truecolor')
@@ -570,7 +570,8 @@ describe('conversation viewport', () => {
     const codeLines = rendered.filter(row => row.includes('const answer') || row.includes('return answer'))
     expect(codeLines).toHaveLength(2)
     for (const codeLine of codeLines) {
-      expect(codeLine).toContain('\u001B[48;2;17;24;39m')
+      expect(codeLine).toContain('\u001B[49m')
+      expect(codeLine).not.toContain('\u001B[48;')
       expect(codeLine).toMatch(/ +\u001B\[0m(?:\s*(?:\u001B\[[0-9;:]*m)?▐(?:\u001B\[0m)?)?\s*$/u)
     }
     expect(new Set(codeLines.map(codeLine => stripAnsi(codeLine).length)).size).toBe(1)
@@ -588,7 +589,8 @@ describe('conversation viewport', () => {
 
     const rendered = transcript.render(52)
     const codeLine = rendered.find(row => row.includes('const nested = 7'))
-    expect(codeLine).toContain('\u001B[48;2;17;24;39m')
+    expect(codeLine).toContain('\u001B[49m')
+    expect(codeLine).not.toContain('\u001B[48;')
     expect(stripAnsi(rendered.join('\n'))).not.toContain('```')
   })
 
@@ -617,7 +619,8 @@ describe('conversation viewport', () => {
     expect(plain).not.toContain('完成')
     expect(plain).not.toContain('RESULT')
     expect(command).toContain('⎿')
-    expect(command).toContain('\u001B[48;2;17;24;39m')
+    expect(command).toContain('\u001B[49m')
+    expect(command).not.toContain('\u001B[48;')
   })
 
   it('shows structured tool parameters as connected JSON code while collapsed', () => {

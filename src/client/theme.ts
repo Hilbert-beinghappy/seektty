@@ -98,7 +98,11 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
 let selectedTheme: ResolvedTuiTheme = BUILT_IN_THEMES.dark
 let backgroundMode: TuiBackgroundMode = DEFAULT_TUI_BACKGROUND_MODE
 let palette = runtimePalette(selectedTheme)
-let codeHighlighter: ((code: string, lang?: string) => string[]) | undefined
+
+/** Whether syntax rendering should emit the theme's default code background. */
+export type CodeBackgroundPolicy = 'inherit' | 'explicit'
+
+let codeHighlighter: ((code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[]) | undefined
 
 function controlStringEnd(text: string, start: number): number {
   for (let index = start; index < text.length; index += 1) {
@@ -330,7 +334,9 @@ export function setTerminalCanvasBackground(color?: string): void { terminalCanv
  * Connect the asynchronously prepared syntax highlighter to Markdown rendering.
  * @param highlighter - synchronous cached renderer, or undefined during teardown.
  */
-export function setCodeHighlighter(highlighter?: (code: string, lang?: string) => string[]): void {
+export function setCodeHighlighter(
+  highlighter?: (code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[],
+): void {
   codeHighlighter = highlighter
 }
 
@@ -341,10 +347,11 @@ export function setCodeHighlighter(highlighter?: (code: string, lang?: string) =
  * @returns one safely styled entry per source line.
  */
 export function highlightCodeLines(code: string, language?: string): string[] {
-  return codeHighlighter?.(code, language)
+  const codeBackground = backgroundMode === 'explicit' ? 'explicit' : 'inherit'
+  return codeHighlighter?.(code, language, codeBackground)
     ?? code.split('\n').map(line => styleTerminalText(line, {
       foreground: selectedTheme.syntax.foreground,
-      background: selectedTheme.syntax.background,
+      ...(codeBackground === 'explicit' ? { background: selectedTheme.syntax.background } : {}),
     }))
 }
 
@@ -379,7 +386,11 @@ export const background = {
   },
   surface: (text: string): string => layer(backgroundMode === 'explicit' ? palette.surface : undefined, text),
   selection: (text: string): string => layer(palette.selection, text),
-  code: (text: string): string => layer(palette.codeBackground, text, palette.codeForeground),
+  code: (text: string): string => layer(
+    backgroundMode === 'explicit' ? palette.codeBackground : undefined,
+    text,
+    palette.codeForeground,
+  ),
 } as const
 
 /**

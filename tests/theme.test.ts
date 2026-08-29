@@ -96,11 +96,11 @@ describe('terminal themes', () => {
   it.each(['theme', 'terminal'] as const)('uses terminal foregrounds for unknown %s backgrounds, preserving explicit islands', mode => {
     enableTruecolor()
     setBackgroundMode(mode)
-    const inherited = [background.surface('panel'), interaction.hover('hover')]
-    const islands = [background.code('code'), background.selection('selection')]
+    const inherited = [background.surface('panel'), interaction.hover('hover'), background.code('code')]
+    const islands = [background.selection('selection')]
     const row = background.canvas(`body ${color.muted('muted')} \u001B[1mbold\u001B[0m ${inherited.join(' ')} ${islands.join(' ')} tail`)
-    for (const word of ['body', 'muted', 'bold', 'panel', 'hover', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
-    for (const [index, word] of ['code', 'selection'].entries()) {
+    for (const word of ['body', 'muted', 'bold', 'panel', 'hover', 'code', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
+    for (const [index, word] of ['selection'].entries()) {
       expect(foregroundAt(row, word)).toBe(foregroundAt(islands[index]!, word))
     }
     expect(row).toContain('\u001B[1mbold')
@@ -218,13 +218,16 @@ describe('appearance settings', () => {
       .toThrow('不受支持')
   })
 
-  it('renders a light code surface inside the automatic DeepSeek light interface', () => {
+  it('inherits a light code surface by default and preserves explicit compatibility fill', () => {
     enableTruecolor()
     setTheme(themeFromAppearance(appearance('light')))
 
     expect(background.canvas('interface')).toContain('\u001B[49m')
-    expect(background.code('const answer = 42')).toContain('\u001B[48;2;255;255;255m')
+    expect(background.code('const answer = 42')).toContain('\u001B[49m')
+    expect(background.code('const answer = 42')).not.toContain('\u001B[48;')
     expect(background.code('const answer = 42')).toContain('\u001B[38;2;29;36;51m')
+    setBackgroundMode('explicit')
+    expect(background.code('const answer = 42')).toContain('\u001B[48;2;255;255;255m')
   })
 
   it('persists a change through the revision-protected Harness Settings path', async () => {

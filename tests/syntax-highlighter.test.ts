@@ -5,6 +5,7 @@ import {
   adoptSyntaxHighlighter,
   SyntaxHighlighter,
   syntaxLanguageForPath,
+  syntaxTokenBackground,
 } from '../src/client/syntax-highlighter.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 
@@ -23,16 +24,22 @@ describe('Shiki terminal syntax rendering', () => {
     truecolor()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)
     try {
-      const dark = highlighter.highlight('const answer: number = 42', 'ts').join('\n')
+      const dark = highlighter.highlight('const answer: number = 42', 'ts', 'inherit').join('\n')
       expect(dark).toContain('\u001B[')
       expect(dark).toContain('\u001B[38;2;145;167;255m')
       expect(dark).toContain('answer')
       expect(new Set([...dark.matchAll(/\u001B\[38;2;\d+;\d+;\d+m/gu)].map(match => match[0])).size)
         .toBeGreaterThan(1)
       expect(dark).not.toMatch(/\u001B\[(?:1|3|4|9)m/u)
+      expect(dark).not.toContain('\u001B[48;2;17;24;39m')
+
+      const explicit = highlighter.highlight('const answer: number = 42', 'ts', 'explicit').join('\n')
+      expect(explicit).toContain('\u001B[48;2;17;24;39m')
+      expect(explicit).not.toBe(dark)
+      expect(highlighter.highlight('const answer: number = 42', 'ts', 'inherit').join('\n')).toBe(dark)
 
       highlighter.setTheme(BUILT_IN_THEMES.light)
-      const light = highlighter.highlight('const answer: number = 42', 'typescript').join('\n')
+      const light = highlighter.highlight('const answer: number = 42', 'typescript', 'inherit').join('\n')
       expect(light).toContain('\u001B[38;2;49;86;216m')
       expect(light).not.toBe(dark)
     } finally {
@@ -45,10 +52,10 @@ describe('Shiki terminal syntax rendering', () => {
     const invalidate = vi.fn()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, invalidate)
     try {
-      const first = highlighter.highlight('def greet(name):\n    return f"hello {name}"', 'python').join('\n')
+      const first = highlighter.highlight('def greet(name):\n    return f"hello {name}"', 'python', 'inherit').join('\n')
       expect(first).toContain('\u001B[38;2;221;226;238m')
       await vi.waitFor(() => { expect(invalidate).toHaveBeenCalledTimes(1) })
-      const loaded = highlighter.highlight('def greet(name):\n    return f"hello {name}"', 'python').join('\n')
+      const loaded = highlighter.highlight('def greet(name):\n    return f"hello {name}"', 'python', 'inherit').join('\n')
       expect(loaded).toContain('\u001B[38;2;145;167;255m')
       expect(loaded).not.toBe(first)
     } finally {
@@ -66,13 +73,15 @@ describe('Shiki terminal syntax rendering', () => {
       tokenColors: [{
         scope: ['comment'],
         foreground: '#FF66CC',
+        background: '#123456',
         fontStyle: ['italic', 'bold'] as const,
       }],
     }
     const highlighter = await SyntaxHighlighter.create(imported, () => undefined)
     try {
-      const rendered = highlighter.highlight('// imported comment', 'typescript').join('\n')
+      const rendered = highlighter.highlight('// imported comment', 'typescript', 'inherit').join('\n')
       expect(rendered).toContain('\u001B[38;2;255;102;204m')
+      expect(rendered).not.toContain('\u001B[48;2;17;24;39m')
       expect(rendered).toContain('\u001B[1m')
       expect(rendered).toContain('\u001B[3m')
     } finally {
@@ -89,7 +98,7 @@ describe('Shiki terminal syntax rendering', () => {
         '+++ b/src/theme.ts',
         "-const codeTheme = 'dark'",
         '+const codeTheme = interfaceTone',
-      ].join('\n'), 'diff').join('\n')
+      ].join('\n'), 'diff', 'inherit').join('\n')
       expect(rendered).toContain('\u001B[38;2;240;113;127m')
       expect(rendered).toContain('\u001B[38;2;66;201;154m')
     } finally {
@@ -101,10 +110,12 @@ describe('Shiki terminal syntax rendering', () => {
     truecolor()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)
     try {
-      expect(highlighter.highlight('plain <text>', 'not-a-language').join('\n'))
+      expect(highlighter.highlight('plain <text>', 'not-a-language', 'inherit').join('\n'))
         .toContain('\u001B[38;2;221;226;238m')
+      expect(highlighter.highlight('plain <text>', 'not-a-language', 'inherit').join('\n'))
+        .not.toContain('\u001B[48;2;17;24;39m')
       vi.stubEnv('NO_COLOR', '1')
-      expect(highlighter.highlight('const raw = true', 'ts')).toEqual(['const raw = true'])
+      expect(highlighter.highlight('const raw = true', 'ts', 'inherit')).toEqual(['const raw = true'])
     } finally {
       highlighter.dispose()
     }
@@ -129,6 +140,13 @@ describe('Shiki theme revision', () => {
 })
 
 describe('syntax language inference', () => {
+  it('inherits only the base code background and preserves explicit token backgrounds', () => {
+    expect(syntaxTokenBackground(undefined, '#111827', 'inherit')).toBeUndefined()
+    expect(syntaxTokenBackground('#111827', '#111827', 'inherit')).toBeUndefined()
+    expect(syntaxTokenBackground('#123456', '#111827', 'inherit')).toBe('#123456')
+    expect(syntaxTokenBackground(undefined, '#111827', 'explicit')).toBe('#111827')
+  })
+
   it('uses explicit aliases first and otherwise maps supported file extensions', () => {
     expect(syntaxLanguageForPath('/tmp/file.unknown', 'py')).toBe('python')
     expect(syntaxLanguageForPath('/tmp/component.tsx')).toBe('tsx')

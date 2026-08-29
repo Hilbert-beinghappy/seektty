@@ -350,7 +350,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       adoptSyntaxHighlighter(created, liveTheme, (ready) => {
         syntax = ready
         disposeConstructedSyntax = () => { ready.dispose() }
-        setCodeHighlighter((code, lang) => ready.highlight(code, lang))
+        setCodeHighlighter((code, lang, background) => ready.highlight(code, lang, background))
       })
       if (stopping !== undefined) {
         created.dispose()
