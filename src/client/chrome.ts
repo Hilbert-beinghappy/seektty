@@ -390,7 +390,7 @@ export class StatusBar implements Component {
     const permission = this.hoveredTokenId === 'permission'
       ? background.hover(permissionText)
       : permissionText
-    if (this.detail === undefined || innerWidth - visibleWidth(permission) - visibleWidth(this.detail) < 1) {
+    if (this.detail === undefined || this.detail === '') {
       const clipped = fit(permission, innerWidth)
       this.tokens = [{
         id: 'permission',
@@ -398,16 +398,25 @@ export class StatusBar implements Component {
       }]
       return [`${prefix}${clipped}`]
     }
-    const detail = this.hoveredTokenId === 'detail' ? background.hover(this.detail) : this.detail
-    const gap = innerWidth - visibleWidth(permission) - visibleWidth(detail)
+    // Keep a visible notice even when the complete permission + error will
+    // not fit. Very narrow terminals prioritize the detail over the label.
+    const permissionBudget = visibleWidth(permission) + 1 + visibleWidth(this.detail) <= innerWidth
+      ? visibleWidth(permission) : innerWidth < 12 ? 0 : Math.min(
+        visibleWidth(permission),
+        innerWidth - visibleWidth(permission) >= 13 ? visibleWidth(permission) : Math.floor((innerWidth - 1) / 2),
+      )
+    const left = permissionBudget === 0 ? '' : fit(permission, permissionBudget)
+    const clippedDetail = fit(this.detail, innerWidth - visibleWidth(left) - (left === '' ? 0 : 1))
+    const detail = this.hoveredTokenId === 'detail' ? background.hover(clippedDetail) : clippedDetail
+    const gap = innerWidth - visibleWidth(left) - visibleWidth(detail)
     this.tokens = [
-      { id: 'permission', rect: { col: prefix.length, row: 0, width: visibleWidth(permission), height: 1 } },
+      ...(left === '' ? [] : [{ id: 'permission' as const, rect: { col: prefix.length, row: 0, width: visibleWidth(left), height: 1 } }]),
       {
         id: 'detail',
         rect: { col: prefix.length + innerWidth - visibleWidth(detail), row: 0, width: visibleWidth(detail), height: 1 },
       },
     ]
-    return [`${prefix}${permission}${' '.repeat(gap)}${detail}`]
+    return [`${prefix}${left}${' '.repeat(gap)}${detail}`]
   }
 }
 

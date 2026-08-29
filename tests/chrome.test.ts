@@ -252,6 +252,23 @@ describe('context bar running indicator', () => {
     expect(narrow.text).toContain('Standard')
   })
 
+  it.each(['zh', 'en'] as const)('keeps long status errors visible in narrow terminals (%s)', locale => {
+    setUiLocale(locale)
+    const bar = new StatusBar()
+    bar.setPermission('workspace-write')
+    bar.setDetail(locale === 'zh' ? '切换失败：' + '错误详情'.repeat(50) : 'Failed: ' + 'error details '.repeat(50))
+    for (const width of [1, 8, 20, 40, 80]) {
+      const row = bar.render(width)[0]!
+      expect(visibleWidth(row)).toBeLessThanOrEqual(width)
+      expect(bar.lastTokens().some(token => token.id === 'detail')).toBe(true)
+      for (const token of bar.lastTokens()) {
+        expect(token.rect.width).toBeGreaterThan(0)
+        expect(token.rect.col + token.rect.width).toBeLessThanOrEqual(width)
+      }
+      if (width >= 20) expect(row).toContain(locale === 'zh' ? '切换' : 'Failed')
+    }
+  })
+
   it('registers permission and detail tokens from the status layout, not a string parse', () => {
     vi.stubEnv('NO_COLOR', '1')
     const bar = new StatusBar()

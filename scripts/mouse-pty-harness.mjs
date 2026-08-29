@@ -12,10 +12,11 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import crossSpawn from 'cross-spawn'
 
 const root = resolve(import.meta.dirname, '..')
+const workspaceTitle = basename(root).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
 
 if (process.env.SEEKTTY_MOUSE_PTY !== '1') {
   process.stdout.write('skip: set SEEKTTY_MOUSE_PTY=1 to run opt-in PTY mouse tests\n')
@@ -190,11 +191,23 @@ async function oneCycle(index, home, env) {
   try {
     // ConPTY may consume DEC mouse-mode writes instead of forwarding them to
     // the captured output. The isolated manifest above proves the package;
-    // SeekTTY's OSC title proves that exact bundle reached its interactive UI.
-    await log.waitFor(/\]0;seektty/u, 20_000)
+    // The initial Session title follows the workspace, including renamed clones.
+    // Subsequent Help, permission and theme checks exercise the packaged UI.
+    await log.waitFor(new RegExp(`\\]0;${workspaceTitle}`, 'u'), 20_000)
     await log.waitFor(/API Key|输入消息|Type a message/u, 20_000)
     session.write('\u001B')
     await delay(100)
+    // First verify permission commands against this isolated, keyless Session.
+    for (const [permission, label] of [
+      ['read-only', /使用权限：只读|Permission: Read only/u],
+      ['workspace-write', /使用权限：工作区|Permission: Workspace/u],
+    ]) {
+      const since = log.text().length
+      session.write(`/permission ${permission}`)
+      await delay(100)
+      session.write('\r')
+      await log.waitFor(label, 10_000, since)
+    }
     // Exercise the packed slash-completion path without a Provider request:
     // an exact /help candidate survives Down wrapping and Enter opens Help.
     session.write('/help')

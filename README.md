@@ -152,6 +152,8 @@ See [Compatibility and verification](#compatibility-and-verification) for the ac
 
 SeekTTY reads these catalogs from the active Harness Profile. Unsupported optional capabilities degrade safely while dedicated terminal views continue to evolve.
 
+Permission changes use the native Host command and its execution result. The menu closes on success; failures remain visible in the menu for retry. Full-access and unknown presets still require confirmation, and a session switch invalidates an open permission selection. The command adapter supports the mounted two-argument legacy contract and the three-argument `images` contract of official dsh `0.1.1-rc.2`; unknown contracts are rejected without retrying the command.
+
 ## First-run API key setup
 
 | Dark | Light |
