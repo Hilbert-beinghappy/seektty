@@ -272,7 +272,7 @@ SeekTTY 默认使用 DeepSeek 暗色主题。`/theme` 会打开主题中心，�
 /theme delete <主题名>
 ```
 
-界面主题与代码主题彼此独立。输入 3–16 个 HEX/RGB 颜色即可生成亮色与暗色候选。`/theme import` 会读取本地 VS Code JSON/JSONC，解析相对 `include`，并保留可移植的 TextMate 颜色与样式。所有自定义路径都会先预览，并在保存前标出低对比度。定义保存在带 revision 保护的 `seektty-appearance` Harness Settings 命名空间中。
+界面主题与代码主题彼此独立。输入 3–16 个 HEX/RGB 颜色即可生成亮色与暗色候选。内置代码主题为常见编程语言、标记语言与结构化数据提供精细 TextMate 规则。`/theme import` 会读取本地 VS Code JSON/JSONC，解析相对 `include`，并将可移植的 TextMate 颜色、选择器优先级与样式原样作为权威语法规则；只有不含 `tokenColors` 的主题才使用 SeekTTY 的紧凑角色色生成兜底规则。所有自定义路径都会先预览，并在保存前标出低对比度。定义保存在带 revision 保护的 `seektty-appearance` Harness Settings 命名空间中。
 
 悬停是由当前界面主题统一派生的纯前景交互状态：使用主题 `brand` 色，不填充背景，不使用下划线、粗体、反色或额外标记，也不新增必填设置或修改保存的配色。选中态继续使用更强的背景填充；仍遵守 `NO_COLOR`。
 
