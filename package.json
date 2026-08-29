@@ -1,6 +1,6 @@
 {
   "name": "seektty",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [

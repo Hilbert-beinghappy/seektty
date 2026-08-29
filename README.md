@@ -7,7 +7,7 @@
 <p>A terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.5-orange" alt="Version 1.2.5"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -47,30 +47,30 @@ Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
 ```sh
 pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 
 dsh --profile tui
 ```
 
 These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. The per-command pnpm option avoids the pnpm 11 Global Virtual Store layout that the Cordis loader in the currently tested dsh releases cannot reliably load. SeekTTY never changes global pnpm configuration. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
 
-Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.4 review and release checklist](docs/release-v1.2.4-verification.md).
+Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.5 owner review and release checklist](docs/release-v1.2.5-verification.md). This pull request is a release candidate only; merging it does not publish a tag, GitHub Release, or npm package.
 
 ### Bare `deepseek` launcher
 
 After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to that tarball:
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 deepseek
 ```
 
 PowerShell uses the same package URL:
 
 ```powershell
-pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
 deepseek
 ```
 
@@ -88,16 +88,16 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.4` improves mouse navigation and input editing on official Harness `0.1.1-rc.2`, retaining native terminal selection as a fallback. No Settings or Session migration is required.
+SeekTTY `1.2.5` makes pnpm 11 installation and Profile plugin reconciliation reliable on official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
 
-### What's new in 1.2.4
+### What's new in 1.2.5
 
-- Lists keep their viewport instead of recentering on selection; ordinary mouse actions work at startup, and nested overlays share theme-aware hover and clickable footer buttons.
-- Overlay text and non-secret inputs support selection and clipboard editing. Ctrl+Z undoes edits in each input; the shortcut reference is grouped by purpose.
-- Context menus are independent of the page stack. Wheel and left-drag gestures dismiss the menu and continue immediately; right-drag opens it at the release position.
-- Escape followed by a mouse report no longer types protocol fragments into search fields. Dangerous confirmations remain keyboard-only, and F3 or `/mouse` retains native selection.
+- Launcher provisioning, compatible updates, and TUI plugin mutations now disable pnpm 11 Global Virtual Store per command, without changing the user's global pnpm configuration.
+- Failures caused by the current dsh/Cordis loader reading `store/v11/links` are identified separately from ordinary missing-dependency errors, with bilingual, credential-redacted recovery commands.
+- A shared-candidate Windows, macOS, and Linux CI matrix verifies Node 22/24 with GVS disabled and records the current upstream behavior with GVS enabled.
+- The adapter is restricted to the exact supported dsh range and preserves native `dsh plugin` reconciliation, Profile ownership, and the existing Bundle patch contract.
 
-See the [release notes](docs/release-v1.2.4.md) for changes and the [review checklist](docs/release-v1.2.4-verification.md) for verification limits.
+See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits. Version 1.2.4 remains the latest published release until the Owner explicitly approves and performs publication.
 
 ## Interface
 
@@ -318,8 +318,8 @@ Replace the former `deepseek-tui` global package once:
 
 ```sh
 pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
-pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 deepseek
 ```
 
@@ -327,7 +327,7 @@ Custom Profiles migrate independently on first launch. Native dsh-only installat
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
-dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 ```
 
 Removing SeekTTY changes only the target Profile, never the dsh installation:
@@ -347,7 +347,7 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Current tested Harness Host | `0.1.1-rc.2` |
 | pnpm 11 layout adapter | pnpm `11.7.0`; dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current mouse/input release | SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
+| Current compatibility candidate | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
@@ -359,15 +359,15 @@ This adapter does not run `pnpm config set`, set `NODE_PATH`, copy Host packages
 
 See the bilingual [pnpm 11 layout acceptance record](docs/pnpm11-layout-acceptance.md) for the gate contract, current local evidence, and the adapter exit condition.
 
-The 1.2.4 release checks cover:
+The 1.2.5 release-candidate checks cover:
 
 - Type checking, unit/integration tests, production build, packed-content checks, and duplicate-Host-package rejection.
 - Isolated add, boot, remove, and re-add on unmodified official dsh `0.1.1-rc.2` using the exact candidate tarball.
 - A shared-candidate CI matrix on Windows, macOS, and Linux with Node 22 and 24: GVS=false must pass the complete lifecycle; GVS=true must either boot successfully or reproduce and accurately classify the known dsh/Cordis loader failure. CI runner coverage is separate from manual real-terminal sign-off.
 - Windows ConPTY startup, slash navigation, context-menu gesture handoff, resize, and clean exit. Injected PTY input and synthetic renderer tests are not equivalent to real GUI-terminal mouse or clipboard testing.
-- The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [release checklist](docs/release-v1.2.4-verification.md).
+- The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [owner review checklist](docs/release-v1.2.5-verification.md).
 
-Earlier Clarify, attachment, Vision-Exp, and Provider observations are historical evidence, not renewed acceptance of those optional workflows in 1.2.4. The declared Host range is unchanged; this release's stock lifecycle rerun targets `0.1.1-rc.2`, not every legacy version.
+Earlier Clarify, attachment, Vision-Exp, mouse/input, and Provider observations are historical evidence, not renewed acceptance of those optional workflows in 1.2.5. The declared Host range is unchanged; this candidate's stock lifecycle rerun targets `0.1.1-rc.2`, not every legacy version.
 
 Reusable checks:
 

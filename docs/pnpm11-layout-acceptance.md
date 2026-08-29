@@ -1,7 +1,7 @@
 # pnpm 11 GVS compatibility acceptance / pnpm 11 GVS 兼容验收
 
 - Date / 日期: 2026-08-30
-- Candidate / 候选版本: SeekTTY `1.2.4`
+- Candidate / 候选版本: SeekTTY `1.2.5`
 - Host: unmodified official `@deepseek-ai/dsh@0.1.1-rc.2`
 - Package manager: pnpm `11.7.0`
 
@@ -40,9 +40,9 @@ pnpm test:pnpm11-layout true .artifacts
 | macOS | Not run locally; CI gate added, result pending | Not run locally; CI gate added, result pending |
 | Linux | Not run locally; CI gate added, result pending | Not run locally; CI gate added, result pending |
 
-The Windows run used the exact generated `seektty-1.2.4.tgz`. Automated process tests do not replace manual GUI-terminal, clipboard, or interaction acceptance.
+The Windows run used the exact generated `seektty-1.2.5.tgz`. Automated process tests do not replace manual GUI-terminal, clipboard, or interaction acceptance.
 
-Windows 本机运行使用了实际生成的 `seektty-1.2.4.tgz`。自动进程测试不等价于 GUI 终端、剪贴板或交互行为的人工验收。
+Windows 本机运行使用了实际生成的 `seektty-1.2.5.tgz`。自动进程测试不等价于 GUI 终端、剪贴板或交互行为的人工验收。
 
 ## Exit condition / 退出条件
 
