@@ -20,6 +20,7 @@ import {
   background,
   color,
   currentTheme,
+  interaction,
   setBackgroundMode,
   setTerminalCanvasBackground,
   setTheme,
@@ -95,14 +96,15 @@ describe('terminal themes', () => {
   it.each(['theme', 'terminal'] as const)('uses terminal foregrounds for unknown %s backgrounds, preserving explicit islands', mode => {
     enableTruecolor()
     setBackgroundMode(mode)
-    const islands = [background.code('code'), background.surface('panel'), background.hover('hover'), background.selection('selection')]
-    const row = background.canvas(`body ${color.muted('muted')} \u001B[1mbold\u001B[0m ${islands.join(' ')} tail`)
-    for (const word of ['body', 'muted', 'bold', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
-    for (const [index, word] of ['code', 'panel', 'hover', 'selection'].entries()) {
+    const inherited = [background.surface('panel'), interaction.hover('hover')]
+    const islands = [background.code('code'), background.selection('selection')]
+    const row = background.canvas(`body ${color.muted('muted')} \u001B[1mbold\u001B[0m ${inherited.join(' ')} ${islands.join(' ')} tail`)
+    for (const word of ['body', 'muted', 'bold', 'panel', 'hover', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
+    for (const [index, word] of ['code', 'selection'].entries()) {
       expect(foregroundAt(row, word)).toBe(foregroundAt(islands[index]!, word))
     }
     expect(row).toContain('\u001B[1mbold')
-    expect(row.replace(/\u001B\[[0-9;:]*m/gu, '')).toBe('body muted bold code panel hover selection tail')
+    expect(row.replace(/\u001B\[[0-9;:]*m/gu, '')).toBe('body muted bold panel hover code selection tail')
   })
 
   it('keeps saved theme colors for explicit fill and confirmed matching theme backgrounds', () => {
@@ -130,8 +132,8 @@ describe('terminal themes', () => {
 
     setTheme(BUILT_IN_THEMES.dark)
     expect(background.canvas('frame')).toContain('\u001B[48;2;9;14;27m')
-    expect(background.hover('option')).not.toBe(background.surface('option'))
-    expect(background.hover('option')).not.toBe(background.selection('option'))
+    expect(interaction.hover('option')).not.toBe(background.surface('option'))
+    expect(interaction.hover('option')).not.toBe(background.selection('option'))
     expect(color.brand('brand')).toContain('\u001B[38;2;102;130;255m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;52;65;95m')
     expect(color.pulse('◆', 4)).toContain('\u001B[38;2;145;167;255m')
@@ -139,18 +141,20 @@ describe('terminal themes', () => {
     setTheme(BUILT_IN_THEMES.light)
     expect(currentTheme().id).toBe('light')
     expect(background.canvas('frame')).toContain('\u001B[48;2;246;248;253m')
-    expect(background.hover('option')).not.toBe(background.surface('option'))
-    expect(background.hover('option')).not.toBe(background.selection('option'))
+    expect(interaction.hover('option')).not.toBe(background.surface('option'))
+    expect(interaction.hover('option')).not.toBe(background.selection('option'))
     expect(color.brand('brand')).toContain('\u001B[38;2;49;86;216m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;198;208;231m')
     expect(color.pulse('◆', 4)).toContain('\u001B[38;2;65;95;201m')
   })
 
-  it('restores a panel background after nested foreground resets', () => {
+  it.each(['theme', 'terminal', 'explicit'] as const)('restores the %s panel background after nested foreground resets', mode => {
     enableTruecolor()
     setTheme(BUILT_IN_THEMES.dark)
+    setBackgroundMode(mode)
     const surface = background.surface(`before ${color.brand('brand')} after`)
-    expect(surface.match(/\u001B\[48;2;17;24;39m/gu)).toHaveLength(2)
+    const expected = mode === 'explicit' ? '\u001B[48;2;17;24;39m' : '\u001B[49m'
+    expect(surface.split(expected)).toHaveLength(3)
     expect(surface.endsWith('\u001B[0m')).toBe(true)
   })
 
@@ -161,26 +165,29 @@ describe('terminal themes', () => {
     expect(visibleWidth(row)).toBe(10)
   })
 
-  it('keeps hover distinguishable when colors quantize to the same ANSI-16 background', () => {
+  it('renders hover as an ANSI-16 foreground without decoration or background', () => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm')
     vi.stubEnv('COLORTERM', undefined)
     vi.stubEnv('TERM_PROGRAM', undefined)
     vi.stubEnv('WT_SESSION', undefined)
-    expect(background.hover('option')).toContain('\u001B[4m')
-    expect(background.hover('option')).not.toBe(background.surface('option'))
+    const hovered = interaction.hover('option')
+    expect(hovered).toMatch(/^\u001B\[(?:3|9)\d+moption\u001B\[0m$/u)
+    expect(hovered).not.toMatch(/\u001B\[(?:1|4|(?:4|10)\d|48;)/u)
+    expect(visibleWidth(hovered)).toBe(6)
   })
 
-  it('invalidates derived hover when switching custom themes without changing their definitions', () => {
+  it('switches foreground-only hover with custom themes without changing their definitions', () => {
     enableTruecolor()
     const base = editableTheme(BUILT_IN_THEMES.dark, 'mono', 'Monochrome')
-    const mono = { ...base, colors: { ...base.colors, surface: '#111111', selection: '#111111' } }
+    const mono = { ...base, colors: { ...base.colors, brand: '#123456', surface: '#111111', selection: '#111111' } }
     const saved = structuredClone(mono)
     setTheme(themeFromAppearance(appearance('custom:mono', 0, [mono])))
-    expect(background.hover('option')).toContain('\u001B[4m')
+    expect(interaction.hover('option')).toContain('\u001B[38;2;18;52;86m')
+    expect(interaction.hover('option')).not.toMatch(/\u001B\[(?:1|4|48;)/u)
     expect(mono).toEqual(saved)
     setTheme(BUILT_IN_THEMES.dark)
-    expect(background.hover('option')).not.toContain('\u001B[4m')
+    expect(interaction.hover('option')).toContain('\u001B[38;2;102;130;255m')
   })
 
   it('quantizes arbitrary theme colors for 256-color and ANSI-16 terminals', () => {

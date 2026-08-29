@@ -14,7 +14,7 @@ import { horizontalRule } from './horizontal-rule.ts'
 import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
-import { background, color, editorTheme } from './theme.ts'
+import { background, color, editorTheme, interaction } from './theme.ts'
 import { autocompleteTargetId, editorMouseApi } from './pi-tui-adapters.ts'
 
 /** Pending composer image shown above the model rule. */
@@ -382,14 +382,12 @@ export class StatusBar implements Component {
       `使用权限：${permissionLabel(this.permission)}`,
       `Permission: ${permissionLabel(this.permission)}`,
     )
-    const permissionText = `${color.brand('▸▸')} ${
-      this.permission === 'danger-full-access'
+    const permissionLabelText = this.hoveredTokenId === 'permission'
+      ? interaction.hover(label)
+      : this.permission === 'danger-full-access'
         ? color.danger(label)
         : this.permission === 'read-only' ? color.muted(label) : color.accent(label)
-    }`
-    const permission = this.hoveredTokenId === 'permission'
-      ? background.hover(permissionText)
-      : permissionText
+    const permission = `${color.brand('▸▸')} ${permissionLabelText}`
     if (this.detail === undefined || this.detail === '') {
       const clipped = fit(permission, innerWidth)
       this.tokens = [{
@@ -407,7 +405,7 @@ export class StatusBar implements Component {
       )
     const left = permissionBudget === 0 ? '' : fit(permission, permissionBudget)
     const clippedDetail = fit(this.detail, innerWidth - visibleWidth(left) - (left === '' ? 0 : 1))
-    const detail = this.hoveredTokenId === 'detail' ? background.hover(clippedDetail) : clippedDetail
+    const detail = this.hoveredTokenId === 'detail' ? interaction.hover(clippedDetail) : clippedDetail
     const gap = innerWidth - visibleWidth(left) - visibleWidth(detail)
     this.tokens = [
       ...(left === '' ? [] : [{ id: 'permission' as const, rect: { col: prefix.length, row: 0, width: visibleWidth(left), height: 1 } }]),
@@ -531,7 +529,7 @@ export class PromptEditor extends Editor {
           autocompleteSnapshot?.generation ?? -1,
           visible.absoluteIndex,
           )
-      return hovered ? background.hover(row) : row
+      return hovered ? interaction.hover(row) : row
     })
 
     if (this.getText() === '' && !this.isShowingAutocomplete() && editorRows.length > 0) {
@@ -557,13 +555,13 @@ export class PromptEditor extends Editor {
         ...(this.facts.model === '' ? [] : [{
           id: 'model' as const,
           text: this.hoveredTargetId === 'chrome:model'
-            ? background.hover(modelLabel(this.facts.model))
+            ? interaction.hover(modelLabel(this.facts.model))
             : modelLabel(this.facts.model),
         }]),
         {
           id: 'mode' as const,
           text: this.hoveredTargetId === 'chrome:mode'
-            ? background.hover(modeLabel(this.facts.mode))
+            ? interaction.hover(modeLabel(this.facts.mode))
             : modeLabel(this.facts.mode),
         },
       ]

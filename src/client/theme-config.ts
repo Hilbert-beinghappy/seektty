@@ -353,25 +353,6 @@ export function ensureContrast(color: string, background: string, minimum: numbe
     : '#FFFFFF')
 }
 
-/**
- * Derive a transient interaction style from any interface theme, without changing its saved colors.
- * Oklab keeps the hover between panel and selection; text legibility is no worse than the panel.
- */
-export function resolveHoverStyle(colors: TuiThemeUiColors): { readonly background: string; readonly underline: boolean } {
-  const background = ensureContrast(
-    mix(colors.surface, colors.selection, 0.5),
-    colors.text,
-    Math.min(4.5, themeContrast(colors.text, colors.surface)),
-  )
-  const hover = oklabOf(background)
-  const underline = [colors.canvas, colors.surface, colors.selection].some(color => {
-    const other = oklabOf(color)
-    // A small perceptual separation needs a non-color cue, including monochrome custom palettes.
-    return Math.hypot(hover.lightness - other.lightness, hover.a - other.a, hover.b - other.b) < 0.025
-  })
-  return { background, underline }
-}
-
 function hueDistance(left: number, right: number): number {
   const distance = Math.abs(left - right) % 360
   return Math.min(distance, 360 - distance)

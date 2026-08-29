@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Box, TUI, visibleWidth, type Terminal } from '@mariozechner/pi-tui'
 import { BottomAnchoredLayout } from '../src/client/chrome.ts'
-import { background, color, setBackgroundMode, setTerminalCanvasBackground, setTheme } from '../src/client/theme.ts'
+import { background, color, interaction, setBackgroundMode, setTerminalCanvasBackground, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 import { tuiFrameApi } from '../src/client/pi-tui-adapters.ts'
 import type { TuiBackgroundMode } from '../src/protocol.ts'
@@ -38,18 +38,21 @@ describe('main canvas background semantics', () => {
     expect(background.canvas(`before ${color.brand('中文')} after\u001B[m end`)).toBe(row)
   })
 
-  it('leaves panel, code, hover and selection colors and text widths unchanged', () => {
+  it('inherits panel backgrounds while preserving code, hover and selection geometry', () => {
     truecolor()
-    const layers = () => [background.surface('panel'), background.code('const 中文 = 1'), background.hover('hover'), background.selection('selected')]
+    const stableLayers = () => [background.code('const 中文 = 1'), interaction.hover('hover'), background.selection('selected')]
     setBackgroundMode('explicit')
-    const original = layers()
+    const original = stableLayers()
     for (const mode of ['theme', 'terminal', 'explicit'] as const) {
       setBackgroundMode(mode)
-      expect(layers()).toEqual(original)
-      const composed = background.canvas(`${original.join(' ')} tail`)
+      expect(stableLayers()).toEqual(original)
+      const panel = background.surface('panel')
+      expect(panel).toContain(mode === 'explicit' ? '\u001B[48;2;17;24;39m' : DEFAULT_BG)
+      if (mode !== 'explicit') expect(panel).not.toContain('\u001B[48;')
+      const composed = background.canvas(`${panel} ${original.join(' ')} tail`)
       expect(plain(composed)).toBe('panel const 中文 = 1 hover selected tail')
       expect(visibleWidth(composed)).toBe(visibleWidth(plain(composed)))
-      for (const line of original) expect(composed).toContain(line.slice(0, line.indexOf('m') + 1))
+      for (const line of [panel, ...original]) expect(composed).toContain(line.slice(0, line.indexOf('m') + 1))
     }
   })
 })
