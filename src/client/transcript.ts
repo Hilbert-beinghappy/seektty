@@ -112,6 +112,8 @@ interface TranscriptPreferences {
   readonly diffContextLines: number
   readonly expandedTools: ReadonlySet<string>
   readonly collapsedTools: ReadonlySet<string>
+  readonly expandedReasoning: ReadonlySet<string>
+  readonly collapsedReasoning: ReadonlySet<string>
   readonly focusedTool?: string
 }
 
@@ -161,6 +163,8 @@ type TranscriptRow = ({
   readonly exampleId?: string
   /** Tool-card identity for per-card expand in focus mode. */
   readonly toolKey?: string
+  /** Reasoning-region identity for pointer-only presentation toggles. */
+  readonly reasoningKey?: string
 }
 
 /** Preserve source newlines that would otherwise be indistinguishable from exact-width wraps. */
@@ -213,8 +217,25 @@ export type TranscriptFocusAction = {
   readonly key: string
 }
 
-function thinkingRow(): TranscriptRow {
-  return { format: 'plain', text: ui('正在思考…', 'Thinking…'), pulse: 'thinking' }
+function thinkingRow(key: string, expanded: boolean): TranscriptRow {
+  return {
+    format: 'plain',
+    text: expanded
+      ? ui('正在思考… ▾', 'Thinking… ▾')
+      : ui('正在思考…（已折叠） ▸', 'Thinking… (collapsed) ▸'),
+    pulse: 'thinking',
+    reasoningKey: key,
+  }
+}
+
+function reasoningHeaderRow(key: string, expanded: boolean): TranscriptRow {
+  return {
+    format: 'plain',
+    text: color.muted(expanded
+      ? ui('▾ 思考', '▾ Reasoning')
+      : ui('▸ 思考（已折叠）', '▸ Reasoning (collapsed)')),
+    reasoningKey: key,
+  }
 }
 
 class PulsingRow implements Component {
@@ -463,13 +484,15 @@ function assistantBlockRows(
   block: AssistantBlock,
   preferences: TranscriptPreferences,
   liveReasoning = false,
+  reasoning?: { readonly key: string; readonly expanded: boolean },
 ): TranscriptRow[] {
   switch (block.kind) {
     case 'text': return block.text === '' ? [] : [{ format: 'markdown', text: block.text }]
     case 'reasoning': {
       if (block.text === '') return []
-      if (!preferences.reasoning && !liveReasoning) return []
-      if (liveReasoning && !preferences.reasoning) {
+      if (reasoning !== undefined && !reasoning.expanded) return []
+      if (reasoning === undefined && !preferences.reasoning && !liveReasoning) return []
+      if (liveReasoning) {
         // Plain text keeps a stable wrapped prefix while tokens append, so
         // earlier reasoning lines already in scrollback do not look changed.
         return [{ format: 'plain', text: color.muted(block.text) }]
@@ -477,7 +500,7 @@ function assistantBlockRows(
       const quoted = block.text.split('\n').map(line => `> ${line}`).join('\n')
       return [{
         format: 'markdown',
-        text: `> **${ui('思考', 'Reasoning')}**\n>\n${quoted}`,
+        text: reasoning === undefined ? `> **${ui('思考', 'Reasoning')}**\n>\n${quoted}` : quoted,
       }]
     }
     case 'image': return [imageRow(block.attachment)]
@@ -989,8 +1012,20 @@ function nodeFingerprint(
     diffContextLines: preferences.diffContextLines,
     expanded: preferences.expandedTools.has(node.key),
     collapsed: preferences.collapsedTools.has(node.key),
+    reasoningExpanded: preferences.expandedReasoning.has(node.key),
+    reasoningCollapsed: preferences.collapsedReasoning.has(node.key),
     focusedTool: preferences.focusedTool,
   })
+}
+
+function reasoningExpanded(
+  preferences: TranscriptPreferences,
+  key: string,
+  defaultExpanded: boolean,
+): boolean {
+  if (preferences.collapsedReasoning.has(key)) return false
+  if (preferences.expandedReasoning.has(key)) return true
+  return preferences.reasoning || defaultExpanded
 }
 
 function nonnegativeNumber(value: unknown): number | undefined {
@@ -1094,19 +1129,20 @@ function assistantStepData(data: unknown): AssistantChatData | undefined {
     : undefined
 }
 
-function assistantStepRows(data: unknown, preferences: TranscriptPreferences): TranscriptRow[] {
+function assistantStepRows(data: unknown, preferences: TranscriptPreferences, fallbackKey: string): TranscriptRow[] {
   const step = assistantStepData(data)
   if (step === undefined) return []
-  const hasFoldedReasoning = !preferences.reasoning
-    && step.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
+  const hasReasoning = step.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
   const hasAnswer = step.blocks.some(block => block.kind === 'text' && block.text !== '')
   const thinking = !hasAnswer && step.status === 'running'
+  const key = fallbackKey
+  const expanded = reasoningExpanded(preferences, key, thinking)
   const content = step.blocks.flatMap(block => block.kind === 'tool-call'
     ? []
-    : assistantBlockRows(block, preferences, thinking && !preferences.reasoning))
-  if (content.length === 0 && step.status === 'settled' && !hasFoldedReasoning) return []
+    : assistantBlockRows(block, preferences, thinking, { key, expanded }))
+  if (content.length === 0 && step.status === 'settled' && !hasReasoning) return []
   const rows: TranscriptRow[] = []
-  if (thinking) rows.push(thinkingRow())
+  if (hasReasoning) rows.push(thinking ? thinkingRow(key, expanded) : reasoningHeaderRow(key, expanded))
   rows.push(...content)
   if (step.status === 'interrupted') rows.push({ format: 'plain', text: color.warning(ui('已停止', 'Stopped')) })
   return grouped(rows)
@@ -1184,7 +1220,7 @@ function retryRows(data: unknown, preferences: TranscriptPreferences): Transcrip
 }
 
 function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPreferences): TranscriptRow[] {
-  if (node.kind === 'assistant-step') return assistantStepRows(node.data, preferences)
+  if (node.kind === 'assistant-step') return assistantStepRows(node.data, preferences, node.key)
   if (node.kind === 'tool-call') {
     if (preferences.tools === 'hidden') return []
     const data = toolChatData(node.data)
@@ -1240,7 +1276,7 @@ interface TranscriptBlockLines {
 }
 
 interface TranscriptPointerControl {
-  readonly kind: 'tool' | 'example'
+  readonly kind: 'tool' | 'reasoning' | 'example'
   readonly id: string
 }
 
@@ -1331,6 +1367,9 @@ export class Transcript implements Component, Focusable {
   private toolFocus = false
   private readonly expandedTools = new Set<string>()
   private readonly collapsedTools = new Set<string>()
+  private readonly expandedReasoning = new Set<string>()
+  private readonly collapsedReasoning = new Set<string>()
+  private readonly reasoningStates = new Map<string, boolean>()
   private readonly nodeCache = new Map<string, TranscriptBlock>()
   private readonly lineCache = new WeakMap<Component, { width: number; lines: readonly string[] }>()
   focused = false
@@ -1348,7 +1387,7 @@ export class Transcript implements Component, Focusable {
   private readonly lineControls = new Map<string, readonly (TranscriptPointerControl | undefined)[]>()
   private lastPointerControls: readonly {
     readonly row: number
-    readonly kind: 'tool' | 'example'
+    readonly kind: 'tool' | 'reasoning' | 'example'
     readonly id: string
   }[] = []
   private hoveredRegionId: string | undefined
@@ -1477,13 +1516,15 @@ export class Transcript implements Component, Focusable {
       id: `transcript:${control.kind}:${control.id}`,
       rect: { col: origin.col + inset, row: origin.row + control.row, width, height: 1 },
       zIndex: 11,
-      role: control.kind === 'tool' ? 'button' : 'option',
+      role: control.kind === 'example' ? 'option' : 'button',
       enabled: true,
-      activation: control.kind === 'tool' ? 'direct' : 'arm',
+      activation: control.kind === 'example' ? 'arm' : 'direct',
       hover: 'highlight',
       action: {
         kind: 'transcript',
-        command: control.kind === 'tool' ? 'toggle' : 'example',
+        command: control.kind === 'tool'
+          ? 'toggle'
+          : control.kind === 'reasoning' ? 'toggle-reasoning' : 'example',
         targetKey: control.id,
       },
     }))
@@ -1527,6 +1568,21 @@ export class Transcript implements Component, Focusable {
     this.update(this.snapshot, this.imageLoader)
     this.requestRender()
     return { kind: 'tool', key }
+  }
+
+  /** Toggle one visible reasoning region without mutating the Session log. */
+  pointerToggleReasoning(key: string): boolean {
+    if (!this.reasoningStates.has(key) || this.snapshot === undefined) return false
+    if (this.reasoningStates.get(key) === true) {
+      this.expandedReasoning.delete(key)
+      this.collapsedReasoning.add(key)
+    } else {
+      this.collapsedReasoning.delete(key)
+      this.expandedReasoning.add(key)
+    }
+    this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return true
   }
 
   /** Track/end-cap click. A thumb press without movement does not jump. */
@@ -1668,6 +1724,7 @@ export class Transcript implements Component, Focusable {
     this.lineControls.clear()
     this.lastViewportMaps = []
     this.lastPointerControls = []
+    this.reasoningStates.clear()
     this.selection = undefined
     this.syncHeightIndexCounters()
     this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
@@ -1695,6 +1752,9 @@ export class Transcript implements Component, Focusable {
       this.sessionId = sessionId
       this.expandedTools.clear()
       this.collapsedTools.clear()
+      this.expandedReasoning.clear()
+      this.collapsedReasoning.clear()
+      this.reasoningStates.clear()
       this.toolCursor = 0
       this.nodeCache.clear()
       this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
@@ -1722,12 +1782,23 @@ export class Transcript implements Component, Focusable {
       diffContextLines: this.diffContextLines,
       expandedTools: this.expandedTools,
       collapsedTools: this.collapsedTools,
+      expandedReasoning: this.expandedReasoning,
+      collapsedReasoning: this.collapsedReasoning,
       ...(this.toolFocus ? { focusedTool: this.toolKeys()[this.toolCursor] } : {}),
     }
     const visibleNodes = snapshot.chat.order.flatMap((key) => {
       const node = snapshot.chat.nodes.get(key)
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
+    this.reasoningStates.clear()
+    for (const node of visibleNodes) {
+      const step = assistantStepData(node.data)
+      if (step?.blocks.some(block => block.kind === 'reasoning' && block.text !== '') !== true) continue
+      const key = node.key
+      const thinking = step.status === 'running'
+        && !step.blocks.some(block => block.kind === 'text' && block.text !== '')
+      this.reasoningStates.set(key, reasoningExpanded(preferences, key, thinking))
+    }
     const blocks: TranscriptBlock[] = []
     const keep = new Set<string>()
     let hasVisibleRows = false
@@ -1764,18 +1835,24 @@ export class Transcript implements Component, Focusable {
     }
     if (snapshot.partial !== null && !visibleNodes.some(node => node.kind === 'assistant-step')) {
       const partial = snapshot.partial
+      const key = '__partial__'
+      const thinking = !partial.blocks.some(block => block.kind === 'text' && block.text !== '')
+      const hasReasoning = partial.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
+      const expanded = reasoningExpanded(preferences, key, thinking)
+      if (hasReasoning) this.reasoningStates.set(key, expanded)
       take('__partial__', JSON.stringify({
         partial,
         tools: preferences.tools,
         reasoning: preferences.reasoning,
+        reasoningExpanded: preferences.expandedReasoning.has(key),
+        reasoningCollapsed: preferences.collapsedReasoning.has(key),
         toolOutputLineLimit: preferences.toolOutputLineLimit,
         diffContextLines: preferences.diffContextLines,
       }), () => {
-        const thinking = !partial.blocks.some(block => block.kind === 'text' && block.text !== '')
         const partialRows = partial.blocks.flatMap(block =>
-          assistantBlockRows(block, preferences, thinking && !preferences.reasoning))
+          assistantBlockRows(block, preferences, thinking, { key, expanded }))
         return grouped([
-          ...(thinking ? [thinkingRow()] : []),
+          ...(hasReasoning ? [thinking ? thinkingRow(key, expanded) : reasoningHeaderRow(key, expanded)] : []),
           ...partialRows,
         ])
       })
@@ -1960,6 +2037,8 @@ export class Transcript implements Component, Focusable {
       const start = lines.length
       const control: TranscriptPointerControl | undefined = row?.toolKey !== undefined
         ? { kind: 'tool', id: row.toolKey }
+        : row?.reasoningKey !== undefined
+          ? { kind: 'reasoning', id: row.reasoningKey }
         : row?.exampleId !== undefined
           ? { kind: 'example', id: row.exampleId }
           : undefined
@@ -2232,7 +2311,7 @@ export class Transcript implements Component, Focusable {
   ): { readonly lines: readonly string[]; readonly maps: readonly ViewportCellMap[] } {
     const start = this.viewportState?.start
     const maps: ViewportCellMap[] = []
-    const pointerControls: { readonly row: number; readonly kind: 'tool' | 'example'; readonly id: string }[] = []
+    const pointerControls: { readonly row: number; readonly kind: 'tool' | 'reasoning' | 'example'; readonly id: string }[] = []
     if (start === undefined) {
       this.lastViewportMaps = maps
       this.lastPointerControls = pointerControls
@@ -2715,6 +2794,8 @@ export class Transcript implements Component, Focusable {
       diffContextLines: this.diffContextLines,
       expandedTools: this.expandedTools,
       collapsedTools: this.collapsedTools,
+      expandedReasoning: this.expandedReasoning,
+      collapsedReasoning: this.collapsedReasoning,
     }, key)
     if (expanded) {
       this.expandedTools.delete(key)

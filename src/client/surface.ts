@@ -1439,6 +1439,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         transcript.pointerToggleTool(region.action.targetKey)
         return
       }
+      if (region?.action.kind === 'transcript' && region.action.command === 'toggle-reasoning' && region.action.targetKey !== undefined) {
+        transcript.pointerToggleReasoning(region.action.targetKey)
+        return
+      }
       if (region?.action.kind === 'transcript' && region.action.command === 'example' && region.action.targetKey !== undefined) {
         const id = region.action.targetKey
         transcript.focusExample(id)

@@ -266,6 +266,50 @@ describe('conversation viewport', () => {
     transcript.dispose()
   })
 
+  it('keeps a manually folded live reasoning region folded while tokens continue', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      assistantStep('a1', 'running', [{ kind: 'reasoning', text: '第一段推理' }]),
+    ]))
+    transcript.render(60)
+    const key = 'a1'
+    expect(transcript.pointerToggleReasoning(key)).toBe(true)
+    expect(transcript.render(60).join('\n')).not.toContain('第一段推理')
+    expect(transcript.render(60).join('\n')).toContain('已折叠')
+
+    transcript.update(snapshot([
+      assistantStep('a1', 'running', [{ kind: 'reasoning', text: '第一段推理\n新收到的推理' }]),
+    ]))
+    expect(transcript.render(60).join('\n')).not.toContain('新收到的推理')
+    expect(transcript.pointerToggleReasoning(key)).toBe(true)
+    expect(transcript.render(60).join('\n')).toContain('新收到的推理')
+    transcript.dispose()
+  })
+
+  it('shows a clickable collapsed reasoning header after completion', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      assistantStep('a1', 'settled', [
+        { kind: 'reasoning', text: '完成后的推理' },
+        { kind: 'text', text: '结论' },
+      ]),
+    ]))
+    const collapsed = transcript.render(60).join('\n')
+    expect(collapsed).toContain('思考（已折叠）')
+    expect(collapsed).not.toContain('完成后的推理')
+    const hits = transcript.controlHitRegions({ col: 0, row: 0, width: 60, height: 12 })
+    expect(hits.some(region => region.id === 'transcript:reasoning:a1'
+      && region.activation === 'direct'
+      && region.action.kind === 'transcript'
+      && region.action.command === 'toggle-reasoning')).toBe(true)
+
+    expect(transcript.pointerToggleReasoning('a1')).toBe(true)
+    expect(transcript.render(60).join('\n')).toContain('完成后的推理')
+    transcript.dispose()
+  })
+
   it('keeps a running tool duration live when color animation is disabled', () => {
     vi.useFakeTimers()
     vi.setSystemTime(20_000)
