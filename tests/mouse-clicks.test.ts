@@ -10,6 +10,7 @@ describe('click matrix ownership', () => {
     const transcript = readFileSync(resolve(root, 'src/client/transcript.ts'), 'utf8')
     const overlays = readFileSync(resolve(root, 'src/client/overlays.ts'), 'utf8')
     expect(surface).toContain('transcript.pointerToggleTool')
+    expect(surface).toContain('transcript.pointerToggleReasoning')
     expect(surface).toContain('transcript.focusExample')
     expect(surface).toContain('transcript.activateFocused')
     expect(surface).toContain("actions.execute('model'")
@@ -21,6 +22,8 @@ describe('click matrix ownership', () => {
     expect(surface).toContain('activateAutocompleteSelection')
     expect(surface).not.toContain('setAutocompleteSelectedIndex')
     expect(transcript).toContain('toggleToolCard(key)')
+    expect(transcript).toContain("command: control.kind === 'tool'")
+    expect(transcript).toContain("'toggle-reasoning'")
     expect(overlays).toContain("mouseExecute: 'focus-only'")
   })
 
