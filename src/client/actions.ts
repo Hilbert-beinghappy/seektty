@@ -1356,8 +1356,8 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const selected = await overlays.select({
       title: ui('背景模式', 'Background mode'),
       detail: ui(
-        '仅主画布继承终端效果，不设置透明度。弹窗、代码块和高亮保留独立底色；保存后立即生效。',
-        'Only the canvas inherits terminal effects; opacity is not changed. Panels, code blocks and highlights keep their backgrounds. Saves apply immediately.',
+        '主画布、弹窗面板和代码基础背景按模式继承终端效果，不设置透明度；选区与特殊 token 背景保留。保存后立即生效。',
+        'Canvas, panels and base code backgrounds inherit terminal effects by mode; opacity is not changed. Selections and explicit token backgrounds remain. Saves apply immediately.',
       ),
       searchable: false,
       initialChoiceId: current,
@@ -1372,7 +1372,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         },
         {
           id: 'explicit', label: ui('显式主题底色（兼容）', 'Explicit fill (compatibility)'),
-          description: ui('沿用 RGB 画布与主题改色；实际透明效果由终端决定', 'Keep the RGB canvas and theme color sync; the terminal still decides opacity'),
+          description: ui('沿用 RGB 画布、面板、代码背景与主题改色；实际透明效果由终端决定', 'Keep RGB canvas, panel and code backgrounds plus theme color sync; the terminal still decides opacity'),
         },
       ].map(choice => ({ ...choice, active: choice.id === current })),
       options: { width: 90, maxHeight: '90%', anchor: 'center', margin: 1 },

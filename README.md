@@ -274,21 +274,21 @@ SeekTTY starts with its DeepSeek dark theme. `/theme` opens the theme center; di
 
 Interface and code themes are independent. A palette of 3–16 HEX/RGB colors can generate light and dark candidates. `/theme import` reads local VS Code JSON/JSONC themes, resolves relative `include` files, and preserves portable TextMate colors and styles. Every customization path previews changes and flags low contrast before saving. Definitions live in the revision-protected `seektty-appearance` Harness Settings namespace.
 
-Hover styling is derived from the active interface theme, including existing custom themes, without adding required settings or altering saved colors. Indistinct or limited-color backgrounds use an underline cue; `NO_COLOR` remains respected.
+Hover is a foreground-only interaction state derived from the active interface theme. It uses the theme's `brand` color without a background fill, underline, bold, reverse video, extra marker, required setting, or saved-palette mutation. Selection remains the stronger filled state; `NO_COLOR` remains respected.
 
 The main canvas now defaults to **theme colors + terminal effects**, instead of an explicit RGB fill. It uses the terminal's default background so the terminal can apply its configured transparency, blur, or background image. Choose **Background mode** in `/theme` or `/settings seektty-appearance`; both open the same editor and apply successful saves immediately.
 
-| `backgroundMode` | Main canvas | Terminal color |
+| `backgroundMode` | Canvas, panels and base code background | Terminal color |
 | --- | --- | --- |
-| `theme` (default, including older settings) | Terminal default background | Temporarily synchronize the interface theme with OSC 11 |
-| `terminal` | Terminal default background | Leave unchanged; restore the captured original if SeekTTY changed it |
-| `explicit` (compatibility) | Explicit theme fill, as before | Keep the previous OSC 11 synchronization behavior |
+| `theme` (default, including older settings) | Terminal default background (`SGR 49`) | Temporarily synchronize the interface theme with OSC 11 |
+| `terminal` | Terminal default background (`SGR 49`) | Leave unchanged; restore the captured original if SeekTTY changed it |
+| `explicit` (compatibility) | Explicit canvas, panel and code-theme fills, as before | Keep the previous OSC 11 synchronization behavior |
 
-Panels, code blocks, selections and hover keep their independent backgrounds and highlighting. Their transparency can differ from the canvas; even `explicit` is not guaranteed opaque. Background mode belongs to Harness `seektty-appearance` settings, not theme files: theme switching, previews, import and export do not overwrite it.
+In `theme` and `terminal`, padded panel rows and the base background of inline, fenced, tool, file and diff code use the same terminal-default background semantics as the canvas. Code layout and syntax foregrounds are unchanged. Selection and explicitly authored TextMate token backgrounds remain colored islands; hover changes foreground only. In `explicit`, the previous canvas, panel and code fills remain available, although the terminal still decides whether explicit colors are opaque. Background mode belongs to Harness `seektty-appearance` settings, not theme files: theme switching, previews, import and export do not overwrite it.
 
-Canvas text adapts to a known background that differs from the theme. If the background is unknown (including unavailable synchronization), it uses the terminal's default foreground instead of guessing black or white; semantic text colors are reduced, while bold, underline and independent code/panel colors remain. This also updates existing messages without moving the viewport or clearing selection. The open theme menu refreshes its current marker and code-theme description after saving or returning from a child menu.
+Canvas text adapts to a known background that differs from the theme. If the background is unknown (including unavailable synchronization), it uses the terminal's default foreground instead of guessing black or white; semantic text colors on default-background cells are reduced, while text styles, selection and explicit token backgrounds remain. This also updates existing messages without moving the viewport or clearing selection. The open theme menu refreshes its current marker and code-theme description after saving or returning from a child menu.
 
-Color synchronization requires a supported truecolor terminal and a valid reply to one 500 ms asynchronous query. Unsupported or timed-out queries, `NO_COLOR`, limited colors, and tmux/screen do not recolor the terminal. In `theme` mode, an unavailable sync leaves the default background in place with one non-blocking notice, not an automatic RGB fallback. `SEEKTTY_TERMINAL_BACKGROUND=off` disables recoloring only; it does not change the selected mode. Exit restores the captured color. SeekTTY does not read/set opacity, edit terminal configuration, or alter window decorations. See [compatibility](docs/terminal-background-compatibility.md) and [acceptance results](docs/background-inheritance-acceptance.md).
+Color synchronization requires a supported truecolor terminal and a valid reply to one 500 ms asynchronous query. Unsupported or timed-out queries, `NO_COLOR`, limited colors, and tmux/screen do not recolor the terminal. In `theme` mode, an unavailable sync leaves the default background in place with one non-blocking notice, not an automatic RGB fallback. `SEEKTTY_TERMINAL_BACKGROUND=off` disables recoloring only; it does not change the selected mode. Exit restores the captured color. SeekTTY does not read/set opacity, edit terminal configuration, or alter window decorations. See [compatibility](docs/terminal-background-compatibility.md) and [current acceptance results](docs/transparent-surfaces-hover-acceptance.md).
 
 Use `/language` or a direct command to switch the terminal copy live:
 

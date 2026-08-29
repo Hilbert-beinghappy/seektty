@@ -4,15 +4,15 @@
 
 The main canvas defaults to `theme`: interface colors with terminal-owned background effects. Older settings without `backgroundMode` use this default too. This changes the previous explicitly painted canvas; choose `explicit` to retain that rendering behavior.
 
-| Harness `seektty-appearance.backgroundMode` | Canvas background | OSC 11 policy |
+| Harness `seektty-appearance.backgroundMode` | Canvas, panels and base code background | OSC 11 policy |
 | --- | --- | --- |
 | `theme` (default) | Default background (`SGR 49`) | Synchronize the interface theme's `colors.canvas` when safe |
 | `terminal` | Default background (`SGR 49`) | Do not recolor; restore an original captured earlier in this lifetime |
-| `explicit` (compatibility) | Explicit theme background, quantized to the terminal's color depth | Same synchronization policy as before |
+| `explicit` (compatibility) | Explicit canvas, panel and code-theme backgrounds, quantized to the terminal's color depth | Same synchronization policy as before |
 
 `/theme` → **Background mode** and `/settings seektty-appearance` → **Background mode** share one three-choice editor. Changes are persisted through revision-protected Harness Settings before applying; cancellation or failure leaves the current appearance unchanged. Successful changes redraw the full viewport without restarting, moving scroll anchors, clearing selection, or changing hit geometry. Theme previews retain the mode, and theme switching/import/export never writes it.
 
-The canvas and its full-width/full-height blank filling remain in place. Foreground resets restore the selected background semantics. This is not a different layout or a full-history renderer. Panels, code blocks, selections and hover retain their existing independent backgrounds and syntax colors; those regions may have different transparency from the main canvas.
+The canvas and its full-width/full-height blank filling remain in place. Padded modal rows still overwrite the covered cells, so `SGR 49` exposes terminal effects, not underlying transcript characters. Foreground resets restore the selected background semantics. Code blocks retain their layout and syntax foregrounds; only their base background follows the mode. Selection and explicitly authored TextMate token backgrounds remain colored islands. Hover is foreground-only `brand` text with no fill, underline, bold, reverse video or extra marker.
 
 No dependencies, alpha-percentage probes, terminal-specific opacity APIs, or terminal configuration writes are added. Opacity, blur, background images, and OS window decorations remain terminal/compositor responsibilities. `explicit` describes escape sequences, not a promise of opacity. For example, [Kitty applies opacity to cells matching its default background](https://sw.kovidgoyal.net/kitty/conf/#opt-kitty.background_opacity), while [Ghostty can optionally apply opacity to explicitly colored cells](https://ghostty.org/docs/config/reference#background-opacity-cells). [Windows Terminal owns its profile opacity, acrylic and background-image settings](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/profile-appearance#transparency). SeekTTY does not change these options.
 
@@ -30,7 +30,7 @@ The existing pinned `@mariozechner/pi-tui@0.73.1` input framing is reused unchan
 
 ## Safe fallback
 
-Color synchronization still requires an interactive managed terminal and the existing truecolor detection. It is disabled by `NO_COLOR`, limited color depth, `TERM=dumb`, `TMUX`, `STY`, a `screen*`/`tmux*` terminal type, or `SEEKTTY_TERMINAL_BACKGROUND=off` (`0` and `false` also work). The environment switch disables recoloring only: `theme`/`terminal` still use the default background and `explicit` still uses a theme fill where colors are enabled. `NO_COLOR` retains unstyled output. Non-interactive and dumb terminals retain the existing headless guidance.
+Color synchronization still requires an interactive managed terminal and the existing truecolor detection. It is disabled by `NO_COLOR`, limited color depth, `TERM=dumb`, `TMUX`, `STY`, a `screen*`/`tmux*` terminal type, or `SEEKTTY_TERMINAL_BACKGROUND=off` (`0` and `false` also work). The environment switch disables recoloring only: `theme`/`terminal` still use the default background for canvas, panels and base code, while `explicit` still uses theme fills where colors are enabled. `NO_COLOR` retains unstyled output. Non-interactive and dumb terminals retain the existing headless guidance.
 
 Direct SSH uses the same bounded query; network latency may cause safe fallback. Multiplexers are excluded because cached replies or outer-window mutations could affect other panes. No passthrough is forced. A successful protocol test cannot prove compositor effects or pixel-perfect padding in every emulator.
 
@@ -38,13 +38,13 @@ Direct SSH uses the same bounded query; network latency may cause safe fallback.
 
 The saved theme is unchanged. If the captured or applied background differs from its canvas color, RGB foregrounds on the default background are adjusted with the existing contrast calculation to at least 4.5:1. If the background is unknown, canvas foregrounds use `SGR 39`, the terminal's configured foreground. This includes semantic colors embedded in cached Markdown; adapting only the outer text color would be insufficient. No extra query is issued just to discover a terminal-mode background.
 
-Adaptation runs at the canvas rendering boundary, so mode changes or background replies do not recreate transcript nodes, disturb selection, or move scroll anchors. Explicit background islands retain their original colors (panels, code, hover, selection), as does `explicit` canvas mode. A matching synchronized theme background keeps the theme palette. Color calculations are cached with a bounded size.
+Adaptation runs at the canvas rendering boundary, so mode changes or background replies do not recreate transcript nodes, disturb selection, or move scroll anchors. Selection and explicitly authored token backgrounds retain their original colors, as do all application surfaces in `explicit` mode. A matching synchronized theme background keeps the theme palette. Color calculations are cached with a bounded size.
 
 Default foregrounds rely on a readable terminal palette; opacity and images can still affect the actual pixel contrast. The 4.5:1 calculation applies to known opaque RGB colors, not arbitrary wallpaper or compositor output. Unknown/indexed terminal palettes are not guessed, and `NO_COLOR` retains uncolored output. Native macOS/Windows GUI visual acceptance must still be recorded separately from synthetic and PTY checks.
 
 ## Verification
 
-See [dated acceptance results and manual checklist](background-inheritance-acceptance.md). Unit/synthetic frame tests, real PTY/ConPTY tests, official packaged lifecycle checks, and real GUI-terminal acceptance are recorded separately. Missing devices remain **untested**.
+See [current acceptance results and manual checklist](transparent-surfaces-hover-acceptance.md). Unit/synthetic frame tests, real PTY/ConPTY tests, official packaged lifecycle checks, and real GUI-terminal acceptance are recorded separately. Missing devices remain **untested**. The earlier [canvas-only acceptance](background-inheritance-acceptance.md) remains as historical evidence for the original implementation.
 
 Focused checks:
 
@@ -57,9 +57,9 @@ Packaged checks require an isolated `DSH_HOME` and an unmodified official dsh `0
 
 ## 中文说明
 
-默认从“显式 RGB 铺底”改为 `theme`：主画布使用终端默认背景（SGR 49），通过原有 OSC 11 同步界面主题颜色，让终端保留其背景效果。旧设置缺少字段时同样默认 `theme`。`terminal` 只跟随终端，不改色；`explicit` 保留旧铺底与原有改色行为，透明与否仍取决于终端。
+默认从“显式 RGB 铺底”改为 `theme`：主画布、弹窗面板和代码基础背景使用终端默认背景（SGR 49），通过原有 OSC 11 同步界面主题颜色，让终端保留其背景效果。旧设置缺少字段时同样默认 `theme`。`terminal` 只跟随终端，不改色；`explicit` 保留旧铺底与原有改色行为，透明与否仍取决于终端。
 
-`/theme` 与 `/settings seektty-appearance` 的“背景模式”共用三选项编辑器，保存成功立即生效，失败／取消不改变状态。模式由 Harness 管理，主题切换、预览及取消、导入和导出均不覆盖它。只切模式不重建会话节点、不改变视口、选区、滚动锚点及鼠标命中；弹窗、代码块、选区与 hover 仍有独立底色。
+`/theme` 与 `/settings seektty-appearance` 的“背景模式”共用三选项编辑器，保存成功立即生效，失败／取消不改变状态。模式由 Harness 管理，主题切换、预览及取消、导入和导出均不覆盖它。只切模式不重建会话节点、不改变视口、选区、滚动锚点及鼠标命中。代码排版和语法前景色不变；选区与显式 token 背景继续填色，hover 仅使用 `brand` 前景色，不再使用底色或下划线。
 
 每个活动终端生命周期最多一次 500 ms 异步查询；输入监听就绪、首次需要改色时才发起。切到 `terminal` 会恢复本次运行捕获的原色并保留快照，查询中的回复可记录但不可改色。超时、无效、迟到回复不进入输入框。同步不可用时 `theme` 保留默认背景并提示一次，不自动改成显式铺底。`SEEKTTY_TERMINAL_BACKGROUND=off` 只禁止改色；tmux/screen、低色彩和非交互环境沿用现有限制。
 

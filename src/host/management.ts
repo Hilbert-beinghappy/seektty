@@ -133,8 +133,8 @@ export const AppearanceSettingsSchema = z.object({
   backgroundMode: z.union(['theme', 'terminal', 'explicit'])
     .default(DEFAULT_TUI_BACKGROUND_MODE)
     .description(localeDescription({
-      zh: '主背景模式：主题颜色＋终端效果、完全跟随终端，或显式主题底色（兼容）。不改变终端透明度；弹窗和代码块保留底色。',
-      en: 'Canvas background: theme colors with terminal effects, terminal background, or explicit theme fill (compatibility). Does not change terminal opacity; panels and code blocks keep their backgrounds.',
+      zh: '界面背景模式：主题颜色＋终端效果、完全跟随终端，或显式主题底色（兼容）。不改变终端透明度；默认模式下主画布、弹窗面板和代码基础背景使用终端默认背景。',
+      en: 'Interface background mode: theme colors with terminal effects, terminal background, or explicit theme fill (compatibility). Does not change terminal opacity; default modes use the terminal background for canvas, panels and base code.',
     })),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
     .description(localeDescription({

@@ -1,5 +1,7 @@
 # Background inheritance acceptance / 背景继承验收
 
+> Historical record: this document describes the original canvas-only implementation. Panel/code inheritance and foreground-only hover are covered by the [current acceptance record](transparent-surfaces-hover-acceptance.md).
+
 Date: 2026-08-29 (Asia/Shanghai). Branch: `codex/background-inheritance`.
 
 Base: `662b753` (the OSC 11 implementation from PR #162). Implementation commits: `8f96856`, `e4273fd`. This is a local development candidate still numbered `1.2.4`; it does not replace the published release. No push, PR creation or release was performed for this feature.
