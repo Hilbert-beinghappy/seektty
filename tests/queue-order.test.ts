@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
-import type { HarnessTuiCapabilities, TuiActiveSession } from '../src/client/capabilities.ts'
+import { HarnessTuiCapabilities, type TuiActiveSession } from '../src/client/capabilities.ts'
 import { OverlayQueue } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
 import { moveIndex, queueListChoiceOrder } from '../src/client/queue-order.ts'
@@ -92,8 +92,14 @@ describe('queue reorder', () => {
     expect(plain(mounted!.render(80))).toContain('queued hello')
 
     handleInput(mounted!, ENTER)
-    await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑') })
+    await vi.waitFor(() => {
+      const menu = plain(mounted!.render(80))
+      expect(menu).toContain('停止当前任务并优先处理')
+      expect(menu).toContain('转为引导')
+      expect(menu).toContain('编辑')
+    })
 
+    handleInput(mounted!, DOWN)
     handleInput(mounted!, DOWN)
     handleInput(mounted!, ENTER)
     await vi.waitFor(() => { expect(plain(mounted!.render(80))).toContain('编辑排队消息') })
@@ -109,5 +115,93 @@ describe('queue reorder', () => {
     await pending
     expect(updateQueue).not.toHaveBeenCalled()
     expect(notice.mock.calls.some(call => String(call[0]).includes('已提交'))).toBe(false)
+  })
+
+  it('cancels before promoting the selected queued message on its captured session', async () => {
+    const calls: string[] = []
+    const session = {
+      getSnapshot: () => ({
+        running: true,
+        queue: [{ id: 'msg-1', placement: 'queued' }],
+      }),
+      cancel: vi.fn(async () => {
+        calls.push('cancel')
+        return { ok: true, value: { accepted: true } }
+      }),
+      updateQueue: vi.fn(async () => {
+        calls.push('steer')
+        return { ok: true, value: { accepted: true } }
+      }),
+    }
+    const capabilities = Object.create(HarnessTuiCapabilities.prototype) as HarnessTuiCapabilities
+    Object.defineProperty(capabilities, 'active', {
+      value: () => ({ sessionId: 'session-1', session }) as unknown as TuiActiveSession,
+    })
+
+    await capabilities.interruptAndSteer('session-1' as never, 'msg-1' as never)
+
+    expect(calls).toEqual(['cancel', 'steer'])
+    expect(session.updateQueue).toHaveBeenCalledWith('msg-1', { kind: 'steer' })
+  })
+
+  it('does not interrupt when the selected queue occurrence is stale', async () => {
+    const session = {
+      getSnapshot: () => ({ running: true, queue: [] }),
+      cancel: vi.fn(),
+      updateQueue: vi.fn(),
+    }
+    const capabilities = Object.create(HarnessTuiCapabilities.prototype) as HarnessTuiCapabilities
+    Object.defineProperty(capabilities, 'active', {
+      value: () => ({ sessionId: 'session-1', session }) as unknown as TuiActiveSession,
+    })
+
+    await expect(capabilities.interruptAndSteer('session-1' as never, 'msg-1' as never))
+      .rejects.toThrow('任务或队列状态已变化')
+    expect(session.cancel).not.toHaveBeenCalled()
+    expect(session.updateQueue).not.toHaveBeenCalled()
+  })
+
+  it('does not promote a message when the interrupt request is rejected', async () => {
+    const session = {
+      getSnapshot: () => ({
+        running: true,
+        queue: [{ id: 'msg-1', placement: 'queued' }],
+      }),
+      cancel: vi.fn(async () => ({
+        ok: false,
+        error: { code: 'cancel-failed', message: 'not cancellable', details: {} },
+      })),
+      updateQueue: vi.fn(),
+    }
+    const capabilities = Object.create(HarnessTuiCapabilities.prototype) as HarnessTuiCapabilities
+    Object.defineProperty(capabilities, 'active', {
+      value: () => ({ sessionId: 'session-1', session }) as unknown as TuiActiveSession,
+    })
+
+    await expect(capabilities.interruptAndSteer('session-1' as never, 'msg-1' as never))
+      .rejects.toThrow('打断任务失败')
+    expect(session.updateQueue).not.toHaveBeenCalled()
+  })
+
+  it('reports an unconfirmed promotion without retrying after cancellation', async () => {
+    const session = {
+      getSnapshot: () => ({
+        running: true,
+        queue: [{ id: 'msg-1', placement: 'queued' }],
+      }),
+      cancel: vi.fn(async () => ({ ok: true, value: { accepted: true } })),
+      updateQueue: vi.fn(async () => ({
+        ok: false,
+        error: { code: 'steer-unavailable', message: 'turn already idle', details: {} },
+      })),
+    }
+    const capabilities = Object.create(HarnessTuiCapabilities.prototype) as HarnessTuiCapabilities
+    Object.defineProperty(capabilities, 'active', {
+      value: () => ({ sessionId: 'session-1', session }) as unknown as TuiActiveSession,
+    })
+
+    await expect(capabilities.interruptAndSteer('session-1' as never, 'msg-1' as never))
+      .rejects.toThrow('消息提前处理状态未确认')
+    expect(session.updateQueue).toHaveBeenCalledTimes(1)
   })
 })

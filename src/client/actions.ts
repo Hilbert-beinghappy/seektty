@@ -1898,7 +1898,9 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async queueChoice(nav: OverlayNavigation, id: string): Promise<void> {
-    const rows = this.capabilities.active()?.session.getSnapshot().queue ?? []
+    const active = this.capabilities.active()
+    const snapshot = active?.session.getSnapshot()
+    const rows = snapshot?.queue ?? []
     const queued = rows.filter(row => row.placement === 'queued')
     if (id === '__all_steer__') {
       for (const row of queued) await this.capabilities.updateQueue(row.id, { kind: 'steer' })
@@ -1921,6 +1923,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const action = await nav.select({
       title: ui('队列操作', "Queue action"),
       choices: [
+        {
+          id: 'interrupt',
+          label: ui('停止当前任务并优先处理', "Stop current turn and prioritize"),
+          description: ui('保留其他排队消息，停止后优先处理这一条', "Keep the rest of the queue and prioritize this message after stopping"),
+          ...(snapshot?.running === true ? {} : { disabledReason: ui('当前没有正在运行的任务', "No turn is currently running") }),
+        },
         { id: 'steer', label: ui('转为引导', "Convert to steering"), description: ui('并入当前轮次', "Merge into current turn") },
         { id: 'edit', label: ui('编辑', "Edit"), ...(row.text === null ? { disabledReason: ui('含非文本内容，无法文本编辑', "Contains non-text content and cannot be edited as text") } : {}) },
         { id: 'remove', label: ui('删除', "Delete"), description: ui('从待处理队列移除', "Remove from the pending queue") },
@@ -1928,6 +1936,17 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       searchable: false,
     })
     if (action === undefined) return
+    if (action.id === 'interrupt' && active !== undefined) {
+      const confirmed = await nav.confirm(
+        ui('停止当前任务并优先处理这条消息？', "Stop the current turn and prioritize this message?"),
+        ui('当前生成会停止；其他排队消息将按原顺序保留。', "The current generation will stop; other queued messages keep their order."),
+        ui('停止并优先处理', "Stop and prioritize"),
+      )
+      if (!confirmed) return
+      await this.capabilities.interruptAndSteer(active.sessionId, row.id)
+      this.host.notice(ui('已请求停止当前任务；所选消息将优先处理', "Stop requested; the selected message will be handled first"), 'success')
+      return
+    }
     if (action.id === 'steer') await this.capabilities.updateQueue(row.id, { kind: 'steer' })
     else if (action.id === 'remove') await this.capabilities.updateQueue(row.id, { kind: 'remove' })
     else if (action.id === 'edit' && row.text !== null) {

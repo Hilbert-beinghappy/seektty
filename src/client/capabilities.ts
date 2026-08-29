@@ -1650,6 +1650,41 @@ export class HarnessTuiCapabilities {
   }
 
   /**
+   * Stop one running turn while preserving its inbox, then promote one queued
+   * message through the Host's native steering operation. The captured Session
+   * face is kept across both acknowledgements so a UI selection change cannot
+   * redirect the second operation to another Session.
+   * @param sessionId - Session selected when the queue row was opened.
+   * @param itemId - authoritative queued message identity.
+   */
+  async interruptAndSteer(
+    sessionId: SessionId,
+    itemId: ConversationSnapshot['queue'][number]['id'],
+  ): Promise<void> {
+    const active = this.requireActive()
+    if (active.sessionId !== sessionId) {
+      throw new Error(ui('会话已切换，未打断原任务', 'The active session changed; the original turn was not interrupted'))
+    }
+    const snapshot = active.session.getSnapshot()
+    const queued = snapshot.queue.some(row => row.id === itemId && row.placement === 'queued')
+    if (!snapshot.running || !queued) {
+      throw new Error(ui('任务或队列状态已变化，请重新打开队列', 'The turn or queue changed; reopen the queue and try again'))
+    }
+
+    const cancelled = await active.session.cancel()
+    if (!cancelled.ok) {
+      throw new Error(ui(`打断任务失败：${cancelled.error.message}`, `Failed to interrupt the turn: ${cancelled.error.message}`))
+    }
+    const promoted = await active.session.updateQueue(itemId, { kind: 'steer' })
+    if (!promoted.ok) {
+      throw new Error(ui(
+        `任务已请求停止，但消息提前处理状态未确认：${promoted.error.message}；请查看队列`,
+        `The turn was asked to stop, but message promotion is unconfirmed: ${promoted.error.message}; inspect the queue`,
+      ))
+    }
+  }
+
+  /**
    * Answer a Runtime-owned approval wait with the Host protocol's correlated value.
    * @param wait - correlated Runtime approval interaction.
    * @param outcome - Host-supported one-shot allow or rejection.
