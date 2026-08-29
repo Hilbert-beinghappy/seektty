@@ -836,7 +836,9 @@ function toolBlockRows(
   if ('kind' in block) {
     const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
     const failed = settledToolFailed(block)
-    const details = expanded ? viewDetails(block, preferences.diffContextLines) : settledInvocationDetails(block, preferences.diffContextLines)
+    // A collapsed card is the header only. Keeping invocation arguments visible
+    // made a successful second toggle look like it had not collapsed at all.
+    const details = expanded ? viewDetails(block, preferences.diffContextLines) : []
     return [
       {
         format: 'plain',
@@ -847,7 +849,7 @@ function toolBlockRows(
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
     ]
   }
-  const details = runningViewDetails(block, preferences.diffContextLines)
+  const details = expanded ? runningViewDetails(block, preferences.diffContextLines) : []
   return [
     {
       format: 'plain',
@@ -1003,6 +1005,8 @@ function nodeFingerprint(
   node: ChatConversationViewNode,
   preferences: TranscriptPreferences,
 ): string {
+  const tool = node.kind === 'tool-call' ? toolChatData(node.data)?.root : undefined
+  const toolKey = tool === undefined ? node.key : callKey(tool, node.key) ?? node.key
   return JSON.stringify({
     kind: node.kind,
     data: node.data,
@@ -1011,8 +1015,10 @@ function nodeFingerprint(
     reasoning: preferences.reasoning,
     toolOutputLineLimit: preferences.toolOutputLineLimit,
     diffContextLines: preferences.diffContextLines,
-    expanded: preferences.expandedTools.has(node.key),
-    collapsed: preferences.collapsedTools.has(node.key),
+    // Tool presentation is keyed by the Harness callId. Projection node keys
+    // are independent identities and commonly differ in real Sessions.
+    expanded: preferences.expandedTools.has(toolKey),
+    collapsed: preferences.collapsedTools.has(toolKey),
     reasoningExpanded: preferences.expandedReasoning.has(node.key),
     reasoningCollapsed: preferences.collapsedReasoning.has(node.key),
     focusedTool: preferences.focusedTool,

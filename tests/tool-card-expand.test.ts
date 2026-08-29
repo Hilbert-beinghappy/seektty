@@ -19,9 +19,9 @@ function chatNode(key: string, data: unknown): ChatConversationViewNode {
   }
 }
 
-function tool(key: string, title: string, result: string): ChatConversationViewNode {
+function tool(key: string, title: string, result: string, nodeKey: string = key): ChatConversationViewNode {
   return {
-    ...chatNode(key, {
+    ...chatNode(nodeKey, {
       root: {
         kind: 'tool-result',
         callId: key,
@@ -138,14 +138,17 @@ describe('per-card tool expand', () => {
     const transcript = new Transcript(() => 12)
     transcript.update(snapshot([
       tool('a', 'First tool', 'result-a'),
-      tool('b', 'Second tool', 'result-b'),
+      // Harness projection keys and tool callIds are independent in real Sessions.
+      tool('b', 'Second tool', 'result-b', 'tool-view-b'),
     ]))
     expect(transcript.pointerToggleTool('b')).toEqual({ kind: 'tool', key: 'b' })
     const rendered = stripAnsi(transcript.render(80).join('\n'))
     expect(rendered).toContain('result-b')
     expect(rendered).not.toContain('result-a')
     expect(transcript.pointerToggleTool('b')).toEqual({ kind: 'tool', key: 'b' })
-    expect(stripAnsi(transcript.render(80).join('\n'))).not.toContain('result-b')
+    const collapsed = stripAnsi(transcript.render(80).join('\n'))
+    expect(collapsed).not.toContain('result-b')
+    expect(collapsed).not.toContain('fixture_tool({')
     const origin = { col: 0, row: 0, width: 80, height: 12 }
     const hits = transcript.controlHitRegions(origin)
     expect(hits.some(region => region.id === 'transcript:tool:b'
