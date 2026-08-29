@@ -111,7 +111,7 @@ SeekTTY `1.2.4` 在官方 Harness `0.1.1-rc.2` 上改进鼠标导航与输入编
 
 最新视图使用固定高度的 alternate screen，把输入框和状态栏固定在底部。已发送的用户消息复用输入框的上下细线，与不加边框的模型回复区分。完整鼠标模式用滚轮浏览历史、选择文本，并点击已有控件。把选区拖到 Transcript 边缘并停留会自动跨已加载页面滚动，同时保持同一个逻辑文本锚点；每帧仍只重绘当前可见窗口。F3 或 `/mouse` 可切到原生终端选择且不离开备用屏幕；退出后恢复原主屏幕及其滚动记录。助手代码、Shell 指令、工具参数、文件读取、JSON 和 Diff 共用当前代码主题，普通对话文字仍使用界面主题。
 
-空会话现在显示响应式 Fastfetch 风格欢迎页，不再提供可发送的任务候选。默认使用随包发布的原色 SeekTTY 像素 Logo，并显示当前 Profile 的运行信息；默认**不会**执行 Fastfetch。首次 API Key 引导仍具有更高优先级，完成后才会开始可选的 Fastfetch 采集。
+空会话现在显示响应式 Fastfetch 风格欢迎页，不再提供可发送的任务候选。默认使用随包发布的原色 DeepSeek 像素鲸鱼，并显示当前 Profile 的运行信息；默认**不会**执行 Fastfetch。首次 API Key 引导仍具有更高优先级，完成后才会开始可选的 Fastfetch 采集。
 
 ## Clarify 与 Plan
 
@@ -150,7 +150,7 @@ Clarify 一次提出一个聚焦问题，把已确认的决定带入后续问题
 | Profile 与 Settings | 创建、复制、切换和诊断 Profile；通过 Schema 回退、revision 检查和只写 Secret 编辑全部设置命名空间 |
 | 插件、Skill 与 MCP | 插件中心、原生 Bundle 协调、动态 Skill 命令、MCP 实例、加载状态、设置与风险信息 |
 | 主题与语言 | 界面／代码主题独立切换、继承终端背景效果、配色生成、VS Code 主题导入、对比度检查、`NO_COLOR` 和中英文实时切换 |
-| 欢迎页 | 响应式 SeekTTY 终端文本 Logo、自定义信息行、可选 Fastfetch 数据、草稿实时预览和带 revision 保护的 Profile 设置 |
+| 欢迎页 | 响应式 DeepSeek 像素鲸鱼终端 Logo、自定义信息行、可选 Fastfetch 数据、草稿实时预览和带 revision 保护的 Profile 设置 |
 | 诊断与反馈 | 运行状态、可执行的 `/doctor` 检查、Session 反馈、助手消息评分与反馈删除 |
 
 SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可选能力会安全降级，专用终端界面则可以持续演进。
@@ -213,7 +213,7 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 默认运行信息包括 SeekTTY 版本、工作区、模型、推理强度、Agent 模式、权限和主题。欢迎内容只属于临时界面状态，不写入 Session 或聊天记录；Session 出现第一条持久会话内容后立即隐藏。内容高于窗口时使用 transcript 滚动，不会静默截断；resize 和主题切换只重新排版、重新着色，不重复执行 Fastfetch。
 
-内置大图与紧凑图是随包发布的预生成像素 Logo。SeekTTY 不负责生成像素画，也不使用 Kitty、iTerm、Sixel 等图像协议。用户可提供 UTF-8 终端文本文件：原色模式仅保留安全解析后的 ANSI 颜色，主题模式兼容 Fastfetch `$[1-9]` 前景色槽，`$$` 表示字面量 `$`。第四种 Logo 来源可直接复用本机 Fastfetch 配置渲染的 Logo：SeekTTY 强制使用空模块结构，只采集一次 Logo，保留原始 ANSI 颜色，清理后再参与欢迎页排版；该过程不会执行 Fastfetch 信息模块或 `command` 模块。光标移动、清屏、OSC/DCS、超链接、剪贴板和图像协议都会被移除。文件及采集结果限制为 256 KiB、256 列、120 行；来源无效或不可用时回退内置 Logo，并只提示一次。
+内置大图与紧凑图是对 MIT 授权的 `seek-on-dsh` DeepSeek 像素鲸鱼进行的预生成终端转换；固定的源代码版本与许可说明记录在 `THIRD_PARTY_NOTICES.md`。原色模式保留蓝白配色，主题模式则把蓝色映射为 `brand`、白色映射为 `text`。SeekTTY 不负责生成像素画，也不使用 Kitty、iTerm、Sixel 等图像协议。用户可提供 UTF-8 终端文本文件：原色模式仅保留安全解析后的 ANSI 颜色，主题模式兼容 Fastfetch `$[1-9]` 前景色槽，`$$` 表示字面量 `$`。第四种 Logo 来源可直接复用本机 Fastfetch 配置渲染的 Logo：SeekTTY 强制使用空模块结构，只采集一次 Logo，保留原始 ANSI 颜色，清理后再参与欢迎页排版；该过程不会执行 Fastfetch 信息模块或 `command` 模块。光标移动、清屏、OSC/DCS、超链接、剪贴板和图像协议都会被移除。文件及采集结果限制为 256 KiB、256 列、120 行；来源无效或不可用时回退内置 Logo，并只提示一次。
 
 Fastfetch 始终是可选项，SeekTTY 不安装也不下载它。安全信息来源直接以 argv 启动已有程序，不经过 Shell，强制使用 `--config none`，关闭 Fastfetch Logo 与颜色，并提供可排序的隐私安全模块。受信任的用户配置信息来源可能包含 `command` 模块或其他外部行为，启用前必须明确确认风险。Logo 复用独立于信息模式，使用同一个可选 Fastfetch 配置路径，留空则使用 Fastfetch 默认配置。所有采集均采用 2 秒超时、有限输出和控制序列清理。同一配置每个进程只采集一次；`/welcome refresh` 同时清除信息与 Logo 缓存并重新采集，`/welcome reset` 恢复默认的不运行 Fastfetch 配置。
 

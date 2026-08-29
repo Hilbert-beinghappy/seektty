@@ -202,6 +202,8 @@ async function editRows(
         { id: 'edit', label: ui('修改', 'Edit') },
         { id: 'up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
         { id: 'down', label: ui('下移', 'Move down'), ...(index === current.customRows.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
+        { id: 'top', label: ui('移到顶部', 'Move to top'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
+        { id: 'bottom', label: ui('移到底部', 'Move to bottom'), ...(index === current.customRows.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
         { id: 'delete', label: ui('删除', 'Delete') },
       ],
     })
@@ -214,6 +216,13 @@ async function editRows(
     } else if (action.id === 'delete') {
       rows.splice(index, 1)
       initialChoiceId = rows.length === 0 ? '__add__' : `row:${String(Math.min(index, rows.length - 1))}`
+    } else if (action.id === 'top' || action.id === 'bottom') {
+      const [moved] = rows.splice(index, 1)
+      if (moved !== undefined) {
+        const target = action.id === 'top' ? 0 : rows.length
+        rows.splice(target, 0, moved)
+        initialChoiceId = `row:${String(target)}`
+      }
     } else {
       const other = action.id === 'up' ? index - 1 : index + 1
       if (other >= 0 && other < rows.length) {

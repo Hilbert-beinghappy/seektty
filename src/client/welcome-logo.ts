@@ -28,29 +28,62 @@ function validateLines(lines: readonly string[]): WelcomeLogo {
   return { lines, width, height: lines.length }
 }
 
-function renderBuiltinLine(mask: string, colorMode: 'original' | 'theme'): string {
-  let output = ''
-  for (let index = 0; index < mask.length;) {
-    const token = mask[index] ?? ' '
-    let end = index + 1
-    while (mask[end] === token) end += 1
-    const text = token === ' ' ? ' '.repeat((end - index) * 2) : '██'.repeat(end - index)
-    if (token === ' ') output += text
-    else if (colorMode === 'theme') output += color.logoSlot(logoAsset.slots[token as keyof typeof logoAsset.slots] ?? 1, text)
-    else output += styleTerminalText(text, {
-      foreground: logoAsset.palette[token as keyof typeof logoAsset.palette] ?? '#145AD8',
-    })
-    index = end
+function renderBuiltinCell(
+  foreground: keyof typeof logoAsset.palette,
+  background: keyof typeof logoAsset.palette | undefined,
+  text: string,
+  colorMode: 'original' | 'theme',
+): string {
+  if (colorMode === 'theme') {
+    return color.logoCell(
+      logoAsset.slots[foreground],
+      background === undefined ? undefined : logoAsset.slots[background],
+      text,
+    )
   }
-  return output.trimEnd()
+  return styleTerminalText(text, {
+    foreground: logoAsset.palette[foreground],
+    ...(background === undefined ? {} : { background: logoAsset.palette[background] }),
+  })
 }
 
-/** Pre-generated SeekTTY mark. Original mode never changes with the active theme. */
+function renderBuiltinRows(masks: readonly string[], colorMode: 'original' | 'theme'): readonly string[] {
+  const rows: string[] = []
+  for (let row = 0; row < masks.length; row += 2) {
+    const top = masks[row] ?? ''
+    const bottom = masks[row + 1] ?? ''
+    const width = Math.max(top.length, bottom.length)
+    let output = ''
+    for (let index = 0; index < width;) {
+      const topToken = top[index] as keyof typeof logoAsset.palette | ' ' | undefined
+      const bottomToken = bottom[index] as keyof typeof logoAsset.palette | ' ' | undefined
+      let end = index + 1
+      while (end < width && top[end] === topToken && bottom[end] === bottomToken) end += 1
+      const run = end - index
+      if ((topToken === undefined || topToken === ' ') && (bottomToken === undefined || bottomToken === ' ')) {
+        output += ' '.repeat(run)
+      } else if (topToken === undefined || topToken === ' ') {
+        output += renderBuiltinCell(bottomToken as keyof typeof logoAsset.palette, undefined, '▄'.repeat(run), colorMode)
+      } else if (bottomToken === undefined || bottomToken === ' ') {
+        output += renderBuiltinCell(topToken, undefined, '▀'.repeat(run), colorMode)
+      } else if (topToken === bottomToken) {
+        output += renderBuiltinCell(topToken, undefined, '█'.repeat(run), colorMode)
+      } else {
+        output += renderBuiltinCell(topToken, bottomToken, '▀'.repeat(run), colorMode)
+      }
+      index = end
+    }
+    rows.push(output.trimEnd())
+  }
+  return rows
+}
+
+/** Pre-generated DeepSeek pixel whale. Original mode never changes with the active theme. */
 export function builtinWelcomeLogo(
   size: 'large' | 'compact',
   colorMode: 'original' | 'theme',
 ): WelcomeLogo {
-  return validateLines(logoAsset[size].map(line => renderBuiltinLine(line, colorMode)))
+  return validateLines(renderBuiltinRows(logoAsset[size], colorMode))
 }
 
 /** Keep printable Unicode and color-only SGR while dropping every active terminal command. */

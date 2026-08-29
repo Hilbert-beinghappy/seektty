@@ -18,14 +18,14 @@ afterEach(() => {
 })
 
 describe('welcome logos', () => {
-  it('ships fixed large and compact SeekTTY masks', () => {
+  it('ships fixed half-block DeepSeek whale masks', () => {
     vi.stubEnv('NO_COLOR', '1')
     const large = builtinWelcomeLogo('large', 'original')
     const compact = builtinWelcomeLogo('compact', 'theme')
-    expect(large.height).toBeGreaterThan(compact.height)
-    expect(large.width).toBeGreaterThan(compact.width)
-    expect(stripAnsi(large.lines.join('\n'))).toContain('██')
-    expect(stripAnsi(compact.lines.join('\n'))).toContain('██')
+    expect(large).toMatchObject({ width: 40, height: 16 })
+    expect(compact).toMatchObject({ width: 24, height: 10 })
+    expect(stripAnsi(large.lines.join('\n'))).toMatch(/[▀▄█]/u)
+    expect(stripAnsi(compact.lines.join('\n'))).toMatch(/[▀▄█]/u)
   })
 
   it('keeps color-only SGR and removes active terminal controls', () => {

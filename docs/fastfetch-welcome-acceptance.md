@@ -2,13 +2,13 @@
 
 Date: 2026-08-30 (Asia/Shanghai). Branch: `codex/fastfetch-welcome`. Base: `upstream/main` at `0e128f3`.
 
-This candidate replaces the old sendable empty-session suggestions with a non-durable, responsive welcome presentation. The default is a packaged original-color SeekTTY terminal-text logo plus custom runtime facts; it does not invoke Fastfetch. Optional Fastfetch data remains an adapter around an executable already on `PATH`, never a bundled or downloaded dependency. The first-time API-key transaction remains higher priority and settles before collection is activated.
+This candidate replaces the old sendable empty-session suggestions with a non-durable, responsive welcome presentation. The default is a packaged original-color DeepSeek pixel-whale terminal logo plus custom runtime facts; it does not invoke Fastfetch. Optional Fastfetch data remains an adapter around an executable already on `PATH`, never a bundled or downloaded dependency. The first-time API-key transaction remains higher priority and settles before collection is activated.
 
 ## Automated results
 
 | Check | Result | Boundary |
 | --- | --- | --- |
-| `pnpm run check` | Passed: 122 test files; 1,067 passed / 1 unrelated conditional skip; typecheck, build and `pack:check` passed | Includes settings migration and product categories, one-level navigation, Agent Preset localization, renderer/layout, ANSI sanitization, Fastfetch process boundaries, continuous list editing, draft UI, failure rollback, transcript scrolling/selection, i18n and existing product regressions. Missing vendor source-map warnings are pre-existing and non-fatal. |
+| `pnpm run check` | Passed: 122 test files; 1,068 passed / 1 unrelated conditional skip; typecheck, build and `pack:check` passed | Includes settings migration and product categories, one-level navigation, Agent Preset localization, renderer/layout, ANSI sanitization, Fastfetch process boundaries, continuous list editing and direct top/bottom moves, draft UI, failure rollback, transcript scrolling/selection, i18n and existing product regressions. Missing vendor source-map warnings are pre-existing and non-fatal. |
 | Packed contents | Passed: 24 allowlisted entries | Includes `assets/seektty-welcome-logo.json`; contains no personal themes, Profile/Session data, credential, generated cache, helper script, or consumer `workspace:` dependency. |
 | Official dsh `0.1.1-rc.2` stock lifecycle | Passed | Packed launcher, candidate add, boot to the non-interactive TUI boundary, remove, re-add, second boot, and Host module-identity checks used isolated temporary `DSH_HOME` directories. |
 | Windows ConPTY harness | Passed: 1 cycle, 23,722 captured bytes, exit 0 | Packaged boot, keyboard/mouse input, resize, context-menu gestures, and clean terminal exit. ConPTY is not GUI-equivalent and does not prove perceived pixel-art layout in Windows Terminal. |
@@ -40,9 +40,9 @@ Manual verification should open an empty Session at wide, medium, narrow, and sh
 
 ## 中文结论
 
-自动门禁已通过：122 个测试文件中 1,067 项通过，1 项无关条件跳过；类型检查、构建、24 项发布包白名单、官方 dsh `0.1.1-rc.2` 的隔离安装／启动／移除／重装，以及一轮 Windows ConPTY 流程均通过。新增的内置 Logo 资源已进入发布包，个人主题、日常 Profile、Session、凭据和缓存均未纳入。
+自动门禁已通过：122 个测试文件中 1,068 项通过，1 项无关条件跳过；类型检查、构建、24 项发布包白名单、官方 dsh `0.1.1-rc.2` 的隔离安装／启动／移除／重装，以及一轮 Windows ConPTY 流程均通过。新增的内置 Logo 资源已进入发布包，个人主题、日常 Profile、Session、凭据和缓存均未纳入。
 
-默认欢迎页只显示随包发布的原色 SeekTTY 终端文本 Logo 与运行信息，不执行 Fastfetch。`custom`、`fastfetch`、`mixed` 三种模式、混合顺序、自定义行、Logo 文件、本机 Fastfetch Logo 复用、安全模块、用户配置风险确认、实时预览、整份草稿保存／取消、缓存刷新与默认重置均已实现。欢迎内容不写入 Session；第一条持久会话内容出现后隐藏。大图、紧凑图、隐藏三档按宽度选择，不在运行时缩放图片；Fastfetch Logo 没有紧凑图时在窄窗口隐藏；高度不足时使用 transcript 滚动。
+默认欢迎页只显示随包发布的原色 DeepSeek 像素鲸鱼与运行信息，不执行 Fastfetch。原图固定至 `seek-on-dsh` 的 MIT 授权版本，并离线转换为 40×16 与 24×10 终端半块字符资源。`custom`、`fastfetch`、`mixed` 三种模式、混合顺序、自定义行、Logo 文件、本机 Fastfetch Logo 复用、安全模块、用户配置风险确认、实时预览、整份草稿保存／取消、缓存刷新与默认重置均已实现。欢迎内容不写入 Session；第一条持久会话内容出现后隐藏。大图、紧凑图、隐藏三档按宽度选择，不在运行时缩放图片；Fastfetch Logo 没有紧凑图时在窄窗口隐藏；高度不足时使用 transcript 滚动。
 
 `/settings` 现在固定按外观、欢迎页、鼠标与滚动、输入与快捷键、模型与 Agent、权限与安全、插件与扩展、语言与系统分组；技术命名空间仍可直接打开。列表管理操作留在列表，叶子编辑结束返回上一层，Esc 每次只退一层，草稿只由保存／取消整体退出，新增、删除和移动后保留就近焦点。
 

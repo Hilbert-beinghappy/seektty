@@ -199,6 +199,41 @@ describe('/welcome configuration', () => {
     }
   })
 
+  it('moves one custom row directly to the bottom and back to the top', async () => {
+    const h = harness()
+    const pending = h.actions.execute('welcome', '')
+    try {
+      await vi.waitFor(() => { expect(h.text()).toContain('自定义信息行') })
+      h.key(DOWN)
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('可连续编辑') })
+      h.key(HOME)
+      h.key(DOWN)
+      h.key(DOWN)
+      h.key(ENTER)
+      await vi.waitFor(() => {
+        expect(h.text()).toContain('移到顶部')
+        expect(h.text()).toContain('移到底部')
+      })
+      h.key(END)
+      h.key('\u001B[A')
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('8. 标题 · SeekTTY') })
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('移到顶部') })
+      h.key(HOME)
+      h.key(DOWN)
+      h.key(DOWN)
+      h.key(DOWN)
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('1. 标题 · SeekTTY') })
+      expect(h.mutate).not.toHaveBeenCalled()
+    } finally {
+      h.overlays.dispose()
+      await pending
+    }
+  })
+
   it('keeps leaf changes inside their subgroup and lets Esc return exactly one level', async () => {
     const h = harness()
     const pending = h.actions.execute('welcome', '')
