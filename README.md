@@ -111,6 +111,8 @@ See the [release notes](docs/release-v1.2.4.md) for changes and the [review chec
 
 The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Sent user messages use the composer's top and bottom horizontal rules to separate them from unframed assistant replies. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. Holding a selection at the transcript edge auto-scrolls across loaded pages while preserving one logical text anchor; only the visible viewport is repainted. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
 
+An empty session now opens with a responsive Fastfetch-style welcome page rather than sendable task suggestions. The default uses a packaged, original-color SeekTTY pixel logo plus runtime facts from the current Profile; it does **not** execute Fastfetch. The first-time API-key prompt remains higher priority and finishes before optional Fastfetch collection starts.
+
 ## Clarify and Plan
 
 Clarify and Plan cover consecutive stages of one workflow: Clarify helps decide **what** should be built; Harness-native Plan proposes **how** to build it.
@@ -148,6 +150,7 @@ See [Compatibility and verification](#compatibility-and-verification) for the ac
 | Profiles and Settings | Create, copy, switch, and diagnose Profiles; edit every registered Settings namespace with Schema fallbacks, revision checks, and write-only secrets |
 | Plugins, Skills, and MCP | Plugin center, native Bundle reconciliation, dynamic Skill commands, MCP instances, load state, settings, and risk information |
 | Themes and language | Independent interface/code themes, terminal background effects, palette generation, VS Code theme import, contrast checks, `NO_COLOR`, and live Chinese/English switching |
+| Welcome page | Responsive SeekTTY terminal-text logo, custom rows, optional Fastfetch facts, live draft preview, and revision-protected Profile settings |
 | Diagnostics and feedback | Runtime status, actionable `/doctor` checks, Session feedback, Assistant-message ratings, and feedback removal |
 
 SeekTTY reads these catalogs from the active Harness Profile. Unsupported optional capabilities degrade safely while dedicated terminal views continue to evolve.
@@ -179,7 +182,7 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
 | Plugin workflow | `/clarify` appears when a compatible Clarify Remote and Auxiliary Runtime are active |
-| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
+| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/welcome`, `/status`, `/doctor`, `/feedback`, `/restart` |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
 `/plugin`, `/workspace`, and `/profile` provide interactive centers and direct subcommands. Unknown commands stay inside the command surface and show nearby suggestions.
@@ -189,6 +192,26 @@ Autocomplete and overlay lists keep their scroll position: the wheel browses wit
 Overlay footers have single-click Select/Confirm/Save and Back/Close buttons, with theme-aware hover. They share keyboard validation and navigation; dangerous confirmations remain keyboard-only. Ordinary mouse actions work immediately after startup without minimizing the terminal. Focus reports, when available, protect against accidental activation for 250 ms after refocusing.
 
 Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerShell `Set-Clipboard` writer, macOS runs `pbcopy` under a UTF-8 locale, Wayland declares `text/plain;charset=utf-8`, and X11 requests `UTF8_STRING`; OSC 52 remains available for terminal, SSH, and tmux paths.
+
+## Welcome page
+
+`/welcome` opens one transactional editor for the empty-session presentation; `/settings seektty-welcome` opens the same editor. Changes stay in a draft until **Save**, then apply immediately under the Settings revision. Escape or **Cancel all changes** leaves the live page unchanged.
+
+Information modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `custom` (default) | Structured headings, text, fixed fields, runtime facts, separators, blank rows, and a theme palette; never runs Fastfetch |
+| `fastfetch` | Shows parsed output from a `fastfetch` executable already on `PATH` |
+| `mixed` | Shows both blocks in the configured custom-first or Fastfetch-first order |
+
+The default runtime facts are SeekTTY version, workspace, model, reasoning effort, Agent mode, permission, and theme. Welcome rows are temporary UI state: they are not written to the Session or chat history, and disappear as soon as the Session has persistent conversation content. Tall welcome content uses transcript scrolling instead of being silently truncated. Resize and theme changes only reflow/recolor cached content.
+
+The built-in large and compact pixel logos are pre-generated package assets. SeekTTY does not generate pixel art and does not use Kitty, iTerm, Sixel, or other image protocols. A user-provided UTF-8 terminal-text file can either preserve safely parsed ANSI colors or use Fastfetch-compatible `$[1-9]` foreground slots (`$$` emits a literal `$`) mapped to the current SeekTTY theme. Cursor movement, clearing, OSC/DCS, hyperlinks, clipboard commands, and image protocols are removed. Files are limited to 256 KiB, 256 columns, and 120 rows; invalid configured files cannot be saved, while files that disappear later fall back to the built-in logo with one notice.
+
+Fastfetch remains optional and is never installed or downloaded. The safe source runs the existing executable directly without a shell, forces `--config none`, disables its logo and colors, and exposes an ordered privacy-conscious module list. The trusted user-config source may run a Fastfetch `command` module or other external behavior, so enabling it requires an explicit warning confirmation. Both sources have a 2-second timeout and bounded, control-sequence-sanitized output. Collection is cached once per process/configuration; `/welcome refresh` clears that cache, while `/welcome reset` restores the non-Fastfetch default.
+
+See the [implementation and compatibility acceptance record](docs/fastfetch-welcome-acceptance.md) for automated coverage and real-terminal boundaries.
 
 ## Common controls
 
