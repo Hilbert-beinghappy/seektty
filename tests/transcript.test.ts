@@ -296,10 +296,13 @@ describe('conversation viewport', () => {
         { kind: 'text', text: '结论' },
       ]),
     ]))
-    const collapsed = transcript.render(60).join('\n')
+    const collapsedLines = transcript.render(60)
+    const collapsed = collapsedLines.join('\n')
     expect(collapsed).toContain('思考（已折叠）')
     expect(collapsed).not.toContain('完成后的推理')
     const hits = transcript.controlHitRegions({ col: 0, row: 0, width: 60, height: 12 })
+    const reasoningHit = hits.find(region => region.id === 'transcript:reasoning:a1')
+    expect(reasoningHit?.rect.row).toBe(collapsedLines.findIndex(line => line.includes('思考（已折叠）')))
     expect(hits.some(region => region.id === 'transcript:reasoning:a1'
       && region.activation === 'direct'
       && region.action.kind === 'transcript'
@@ -307,6 +310,28 @@ describe('conversation viewport', () => {
 
     expect(transcript.pointerToggleReasoning('a1')).toBe(true)
     expect(transcript.render(60).join('\n')).toContain('完成后的推理')
+    transcript.dispose()
+  })
+
+  it('keeps a collapsed reasoning hit on its rendered row when the viewport starts with a block gap', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 3)
+    transcript.update(snapshot([
+      user('u1', 'earlier question'),
+      assistantStep('a1', 'settled', [
+        { kind: 'reasoning', text: '完成后的推理' },
+        { kind: 'text', text: '结论' },
+      ]),
+    ]))
+
+    const rendered = transcript.render(60)
+    const headerRow = rendered.findIndex(line => line.includes('思考（已折叠）'))
+    expect(headerRow).toBe(1)
+
+    const origin = { col: 0, row: 4, width: 60, height: 3 }
+    const hit = transcript.controlHitRegions(origin)
+      .find(region => region.id === 'transcript:reasoning:a1')
+    expect(hit?.rect.row).toBe(origin.row + headerRow)
     transcript.dispose()
   })
 
@@ -365,14 +390,22 @@ describe('conversation viewport', () => {
     const dim = transcript.render(80).join('\n')
     expect(dim).toContain('\u001B[38;2;52;65;95m◆')
     expect(dim).toContain('Russia Ukraine war latest news ceasefire 2025')
-    expect(dim).toContain('web_search({')
-    expect(dim).toContain('"query": "Russia Ukraine war latest news ceasefire 2025"')
+    expect(dim).not.toContain('web_search({')
+    expect(dim).not.toContain('"query": "Russia Ukraine war latest news ceasefire 2025"')
     expect(dim).toContain(' · 0s')
     expect(dim).not.toContain('运行中')
 
+    expect(transcript.pointerToggleTool('call-1')).toEqual({ kind: 'tool', key: 'call-1' })
+    const expanded = transcript.render(80).join('\n')
+    expect(expanded).toContain('web_search({')
+    expect(expanded).toContain('"query": "Russia Ukraine war latest news ceasefire 2025"')
+    expect(transcript.pointerToggleTool('call-1')).toEqual({ kind: 'tool', key: 'call-1' })
+    expect(transcript.render(80).join('\n')).not.toContain('web_search({')
+
+    const beforePulse = requestRender.mock.calls.length
     vi.advanceTimersByTime(640)
     expect(transcript.render(80).join('\n')).toContain('\u001B[38;2;145;167;255m◆')
-    expect(requestRender).toHaveBeenCalledTimes(4)
+    expect(requestRender).toHaveBeenCalledTimes(beforePulse + 4)
 
     vi.advanceTimersByTime(5_360)
     expect(transcript.render(80).join('\n')).toContain(' · 6s')
@@ -594,7 +627,7 @@ describe('conversation viewport', () => {
     expect(stripAnsi(rendered.join('\n'))).not.toContain('```')
   })
 
-  it('renders tool headers as action and duration with connected themed invocation code', () => {
+  it('renders expanded tool invocations with the connected themed code surface', () => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm-256color')
     vi.stubEnv('COLORTERM', 'truecolor')
@@ -611,19 +644,20 @@ describe('conversation viewport', () => {
         { card: 'terminal', output: 'RESULT', exitCode: 0 },
       ),
     ]))
+    transcript.pointerToggleTool('terminal-1')
 
     const rendered = transcript.render(70)
     const plain = stripAnsi(rendered.join('\n'))
     const command = rendered.find(row => row.includes('$ printf'))
     expect(plain).toContain('◆ 检查主题支持 · 15ms')
     expect(plain).not.toContain('完成')
-    expect(plain).not.toContain('RESULT')
+    expect(plain).toContain('RESULT')
     expect(command).toContain('⎿')
     expect(command).toContain('\u001B[49m')
     expect(command).not.toContain('\u001B[48;')
   })
 
-  it('shows structured tool parameters as connected JSON code while collapsed', () => {
+  it('shows structured tool parameters only while expanded', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 12)
     transcript.update(snapshot([
@@ -634,11 +668,17 @@ describe('conversation viewport', () => {
       ),
     ]))
 
-    const rendered = transcript.render(60).join('\n')
-    expect(rendered).toContain('◆ Inspect · 15ms')
-    expect(rendered).toContain('⎿  fixture_tool({')
-    expect(rendered).toContain('"path": "src/index.ts"')
-    expect(rendered).not.toContain('done')
+    const collapsed = transcript.render(60).join('\n')
+    expect(collapsed).toContain('◆ Inspect · 15ms')
+    expect(collapsed).not.toContain('fixture_tool({')
+    expect(collapsed).not.toContain('"path": "src/index.ts"')
+    expect(collapsed).not.toContain('done')
+
+    transcript.pointerToggleTool('json-1')
+    const expanded = transcript.render(60).join('\n')
+    expect(expanded).toContain('⎿  fixture_tool({')
+    expect(expanded).toContain('"path": "src/index.ts"')
+    expect(expanded).toContain('done')
   })
 
   it('renders a search as its tool invocation instead of repeating the title', () => {
@@ -658,6 +698,7 @@ describe('conversation viewport', () => {
         { name: 'web_search', argsRaw: '{"query":"Donald Trump latest news today"}' },
       ),
     ]))
+    transcript.pointerToggleTool('search-1')
 
     const rendered = transcript.render(80).join('\n')
     expect(rendered).toContain('◆ Donald Trump latest news today · 15ms')
@@ -722,7 +763,7 @@ describe('conversation viewport', () => {
     expect(rendered).toContain('11 export { answer }')
   })
 
-  it('keeps the actual read invocation connected while tool results are collapsed', () => {
+  it('hides both the read invocation and result while collapsed', () => {
     vi.stubEnv('NO_COLOR', '1')
     const transcript = new Transcript(() => 12)
     transcript.update(snapshot([
@@ -751,9 +792,15 @@ describe('conversation viewport', () => {
 
     const rendered = transcript.render(100).join('\n')
     expect(rendered).toContain('◆ Reading bwq1gladk · 15ms')
-    expect(rendered).toContain('  ⎿  read({')
-    expect(rendered).toContain('"file_path": "/private/tmp/claude-501/tasks/bwq1gladk.output"')
+    expect(rendered).not.toContain('read({')
+    expect(rendered).not.toContain('"file_path": "/private/tmp/claude-501/tasks/bwq1gladk.output"')
     expect(rendered).not.toContain('complete')
+
+    transcript.pointerToggleTool('read-collapsed')
+    const expanded = transcript.render(100).join('\n')
+    expect(expanded).toContain('  ⎿  read({')
+    expect(expanded).toContain('"file_path": "/private/tmp/claude-501/tasks/bwq1gladk.output"')
+    expect(expanded).toContain('complete')
   })
 
   it('highlights tool JSON and diffs while leaving terminal ANSI output untouched', () => {
