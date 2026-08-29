@@ -21,12 +21,13 @@ import {
   color,
   currentTheme,
   setBackgroundMode,
+  setTerminalCanvasBackground,
   setTheme,
   styleTerminalText,
   surfaceRow,
   terminalColorLevel,
 } from '../src/client/theme.ts'
-import { BUILT_IN_THEMES, editableTheme } from '../src/client/theme-config.ts'
+import { BUILT_IN_THEMES, editableTheme, themeContrast } from '../src/client/theme-config.ts'
 
 function appearance(
   theme: TuiThemeId,
@@ -53,10 +54,76 @@ function enableTruecolor(): void {
 afterEach(() => {
   setTheme(BUILT_IN_THEMES.dark)
   setBackgroundMode('theme')
+  setTerminalCanvasBackground(undefined)
   vi.unstubAllEnvs()
 })
 
 describe('terminal themes', () => {
+  // Evaluate the effective foreground at text, not just the presence of an
+  // earlier escape that a nested Markdown token could override.
+  function foregroundAt(row: string, text: string): string | undefined {
+    const prefix = row.slice(0, row.indexOf(text))
+    const match = [...prefix.matchAll(/\u001B\[(39|38;2;(\d+);(\d+);(\d+))m/gu)].at(-1)
+    if (match?.[1] === '39') return undefined
+    if (match === undefined) throw new Error('missing foreground')
+    return `#${match.slice(2).map(value => Number(value).toString(16).padStart(2, '0')).join('')}`
+  }
+
+  it.each([['dark', '#ffffff'], ['light', '#000000']] as const)(
+    'adapts cached %s text to a known mismatched terminal background %s', (theme, terminalBackground) => {
+      enableTruecolor()
+      setTheme(BUILT_IN_THEMES[theme])
+      setBackgroundMode('terminal')
+      const cached = `body ${color.muted('muted')} ${color.brand('heading')} ${color.danger('error')} ${color.accent('link')}`
+      setTerminalCanvasBackground(terminalBackground)
+      const row = background.canvas(cached)
+      for (const word of ['body', 'muted', 'heading', 'error', 'link']) {
+        const actual = foregroundAt(row, word)
+        expect(actual).toBeDefined()
+        expect(themeContrast(actual!, terminalBackground)).toBeGreaterThanOrEqual(4.5)
+      }
+      expect(visibleWidth(row)).toBe(visibleWidth(cached))
+      expect(currentTheme()).toBe(BUILT_IN_THEMES[theme])
+      // Repaint the same cached row when the background becomes unknown.
+      setTerminalCanvasBackground(undefined)
+      for (const word of ['body', 'muted', 'heading', 'error', 'link']) {
+        expect(foregroundAt(background.canvas(cached), word)).toBeUndefined()
+      }
+    },
+  )
+
+  it.each(['theme', 'terminal'] as const)('uses terminal foregrounds for unknown %s backgrounds, preserving explicit islands', mode => {
+    enableTruecolor()
+    setBackgroundMode(mode)
+    const islands = [background.code('code'), background.surface('panel'), background.hover('hover'), background.selection('selection')]
+    const row = background.canvas(`body ${color.muted('muted')} \u001B[1mbold\u001B[0m ${islands.join(' ')} tail`)
+    for (const word of ['body', 'muted', 'bold', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
+    for (const [index, word] of ['code', 'panel', 'hover', 'selection'].entries()) {
+      expect(foregroundAt(row, word)).toBe(foregroundAt(islands[index]!, word))
+    }
+    expect(row).toContain('\u001B[1mbold')
+    expect(row.replace(/\u001B\[[0-9;:]*m/gu, '')).toBe('body muted bold code panel hover selection tail')
+  })
+
+  it('keeps saved theme colors for explicit fill and confirmed matching theme backgrounds', () => {
+    enableTruecolor()
+    setBackgroundMode('explicit')
+    const row = background.canvas(`body ${color.muted('muted')}`)
+    expect(foregroundAt(row, 'body')?.toLowerCase()).toBe(BUILT_IN_THEMES.dark.colors.text.toLowerCase())
+    setBackgroundMode('theme')
+    setTerminalCanvasBackground(BUILT_IN_THEMES.dark.colors.canvas)
+    expect(foregroundAt(background.canvas('body'), 'body')).toBe(foregroundAt(row, 'body'))
+  })
+
+  it('handles combined, indexed and colon SGR foregrounds without changing text or geometry', () => {
+    enableTruecolor()
+    setBackgroundMode('terminal')
+    const row = background.canvas('\u001B[1;38;5;255mindexed\u001B[38:2::255:255:255mcolon\u001B[48;2;0;0;0mcode\u001B[49mtail')
+    for (const word of ['indexed', 'colon', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
+    expect(row).toContain('\u001B[38:2::255:255:255mcode')
+    expect(visibleWidth(row)).toBe('indexedcoloncodetail'.length)
+  })
+
   it('switches every semantic layer between DeepSeek dark and light palettes', () => {
     enableTruecolor()
     setBackgroundMode('explicit')

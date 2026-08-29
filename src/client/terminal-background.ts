@@ -28,11 +28,13 @@ export class TerminalBackground {
   private applied: string | undefined
   private changed = false
   private timer: ReturnType<typeof setTimeout> | undefined
+  private reportedColor: string | undefined
 
   constructor(
     private readonly terminal: { write(data: string): void },
     private readonly enabled: boolean,
     private readonly onUnavailable: (reason: BackgroundSyncUnavailable) => void = () => undefined,
+    private readonly onColorChanged: (color: string | undefined) => void = () => undefined,
   ) {}
 
   /** Set color and policy atomically, without writing an intermediate theme. */
@@ -43,6 +45,7 @@ export class TerminalBackground {
     this.mode = mode
     if (mode === 'terminal') this.restoreOriginal()
     else this.sync()
+    this.reportColor()
   }
 
   start(): void {
@@ -91,6 +94,7 @@ export class TerminalBackground {
       this.timer = undefined
       this.original = reply[1].toLowerCase()
       this.sync()
+      this.reportColor()
     }
     return true
   }
@@ -106,6 +110,7 @@ export class TerminalBackground {
     this.original = undefined
     this.applied = undefined
     this.changed = false
+    this.reportColor()
   }
 
   /** Switching to terminal-only restores color without losing the lifetime snapshot. */
@@ -132,6 +137,19 @@ export class TerminalBackground {
       this.restoreOriginal()
       this.notifyUnavailable()
     }
+    this.reportColor()
+  }
+
+  private reportColor(): void {
+    const actual = this.unavailable === 'write-failed' ? undefined : this.changed ? this.applied : this.original
+    // OSC channels may contain 1–4 hex digits. Scale, rather than truncate,
+    // and retain the untouched original string for restoration above.
+    const color = actual === undefined ? undefined : `#${actual.slice(4).split('/').map(channel =>
+      Math.round(Number.parseInt(channel, 16) * 255 / (16 ** channel.length - 1)).toString(16).padStart(2, '0'),
+    ).join('')}`
+    if (color === this.reportedColor) return
+    this.reportedColor = color
+    try { this.onColorChanged(color) } catch { /* presentation cannot disrupt terminal cleanup */ }
   }
 
   private notifyUnavailable(): void {

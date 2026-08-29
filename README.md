@@ -286,6 +286,8 @@ The main canvas now defaults to **theme colors + terminal effects**, instead of 
 
 Panels, code blocks, selections and hover keep their independent backgrounds and highlighting. Their transparency can differ from the canvas; even `explicit` is not guaranteed opaque. Background mode belongs to Harness `seektty-appearance` settings, not theme files: theme switching, previews, import and export do not overwrite it.
 
+Canvas text adapts to a known background that differs from the theme. If the background is unknown (including unavailable synchronization), it uses the terminal's default foreground instead of guessing black or white; semantic text colors are reduced, while bold, underline and independent code/panel colors remain. This also updates existing messages without moving the viewport or clearing selection. The open theme menu refreshes its current marker and code-theme description after saving or returning from a child menu.
+
 Color synchronization requires a supported truecolor terminal and a valid reply to one 500 ms asynchronous query. Unsupported or timed-out queries, `NO_COLOR`, limited colors, and tmux/screen do not recolor the terminal. In `theme` mode, an unavailable sync leaves the default background in place with one non-blocking notice, not an automatic RGB fallback. `SEEKTTY_TERMINAL_BACKGROUND=off` disables recoloring only; it does not change the selected mode. Exit restores the captured color. SeekTTY does not read/set opacity, edit terminal configuration, or alter window decorations. See [compatibility](docs/terminal-background-compatibility.md) and [acceptance results](docs/background-inheritance-acceptance.md).
 
 Use `/language` or a direct command to switch the terminal copy live:

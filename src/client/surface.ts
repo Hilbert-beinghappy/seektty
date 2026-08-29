@@ -66,7 +66,7 @@ import {
   type ProviderOnboardingResult,
 } from './provider-onboarding.ts'
 import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
-import { background, color, escapeTerminalText, setBackgroundMode, setCodeHighlighter, setTheme } from './theme.ts'
+import { background, color, escapeTerminalText, setBackgroundMode, setCodeHighlighter, setTerminalCanvasBackground, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { canReadClipboardText, readClipboardText, writeClipboard } from './clipboard.ts'
 import { graphemeRangeAt, type SelectionAnchor } from './text-selection.ts'
@@ -195,8 +195,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   }
   let stopTuiRenderingSync = (): void => undefined
   let reportBackgroundUnavailable = (): void => undefined
+  let repaintBackground = (): void => undefined
+  setTerminalCanvasBackground(undefined)
   const terminalSession = createTerminalSession(terminal, true, () => { stopTuiRenderingSync() }, process.env,
-    () => { reportBackgroundUnavailable() })
+    () => { reportBackgroundUnavailable() },
+    color => { setTerminalCanvasBackground(color); repaintBackground() })
   const startup = await (async () => {
     try {
       return await measureStartup('settings+client', () => Promise.all([
@@ -244,6 +247,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     const capabilities = client.capabilities
     let stopping: Promise<void> | undefined
+    repaintBackground = () => {
+      if (stopping !== undefined) return
+      // Adapt cached foregrounds at the canvas boundary; no transcript rebuild,
+      // selection reset, or scroll-anchor movement is needed for this repaint.
+      tui.invalidate()
+      tui.requestRender(true)
+    }
     let active: TuiActiveSession | undefined
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)

@@ -6,7 +6,7 @@ import type {
 import { internals, Transcript } from '../src/client/transcript.ts'
 import type { TranscriptImagePayload } from '../src/client/transcript.ts'
 import { terminalMouseDelta } from '../src/client/terminal-session.ts'
-import { background, setBackgroundMode } from '../src/client/theme.ts'
+import { background, setBackgroundMode, setTerminalCanvasBackground } from '../src/client/theme.ts'
 
 function assistant(key: string, text: string): ChatConversationViewNode {
   return {
@@ -123,6 +123,7 @@ function plain(lines: readonly string[]): string {
 
 afterEach(() => {
   setBackgroundMode('theme')
+  setTerminalCanvasBackground(undefined)
   resetRenderCounters()
   internals.fingerprintsComputed = 0
   internals.markdownCreated = 0
@@ -153,8 +154,9 @@ describe('transcript block viewport', () => {
     const lines = plain(transcript.render(80))
     const maps = transcript.viewportMaps()
     resetRenderCounters()
-    for (const mode of ['terminal', 'explicit', 'theme'] as const) {
+    for (const [mode, color] of [['terminal', '#ffffff'], ['explicit', undefined], ['theme', undefined], ['terminal', '#000000']] as const) {
       setBackgroundMode(mode)
+      setTerminalCanvasBackground(color)
       transcript.invalidate()
       expect(plain(transcript.render(80).map(background.canvas))).toBe(lines)
       expect(transcript.currentSelection()).toEqual(selection)

@@ -22,7 +22,7 @@ No dependencies, alpha-percentage probes, terminal-specific opacity APIs, or ter
 - The query is asynchronous and expires after 500 ms. Only a valid `rgb:r/g/b` reply with 1–4 hex digits per channel authorizes a color change. Preserve original channel precision.
 - Switching between synchronizing modes with the same color does not repeat a write. Repaints and mode switches never repeat the query.
 - Entering `terminal` restores the captured original immediately if this run changed it, but retains the snapshot for later switches. If a reply arrives while `terminal` is selected, capture it without recoloring. A later synchronizing mode uses the latest requested theme.
-- Missing, expired, or disabled synchronization in `theme` mode leaves the default canvas background in place with one non-blocking notice per active lifetime. Do not silently switch to explicit RGB. If foreground contrast is poor against an unrelated terminal background, select a matching interface theme or opt into `explicit`.
+- Missing, expired, or disabled synchronization in `theme` mode leaves the default canvas background in place with one non-blocking notice per active lifetime. Do not silently switch to explicit RGB.
 - Restore the captured color synchronously before normal/fatal teardown. Do not use OSC 111: it resets the profile color, which may differ from a color previously chosen by the shell. Write failures are handled best-effort, without breaking cleanup.
 - POSIX suspend restores the background and protocols. Resume starts a new active lifetime, installs input first, then re-queries if needed. Ctrl+Z remains input undo. Uncatchable termination (`SIGKILL`, forced process termination, or terminal crash) cannot guarantee restoration.
 
@@ -34,6 +34,14 @@ Color synchronization still requires an interactive managed terminal and the exi
 
 Direct SSH uses the same bounded query; network latency may cause safe fallback. Multiplexers are excluded because cached replies or outer-window mutations could affect other panes. No passthrough is forced. A successful protocol test cannot prove compositor effects or pixel-perfect padding in every emulator.
 
+## Canvas readability
+
+The saved theme is unchanged. If the captured or applied background differs from its canvas color, RGB foregrounds on the default background are adjusted with the existing contrast calculation to at least 4.5:1. If the background is unknown, canvas foregrounds use `SGR 39`, the terminal's configured foreground. This includes semantic colors embedded in cached Markdown; adapting only the outer text color would be insufficient. No extra query is issued just to discover a terminal-mode background.
+
+Adaptation runs at the canvas rendering boundary, so mode changes or background replies do not recreate transcript nodes, disturb selection, or move scroll anchors. Explicit background islands retain their original colors (panels, code, hover, selection), as does `explicit` canvas mode. A matching synchronized theme background keeps the theme palette. Color calculations are cached with a bounded size.
+
+Default foregrounds rely on a readable terminal palette; opacity and images can still affect the actual pixel contrast. The 4.5:1 calculation applies to known opaque RGB colors, not arbitrary wallpaper or compositor output. Unknown/indexed terminal palettes are not guessed, and `NO_COLOR` retains uncolored output. Native macOS/Windows GUI visual acceptance must still be recorded separately from synthetic and PTY checks.
+
 ## Verification
 
 See [dated acceptance results and manual checklist](background-inheritance-acceptance.md). Unit/synthetic frame tests, real PTY/ConPTY tests, official packaged lifecycle checks, and real GUI-terminal acceptance are recorded separately. Missing devices remain **untested**.
@@ -41,7 +49,7 @@ See [dated acceptance results and manual checklist](background-inheritance-accep
 Focused checks:
 
 ```sh
-pnpm exec vitest run tests/appearance-background.test.ts tests/actions-background.test.ts tests/background-inheritance.test.ts tests/terminal-background.test.ts tests/theme-config.test.ts tests/actions-theme.test.ts tests/transcript-viewport.test.ts tests/terminal-input-framing.test.ts tests/terminal-session.test.ts tests/process-guards.test.ts
+pnpm exec vitest run tests/appearance-background.test.ts tests/actions-background.test.ts tests/background-inheritance.test.ts tests/terminal-background.test.ts tests/theme.test.ts tests/theme-config.test.ts tests/actions-theme.test.ts tests/transcript-viewport.test.ts tests/terminal-input-framing.test.ts tests/terminal-session.test.ts tests/process-guards.test.ts
 pnpm run check
 ```
 

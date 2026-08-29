@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Component, OverlayHandle, TUI } from '@mariozechner/pi-tui'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
-import type { OverlayNavigation, OverlayQueue } from '../src/client/overlays.ts'
+import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
+import { setUiLocale } from '../src/client/locale.ts'
 import type { Transcript } from '../src/client/transcript.ts'
 import { BUILT_IN_THEMES, editableTheme } from '../src/client/theme-config.ts'
 import {
@@ -88,6 +90,118 @@ function actionHarness(
   }
   return { actions: new TuiActions(capabilities, host), host }
 }
+
+afterEach(() => { setUiLocale('zh') })
+
+function menuHarness(state: ReturnType<typeof settingsState>) {
+  let mounted: Component | undefined
+  const overlays = new OverlayQueue({
+    showOverlay: (component: Component) => { mounted = component; return { hide: vi.fn() } as unknown as OverlayHandle },
+    requestRender: vi.fn(),
+  } as unknown as TUI)
+  return {
+    ...actionHarness(state.settings, overlays), overlays,
+    text: () => mounted?.render(110).join('\n').replace(/\u001B\[[0-9;:]*m/gu, '') ?? '',
+    key: (data: string) => mounted?.handleInput?.(data),
+  }
+}
+
+describe('live theme menu', () => {
+  it.each(['zh', 'en'] as const)('refreshes current marks and preserves the query and selection (%s)', async locale => {
+    setUiLocale(locale)
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
+    const h = menuHarness(state)
+    const pending = h.actions.execute('theme', '')
+    const current = locale === 'zh' ? '当前 · DeepSeek ' : 'Current · DeepSeek '
+    const dark = locale === 'zh' ? '暗色' : 'dark'
+    const light = locale === 'zh' ? '亮色' : 'light'
+    try {
+      await vi.waitFor(() => expect(h.text()).toContain(current + dark))
+      h.key('\u001B[B'); h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain(current + light))
+      expect(h.text()).not.toContain(current + dark)
+      expect(h.text()).toMatch(new RegExp(`→\\s+${current}${light}`, 'u'))
+      h.key('\r') // Stable selection remains light, now current; no new write.
+      await vi.waitFor(() => expect(h.host.notice).toHaveBeenLastCalledWith(expect.any(String), 'info'))
+      expect(state.mutate).toHaveBeenCalledTimes(1)
+      h.key(dark); h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain(current + dark))
+      expect(h.text()).toMatch(new RegExp(`(?:搜索|Search)\\s*>\\s*${dark}`, 'u'))
+      expect(state.current().value).toMatchObject({ theme: 'dark', codeTheme: 'auto' })
+      expect(state.settings.describe).toHaveBeenCalledWith(TUI_APPEARANCE_SETTINGS_NAMESPACE, { bypassCache: true })
+    } finally { h.overlays.dispose(); await pending }
+  })
+
+  it('refreshes the parent description after returning from the code theme child', async () => {
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
+    const h = menuHarness(state)
+    const pending = h.actions.execute('theme', '')
+    try {
+      await vi.waitFor(() => expect(h.text()).toContain('代码块主题'))
+      h.key('代码块主题'); h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain('DeepSeek 亮色代码'))
+      h.key('DeepSeek 亮色代码'); h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain('独立指定 · 当前 DeepSeek 亮色'))
+      expect(state.current().value).toMatchObject({ theme: 'dark', codeTheme: 'light' })
+      expect(state.mutate).toHaveBeenCalledTimes(1)
+    } finally { h.overlays.dispose(); await pending }
+  })
+
+  it('keeps the authoritative marker and an inline error after a failed save, then permits retry', async () => {
+    const custom = editableTheme(BUILT_IN_THEMES.dark, 'ocean', 'Ocean')
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [custom] })
+    state.mutate.mockRejectedValueOnce(new Error('save rejected'))
+    const h = menuHarness(state)
+    const pending = h.actions.execute('theme', '')
+    try {
+      await vi.waitFor(() => expect(h.text()).toContain('Ocean'))
+      h.key('\u001B[B'); h.key('\u001B[B'); h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain('save rejected'))
+      expect(h.text()).toContain('当前 · DeepSeek 暗色')
+      expect(h.text()).not.toContain('当前 · Ocean')
+      expect(h.host.applyAppearance).not.toHaveBeenCalled()
+      h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain('当前 · Ocean'))
+      expect(h.text()).not.toContain('save rejected')
+      expect(state.current().value).toMatchObject({ theme: 'custom:ocean' })
+    } finally { h.overlays.dispose(); await pending }
+  })
+
+  it('leaves theme state unchanged when a child is cancelled', async () => {
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
+    const h = menuHarness(state)
+    const pending = h.actions.execute('theme', '')
+    try {
+      await vi.waitFor(() => expect(h.text()).toContain('代码块主题'))
+      h.key('代码块主题'); h.key('\r')
+      await vi.waitFor(() => expect(h.text()).toContain('DeepSeek 亮色代码'))
+      h.key('\u001B')
+      await vi.waitFor(() => expect(h.text()).toContain('自动匹配 · 当前 DeepSeek 暗色'))
+      expect(state.mutate).not.toHaveBeenCalled()
+      expect(h.host.applyAppearance).not.toHaveBeenCalled()
+    } finally { h.overlays.dispose(); await pending }
+  })
+
+  it('ignores a late refresh after the menu is closed', async () => {
+    const state = settingsState({ theme: 'dark', codeTheme: 'auto', customThemes: [] })
+    const h = menuHarness(state)
+    const describe = vi.mocked(state.settings.describe)
+    let release: ((value: readonly TuiSettingsDocument[]) => void) | undefined
+    const pending = h.actions.execute('theme', '')
+    try {
+      await vi.waitFor(() => expect(h.text()).toContain('当前 · DeepSeek 暗色'))
+      // Selecting the current theme reads once, then the menu refresh awaits.
+      describe.mockResolvedValueOnce([state.current()]).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+      h.key('\r')
+      await vi.waitFor(() => expect(release).toBeDefined())
+      h.overlays.dispose()
+      release!([state.current()])
+      await pending
+      expect(state.mutate).not.toHaveBeenCalled()
+      expect(h.host.notice).not.toHaveBeenCalledWith(expect.any(String), 'error')
+    } finally { h.overlays.dispose(); release?.([state.current()]); await pending }
+  })
+})
 
 describe('/theme commands', () => {
   it('switches a built-in theme through Harness Settings and applies the resolved theme live', async () => {

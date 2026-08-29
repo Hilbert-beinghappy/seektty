@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Box, TUI, visibleWidth, type Terminal } from '@mariozechner/pi-tui'
 import { BottomAnchoredLayout } from '../src/client/chrome.ts'
-import { background, color, setBackgroundMode, setTheme } from '../src/client/theme.ts'
+import { background, color, setBackgroundMode, setTerminalCanvasBackground, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 import { tuiFrameApi } from '../src/client/pi-tui-adapters.ts'
 import type { TuiBackgroundMode } from '../src/protocol.ts'
@@ -21,6 +21,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllEnvs()
   setBackgroundMode('theme')
+  setTerminalCanvasBackground(undefined)
   setTheme(BUILT_IN_THEMES.dark)
 })
 
@@ -110,6 +111,12 @@ describe('canvas / layout / overlay frame integration (synthetic terminal)', () 
         expect(await redraw(mode)).toEqual(original)
         expect(tuiFrameApi(tui).getLastFrameGeometry?.()).toEqual(geometry)
       }
+      const beforeReply = tui.render(terminal.columns)
+      setTerminalCanvasBackground('#ffffff')
+      expect(await redraw('terminal')).toEqual(original)
+      expect(tui.render(terminal.columns)).not.toEqual(beforeReply)
+      expect(tuiFrameApi(tui).getLastFrameGeometry?.()).toEqual(geometry)
+      setTerminalCanvasBackground(undefined)
       const overlay = tui.showOverlay({ render: () => [background.surface('overlay')], invalidate: () => undefined }, { width: 20 })
       await frame()
       overlay.hide()
