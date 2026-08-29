@@ -1372,6 +1372,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const transcriptChanged = transcript.setHoveredRegion(id)
       const editorChanged = editor.setHoveredTarget(
         id?.startsWith('composer:autocomplete:') === true || id?.startsWith('chrome:model') === true
+          || id?.startsWith('chrome:reasoning') === true
           || id?.startsWith('chrome:mode') === true
           ? id
           : undefined,
@@ -1506,7 +1507,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (region?.action.kind === 'chrome') {
         const commandId = region.action.commandId
-        if (commandId === 'model') void actions.execute('model', '')
+        if (commandId === 'model' || commandId === 'reasoning') void actions.execute('model', '')
         else if (commandId === 'mode') void actions.execute('mode', '')
         else if (commandId === 'permission') void actions.execute('permission', '')
         else if (commandId === 'detail') void actions.execute('status', '')
