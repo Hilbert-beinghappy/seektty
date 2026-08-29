@@ -20,7 +20,7 @@ export function helpSectionText(id: HelpSectionId): string {
     return ui(
       [
         '输入：在底部输入区写消息，Enter 发送。',
-        '换行：Shift+Enter 在输入区插入换行。',
+        '换行：Shift+Enter 需终端支持扩展键盘协议；无法区分时，部分终端可用 Ctrl+Enter。',
         '图片：直接粘贴图片或图片路径；也可以 /attach。待发送图片显示在输入框下方。默认 v4-flash / v4-pro 目前不接受图片输入。',
         '停止：Ctrl+C 停止当前轮次；再按一次退出。',
         '会话：Ctrl+S 打开会话列表，新建或切换会话。',
@@ -30,7 +30,7 @@ export function helpSectionText(id: HelpSectionId): string {
       ].join('\n'),
       [
         'Input: type in the composer and press Enter to send.',
-        'Newline: Shift+Enter inserts a newline in the composer.',
+        'Newline: Shift+Enter requires extended keyboard input; some terminals can use Ctrl+Enter instead.',
         'Images: paste an image or image path, or use /attach. Pending images appear under the composer. Default v4-flash / v4-pro currently reject image input.',
         'Stop: Ctrl+C stops the active turn; press again to exit.',
         'Sessions: Ctrl+S opens the session list to create or switch sessions.',
