@@ -11,6 +11,7 @@ import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+  TUI_WELCOME_SETTINGS_NAMESPACE,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { ui, uiLocale } from './locale.ts'
 import type { TuiSettingsDocument } from './management.ts'
@@ -200,6 +201,7 @@ export function settingsSectionLabel(namespace: string): string {
   if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return ui('模型与 Provider', 'Models and Providers')
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return ui('SeekTTY 主题', 'SeekTTY themes')
   if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) return ui('SeekTTY 行为', 'SeekTTY behavior')
+  if (namespace === TUI_WELCOME_SETTINGS_NAMESPACE) return ui('SeekTTY 欢迎页', 'SeekTTY welcome page')
   if (namespace === 'tui-plugin-marketplace') return ui('插件市场来源', 'Plugin marketplace sources')
   return ui('通用设置', 'General settings')
 }
@@ -259,6 +261,7 @@ export function visibleSettingsDocuments(
  * @param path - schema path inside that namespace.
  */
 export function hasDedicatedSettingsEditor(namespace: string, path: readonly string[]): boolean {
+  if (namespace === TUI_WELCOME_SETTINGS_NAMESPACE) return true
   if (namespace === LOCALE_SETTINGS_NAMESPACE) return samePath(path, [LOCALE_PREFERENCE_FIELD])
   if (namespace === 'agent-default-model') {
     return samePath(path, ['provider']) || samePath(path, ['model']) || samePath(path, ['reasoningEffort'])

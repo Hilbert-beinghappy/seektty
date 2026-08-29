@@ -17,6 +17,7 @@ import type {
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+  TUI_WELCOME_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
   type TuiAppearanceSettings,
   type TuiBackgroundMode,
@@ -25,6 +26,7 @@ import {
   type TuiCustomTheme,
   type TuiMouseMode,
   type TuiThemeId,
+  type TuiWelcomeSettings,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiDraftAttachment, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
@@ -103,6 +105,14 @@ import {
 import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
 import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
+import {
+  defaultWelcomeSettings,
+  prepareWelcomeSettings,
+  saveWelcomeSettings,
+  welcomeFromSettings,
+  welcomeSettings,
+} from './welcome-settings.ts'
+import { editWelcomeSettings } from './welcome-editor.ts'
 import { normalizeOnboardingApiKey } from './provider-onboarding.ts'
 import {
   captureClipboardImage,
@@ -136,6 +146,10 @@ export interface TuiActionHost {
   applyAppearance(appearance: TuiAppearanceSettings): void
   applyLocale(locale: LocaleId): void
   applyBehavior?(behavior: TuiBehaviorSettings): void
+  applyWelcome?(settings: TuiWelcomeSettings): void
+  refreshWelcome?(): Promise<void>
+  previewWelcome?(settings: TuiWelcomeSettings, width: number): Promise<string>
+  workspacePath?(): string
   setEditor(text: string): void
   composerText?(): string
   copy(text: string): void
@@ -468,6 +482,7 @@ export class TuiActions {
         case 'effort': await this.reasoningEffort(); break
         case 'language': await this.language(args); break
         case 'theme': await this.theme(args); break
+        case 'welcome': await this.welcome(args); break
         case 'permission': await this.permission(args); break
         case 'queue': await this.queue(); break
         case 'steer': await this.steer(args); break
@@ -1295,6 +1310,54 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       case 'delete': await this.themeDelete(parsed.rest); return
       default: throw new Error(ui('用法：/theme [dark|light|code|use|edit|palette|import|export|delete]', "Usage: /theme [dark|light|code|use|edit|palette|import|export|delete]"))
     }
+  }
+
+  private welcomeWorkspacePath(): string {
+    return this.host.workspacePath?.() ?? this.capabilities.active()?.workspacePath ?? process.cwd()
+  }
+
+  private applyWelcome(settings: TuiWelcomeSettings): void {
+    if (this.host.applyWelcome === undefined) {
+      throw new Error(ui('当前 Surface 未提供欢迎页实时应用接口', 'The current Surface does not expose live welcome-page updates'))
+    }
+    this.host.applyWelcome(settings)
+  }
+
+  private async welcome(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const token = args.trim().toLowerCase()
+    const bridge = this.capabilities.managementBridge().settings
+    const document = welcomeSettings(await bridge.describe(TUI_WELCOME_SETTINGS_NAMESPACE, { bypassCache: true }))
+    if (token === 'refresh') {
+      if (this.host.refreshWelcome === undefined) throw new Error(ui('当前 Surface 无法刷新欢迎页', 'The current Surface cannot refresh the welcome page'))
+      await this.host.refreshWelcome()
+      this.host.notice(ui('已清除 Fastfetch 缓存并重新采集', 'Cleared the Fastfetch cache and started a fresh collection'), 'success')
+      return
+    }
+    if (token === 'reset') {
+      const confirmed = await overlays.confirm(
+        ui('恢复默认欢迎页？', 'Restore the default welcome page?'),
+        ui('将恢复内置原色 Logo、自定义信息模式和默认信息行；不会安装或执行 Fastfetch。', 'Restores the built-in original-color logo, custom information mode, and default rows. Fastfetch is not installed or run.'),
+        ui('恢复默认', 'Restore defaults'),
+      )
+      if (!confirmed) return
+      const prepared = await prepareWelcomeSettings(defaultWelcomeSettings(), this.welcomeWorkspacePath())
+      const updated = await saveWelcomeSettings(bridge, document, prepared)
+      this.applyWelcome(welcomeFromSettings(updated))
+      this.host.notice(ui('欢迎页已恢复默认并立即生效', 'The welcome page was restored and is now active'), 'success')
+      return
+    }
+    if (token !== '') throw new Error(ui('用法：/welcome [refresh|reset]', 'Usage: /welcome [refresh|reset]'))
+    await this.overlayFlow(overlays, async (navigation) => {
+      await editWelcomeSettings(navigation, {
+        settings: bridge,
+        document,
+        workspacePath: this.welcomeWorkspacePath(),
+        preview: (settings, width) => this.host.previewWelcome?.(settings, width)
+          ?? Promise.resolve(ui('当前 Surface 无法生成预览', 'The current Surface cannot generate a preview')),
+        apply: settings => { this.applyWelcome(settings) },
+        notice: (message, tone) => { this.host.notice(message, tone) },
+      })
+    }, { width: '95%', maxHeight: '92%', anchor: 'center', margin: 1 })
   }
 
   private async themeCenter(): Promise<void> {
@@ -2331,6 +2394,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           label: ui('管理插件市场来源…', "Manage plugin marketplace sources…"),
           description: ui('管理 npm 和其他插件目录来源', "Manage npm and other plugin catalog sources"),
         }]
+      case TUI_WELCOME_SETTINGS_NAMESPACE:
+        return [{
+          id: '__settings_welcome__',
+          label: ui('配置欢迎页…', 'Configure welcome page…'),
+          description: ui('信息、Logo、Fastfetch 与实时预览', 'Information, logo, Fastfetch, and live preview'),
+        }]
       default: return []
     }
   }
@@ -2346,6 +2415,18 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       case '__settings_default_permission__': await this.editDefaultPermission(overlays, document); return
       case '__settings_default_mode__': await this.editDefaultMode(overlays, document); return
       case '__settings_plugin_sources__': await this.pluginSources('', overlays); return
+      case '__settings_welcome__': {
+        await editWelcomeSettings(overlays as OverlayNavigation, {
+          settings: this.capabilities.managementBridge().settings,
+          document,
+          workspacePath: this.welcomeWorkspacePath(),
+          preview: (settings, width) => this.host.previewWelcome?.(settings, width)
+            ?? Promise.resolve(ui('当前 Surface 无法生成预览', 'The current Surface cannot generate a preview')),
+          apply: settings => { this.applyWelcome(settings) },
+          notice: (message, tone) => { this.host.notice(message, tone) },
+        })
+        return
+      }
       default: throw new Error(ui(`未知 Settings 专用动作 ${JSON.stringify(action)}`, `Unknown Settings-only action ${JSON.stringify(action)}`))
     }
   }
@@ -2663,6 +2744,9 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
       }
       if (document.namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
         this.host.applyBehavior?.(behaviorFromSettings(document))
+      }
+      if (document.namespace === TUI_WELCOME_SETTINGS_NAMESPACE) {
+        this.host.applyWelcome?.(welcomeFromSettings(document))
       }
       if (document.namespace === LOCALE_SETTINGS_NAMESPACE) {
         this.host.applyLocale(localeFromSettings([document]))

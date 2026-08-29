@@ -269,6 +269,7 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'profile', description: ui('管理 Profile', 'Manage Profiles'), argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
     { name: 'language', description: ui('切换界面语言', 'Switch interface language'), argumentHint: '[auto|zh|en]', source: 'TUI', behavior: 'local' },
     { name: 'theme', description: ui('切换界面或独立代码主题', 'Switch interface or code theme'), argumentHint: '[dark|light|code|use|edit|palette|import|export|delete]', source: 'TUI', behavior: 'local' },
+    { name: 'welcome', description: ui('配置 Fastfetch 风格欢迎页', 'Configure the Fastfetch-style welcome page'), argumentHint: '[refresh|reset]', source: 'TUI', behavior: 'local' },
     { name: 'queue', description: ui('管理排队消息', 'Manage queued messages'), source: 'TUI', behavior: 'local' },
     { name: 'steer', description: ui('发送引导消息', 'Send steering message'), argumentHint: ui('<消息>', '<message>'), source: 'TUI', behavior: 'local' },
     { name: 'attach', description: ui('添加图片', 'Attach image'), argumentHint: ui('[图片路径]', '[image-path]'), source: 'TUI', behavior: 'local' },

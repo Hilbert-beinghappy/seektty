@@ -172,15 +172,17 @@ export class WelcomeController {
   }
 
   applySettings(settings: TuiWelcomeSettings): void {
+    const fastfetchChanged = JSON.stringify(settings.fastfetch) !== JSON.stringify(this.settings.fastfetch)
     this.settings = settings
     this.fastfetchGeneration += 1
     this.fastfetchAbort?.abort()
     this.generation += 1
     this.fastfetchResult = undefined
     this.fastfetchKey = ''
+    if (fastfetchChanged) this.fastfetchCache.delete(JSON.stringify(settings.fastfetch))
     if (this.ready) {
       void this.loadLogos()
-      void this.loadFastfetch(false)
+      void this.loadFastfetch(fastfetchChanged)
     }
     this.requestRender()
   }
@@ -275,6 +277,8 @@ export class WelcomeController {
       }
     } catch (error) {
       if (this.disposed || serial !== this.logoAbort) return
+      this.largeLogo = undefined
+      this.compactLogo = undefined
       this.reportOnce(`logo:${String(error)}`, ui(
         '自定义欢迎 Logo 无法读取；已回退到内置 Logo。',
         'The custom welcome logo could not be read; the built-in logo is being used.',
@@ -301,20 +305,26 @@ export class WelcomeController {
     }
   }
 
-  render(width: number, hasSession: boolean): string[] {
+  private renderSettings(
+    settings: TuiWelcomeSettings,
+    width: number,
+    hasSession: boolean,
+    fastfetchResult: TuiWelcomeFastfetchResult | undefined,
+    logos: { readonly large?: WelcomeLogo; readonly compact?: WelcomeLogo },
+  ): string[] {
     const custom = (valueWidth: number): string[] => renderCustomWelcomeRows(
-      this.settings.customRows,
+      settings.customRows,
       { ...this.facts, theme: currentTheme().name },
       valueWidth,
     )
-    const fastfetch = (valueWidth: number): string[] => renderFastfetchRows(this.fastfetchResult, valueWidth)
+    const fastfetch = (valueWidth: number): string[] => renderFastfetchRows(fastfetchResult, valueWidth)
     const info = (valueWidth: number): string[] => {
       let lines: string[]
-      if (this.settings.infoMode === 'custom') lines = custom(valueWidth)
-      else if (this.settings.infoMode === 'fastfetch') lines = fastfetch(valueWidth)
+      if (settings.infoMode === 'custom') lines = custom(valueWidth)
+      else if (settings.infoMode === 'fastfetch') lines = fastfetch(valueWidth)
       else {
-        const first = this.settings.mixedOrder === 'custom-first' ? custom(valueWidth) : fastfetch(valueWidth)
-        const second = this.settings.mixedOrder === 'custom-first' ? fastfetch(valueWidth) : custom(valueWidth)
+        const first = settings.mixedOrder === 'custom-first' ? custom(valueWidth) : fastfetch(valueWidth)
+        const second = settings.mixedOrder === 'custom-first' ? fastfetch(valueWidth) : custom(valueWidth)
         lines = [...first, ...(first.length === 0 || second.length === 0 ? [] : ['']), ...second]
       }
       lines.push('')
@@ -323,8 +333,51 @@ export class WelcomeController {
         : ui('/new 或 /workspace 开始 · /welcome 配置欢迎页', '/new or /workspace to begin · /welcome configures this page')))
       return lines
     }
-    const logos = this.logos()
     return layoutWelcome(Math.max(1, width), logos.large, logos.compact, info)
+  }
+
+  render(width: number, hasSession: boolean): string[] {
+    return this.renderSettings(this.settings, width, hasSession, this.fastfetchResult, this.logos())
+  }
+
+  /** Render a settings draft without changing the live page or executing Fastfetch. */
+  async preview(settings: TuiWelcomeSettings, width: number, hasSession: boolean): Promise<string> {
+    let logos: { readonly large?: WelcomeLogo; readonly compact?: WelcomeLogo } = {}
+    if (settings.logo.source === 'builtin') {
+      logos = {
+        large: builtinWelcomeLogo('large', settings.logo.colorMode),
+        compact: builtinWelcomeLogo('compact', settings.logo.colorMode),
+      }
+    } else if (settings.logo.source === 'file') {
+      try {
+        const large = await loadWelcomeLogoFile(
+          settings.logo.largePath,
+          this.facts.workspace,
+          settings.logo.colorMode,
+        )
+        const compact = settings.logo.compactPath.trim() === ''
+          ? undefined
+          : await loadWelcomeLogoFile(
+            settings.logo.compactPath,
+            this.facts.workspace,
+            settings.logo.colorMode,
+          )
+        logos = {
+          large: large.logo,
+          ...(compact === undefined ? {} : { compact: compact.logo }),
+        }
+      } catch {
+        logos = {
+          large: builtinWelcomeLogo('large', settings.logo.colorMode),
+          compact: builtinWelcomeLogo('compact', settings.logo.colorMode),
+        }
+      }
+    }
+    const key = JSON.stringify(settings.fastfetch)
+    const result = key === this.fastfetchKey
+      ? this.fastfetchResult
+      : this.fastfetchCache.get(key)
+    return this.renderSettings(settings, Math.max(1, width), hasSession, result, logos).join('\n')
   }
 
   dispose(): void {

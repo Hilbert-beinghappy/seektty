@@ -12,8 +12,11 @@ import {
   type TuiWelcomeRow,
   type TuiWelcomeSettings,
 } from '@deepseek-ai/dsh-tui-protocol'
+import { stat } from 'node:fs/promises'
 import { escapeTerminalText } from './theme.ts'
 import { ui } from './locale.ts'
+import { loadWelcomeLogoFile } from './welcome-logo.ts'
+import { resolveHarnessUserPath } from './workspace-path.ts'
 
 const INFO_MODES = new Set(['custom', 'fastfetch', 'mixed'] as const)
 const MIXED_ORDERS = new Set(['custom-first', 'fastfetch-first'] as const)
@@ -123,6 +126,42 @@ export function welcomeSettings(documents: readonly TuiSettingsDocument[]): TuiS
 
 export function welcomeFromSettings(document: TuiSettingsDocument): TuiWelcomeSettings {
   return normalizeWelcome(document.value)
+}
+
+/** Validate external paths before a draft is allowed to replace live settings. */
+export async function prepareWelcomeSettings(
+  draft: TuiWelcomeSettings,
+  workspacePath: string,
+): Promise<TuiWelcomeSettings> {
+  const value = normalizeWelcome(draft)
+  let largePath = value.logo.largePath
+  let compactPath = value.logo.compactPath
+  if (value.logo.source === 'file') {
+    if (largePath.trim() === '') {
+      throw new Error(ui(
+        '自定义 Logo 需要大图文件路径。',
+        'A custom logo requires a large-logo file path.',
+      ))
+    }
+    const large = await loadWelcomeLogoFile(largePath, workspacePath, value.logo.colorMode)
+    largePath = large.path
+    if (compactPath.trim() !== '') {
+      const compact = await loadWelcomeLogoFile(compactPath, workspacePath, value.logo.colorMode)
+      compactPath = compact.path
+    }
+  }
+  let configPath = value.fastfetch.configPath
+  if (value.fastfetch.source === 'user-config' && configPath.trim() !== '') {
+    const path = resolveHarnessUserPath(configPath, workspacePath)
+    const metadata = await stat(path)
+    if (!metadata.isFile()) throw new Error(ui('Fastfetch 配置路径不是文件。', 'The Fastfetch config path is not a file.'))
+    configPath = path
+  }
+  return {
+    ...value,
+    logo: { ...value.logo, largePath, compactPath },
+    fastfetch: { ...value.fastfetch, configPath },
+  }
 }
 
 /** Persist one validated draft atomically under the descriptor revision. */

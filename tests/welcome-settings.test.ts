@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_TUI_WELCOME,
@@ -8,6 +11,7 @@ import { WelcomeSettingsSchema } from '../src/host/management.ts'
 import {
   defaultWelcomeSettings,
   normalizeWelcome,
+  prepareWelcomeSettings,
   saveWelcomeSettings,
   welcomeFromSettings,
   welcomeSettings,
@@ -84,5 +88,24 @@ describe('welcome settings', () => {
     expect(calls[0]?.[0]).toBe(TUI_WELCOME_SETTINGS_NAMESPACE)
     expect(calls[0]?.[2]).toBe(1)
     expect(calls[0]?.[1]).toHaveLength(5)
+  })
+
+  it('validates and normalizes external Logo and Fastfetch config paths before saving', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'seektty-welcome-settings-'))
+    await writeFile(join(directory, 'large.txt'), '$[1]SeekTTY', 'utf8')
+    await writeFile(join(directory, 'compact.txt'), '$[2]ST', 'utf8')
+    await writeFile(join(directory, 'fastfetch.jsonc'), '{}', 'utf8')
+    const prepared = await prepareWelcomeSettings({
+      ...defaultWelcomeSettings(),
+      logo: { source: 'file', colorMode: 'theme', largePath: 'large.txt', compactPath: 'compact.txt' },
+      fastfetch: { source: 'user-config', modules: ['os'], configPath: 'fastfetch.jsonc' },
+    }, directory)
+    expect(isAbsolute(prepared.logo.largePath)).toBe(true)
+    expect(isAbsolute(prepared.logo.compactPath)).toBe(true)
+    expect(isAbsolute(prepared.fastfetch.configPath)).toBe(true)
+    await expect(prepareWelcomeSettings({
+      ...prepared,
+      logo: { ...prepared.logo, largePath: 'missing.txt' },
+    }, directory)).rejects.toThrow()
   })
 })

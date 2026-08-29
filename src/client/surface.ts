@@ -960,6 +960,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         tui.invalidate()
         tui.requestRender(true)
       },
+      applyWelcome: (settings) => {
+        welcome.applySettings(settings)
+      },
+      refreshWelcome: () => welcome.refreshFastfetch(),
+      previewWelcome: (settings, width) => welcome.preview(settings, width, active !== undefined),
+      workspacePath: () => active?.workspacePath ?? options.cwd,
       setEditor: (text) => {
         editor.setText(escapeTerminalText(text))
         focusEditor()
