@@ -11,8 +11,8 @@ import {
 import {
   createJavaScriptRegexEngine,
 } from '@shikijs/engine-javascript'
-import type { TuiSyntaxThemeColors } from '@deepseek-ai/dsh-tui-protocol'
 import { normalizeThemeColor, type ResolvedTuiTheme } from './theme-config.ts'
+import { visualTextMateRules } from './syntax-theme-rules.ts'
 import { styleTerminalText, terminalColorLevel, type CodeBackgroundPolicy } from './theme.ts'
 import { measureStartup } from '../startup-trace.ts'
 
@@ -94,30 +94,6 @@ const MAX_HIGHLIGHT_CHARS = 100_000
 const MAX_HIGHLIGHT_LINE_CHARS = 20_000
 const MAX_CACHE_ENTRIES = 512
 
-const ROLE_SCOPES: Readonly<Record<Exclude<keyof TuiSyntaxThemeColors, 'background' | 'foreground'>, readonly string[]>> = {
-  comment: ['comment'],
-  keyword: ['keyword', 'storage.type', 'storage.modifier'],
-  string: ['string'],
-  number: ['constant.numeric'],
-  constant: ['constant', 'variable.language'],
-  function: ['entity.name.function', 'support.function', 'meta.function-call'],
-  type: ['entity.name.type', 'entity.name.class', 'support.type', 'support.class'],
-  variable: ['variable.other', 'variable.language'],
-  property: ['variable.other.property', 'support.variable.property'],
-  parameter: ['variable.parameter'],
-  operator: ['keyword.operator'],
-  punctuation: ['punctuation'],
-  tag: ['entity.name.tag'],
-  attribute: ['entity.other.attribute-name'],
-  regexp: ['string.regexp'],
-}
-
-const DIFF_SCOPES = {
-  inserted: ['markup.inserted', 'punctuation.definition.inserted'],
-  deleted: ['markup.deleted', 'punctuation.definition.deleted'],
-  header: ['meta.diff.header', 'meta.diff.range'],
-} as const
-
 function languageOf(value: string | undefined): SupportedLanguage | undefined {
   if (value === undefined) return undefined
   const normalized = value.trim().toLowerCase().split(/[\s,{]/u, 1)[0] ?? ''
@@ -151,16 +127,12 @@ function themeHash(theme: ResolvedTuiTheme): string {
 }
 
 function themeRegistration(theme: ResolvedTuiTheme, name: string): ThemeRegistration {
+  const tokenColors = theme.tokenColors.length > 0
+    ? theme.tokenColors
+    : visualTextMateRules(theme.syntax, theme.colors)
   const settings: NonNullable<ThemeRegistration['settings']> = [
     { settings: { foreground: theme.syntax.foreground, background: theme.syntax.background } },
-    ...Object.entries(ROLE_SCOPES).map(([role, scope]) => ({
-      scope: [...scope],
-      settings: { foreground: theme.syntax[role as keyof typeof ROLE_SCOPES] },
-    })),
-    { scope: [...DIFF_SCOPES.inserted], settings: { foreground: theme.colors.success } },
-    { scope: [...DIFF_SCOPES.deleted], settings: { foreground: theme.colors.danger } },
-    { scope: [...DIFF_SCOPES.header], settings: { foreground: theme.colors.accent } },
-    ...theme.tokenColors.map(rule => ({
+    ...tokenColors.map(rule => ({
       scope: [...rule.scope],
       settings: {
         ...(rule.foreground === undefined ? {} : { foreground: rule.foreground }),

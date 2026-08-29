@@ -28,6 +28,19 @@ describe('theme colors and generated palettes', () => {
     expect(BUILT_IN_THEMES.dark.name).toBe('DeepSeek 暗色')
     expect(BUILT_IN_THEMES.light.name).toBe('DeepSeek 亮色')
   })
+
+  it('ships detailed TextMate rules with both built-in code themes', () => {
+    for (const theme of Object.values(BUILT_IN_THEMES)) {
+      const scopes = theme.tokenColors.flatMap(rule => rule.scope)
+      expect(theme.tokenColors.length).toBeGreaterThan(20)
+      expect(scopes).toContain('entity.name.function')
+      expect(scopes).toContain('variable.parameter')
+      expect(scopes).toContain('support.type.property-name')
+      expect(scopes).toContain('markup.heading')
+      expect(scopes).not.toContain('meta.function-call')
+    }
+  })
+
   it('normalizes supported opaque HEX/RGB forms', () => {
     expect(normalizeThemeColor('#abc')).toBe('#AABBCC')
     expect(normalizeThemeColor('rgb(10, 20, 30)')).toBe('#0A141E')

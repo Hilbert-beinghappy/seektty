@@ -18,6 +18,7 @@ import {
   type TuiTokenFontStyle,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { ui } from './locale.ts'
+import { visualTextMateRules } from './syntax-theme-rules.ts'
 
 interface Rgb {
   readonly red: number
@@ -71,6 +72,20 @@ const SYNTAX_COLOR_KEYS = [
   'operator', 'punctuation', 'tag', 'attribute', 'regexp',
 ] as const satisfies readonly (keyof TuiSyntaxThemeColors)[]
 
+const BUILT_IN_DARK_COLORS: TuiThemeUiColors = {
+  text: '#DDE2EE', muted: '#8993AA', border: '#34415F', brand: '#6682FF', accent: '#91A7FF',
+  success: '#42C99A', warning: '#E5AA59', danger: '#F0717F', canvas: '#090E1B',
+  surface: '#111827', selection: '#1D2B52',
+}
+
+const BUILT_IN_DARK_SYNTAX: TuiSyntaxThemeColors = {
+  background: '#111827', foreground: '#DDE2EE', comment: '#8993AA', keyword: '#91A7FF',
+  string: '#42C99A', number: '#E5AA59', constant: '#F0717F', function: '#7F9BFF',
+  type: '#73D0FF', variable: '#DDE2EE', property: '#B4C2FF', parameter: '#E8ECF5',
+  operator: '#91A7FF', punctuation: '#8993AA', tag: '#6682FF', attribute: '#E5AA59',
+  regexp: '#F0717F',
+}
+
 const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
   id: 'dark',
   get name() {
@@ -79,20 +94,24 @@ const BUILT_IN_DARK: ResolvedTuiTheme = Object.freeze({
   tone: 'dark',
   syntaxTone: 'dark',
   source: 'builtin',
-  colors: {
-    text: '#DDE2EE', muted: '#8993AA', border: '#34415F', brand: '#6682FF', accent: '#91A7FF',
-    success: '#42C99A', warning: '#E5AA59', danger: '#F0717F', canvas: '#090E1B',
-    surface: '#111827', selection: '#1D2B52',
-  },
-  syntax: {
-    background: '#111827', foreground: '#DDE2EE', comment: '#8993AA', keyword: '#91A7FF',
-    string: '#42C99A', number: '#E5AA59', constant: '#F0717F', function: '#7F9BFF',
-    type: '#73D0FF', variable: '#DDE2EE', property: '#B4C2FF', parameter: '#E8ECF5',
-    operator: '#91A7FF', punctuation: '#8993AA', tag: '#6682FF', attribute: '#E5AA59',
-    regexp: '#F0717F',
-  },
-  tokenColors: [],
+  colors: BUILT_IN_DARK_COLORS,
+  syntax: BUILT_IN_DARK_SYNTAX,
+  tokenColors: visualTextMateRules(BUILT_IN_DARK_SYNTAX, BUILT_IN_DARK_COLORS),
 })
+
+const BUILT_IN_LIGHT_COLORS: TuiThemeUiColors = {
+  text: '#1D2433', muted: '#667085', border: '#C6D0E7', brand: '#3156D8', accent: '#415FC9',
+  success: '#137A58', warning: '#925700', danger: '#C2384E', canvas: '#F6F8FD',
+  surface: '#FFFFFF', selection: '#E2E9FF',
+}
+
+const BUILT_IN_LIGHT_SYNTAX: TuiSyntaxThemeColors = {
+  background: '#FFFFFF', foreground: '#1D2433', comment: '#667085', keyword: '#3156D8',
+  string: '#137A58', number: '#925700', constant: '#C2384E', function: '#415FC9',
+  type: '#006A8E', variable: '#1D2433', property: '#3F55A8', parameter: '#313B50',
+  operator: '#3156D8', punctuation: '#667085', tag: '#3156D8', attribute: '#925700',
+  regexp: '#C2384E',
+}
 
 const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
   id: 'light',
@@ -102,19 +121,9 @@ const BUILT_IN_LIGHT: ResolvedTuiTheme = Object.freeze({
   tone: 'light',
   syntaxTone: 'light',
   source: 'builtin',
-  colors: {
-    text: '#1D2433', muted: '#667085', border: '#C6D0E7', brand: '#3156D8', accent: '#415FC9',
-    success: '#137A58', warning: '#925700', danger: '#C2384E', canvas: '#F6F8FD',
-    surface: '#FFFFFF', selection: '#E2E9FF',
-  },
-  syntax: {
-    background: '#FFFFFF', foreground: '#1D2433', comment: '#667085', keyword: '#3156D8',
-    string: '#137A58', number: '#925700', constant: '#C2384E', function: '#415FC9',
-    type: '#006A8E', variable: '#1D2433', property: '#3F55A8', parameter: '#313B50',
-    operator: '#3156D8', punctuation: '#667085', tag: '#3156D8', attribute: '#925700',
-    regexp: '#C2384E',
-  },
-  tokenColors: [],
+  colors: BUILT_IN_LIGHT_COLORS,
+  syntax: BUILT_IN_LIGHT_SYNTAX,
+  tokenColors: visualTextMateRules(BUILT_IN_LIGHT_SYNTAX, BUILT_IN_LIGHT_COLORS),
 })
 
 /** Immutable built-in DeepSeek themes. */
