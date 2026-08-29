@@ -1507,7 +1507,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (region?.action.kind === 'chrome') {
         const commandId = region.action.commandId
-        if (commandId === 'model' || commandId === 'reasoning') void actions.execute('model', '')
+        if (commandId === 'model') void actions.execute('model', '')
+        else if (commandId === 'reasoning') void actions.execute('effort', '')
         else if (commandId === 'mode') void actions.execute('mode', '')
         else if (commandId === 'permission') void actions.execute('permission', '')
         else if (commandId === 'detail') void actions.execute('status', '')

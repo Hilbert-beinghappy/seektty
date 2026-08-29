@@ -107,6 +107,7 @@ export interface TuiModelOption {
   readonly selection: ModelSelection
   readonly efforts: readonly ModelReasoningEffort[]
   readonly defaultEffort?: string
+  readonly currentEffort?: string
   readonly current: boolean
 }
 
@@ -254,7 +255,8 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
   return Object.freeze([
     { name: 'new', description: ui('新建会话', 'New session'), source: 'TUI', behavior: 'local' },
     { name: 'sessions', description: ui('查看或搜索会话', 'View or search sessions'), argumentHint: ui('[搜索词]', '[query]'), source: 'TUI', behavior: 'local' },
-    { name: 'model', description: ui('切换模型和推理强度', 'Switch model and reasoning effort'), source: 'TUI', behavior: 'local' },
+    { name: 'model', description: ui('切换 Provider 和模型', 'Switch Provider and model'), source: 'TUI', behavior: 'local' },
+    { name: 'effort', description: ui('切换当前模型的推理强度', 'Change current model reasoning effort'), source: 'TUI', behavior: 'local' },
     { name: 'mode', description: ui('切换模式', 'Switch mode'), source: 'TUI', behavior: 'local' },
     { name: 'permission', description: ui('切换权限', 'Switch permission'), argumentHint: ui('[权限]', '[permission]'), source: 'Host + TUI', behavior: 'local' },
     { name: 'workspace', description: ui('管理工作区', 'Manage workspaces'), argumentHint: ui('[子命令|路径]', '[subcommand|path]'), source: 'TUI', behavior: 'local' },
@@ -793,15 +795,21 @@ export class HarnessTuiCapabilities {
    */
   async listModels(): Promise<{ options: readonly TuiModelOption[]; failures: readonly string[]; routable: boolean }> {
     const directory = await this.loadModels()
-    const options = directory.groups.flatMap(group => group.models.map(model => ({
-      id: `${group.id}\u0000${model.id}`,
-      label: model.name,
-      description: `${group.name}${model.description === undefined ? '' : ` · ${model.description}`}`,
-      selection: { provider: group.id, model: model.id },
-      efforts: model.reasoning?.efforts ?? [],
-      ...(model.reasoning?.defaultEffort === undefined ? {} : { defaultEffort: model.reasoning.defaultEffort }),
-      current: directory.current.provider === group.id && directory.current.model === model.id,
-    })))
+    const options = directory.groups.flatMap(group => group.models.map((model): TuiModelOption => {
+      const current = directory.current.provider === group.id && directory.current.model === model.id
+      return {
+        id: `${group.id}\u0000${model.id}`,
+        label: model.name,
+        description: `${group.name}${model.description === undefined ? '' : ` · ${model.description}`}`,
+        selection: { provider: group.id, model: model.id },
+        efforts: model.reasoning?.efforts ?? [],
+        ...(model.reasoning?.defaultEffort === undefined ? {} : { defaultEffort: model.reasoning.defaultEffort }),
+        ...(current && directory.current.reasoningEffort !== undefined
+          ? { currentEffort: directory.current.reasoningEffort }
+          : {}),
+        current,
+      }
+    }))
     return {
       options,
       failures: directory.failures.map(failure => `${failure.name}: ${failure.message}`),
