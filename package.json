@@ -43,6 +43,7 @@
   "files": [
     "lib/*.js",
     "assets/seektty-logo.png",
+    "assets/seektty-welcome-logo.json",
     "assets/seektty-tui.png",
     "assets/seektty-tui-dark.png",
     "assets/seektty-code-light.png",

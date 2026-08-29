@@ -1,0 +1,39 @@
+{
+  "palette": {
+    "b": "#145AD8",
+    "c": "#10D8EE",
+    "v": "#7267F4"
+  },
+  "slots": {
+    "b": 1,
+    "c": 2,
+    "v": 3
+  },
+  "large": [
+    "          bbbbbbbbbbbb          ",
+    "      bbbbbbbbbbbbbbbbbbbb      ",
+    "    bbbbbbbbbbbbbbbbbbbbbbbb    ",
+    "  bbbbbbbb            bbbbbbbb  ",
+    " bbbbbb                  bbbbbb ",
+    "bbbb        cccccccc        bbbb",
+    "bbb      cccccccccccccc       bb",
+    "bbb    cccccc      cccccc       ",
+    " bbb  cccc    cc     cccc    vv ",
+    "  bbb cccc  cccccc   cccc   vvv",
+    "   bb  cccc   cc    cccc   vvv ",
+    "    bb  cccccccccccccc    vvv  ",
+    "      bb   cccccccc     vvv    ",
+    "        bbbbbbbbbbbbbbbbb       ",
+    "           bbbbbbbbbbb          "
+  ],
+  "compact": [
+    "    bbbbbb    ",
+    " bbbbbbbbbbbb ",
+    "bbb      bbbbb",
+    "bb   cccc   bb",
+    "bb  cc  cc  vv",
+    " bb  cccc  vv ",
+    "  bbbbbbbvv   ",
+    "    bbbbb     "
+  ]
+}

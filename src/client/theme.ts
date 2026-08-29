@@ -369,6 +369,18 @@ export const color = {
   success: (text: string): string => paint(palette.success, text),
   warning: (text: string): string => paint(palette.warning, text),
   danger: (text: string): string => paint(palette.danger, text),
+  /** Fastfetch-compatible `$[1-9]` palette for theme-indexed welcome logos. */
+  logoSlot: (slot: number, text: string): string => paint(([
+    palette.brand,
+    palette.accent,
+    palette.success,
+    palette.warning,
+    palette.danger,
+    palette.text,
+    palette.muted,
+    palette.border,
+    palette.codeForeground,
+  ] as const)[Math.max(0, Math.min(8, Math.floor(slot) - 1))] ?? palette.brand, text),
 } as const
 
 /** Foreground-only interaction states; never introduce a background or text decoration. */

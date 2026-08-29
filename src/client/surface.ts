@@ -45,6 +45,7 @@ import {
   transcriptViewportRows,
 } from './chrome.ts'
 import { appearanceFromSettings, appearanceSettings } from './appearance.ts'
+import { welcomeFromSettings, welcomeSettings } from './welcome-settings.ts'
 import { resolveAppearanceTheme, type ResolvedTuiTheme } from './theme-config.ts'
 import { behaviorFromSettings, behaviorSettings, createLiveBehavior } from './behavior.ts'
 import { clearIdleComposerDraft } from './composer-draft.ts'
@@ -68,6 +69,7 @@ import {
 import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
 import { background, color, escapeTerminalText, setBackgroundMode, setCodeHighlighter, setTerminalCanvasBackground, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
+import { WelcomeController, type WelcomeRuntimeFacts } from './welcome.ts'
 import { canReadClipboardText, readClipboardText, writeClipboard } from './clipboard.ts'
 import { graphemeRangeAt, type SelectionAnchor } from './text-selection.ts'
 import {
@@ -120,6 +122,7 @@ import {
   TuiPerformanceProbe,
   type TuiPerformanceSnapshot,
 } from './tui-performance.ts'
+import { PACKAGE_VERSION } from '../dsh-compat.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -220,6 +223,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   let detachSuspendGuards = (): void => undefined
   try {
     const initialAppearance = appearanceFromSettings(appearanceSettings(settingsDocuments))
+    const initialWelcome = welcomeFromSettings(welcomeSettings(settingsDocuments))
     const initialTheme = resolveAppearanceTheme(initialAppearance)
     let liveTheme = initialTheme
     let liveBackgroundMode = initialAppearance.backgroundMode
@@ -315,7 +319,32 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       targetId: string,
       contentGeneration: number,
     ): boolean => matchesMouseActivation(mouseArmed, kind, targetId, contentGeneration)
-    const transcript = new Transcript(
+    let reportWelcomeNotice = (_message: string): void => undefined
+    let transcript!: Transcript
+    const welcomeFacts = (): WelcomeRuntimeFacts => ({
+      seekttyVersion: PACKAGE_VERSION,
+      profile,
+      workspace: active?.workspacePath ?? options.cwd,
+      model: '',
+      reasoning: '',
+      mode: active?.summary.agentPreset ?? '',
+      permission: '',
+      theme: liveTheme.name,
+      platform: `${process.platform}/${process.arch}`,
+    })
+    const welcome = new WelcomeController(
+      initialWelcome,
+      welcomeFacts(),
+      (request, signal) => options.management.welcome.collectFastfetch(request, signal),
+      () => {
+        if (stopping !== undefined || transcript === undefined) return
+        transcript.refreshPresentation()
+        tui.invalidate()
+        tui.requestRender()
+      },
+      message => { reportWelcomeNotice(message) },
+    )
+    transcript = new Transcript(
       () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
       () => {
@@ -324,6 +353,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const snapshot = current.session.getSnapshot()
         if (snapshot.hasMore && !snapshot.loadingOlder) void current.session.loadOlder()
       },
+      welcome,
     )
     transcript.applyPresentationDefaults(
       liveBehavior.get().toolCards,
@@ -641,6 +671,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         'Terminal recoloring is unavailable; using terminal background effects. /theme offers an explicit-fill compatibility mode.',
       ), 'warning')
     }
+    reportWelcomeNotice = message => { setNotice(message, 'warning') }
 
     const dismissNotice = (): void => {
       notices.dismiss()
@@ -773,6 +804,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         contextBar.setFacts(since === undefined ? header : { ...header, runningSince: since })
         editor.setFacts(facts)
         status.setPermission(facts.permission)
+        welcome.setRuntimeFacts({
+          seekttyVersion: PACKAGE_VERSION,
+          profile: facts.profile,
+          workspace: facts.workspace,
+          model: facts.model.includes(' · ') ? facts.model.slice(0, facts.model.lastIndexOf(' · ')) : facts.model,
+          reasoning: facts.reasoning ?? '',
+          mode: facts.mode,
+          permission: facts.permission,
+          theme: liveTheme.name,
+          platform: `${facts.platform}/${facts.architecture}`,
+        })
         renderWhileOpen()
       }, (error: unknown) => {
         if (stopping !== undefined || generation !== headerGeneration) return
@@ -794,6 +836,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           '当前没有打开的会话；使用 /workspace 或 /new 继续。',
           'No session is open; use /workspace or /new to continue.',
         ))
+        welcome.setRuntimeFacts(welcomeFacts())
         editor.disableSubmit = false
         updateStatus()
         renderWhileOpen()
@@ -825,6 +868,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         contextMenu.close()
         overlays.dispose()
         mouseController.dispose()
+        welcome.dispose()
         transcript.dispose()
         setCodeHighlighter(undefined)
         try { syntax?.dispose() } catch (error) { failures.push(error) }
@@ -1795,6 +1839,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     })
 
     const startupOnboarding = onboarding.ensure()
+    const activateWelcome = (): void => {
+      if (stopping === undefined && transcript.isEmptyState()) welcome.activate()
+    }
+    void startupOnboarding.then(activateWelcome, activateWelcome)
     applyTerminalTitle()
     detachFatalGuards = attachFatalGuards({
       restore: () => {

@@ -149,7 +149,7 @@ describe('conversation viewport', () => {
     setUiLocale('en')
     const empty = new Transcript(() => 5)
     empty.update(snapshot([]))
-    expect(empty.render(60).join('\n')).toContain('Explore beyond the known')
+    expect(empty.render(60).join('\n')).toContain('Enter a message below')
 
     const transcript = new Transcript(() => 5)
     transcript.update(snapshot([assistant('a1', '命令面板')]))

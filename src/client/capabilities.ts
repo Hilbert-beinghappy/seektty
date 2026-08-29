@@ -139,6 +139,7 @@ export interface TuiHeaderFacts {
   readonly workspace: string
   readonly session: string
   readonly mode: string
+  readonly reasoning?: string
   readonly model: string
   readonly permission: string
   readonly running: boolean
@@ -612,6 +613,7 @@ export class HarnessTuiCapabilities {
     const modelRoute = model === undefined
       ? latestModelRoute(active.session.getSnapshot())
       : `${model.provider}/${model.model}${model.reasoningEffort === undefined ? '' : ` · ${model.reasoningEffort}`}`
+    const effortSeparator = modelRoute?.lastIndexOf(' · ') ?? -1
     const permission = this.permissionValue(active.session)
     const context = this.sessionStatistics().context
     const connection = (this.ctx as TuiClientContext & { readonly connection: ConnectionHandle }).connection
@@ -625,6 +627,9 @@ export class HarnessTuiCapabilities {
       session: active.summary.displayTitle,
       mode: active.summary.agentPreset ?? ui('未声明', 'Not declared'),
       model: modelRoute ?? '',
+      ...(model?.reasoningEffort !== undefined
+        ? { reasoning: model.reasoningEffort }
+        : effortSeparator === -1 ? {} : { reasoning: modelRoute?.slice(effortSeparator + 3) ?? '' }),
       permission: permission?.currentValue ?? ui('未提供', 'Not available'),
       running: active.session.getSnapshot().running,
       ...(context === undefined ? {} : { context }),
