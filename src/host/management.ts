@@ -40,7 +40,7 @@ import { markdownFromSessionLog } from '../client/conversation-markdown.ts'
 import { producedFilesFromSessionLog } from '../client/produced-files.ts'
 import { keyBindingsIssue, sanitizeKeyBindings } from '../client/keymap.ts'
 import { ui } from '../client/locale.ts'
-import { collectFastfetch } from './fastfetch.ts'
+import { collectFastfetch, collectFastfetchLogo } from './fastfetch.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
@@ -204,7 +204,7 @@ export const WelcomeSettingsSchema = z.object({
       en: 'Structured custom welcome content. Edit it with /welcome.',
     })),
   logo: z.object({
-    source: z.union(['builtin', 'file', 'none']).default(DEFAULT_TUI_WELCOME.logo.source),
+    source: z.union(['builtin', 'file', 'fastfetch', 'none']).default(DEFAULT_TUI_WELCOME.logo.source),
     colorMode: z.union(['original', 'theme']).default(DEFAULT_TUI_WELCOME.logo.colorMode),
     largePath: z.string().max(2_048).default(''),
     compactPath: z.string().max(2_048).default(''),
@@ -780,6 +780,7 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     },
     welcome: {
       collectFastfetch,
+      collectFastfetchLogo,
     },
   }
 }

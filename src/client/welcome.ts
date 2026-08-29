@@ -4,6 +4,7 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@mariozechner/p
 import type {
   TuiManagementBridge,
   TuiWelcomeFact,
+  TuiWelcomeFastfetchLogoResult,
   TuiWelcomeFastfetchResult,
   TuiWelcomeRow,
   TuiWelcomeSettings,
@@ -14,6 +15,7 @@ import {
   builtinWelcomeLogo,
   loadWelcomeLogoFile,
   parseThemeIndexedLogo,
+  sanitizeOriginalAnsiLogo,
   type WelcomeLogo,
 } from './welcome-logo.ts'
 
@@ -147,6 +149,8 @@ export class WelcomeController {
   private fastfetchGeneration = 0
   private readonly fastfetchCache = new Map<string, TuiWelcomeFastfetchResult>()
   private fastfetchAbort: AbortController | undefined
+  private readonly fastfetchLogoCache = new Map<string, TuiWelcomeFastfetchLogoResult>()
+  private fastfetchLogoAbort: AbortController | undefined
   private largeLogo: LoadedLogo | undefined
   private compactLogo: LoadedLogo | undefined
   private logoAbort = 0
@@ -156,6 +160,7 @@ export class WelcomeController {
     settings: TuiWelcomeSettings,
     facts: WelcomeRuntimeFacts,
     private readonly collect: TuiManagementBridge['welcome']['collectFastfetch'],
+    private readonly collectLogo: TuiManagementBridge['welcome']['collectFastfetchLogo'],
     private readonly requestRender: () => void,
     private readonly notice: (message: string) => void,
   ) {
@@ -173,6 +178,7 @@ export class WelcomeController {
 
   applySettings(settings: TuiWelcomeSettings): void {
     const fastfetchChanged = JSON.stringify(settings.fastfetch) !== JSON.stringify(this.settings.fastfetch)
+    const fastfetchLogoChanged = settings.fastfetch.configPath !== this.settings.fastfetch.configPath
     this.settings = settings
     this.fastfetchGeneration += 1
     this.fastfetchAbort?.abort()
@@ -181,7 +187,7 @@ export class WelcomeController {
     this.fastfetchKey = ''
     if (fastfetchChanged) this.fastfetchCache.delete(JSON.stringify(settings.fastfetch))
     if (this.ready) {
-      void this.loadLogos()
+      void this.loadLogos(fastfetchLogoChanged)
       void this.loadFastfetch(fastfetchChanged)
     }
     this.requestRender()
@@ -197,11 +203,15 @@ export class WelcomeController {
 
   async refreshFastfetch(): Promise<void> {
     this.fastfetchCache.clear()
+    this.fastfetchLogoCache.clear()
     this.fastfetchKey = ''
     this.fastfetchResult = undefined
     this.generation += 1
     this.requestRender()
-    await this.loadFastfetch(true)
+    await Promise.all([
+      this.loadFastfetch(true),
+      this.settings.logo.source === 'fastfetch' ? this.loadLogos(true) : Promise.resolve(),
+    ])
   }
 
   private reportOnce(key: string, message: string): void {
@@ -248,10 +258,41 @@ export class WelcomeController {
     this.requestRender()
   }
 
-  private async loadLogos(): Promise<void> {
+  private async loadLogos(force = false): Promise<void> {
     const serial = ++this.logoAbort
+    this.fastfetchLogoAbort?.abort()
     this.largeLogo = undefined
     this.compactLogo = undefined
+    if (this.settings.logo.source === 'fastfetch') {
+      const request = { configPath: this.settings.fastfetch.configPath }
+      const key = JSON.stringify(request)
+      let result = force ? undefined : this.fastfetchLogoCache.get(key)
+      if (result === undefined) {
+        const controller = new AbortController()
+        this.fastfetchLogoAbort = controller
+        result = await this.collectLogo(request, controller.signal)
+        if (this.disposed || controller.signal.aborted || serial !== this.logoAbort) return
+        this.fastfetchLogoCache.set(key, result)
+      }
+      if (result.status === 'ok' && result.ansi !== undefined) {
+        try {
+          this.largeLogo = { source: result.ansi, logo: sanitizeOriginalAnsiLogo(result.ansi) }
+        } catch (error) {
+          this.reportOnce(`fastfetch-logo:${String(error)}`, ui(
+            'Fastfetch Logo 尺寸无效；已回退到内置 Logo。',
+            'The Fastfetch logo has invalid dimensions; the built-in logo is being used.',
+          ))
+        }
+      } else if (result.status !== 'cancelled') {
+        this.reportOnce(`fastfetch-logo:${result.status}:${result.diagnostic ?? ''}`, ui(
+          'Fastfetch Logo 无法读取；已回退到内置 Logo。',
+          'The Fastfetch logo could not be read; the built-in logo is being used.',
+        ))
+      }
+      this.generation += 1
+      this.requestRender()
+      return
+    }
     if (this.settings.logo.source !== 'file') {
       this.generation += 1
       this.requestRender()
@@ -296,7 +337,7 @@ export class WelcomeController {
         compact: builtinWelcomeLogo('compact', this.settings.logo.colorMode),
       }
     }
-    const render = (loaded: LoadedLogo): WelcomeLogo => this.settings.logo.colorMode === 'theme'
+    const render = (loaded: LoadedLogo): WelcomeLogo => this.settings.logo.source !== 'fastfetch' && this.settings.logo.colorMode === 'theme'
       ? parseThemeIndexedLogo(loaded.source)
       : loaded.logo
     return {
@@ -372,6 +413,18 @@ export class WelcomeController {
           compact: builtinWelcomeLogo('compact', settings.logo.colorMode),
         }
       }
+    } else if (settings.logo.source === 'fastfetch') {
+      const result = this.fastfetchLogoCache.get(JSON.stringify({ configPath: settings.fastfetch.configPath }))
+      if (result?.status === 'ok' && result.ansi !== undefined) {
+        try {
+          logos = { large: sanitizeOriginalAnsiLogo(result.ansi) }
+        } catch {
+          logos = {
+            large: builtinWelcomeLogo('large', settings.logo.colorMode),
+            compact: builtinWelcomeLogo('compact', settings.logo.colorMode),
+          }
+        }
+      }
     }
     const key = JSON.stringify(settings.fastfetch)
     const result = key === this.fastfetchKey
@@ -384,6 +437,7 @@ export class WelcomeController {
     this.disposed = true
     this.fastfetchGeneration += 1
     this.fastfetchAbort?.abort()
+    this.fastfetchLogoAbort?.abort()
     this.logoAbort += 1
   }
 }

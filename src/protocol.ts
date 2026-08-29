@@ -178,7 +178,7 @@ export interface TuiWelcomeSettings {
   readonly mixedOrder: TuiWelcomeMixedOrder
   readonly customRows: readonly TuiWelcomeRow[]
   readonly logo: {
-    readonly source: 'builtin' | 'file' | 'none'
+    readonly source: 'builtin' | 'file' | 'fastfetch' | 'none'
     readonly colorMode: 'original' | 'theme'
     readonly largePath: string
     readonly compactPath: string
@@ -250,6 +250,18 @@ export interface TuiWelcomeFastfetchRequest {
 export interface TuiWelcomeFastfetchResult {
   readonly status: 'ok' | 'unavailable' | 'timeout' | 'error' | 'cancelled'
   readonly rows: readonly TuiWelcomeFastfetchRow[]
+  readonly diagnostic?: string
+}
+
+/** Logo-only request; Fastfetch modules are always disabled by the Host. */
+export interface TuiWelcomeFastfetchLogoRequest {
+  readonly configPath: string
+}
+
+/** Sanitized ANSI text produced by Fastfetch's configured Logo renderer. */
+export interface TuiWelcomeFastfetchLogoResult {
+  readonly status: 'ok' | 'unavailable' | 'timeout' | 'error' | 'cancelled'
+  readonly ansi?: string
   readonly diagnostic?: string
 }
 
@@ -531,6 +543,10 @@ export interface TuiManagementBridge {
       request: TuiWelcomeFastfetchRequest,
       signal?: AbortSignal,
     ): Promise<TuiWelcomeFastfetchResult>
+    collectFastfetchLogo(
+      request: TuiWelcomeFastfetchLogoRequest,
+      signal?: AbortSignal,
+    ): Promise<TuiWelcomeFastfetchLogoResult>
   }
 }
 

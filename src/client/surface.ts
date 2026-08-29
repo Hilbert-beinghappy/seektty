@@ -336,6 +336,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       initialWelcome,
       welcomeFacts(),
       (request, signal) => options.management.welcome.collectFastfetch(request, signal),
+      (request, signal) => options.management.welcome.collectFastfetchLogo(request, signal),
       () => {
         if (stopping !== undefined || transcript === undefined) return
         transcript.refreshPresentation()

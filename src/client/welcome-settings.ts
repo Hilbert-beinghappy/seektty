@@ -20,7 +20,7 @@ import { resolveHarnessUserPath } from './workspace-path.ts'
 
 const INFO_MODES = new Set(['custom', 'fastfetch', 'mixed'] as const)
 const MIXED_ORDERS = new Set(['custom-first', 'fastfetch-first'] as const)
-const LOGO_SOURCES = new Set(['builtin', 'file', 'none'] as const)
+const LOGO_SOURCES = new Set(['builtin', 'file', 'fastfetch', 'none'] as const)
 const LOGO_COLOR_MODES = new Set(['original', 'theme'] as const)
 const FASTFETCH_SOURCES = new Set(['safe', 'user-config'] as const)
 const FACTS = new Set<TuiWelcomeFact>([
@@ -151,7 +151,7 @@ export async function prepareWelcomeSettings(
     }
   }
   let configPath = value.fastfetch.configPath
-  if (value.fastfetch.source === 'user-config' && configPath.trim() !== '') {
+  if ((value.fastfetch.source === 'user-config' || value.logo.source === 'fastfetch') && configPath.trim() !== '') {
     const path = resolveHarnessUserPath(configPath, workspacePath)
     const metadata = await stat(path)
     if (!metadata.isFile()) throw new Error(ui('Fastfetch 配置路径不是文件。', 'The Fastfetch config path is not a file.'))

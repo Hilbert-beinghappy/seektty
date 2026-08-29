@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { TuiWelcomeFastfetchResult, TuiWelcomeSettings } from '@deepseek-ai/dsh-tui-protocol'
+import type { TuiWelcomeFastfetchLogoResult, TuiWelcomeFastfetchResult, TuiWelcomeSettings } from '@deepseek-ai/dsh-tui-protocol'
 import { setUiLocale } from '../src/client/locale.ts'
 import { defaultWelcomeSettings } from '../src/client/welcome-settings.ts'
 import {
@@ -81,12 +81,13 @@ describe('welcome renderer', () => {
       rows: [{ kind: 'field', label: 'OS', value: 'Windows' }],
     }))
     const renders = vi.fn()
+    const collectLogo = vi.fn(async (): Promise<TuiWelcomeFastfetchLogoResult> => ({ status: 'cancelled' }))
     const settings: TuiWelcomeSettings = {
       ...defaultWelcomeSettings(),
       infoMode: 'mixed',
       logo: { ...defaultWelcomeSettings().logo, source: 'none' },
     }
-    const controller = new WelcomeController(settings, FACTS, collect, renders, vi.fn())
+    const controller = new WelcomeController(settings, FACTS, collect, collectLogo, renders, vi.fn())
     expect(controller.render(80, false).join('\n')).toContain('正在读取 Fastfetch')
     controller.activate()
     await vi.waitFor(() => expect(collect).toHaveBeenCalledTimes(1))
@@ -95,6 +96,30 @@ describe('welcome renderer', () => {
     expect(collect).toHaveBeenCalledTimes(1)
     await controller.refreshFastfetch()
     expect(collect).toHaveBeenCalledTimes(2)
+    controller.dispose()
+  })
+
+  it('loads, caches, and explicitly refreshes the configured Fastfetch Logo', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const collect = vi.fn(async (): Promise<TuiWelcomeFastfetchResult> => ({ status: 'ok', rows: [] }))
+    const collectLogo = vi.fn(async (): Promise<TuiWelcomeFastfetchLogoResult> => ({
+      status: 'ok',
+      ansi: '\u001b[34mFF\u001b[0m',
+    }))
+    const settings: TuiWelcomeSettings = {
+      ...defaultWelcomeSettings(),
+      logo: { ...defaultWelcomeSettings().logo, source: 'fastfetch' },
+      fastfetch: { ...defaultWelcomeSettings().fastfetch, configPath: 'C:\\fastfetch.jsonc' },
+    }
+    const controller = new WelcomeController(settings, FACTS, collect, collectLogo, vi.fn(), vi.fn())
+    controller.activate()
+    await vi.waitFor(() => expect(collectLogo).toHaveBeenCalledTimes(1))
+    expect(controller.render(80, false).join('\n')).toContain('FF')
+    expect(collect).not.toHaveBeenCalled()
+    controller.setRuntimeFacts({ ...FACTS, model: 'another-model' })
+    expect(collectLogo).toHaveBeenCalledTimes(1)
+    await controller.refreshFastfetch()
+    expect(collectLogo).toHaveBeenCalledTimes(2)
     controller.dispose()
   })
 })

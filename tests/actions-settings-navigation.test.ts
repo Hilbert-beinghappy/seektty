@@ -13,6 +13,7 @@ import type {
 
 const ESCAPE = '\u001B'
 const ENTER = '\r'
+const END = '\u001B[F'
 
 function plain(lines: readonly string[]): string {
   return lines.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
@@ -97,16 +98,17 @@ function actionHarness(): {
 }
 
 describe('/settings overlay navigation', () => {
-  it('returns field/action → namespace → settings root → composer one level at a time', async () => {
+  it('returns field/action → product category → settings root → composer one level at a time', async () => {
     const harness = actionHarness()
     const execution = harness.actions.execute('settings', '')
 
     await vi.waitFor(() => {
       expect(plain(harness.component().render(90))).toContain('设置')
     })
+    harness.component().handleInput(END)
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
-      expect(plain(harness.component().render(90))).toContain('修改立即生效')
+      expect(plain(harness.component().render(90))).toContain('设置 · 语言与系统')
     })
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
@@ -115,12 +117,12 @@ describe('/settings overlay navigation', () => {
     })
 
     harness.component().handleInput(ESCAPE)
-    expect(plain(harness.component().render(90))).toContain('设置 · example')
+    expect(plain(harness.component().render(90))).toContain('设置 · 语言与系统')
     expect(harness.hide).not.toHaveBeenCalled()
 
     harness.component().handleInput(ESCAPE)
     await vi.waitFor(() => {
-      expect(plain(harness.component().render(90))).toContain('搜索并修改全部功能设置')
+      expect(plain(harness.component().render(90))).toContain('按功能分类修改设置')
     })
     expect(harness.hide).not.toHaveBeenCalled()
 
@@ -138,7 +140,7 @@ describe('/settings overlay navigation', () => {
       expect(plain(harness.component().render(90))).toContain('设置 · example')
     })
     harness.component().handleInput(ESCAPE)
-    expect(plain(harness.component().render(90))).toContain('搜索并修改全部功能设置')
+    expect(plain(harness.component().render(90))).toContain('按功能分类修改设置')
     harness.component().handleInput(ESCAPE)
 
     await execution
@@ -150,9 +152,10 @@ describe('/settings overlay navigation', () => {
     const execution = harness.actions.execute('settings', '')
 
     await vi.waitFor(() => { expect(harness.component()).toBeDefined() })
+    harness.component().handleInput(END)
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
-      expect(plain(harness.component().render(90))).toContain('修改立即生效')
+      expect(plain(harness.component().render(90))).toContain('设置 · 语言与系统')
     })
     harness.component().handleInput(ENTER)
     await vi.waitFor(() => {
@@ -171,12 +174,12 @@ describe('/settings overlay navigation', () => {
         0,
       )
       expect(harness.describe.mock.calls.length).toBeGreaterThanOrEqual(3)
-      expect(plain(harness.component().render(90))).toContain('设置 · example')
+      expect(plain(harness.component().render(90))).toContain('设置 · 语言与系统')
     })
 
     harness.component().handleInput(ESCAPE)
     await vi.waitFor(() => {
-      expect(plain(harness.component().render(90))).toContain('搜索并修改全部功能设置')
+      expect(plain(harness.component().render(90))).toContain('按功能分类修改设置')
     })
     harness.component().handleInput(ESCAPE)
     await execution

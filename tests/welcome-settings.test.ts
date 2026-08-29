@@ -44,6 +44,7 @@ describe('welcome settings', () => {
     // @ts-expect-error persisted external Settings may contain unsafe modules
     expect(() => WelcomeSettingsSchema({ fastfetch: { modules: ['command'] } })).toThrow()
     expect(() => WelcomeSettingsSchema({ customRows: [{ kind: 'text', text: 'x'.repeat(513) }] })).toThrow()
+    expect(WelcomeSettingsSchema({ logo: { source: 'fastfetch' } }).logo.source).toBe('fastfetch')
   })
 
   it('normalizes partial external values and removes terminal controls', () => {
@@ -103,6 +104,12 @@ describe('welcome settings', () => {
     expect(isAbsolute(prepared.logo.largePath)).toBe(true)
     expect(isAbsolute(prepared.logo.compactPath)).toBe(true)
     expect(isAbsolute(prepared.fastfetch.configPath)).toBe(true)
+    const logoPrepared = await prepareWelcomeSettings({
+      ...defaultWelcomeSettings(),
+      logo: { ...defaultWelcomeSettings().logo, source: 'fastfetch' },
+      fastfetch: { source: 'safe', modules: ['os'], configPath: 'fastfetch.jsonc' },
+    }, directory)
+    expect(isAbsolute(logoPrepared.fastfetch.configPath)).toBe(true)
     await expect(prepareWelcomeSettings({
       ...prepared,
       logo: { ...prepared.logo, largePath: 'missing.txt' },

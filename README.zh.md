@@ -193,6 +193,12 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 完整鼠标模式复制会把文本统一编码一次为 UTF-8。Windows 使用固定的 PowerShell `Set-Clipboard` writer，macOS 在 UTF-8 locale 下运行 `pbcopy`，Wayland 明确声明 `text/plain;charset=utf-8`，X11 明确请求 `UTF8_STRING`；OSC 52 继续服务于终端、SSH 与 tmux 路径。
 
+## 设置中心
+
+`/settings` 不再平铺技术命名空间和字段，而是按产品用途组织为：**外观**、**欢迎页**、**鼠标与滚动**、**输入与快捷键**、**模型与 Agent**、**权限与安全**、**插件与扩展**、**语言与系统**。现有 Harness 命名空间和持久化值保持不变；兼容场景仍可使用 `/settings <namespace>` 直接打开技术命名空间。
+
+专用编辑器遵循同一返回规则：列表操作后留在列表，叶子字段完成后返回一层，Esc 每次只退一层，只有保存／取消才退出草稿事务；新增、删除和移动后保持最合理的焦点。欢迎页的 Logo、Fastfetch、自定义信息行与安全模块排序均采用该规则。
+
 ## 欢迎页
 
 `/welcome` 打开空会话欢迎页的事务式编辑器；`/settings seektty-welcome` 复用同一个界面。所有修改先留在草稿中，只有选择**保存并立即应用**后才会按 Settings revision 一次写入并实时生效。按 Escape 或选择**取消全部修改**不会改变当前欢迎页。
@@ -207,9 +213,9 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 默认运行信息包括 SeekTTY 版本、工作区、模型、推理强度、Agent 模式、权限和主题。欢迎内容只属于临时界面状态，不写入 Session 或聊天记录；Session 出现第一条持久会话内容后立即隐藏。内容高于窗口时使用 transcript 滚动，不会静默截断；resize 和主题切换只重新排版、重新着色，不重复执行 Fastfetch。
 
-内置大图与紧凑图是随包发布的预生成像素 Logo。SeekTTY 不负责生成像素画，也不使用 Kitty、iTerm、Sixel 等图像协议。用户可提供 UTF-8 终端文本文件：原色模式仅保留安全解析后的 ANSI 颜色，主题模式兼容 Fastfetch `$[1-9]` 前景色槽，`$$` 表示字面量 `$`。光标移动、清屏、OSC/DCS、超链接、剪贴板和图像协议都会被移除。文件限制为 256 KiB、256 列、120 行；无效文件不能保存，保存后文件丢失或损坏则回退内置 Logo，并只提示一次。
+内置大图与紧凑图是随包发布的预生成像素 Logo。SeekTTY 不负责生成像素画，也不使用 Kitty、iTerm、Sixel 等图像协议。用户可提供 UTF-8 终端文本文件：原色模式仅保留安全解析后的 ANSI 颜色，主题模式兼容 Fastfetch `$[1-9]` 前景色槽，`$$` 表示字面量 `$`。第四种 Logo 来源可直接复用本机 Fastfetch 配置渲染的 Logo：SeekTTY 强制使用空模块结构，只采集一次 Logo，保留原始 ANSI 颜色，清理后再参与欢迎页排版；该过程不会执行 Fastfetch 信息模块或 `command` 模块。光标移动、清屏、OSC/DCS、超链接、剪贴板和图像协议都会被移除。文件及采集结果限制为 256 KiB、256 列、120 行；来源无效或不可用时回退内置 Logo，并只提示一次。
 
-Fastfetch 始终是可选项，SeekTTY 不安装也不下载它。安全来源直接以 argv 启动已有程序，不经过 Shell，强制使用 `--config none`，关闭 Fastfetch Logo 与颜色，并提供可排序的隐私安全模块。受信任的用户配置可能包含 `command` 模块或其他外部行为，启用前必须明确确认风险。两种来源均采用 2 秒超时、有限输出和控制序列清理。同一配置每个进程只采集一次；`/welcome refresh` 清除缓存并重新采集，`/welcome reset` 恢复默认的不运行 Fastfetch 配置。
+Fastfetch 始终是可选项，SeekTTY 不安装也不下载它。安全信息来源直接以 argv 启动已有程序，不经过 Shell，强制使用 `--config none`，关闭 Fastfetch Logo 与颜色，并提供可排序的隐私安全模块。受信任的用户配置信息来源可能包含 `command` 模块或其他外部行为，启用前必须明确确认风险。Logo 复用独立于信息模式，使用同一个可选 Fastfetch 配置路径，留空则使用 Fastfetch 默认配置。所有采集均采用 2 秒超时、有限输出和控制序列清理。同一配置每个进程只采集一次；`/welcome refresh` 同时清除信息与 Logo 缓存并重新采集，`/welcome reset` 恢复默认的不运行 Fastfetch 配置。
 
 自动化覆盖与真实终端边界见[实施与兼容验收记录](docs/fastfetch-welcome-acceptance.md)。
 

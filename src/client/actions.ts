@@ -30,6 +30,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiDraftAttachment, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
+import { agentPresetCopy } from './agent-preset-copy.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { queueListChoiceOrder } from './queue-order.ts'
 import { formatByteSize } from './byte-size.ts'
@@ -72,10 +73,14 @@ import {
   hasDedicatedSettingsEditor,
   parseSettingsRootChoice,
   parseSettingsValue,
+  settingsCategoryChoices,
+  settingsCategoryDescription,
+  settingsCategoryFor,
+  settingsCategoryLabel,
   settingsFields,
-  settingsRootChoices,
   settingsSectionLabel,
   visibleSettingsDocuments,
+  type SettingsCategoryId,
   type TuiSettingsField,
 } from './settings.ts'
 import { toolApprovalPreview, type Transcript } from './transcript.ts'
@@ -1110,12 +1115,15 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       await navigation.selectPage({
         title: ui('Agent 模式', "Agent mode"),
         detail: ui('选择当前会话的工作模式；用户创建的模式会单独标记', "Choose the current session mode; user-created modes are marked separately"),
-        choices: modes.map(mode => ({
-          id: mode.id,
-          label: `${currentMark(mode.current)}${mode.label}${mode.trust === 'user' ? ui(' · 用户', " · user") : ''}`,
-          description: mode.description ?? (mode.isDefault ? ui('部署默认模式', "Deployment default") : mode.id),
-          ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
-        })),
+        choices: modes.map((mode) => {
+          const copy = agentPresetCopy(mode)
+          return {
+            id: mode.id,
+            label: `${currentMark(mode.current)}${copy.label}${mode.trust === 'user' ? ui(' · 用户', " · user") : ''}`,
+            description: copy.description ?? (mode.isDefault ? ui('部署默认模式', "Deployment default") : mode.id),
+            ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
+          }
+        }),
       }, async (selected) => {
         const target = modes.find(mode => mode.id === selected.id)
         if (target?.current === true) {
@@ -1360,7 +1368,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }, { width: '95%', maxHeight: '92%', anchor: 'center', margin: 1 })
   }
 
-  private async themeCenter(): Promise<void> {
+  private async themeCenter(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
     const readChoices = async (): Promise<OverlayChoice[]> => {
       const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE, { bypassCache: true }))
@@ -1399,7 +1407,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       }))
     }
     const options = { width: 68, maxHeight: '90%', anchor: 'center', margin: 1 } as const
-    await this.overlayFlow(this.host.overlays, async (navigation) => {
+    await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('主题', "Theme"),
         detail: ui('手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC', "Edit colors, generate from a palette, or import VS Code JSON/JSONC"),
@@ -2135,20 +2143,99 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.overlayFlow(overlays, async (navigation) => {
       const root = navigation.selectPage({
         title: ui('设置', "Settings"),
-        detail: ui('搜索并修改全部功能设置', "Search and edit all feature settings"),
-        choices: settingsRootChoices(documents),
+        detail: ui('按功能分类修改设置；技术命名空间仍可通过 /settings <namespace> 直接打开', 'Edit settings by feature; technical namespaces remain available through /settings <namespace>'),
+        searchable: false,
+        choices: settingsCategoryChoices(documents),
       }, async (selected) => {
-        const parsed = parseSettingsRootChoice(selected.id)
-        if (parsed === undefined) return
-        await this.settingsNamespace(
-          navigation,
-          parsed.namespace,
-          parsed.fieldPath === undefined ? undefined : JSON.stringify(parsed.fieldPath),
-        )
+        await this.settingsCategory(navigation, selected.id as SettingsCategoryId)
       })
       if (args !== '') await this.settingsNamespace(navigation, args)
       await root
     }, { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 })
+  }
+
+  private settingsCategoryRows(
+    documents: readonly TuiSettingsDocument[],
+    category: SettingsCategoryId,
+  ): readonly OverlayChoice[] {
+    const choices: OverlayChoice[] = []
+    for (const document of documents) {
+      for (const special of this.settingsSpecialChoices(document)) {
+        const specialCategory = special.id === '__settings_keymap__'
+          ? settingsCategoryFor(document.namespace, ['keyBindings'])
+          : settingsCategoryFor(document.namespace)
+        if (specialCategory === category) {
+          choices.push({
+            ...special,
+            id: `special:${JSON.stringify([document.namespace, special.id])}`,
+          })
+        }
+      }
+      for (const field of settingsFields(document)) {
+        if (hasDedicatedSettingsEditor(document.namespace, field.path)
+          || settingsCategoryFor(document.namespace, field.path) !== category) continue
+        choices.push({
+          id: `field:${document.namespace}:${JSON.stringify(field.path)}`,
+          label: field.label,
+          description: `${fieldState(field)}${field.description === undefined ? '' : ` · ${field.description}`}`,
+          ...(field.disabled ? { disabledReason: ui('该字段当前不可编辑', 'This field is currently read-only') } : {}),
+        })
+      }
+    }
+    return choices
+  }
+
+  private async settingsCategory(
+    navigation: OverlayNavigation<void>,
+    category: SettingsCategoryId,
+    initialChoiceId?: string,
+  ): Promise<void> {
+    const bridge = this.capabilities.managementBridge().settings
+    let documents = visibleSettingsDocuments(await bridge.describe())
+    const request = (focus?: string): SelectOverlayRequest => ({
+      title: ui(`设置 · ${settingsCategoryLabel(category)}`, `Settings · ${settingsCategoryLabel(category)}`),
+      detail: settingsCategoryDescription(category),
+      choices: this.settingsCategoryRows(documents, category),
+      ...(focus === undefined ? {} : { initialChoiceId: focus }),
+    })
+    const handle = async (selected: OverlayChoice): Promise<void> => {
+      if (selected.id.startsWith('special:')) {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(selected.id.slice('special:'.length)) as unknown
+        } catch {
+          this.host.notice(ui('无法解析设置入口', 'Could not parse the Settings entry'), 'error')
+          return
+        }
+        if (Array.isArray(parsed) && typeof parsed[0] === 'string' && typeof parsed[1] === 'string') {
+          const document = (await bridge.describe(parsed[0]))[0]
+          if (document !== undefined) await this.editSpecialSetting(navigation, document, parsed[1])
+        }
+      } else {
+        const parsed = parseSettingsRootChoice(selected.id)
+        if (parsed?.fieldPath !== undefined) {
+          const document = (await bridge.describe(parsed.namespace))[0]
+          const field = document === undefined ? undefined : settingsFields(document)
+            .find(candidate => JSON.stringify(candidate.path) === JSON.stringify(parsed.fieldPath))
+          if (document !== undefined && field !== undefined) await this.editSetting(navigation, document, field)
+        }
+      }
+      if (navigation.signal.aborted) return
+      documents = visibleSettingsDocuments(await bridge.describe(undefined, { bypassCache: true }))
+      const choices = this.settingsCategoryRows(documents, category)
+      if (choices.length === 0) {
+        this.host.notice(ui('该分类已没有可用设置', 'This category no longer has available settings'), 'info')
+        navigation.back()
+        return
+      }
+      navigation.replaceSelectPage(request(selected.id), handle)
+    }
+    const choices = this.settingsCategoryRows(documents, category)
+    if (choices.length === 0) {
+      this.host.notice(ui('该分类没有可用设置', 'This category has no available settings'), 'info')
+      return
+    }
+    await navigation.selectPage(request(initialChoiceId), handle)
   }
 
   private async keymap(args: string): Promise<void> {
@@ -2167,19 +2254,25 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   private async keymapOverlay(
     document: TuiSettingsDocument,
     current: TuiBehaviorSettings,
+    overlays: OverlayPrompts = this.host.overlays,
   ): Promise<void> {
-    await this.overlayFlow(this.host.overlays, async (navigation) => {
+    let liveDocument = document
+    let liveCurrent = current
+    const choices = (): readonly OverlayChoice[] => SURFACE_KEYMAP
+      .filter(binding => binding.configurable !== false)
+      .map(binding => ({
+        id: binding.id,
+        label: ui(binding.zh, binding.en),
+        description: bindingKeysLabel(binding.id),
+      }))
+    await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('快捷键', 'Key bindings'),
         detail: ui(
           '选择一项以改绑或恢复默认。撤销、Enter、换行和对话查找不可改。',
           'Choose a shortcut to rebind or restore. Undo, Enter, newline, and transcript search stay fixed.',
         ),
-        choices: SURFACE_KEYMAP.filter(binding => binding.configurable !== false).map(binding => ({
-          id: binding.id,
-          label: ui(binding.zh, binding.en),
-          description: bindingKeysLabel(binding.id),
-        })),
+        choices: choices(),
       }, async (selected) => {
         const target = SURFACE_KEYMAP.find(binding => binding.id === selected.id)
         const action = await navigation.select({
@@ -2195,15 +2288,22 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         })
         if (action === undefined) return
         if (action.id === 'reset') {
-          await this.keymapAssign(document, current, selected.id, 'reset')
-          return
+          await this.keymapAssign(liveDocument, liveCurrent, selected.id, 'reset')
+        } else {
+          const typed = await navigation.input({
+            title: ui('新组合键', 'New chord'),
+            placeholder: 'Ctrl+K',
+          })
+          if (typed === undefined || typed.trim() === '') return
+          await this.keymapAssign(liveDocument, liveCurrent, selected.id, typed)
         }
-        const typed = await navigation.input({
-          title: ui('新组合键', 'New chord'),
-          placeholder: 'Ctrl+K',
-        })
-        if (typed === undefined || typed.trim() === '') return
-        await this.keymapAssign(document, current, selected.id, typed)
+        liveDocument = behaviorSettings(await this.capabilities.managementBridge().settings.describe(
+          TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+          { bypassCache: true },
+        ))
+        liveCurrent = behaviorFromSettings(liveDocument)
+        applyKeyBindingOverrides(liveCurrent.keyBindings)
+        if (!navigation.signal.aborted) navigation.updateChoices(choices())
       })
     })
   }
@@ -2364,6 +2464,30 @@ The directory, user files, and all session logs are kept; sessions become ungrou
 
   private settingsSpecialChoices(document: TuiSettingsDocument): readonly OverlayChoice[] {
     switch (document.namespace) {
+      case TUI_APPEARANCE_SETTINGS_NAMESPACE:
+        return [
+          {
+            id: '__settings_theme__',
+            label: ui('界面主题与主题管理…', 'Interface theme and theme management…'),
+            description: ui('选择、导入、导出、生成或删除主题', 'Choose, import, export, generate, or delete themes'),
+          },
+          {
+            id: '__settings_code_theme__',
+            label: ui('代码主题…', 'Code theme…'),
+            description: ui('独立选择代码块与工具内容的高亮主题', 'Choose syntax colors for code blocks and tool content independently'),
+          },
+          {
+            id: '__settings_background__',
+            label: ui('背景模式…', 'Background mode…'),
+            description: ui('主题颜色、终端背景或显式主题底色', 'Theme color, terminal background, or explicit theme fill'),
+          },
+        ]
+      case TUI_BEHAVIOR_SETTINGS_NAMESPACE:
+        return [{
+          id: '__settings_keymap__',
+          label: ui('快捷键…', 'Keyboard shortcuts…'),
+          description: ui('查看、改绑或恢复可配置键位', 'View, rebind, or reset configurable shortcuts'),
+        }]
       case LOCALE_SETTINGS_NAMESPACE:
         return [{
           id: '__settings_language__',
@@ -2410,6 +2534,15 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     action: string,
   ): Promise<void> {
     switch (action) {
+      case '__settings_theme__': await this.themeCenter(overlays); return
+      case '__settings_code_theme__': await this.themeCode('', overlays); return
+      case '__settings_background__': await this.editBackgroundMode(overlays); return
+      case '__settings_keymap__': {
+        const current = behaviorFromSettings(document)
+        applyKeyBindingOverrides(current.keyBindings)
+        await this.keymapOverlay(document, current, overlays)
+        return
+      }
       case '__settings_language__': await this.language('', overlays, document); return
       case '__settings_default_model__': await this.editDefaultModel(overlays, document); return
       case '__settings_default_permission__': await this.editDefaultPermission(overlays, document); return
@@ -2512,12 +2645,15 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const selected = await overlays.select({
       title: ui('新会话默认模式', "Default mode for new sessions"),
       detail: ui('保存后只影响未来创建且未显式选择 Agent Preset 的会话', "Affects only future sessions that do not select an Agent Preset explicitly"),
-      choices: modes.map(mode => ({
-        id: mode.id,
-        label: `${field.value === mode.id ? ui('当前默认 · ', "Current default · ") : ''}${mode.label}`,
-        description: `${mode.trust === 'system' ? ui('系统', "System") : ui('用户', "User")}${mode.description === undefined ? '' : ` · ${mode.description}`}`,
-        ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
-      })),
+      choices: modes.map((mode) => {
+        const copy = agentPresetCopy(mode)
+        return {
+          id: mode.id,
+          label: `${field.value === mode.id ? ui('当前默认 · ', "Current default · ") : ''}${copy.label}`,
+          description: `${mode.trust === 'system' ? ui('系统', "System") : ui('用户', "User")}${copy.description === undefined ? '' : ` · ${copy.description}`}`,
+          ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
+        }
+      }),
     })
     if (selected === undefined || Object.is(field.value, selected.id)) return
     const mode = modes.find(candidate => candidate.id === selected.id)

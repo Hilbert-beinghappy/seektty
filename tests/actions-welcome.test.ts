@@ -18,6 +18,7 @@ import {
 const ENTER = '\r'
 const DOWN = '\u001B[B'
 const END = '\u001B[F'
+const HOME = '\u001B[H'
 
 function harness() {
   let value = structuredClone(DEFAULT_TUI_WELCOME) as TuiWelcomeSettings
@@ -155,6 +156,73 @@ describe('/welcome configuration', () => {
       })
       expect(h.mutate).not.toHaveBeenCalled()
       expect(h.applyWelcome).not.toHaveBeenCalled()
+    } finally {
+      h.overlays.dispose()
+      await pending
+    }
+  })
+
+  it('stays in custom-row management after each edit so rows can be changed continuously', async () => {
+    const h = harness()
+    const pending = h.actions.execute('welcome', '')
+    try {
+      await vi.waitFor(() => { expect(h.text()).toContain('自定义信息行') })
+      h.key(DOWN)
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('可连续编辑') })
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('新增自定义行') })
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('标题文字') })
+      h.key('Alpha')
+      h.key(ENTER)
+      await vi.waitFor(() => {
+        expect(h.text()).toContain('9. 标题 · Alpha')
+        expect(h.text()).toContain('可连续编辑')
+        expect(h.text()).not.toContain('实时预览')
+      })
+      h.key(HOME)
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('新增自定义行') })
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('标题文字') })
+      h.key('Beta')
+      h.key(ENTER)
+      await vi.waitFor(() => {
+        expect(h.text()).toContain('10. 标题 · Beta')
+        expect(h.text()).toContain('可连续编辑')
+      })
+      expect(h.mutate).not.toHaveBeenCalled()
+    } finally {
+      h.overlays.dispose()
+      await pending
+    }
+  })
+
+  it('keeps leaf changes inside their subgroup and lets Esc return exactly one level', async () => {
+    const h = harness()
+    const pending = h.actions.execute('welcome', '')
+    try {
+      await vi.waitFor(() => { expect(h.text()).toContain('实时预览') })
+      h.key(DOWN)
+      h.key(DOWN)
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('修改字段后留在本页') })
+      h.key(ENTER)
+      await vi.waitFor(() => { expect(h.text()).toContain('复用本机 Fastfetch Logo') })
+      h.key(DOWN)
+      h.key(DOWN)
+      h.key(ENTER)
+      await vi.waitFor(() => {
+        expect(h.text()).toContain('Fastfetch · 保留原色')
+        expect(h.text()).toContain('修改字段后留在本页')
+      })
+      h.key('\u001B')
+      await vi.waitFor(() => {
+        expect(h.text()).toContain('实时预览')
+        expect(h.text()).toContain('Logo')
+      })
+      expect(h.mutate).not.toHaveBeenCalled()
     } finally {
       h.overlays.dispose()
       await pending

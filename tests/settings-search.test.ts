@@ -9,8 +9,9 @@ import {
   hasDedicatedSettingsEditor,
   indexSettingsFields,
   parseSettingsRootChoice,
+  settingsCategoryChoices,
+  settingsCategoryFor,
   settingsFieldLabel,
-  settingsRootChoices,
 } from '../src/client/settings.ts'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
@@ -51,14 +52,15 @@ describe('settings field index', () => {
     const indexed = indexSettingsFields([presets, behavior])
     expect(indexed.map(item => item.field.label)).toEqual(['工具卡片默认形态'])
 
-    const root = settingsRootChoices([presets, behavior])
-    expect(root.some(choice => choice.id === 'agent-presets')).toBe(true)
-    expect(root.some(choice => choice.id === 'seektty-behavior')).toBe(true)
-    expect(root.some(choice => choice.id === `field:agent-presets:${JSON.stringify(['defaultPreset'])}`)).toBe(false)
-    const field = root.find(choice => choice.label === '工具卡片默认形态')
-    expect(field?.id).toBe(`field:seektty-behavior:${JSON.stringify(['toolCards'])}`)
-    expect(field?.description).toContain('seektty-behavior.toolCards')
-    expect(parseSettingsRootChoice(field?.id ?? '')).toEqual({
+    const root = settingsCategoryChoices([presets, behavior])
+    expect(root.map(choice => choice.id)).toEqual([
+      'appearance', 'welcome', 'mouse', 'input', 'model-agent',
+      'permissions', 'extensions', 'language-system',
+    ])
+    expect(root.find(choice => choice.id === 'appearance')?.disabledReason).toBeUndefined()
+    expect(root.find(choice => choice.id === 'model-agent')?.disabledReason).toBeUndefined()
+    expect(root.find(choice => choice.id === 'welcome')?.disabledReason).toBeDefined()
+    expect(parseSettingsRootChoice(`field:seektty-behavior:${JSON.stringify(['toolCards'])}`)).toEqual({
       namespace: 'seektty-behavior',
       fieldPath: ['toolCards'],
     })
@@ -96,13 +98,8 @@ describe('settings field index', () => {
       }).toJSON(),
       { sources: [], extra: 'keep' },
     )
-    const root = settingsRootChoices([appearance, behavior, locale, marketplace])
-    const fieldIds = root.filter(choice => choice.id.startsWith('field:')).map(choice => choice.id)
-
-    expect(root.some(choice => choice.id === TUI_APPEARANCE_SETTINGS_NAMESPACE)).toBe(true)
-    expect(root.some(choice => choice.id === TUI_BEHAVIOR_SETTINGS_NAMESPACE)).toBe(true)
-    expect(root.some(choice => choice.id === LOCALE_SETTINGS_NAMESPACE)).toBe(true)
-    expect(root.some(choice => choice.id === 'tui-plugin-marketplace')).toBe(true)
+    const fieldIds = indexSettingsFields([appearance, behavior, locale, marketplace])
+      .map(item => `field:${item.namespace}:${JSON.stringify(item.field.path)}`)
 
     expect(fieldIds).not.toContain(`field:${TUI_APPEARANCE_SETTINGS_NAMESPACE}:${JSON.stringify(['theme'])}`)
     expect(fieldIds).not.toContain(`field:${TUI_APPEARANCE_SETTINGS_NAMESPACE}:${JSON.stringify(['codeTheme'])}`)
@@ -113,6 +110,13 @@ describe('settings field index', () => {
 
     expect(fieldIds).toContain(`field:${TUI_BEHAVIOR_SETTINGS_NAMESPACE}:${JSON.stringify(['toolCards'])}`)
     expect(fieldIds).toContain(`field:tui-plugin-marketplace:${JSON.stringify(['extra'])}`)
+    expect(settingsCategoryFor(TUI_APPEARANCE_SETTINGS_NAMESPACE, ['backgroundMode'])).toBe('appearance')
+    expect(settingsCategoryFor(TUI_BEHAVIOR_SETTINGS_NAMESPACE, ['keyBindings'])).toBe('input')
+    expect(settingsCategoryFor(TUI_BEHAVIOR_SETTINGS_NAMESPACE, ['mouseMode'])).toBe('mouse')
+    expect(settingsCategoryFor('agent-default-model')).toBe('model-agent')
+    expect(settingsCategoryFor('permission')).toBe('permissions')
+    expect(settingsCategoryFor('tui-plugin-marketplace')).toBe('extensions')
+    expect(settingsCategoryFor(LOCALE_SETTINGS_NAMESPACE)).toBe('language-system')
   })
 
   it('recognizes only the raw fields already owned by dedicated editors', () => {
@@ -130,6 +134,7 @@ describe('settings field index', () => {
     expect(hasDedicatedSettingsEditor('agent-presets', ['extra'])).toBe(false)
     expect(hasDedicatedSettingsEditor(TUI_APPEARANCE_SETTINGS_NAMESPACE, ['theme'])).toBe(true)
     expect(hasDedicatedSettingsEditor(TUI_APPEARANCE_SETTINGS_NAMESPACE, ['codeTheme'])).toBe(true)
+    expect(hasDedicatedSettingsEditor(TUI_APPEARANCE_SETTINGS_NAMESPACE, ['backgroundMode'])).toBe(true)
     expect(hasDedicatedSettingsEditor(TUI_APPEARANCE_SETTINGS_NAMESPACE, ['customThemes'])).toBe(true)
     expect(hasDedicatedSettingsEditor(TUI_APPEARANCE_SETTINGS_NAMESPACE, ['extra'])).toBe(false)
     expect(hasDedicatedSettingsEditor(TUI_BEHAVIOR_SETTINGS_NAMESPACE, ['keyBindings'])).toBe(true)

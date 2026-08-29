@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   collectFastfetch,
+  collectFastfetchLogo,
   fastfetchArguments,
+  fastfetchLogoArguments,
   parseFastfetchOutput,
 } from '../src/host/fastfetch.ts'
 import type { TuiWelcomeFastfetchRequest } from '../src/protocol.ts'
@@ -20,6 +22,11 @@ describe('Fastfetch host adapter', () => {
     ])
     expect(fastfetchArguments({ ...safe, source: 'user-config', configPath: 'C:\\ff.jsonc' }, '__SEP__'))
       .toEqual(['--config', 'C:\\ff.jsonc', '--logo', 'none', '--pipe', 'true', '--separator', '__SEP__'])
+    expect(fastfetchLogoArguments({ configPath: 'C:\\ff.jsonc' })).toEqual([
+      '--config', 'C:\\ff.jsonc', '--structure', 'none', '--pipe', 'false',
+      '--logo-padding', '0', '--logo-padding-top', '0', '--logo-padding-right', '0',
+      '--logo-print-remaining', 'true',
+    ])
   })
 
   it('parses fields and text while stripping terminal control data and module errors', () => {
@@ -81,5 +88,18 @@ describe('Fastfetch host adapter', () => {
     })
     expect(result.status).toBe('error')
     expect(result.diagnostic).toContain('exceeded')
+  })
+
+  it('captures only a color-safe Fastfetch Logo and removes active terminal controls', async () => {
+    const script = "process.stdout.write('\\u001b[38;2;1;2;3m██\\u001b[0m\\n\\u001b[2J\\u001b]52;c;secret\\u0007safe\\n')"
+    const result = await collectFastfetchLogo({ configPath: '' }, undefined, {
+      command: process.execPath,
+      prefixArgs: ['-e', script, '--'],
+    })
+    expect(result.status).toBe('ok')
+    expect(result.ansi).toContain('\u001b[38;2;1;2;3m██\u001b[0m')
+    expect(result.ansi).toContain('safe')
+    expect(result.ansi).not.toContain('\u001b[2J')
+    expect(result.ansi).not.toContain('secret')
   })
 })

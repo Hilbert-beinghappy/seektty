@@ -85,7 +85,11 @@ function modeLabel(settings: TuiWelcomeSettings): string {
 function logoLabel(settings: TuiWelcomeSettings): string {
   const source = settings.logo.source === 'builtin'
     ? ui('内置', 'Built in')
-    : settings.logo.source === 'file' ? ui('自定义文件', 'Custom file') : ui('隐藏', 'Hidden')
+    : settings.logo.source === 'file'
+      ? ui('自定义文件', 'Custom file')
+      : settings.logo.source === 'fastfetch' ? 'Fastfetch' : ui('隐藏', 'Hidden')
+  if (settings.logo.source === 'fastfetch') return `${source} · ${ui('保留原色', 'Original colors')}`
+  if (settings.logo.source === 'none') return source
   const colors = settings.logo.colorMode === 'original' ? ui('原色', 'Original colors') : ui('主题色', 'Theme colors')
   return `${source} · ${colors}`
 }
@@ -155,213 +159,281 @@ async function editRows(
   navigation: OverlayNavigation,
   settings: TuiWelcomeSettings,
 ): Promise<TuiWelcomeSettings> {
-  const selected = await navigation.select({
-    title: ui('自定义信息行', 'Custom information rows'),
-    detail: ui(`最多 ${String(MAX_WELCOME_ROWS)} 行；选择已有行可编辑、移动或删除。`, `Up to ${String(MAX_WELCOME_ROWS)} rows; choose one to edit, move, or delete.`),
-    choices: [
-      { id: '__add__', label: ui('新增一行…', 'Add a row…'), ...(settings.customRows.length >= MAX_WELCOME_ROWS ? { disabledReason: ui('已达到上限', 'Limit reached') } : {}) },
-      { id: '__defaults__', label: ui('恢复默认信息行', 'Restore default rows') },
-      ...settings.customRows.map((row, index) => ({
-        id: `row:${String(index)}`,
-        label: `${String(index + 1)}. ${rowSummary(row)}`,
-      })),
-    ],
-  })
-  if (selected === undefined) return settings
-  if (selected.id === '__defaults__') {
-    return { ...settings, customRows: cloneSettings(defaultWelcomeSettings()).customRows }
+  let current = settings
+  let initialChoiceId: string | undefined
+  while (!navigation.signal.aborted) {
+    const selected = await navigation.select({
+      title: ui('自定义信息行', 'Custom information rows'),
+      detail: ui(`最多 ${String(MAX_WELCOME_ROWS)} 行；可连续编辑，按 Esc 返回欢迎页设置。`, `Up to ${String(MAX_WELCOME_ROWS)} rows; continue editing here and press Esc to return to Welcome settings.`),
+      ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
+      choices: [
+        { id: '__add__', label: ui('新增一行…', 'Add a row…'), ...(current.customRows.length >= MAX_WELCOME_ROWS ? { disabledReason: ui('已达到上限', 'Limit reached') } : {}) },
+        { id: '__defaults__', label: ui('恢复默认信息行', 'Restore default rows') },
+        ...current.customRows.map((row, index) => ({
+          id: `row:${String(index)}`,
+          label: `${String(index + 1)}. ${rowSummary(row)}`,
+        })),
+      ],
+    })
+    if (selected === undefined) return current
+    if (selected.id === '__defaults__') {
+      current = { ...current, customRows: cloneSettings(defaultWelcomeSettings()).customRows }
+      initialChoiceId = '__defaults__'
+      continue
+    }
+    if (selected.id === '__add__') {
+      const row = await promptRow(navigation)
+      if (row !== undefined) {
+        current = { ...current, customRows: [...current.customRows, row] }
+        initialChoiceId = `row:${String(current.customRows.length - 1)}`
+      } else initialChoiceId = '__add__'
+      continue
+    }
+    const index = Number.parseInt(selected.id.slice('row:'.length), 10)
+    const row = current.customRows[index]
+    if (row === undefined) {
+      initialChoiceId = '__add__'
+      continue
+    }
+    const action = await navigation.select({
+      title: rowSummary(row),
+      searchable: false,
+      choices: [
+        { id: 'edit', label: ui('修改', 'Edit') },
+        { id: 'up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
+        { id: 'down', label: ui('下移', 'Move down'), ...(index === current.customRows.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
+        { id: 'delete', label: ui('删除', 'Delete') },
+      ],
+    })
+    initialChoiceId = selected.id
+    if (action === undefined) continue
+    const rows = [...current.customRows]
+    if (action.id === 'edit') {
+      const updated = await promptRow(navigation, row)
+      if (updated !== undefined) rows[index] = updated
+    } else if (action.id === 'delete') {
+      rows.splice(index, 1)
+      initialChoiceId = rows.length === 0 ? '__add__' : `row:${String(Math.min(index, rows.length - 1))}`
+    } else {
+      const other = action.id === 'up' ? index - 1 : index + 1
+      if (other >= 0 && other < rows.length) {
+        [rows[index], rows[other]] = [rows[other]!, rows[index]!]
+        initialChoiceId = `row:${String(other)}`
+      }
+    }
+    current = { ...current, customRows: rows }
   }
-  if (selected.id === '__add__') {
-    const row = await promptRow(navigation)
-    return row === undefined ? settings : { ...settings, customRows: [...settings.customRows, row] }
-  }
-  const index = Number.parseInt(selected.id.slice('row:'.length), 10)
-  const row = settings.customRows[index]
-  if (row === undefined) return settings
-  const action = await navigation.select({
-    title: rowSummary(row),
-    searchable: false,
-    choices: [
-      { id: 'edit', label: ui('修改', 'Edit') },
-      { id: 'up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
-      { id: 'down', label: ui('下移', 'Move down'), ...(index === settings.customRows.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
-      { id: 'delete', label: ui('删除', 'Delete') },
-    ],
-  })
-  if (action === undefined) return settings
-  const rows = [...settings.customRows]
-  if (action.id === 'edit') {
-    const updated = await promptRow(navigation, row)
-    if (updated !== undefined) rows[index] = updated
-  } else if (action.id === 'delete') rows.splice(index, 1)
-  else {
-    const other = action.id === 'up' ? index - 1 : index + 1
-    if (other >= 0 && other < rows.length) [rows[index], rows[other]] = [rows[other]!, rows[index]!]
-  }
-  return { ...settings, customRows: rows }
+  return current
 }
 
 async function editLogo(
   navigation: OverlayNavigation,
   settings: TuiWelcomeSettings,
 ): Promise<TuiWelcomeSettings> {
-  const action = await navigation.select({
-    title: ui('欢迎 Logo', 'Welcome logo'),
-    detail: ui('SeekTTY 只读取终端文本 Logo，不转换普通图片。', 'SeekTTY reads terminal-text logos and does not convert ordinary images.'),
-    searchable: false,
-    choices: [
-      { id: 'source', label: ui('Logo 来源', 'Logo source'), description: logoLabel(settings) },
-      { id: 'color', label: ui('颜色模式', 'Color mode'), description: settings.logo.colorMode === 'original' ? ui('保留原色 ANSI', 'Preserve ANSI colors') : ui('使用 $[1-9] 主题槽', 'Use $[1-9] theme slots') },
-      { id: 'large', label: ui('大图路径', 'Large-logo path'), description: settings.logo.largePath || ui('未设置', 'Not set') },
-      { id: 'compact', label: ui('紧凑图路径', 'Compact-logo path'), description: settings.logo.compactPath || ui('未设置（窄窗口隐藏）', 'Not set (hidden in narrow terminals)') },
-    ],
-  })
-  if (action === undefined) return settings
-  if (action.id === 'source') {
-    const source = await navigation.select({
-      title: ui('Logo 来源', 'Logo source'),
+  let current = settings
+  let initialChoiceId: string | undefined
+  while (!navigation.signal.aborted) {
+    const action = await navigation.select({
+      title: ui('欢迎 Logo', 'Welcome logo'),
+      detail: ui('修改字段后留在本页；按 Esc 返回欢迎页设置。SeekTTY 不转换普通图片。', 'Changes stay on this page; press Esc to return to Welcome settings. SeekTTY does not convert ordinary images.'),
       searchable: false,
-      initialChoiceId: settings.logo.source,
+      ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
       choices: [
-        { id: 'builtin', label: ui('内置 SeekTTY 像素 Logo', 'Built-in SeekTTY pixel logo') },
-        { id: 'file', label: ui('自定义终端文本文件', 'Custom terminal-text file') },
-        { id: 'none', label: ui('隐藏 Logo', 'Hide logo') },
+        { id: 'source', label: ui('Logo 来源', 'Logo source'), description: logoLabel(current) },
+        ...(current.logo.source === 'builtin' || current.logo.source === 'file'
+          ? [{ id: 'color', label: ui('颜色模式', 'Color mode'), description: current.logo.colorMode === 'original' ? ui('保留原色 ANSI', 'Preserve ANSI colors') : ui('使用 $[1-9] 主题槽', 'Use $[1-9] theme slots') }]
+          : []),
+        ...(current.logo.source === 'file' ? [
+          { id: 'large', label: ui('大图路径', 'Large-logo path'), description: current.logo.largePath || ui('未设置', 'Not set') },
+          { id: 'compact', label: ui('紧凑图路径', 'Compact-logo path'), description: current.logo.compactPath || ui('未设置（窄窗口隐藏）', 'Not set (hidden in narrow terminals)') },
+        ] : []),
       ],
     })
-    if (source === undefined) return settings
-    let largePath = settings.logo.largePath
-    if (source.id === 'file' && largePath.trim() === '') {
-      const entered = await navigation.input({
-        title: ui('大图文件路径', 'Large-logo file path'),
-        detail: ui('支持绝对路径、~ 和工作区相对路径', 'Absolute, ~, and workspace-relative paths are supported'),
-        requireText: true,
+    if (action === undefined) return current
+    initialChoiceId = action.id
+    if (action.id === 'source') {
+      const source = await navigation.select({
+        title: ui('Logo 来源', 'Logo source'),
+        searchable: false,
+        initialChoiceId: current.logo.source,
+        choices: [
+          { id: 'builtin', label: ui('内置 SeekTTY 像素 Logo', 'Built-in SeekTTY pixel logo') },
+          { id: 'file', label: ui('自定义终端文本文件', 'Custom terminal-text file') },
+          { id: 'fastfetch', label: ui('复用本机 Fastfetch Logo', 'Reuse local Fastfetch logo'), description: ui('只渲染 Logo，不执行信息模块；保留原始颜色', 'Renders only the logo without information modules; preserves original colors') },
+          { id: 'none', label: ui('隐藏 Logo', 'Hide logo') },
+        ],
       })
-      if (entered === undefined) return settings
-      largePath = entered
+      if (source === undefined) continue
+      let largePath = current.logo.largePath
+      if (source.id === 'file' && largePath.trim() === '') {
+        const entered = await navigation.input({
+          title: ui('大图文件路径', 'Large-logo file path'),
+          detail: ui('支持绝对路径、~ 和工作区相对路径', 'Absolute, ~, and workspace-relative paths are supported'),
+          requireText: true,
+        })
+        if (entered === undefined) continue
+        largePath = entered
+      }
+      current = { ...current, logo: { ...current.logo, source: source.id as TuiWelcomeSettings['logo']['source'], largePath } }
+      continue
     }
-    return { ...settings, logo: { ...settings.logo, source: source.id as TuiWelcomeSettings['logo']['source'], largePath } }
-  }
-  if (action.id === 'color') {
-    const colorMode = await navigation.select({
-      title: ui('Logo 颜色', 'Logo colors'),
-      searchable: false,
-      initialChoiceId: settings.logo.colorMode,
-      choices: [
-        { id: 'original', label: ui('保留原始 ANSI 颜色', 'Preserve original ANSI colors') },
-        { id: 'theme', label: ui('映射当前主题', 'Map to current theme'), description: '$[1-9] / $$' },
-      ],
+    if (action.id === 'color') {
+      const colorMode = await navigation.select({
+        title: ui('Logo 颜色', 'Logo colors'),
+        searchable: false,
+        initialChoiceId: current.logo.colorMode,
+        choices: [
+          { id: 'original', label: ui('保留原始 ANSI 颜色', 'Preserve original ANSI colors') },
+          { id: 'theme', label: ui('映射当前主题', 'Map to current theme'), description: '$[1-9] / $$' },
+        ],
+      })
+      if (colorMode !== undefined) current = { ...current, logo: { ...current.logo, colorMode: colorMode.id as 'original' | 'theme' } }
+      continue
+    }
+    const compact = action.id === 'compact'
+    const path = await navigation.input({
+      title: compact ? ui('紧凑图文件路径', 'Compact-logo file path') : ui('大图文件路径', 'Large-logo file path'),
+      detail: compact ? ui('可留空；窄窗口会隐藏 Logo', 'Optional; narrow terminals will hide the logo') : ui('自定义文件模式下必填', 'Required in custom-file mode'),
+      initialValue: compact ? current.logo.compactPath : current.logo.largePath,
+      requireText: !compact && current.logo.source === 'file',
     })
-    return colorMode === undefined ? settings : { ...settings, logo: { ...settings.logo, colorMode: colorMode.id as 'original' | 'theme' } }
+    if (path !== undefined) {
+      current = {
+        ...current,
+        logo: compact ? { ...current.logo, compactPath: path } : { ...current.logo, largePath: path },
+      }
+    }
   }
-  const compact = action.id === 'compact'
-  const path = await navigation.input({
-    title: compact ? ui('紧凑图文件路径', 'Compact-logo file path') : ui('大图文件路径', 'Large-logo file path'),
-    detail: compact ? ui('可留空；窄窗口会隐藏 Logo', 'Optional; narrow terminals will hide the logo') : ui('自定义文件模式下必填', 'Required in custom-file mode'),
-    initialValue: compact ? settings.logo.compactPath : settings.logo.largePath,
-    requireText: !compact && settings.logo.source === 'file',
-  })
-  if (path === undefined) return settings
-  return {
-    ...settings,
-    logo: compact ? { ...settings.logo, compactPath: path } : { ...settings.logo, largePath: path },
-  }
+  return current
 }
 
 async function editModules(
   navigation: OverlayNavigation,
   settings: TuiWelcomeSettings,
 ): Promise<TuiWelcomeSettings> {
-  const modules = [...settings.fastfetch.modules]
-  const selected = await navigation.select({
-    title: ui('Fastfetch 安全模块', 'Safe Fastfetch modules'),
-    detail: ui('模块顺序就是欢迎页显示顺序。', 'Module order is the welcome-page display order.'),
-    choices: [
-      { id: '__add__', label: ui('添加模块…', 'Add modules…'), ...(modules.length === SAFE_FASTFETCH_MODULES.length ? { disabledReason: ui('已全部添加', 'All modules added') } : {}) },
-      { id: '__defaults__', label: ui('恢复默认模块', 'Restore default modules') },
-      ...modules.map((module, index) => ({ id: `module:${String(index)}`, label: `${String(index + 1)}. ${moduleLabel(module)}` })),
-    ],
-  })
-  if (selected === undefined) return settings
-  if (selected.id === '__defaults__') {
-    return { ...settings, fastfetch: { ...settings.fastfetch, modules: defaultWelcomeSettings().fastfetch.modules } }
-  }
-  if (selected.id === '__add__') {
-    const available = SAFE_FASTFETCH_MODULES.filter(module => !modules.includes(module))
-    const additions = await navigation.multiSelect({
-      title: ui('添加安全模块', 'Add safe modules'),
-      choices: available.map(module => ({ id: module, label: moduleLabel(module) })),
-      requireSelection: true,
+  let current = settings
+  let initialChoiceId: string | undefined
+  while (!navigation.signal.aborted) {
+    const modules = [...current.fastfetch.modules]
+    const selected = await navigation.select({
+      title: ui('Fastfetch 安全模块', 'Safe Fastfetch modules'),
+      detail: ui('可连续添加、移动或删除；按 Esc 返回 Fastfetch 设置。', 'Continue adding, moving, or removing modules; press Esc to return to Fastfetch settings.'),
+      ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
+      choices: [
+        { id: '__add__', label: ui('添加模块…', 'Add modules…'), ...(modules.length === SAFE_FASTFETCH_MODULES.length ? { disabledReason: ui('已全部添加', 'All modules added') } : {}) },
+        { id: '__defaults__', label: ui('恢复默认模块', 'Restore default modules') },
+        ...modules.map((module, index) => ({ id: `module:${String(index)}`, label: `${String(index + 1)}. ${moduleLabel(module)}` })),
+      ],
     })
-    return additions === undefined
-      ? settings
-      : { ...settings, fastfetch: { ...settings.fastfetch, modules: [...modules, ...additions.map(choice => choice.id as TuiSafeFastfetchModule)] } }
+    if (selected === undefined) return current
+    if (selected.id === '__defaults__') {
+      current = { ...current, fastfetch: { ...current.fastfetch, modules: [...defaultWelcomeSettings().fastfetch.modules] } }
+      initialChoiceId = '__defaults__'
+      continue
+    }
+    if (selected.id === '__add__') {
+      const available = SAFE_FASTFETCH_MODULES.filter(module => !modules.includes(module))
+      const additions = await navigation.multiSelect({
+        title: ui('添加安全模块', 'Add safe modules'),
+        choices: available.map(module => ({ id: module, label: moduleLabel(module) })),
+        requireSelection: true,
+      })
+      if (additions !== undefined) {
+        const next = [...modules, ...additions.map(choice => choice.id as TuiSafeFastfetchModule)]
+        current = { ...current, fastfetch: { ...current.fastfetch, modules: next } }
+        initialChoiceId = `module:${String(modules.length)}`
+      } else initialChoiceId = '__add__'
+      continue
+    }
+    const index = Number.parseInt(selected.id.slice('module:'.length), 10)
+    const module = modules[index]
+    if (module === undefined) {
+      initialChoiceId = '__add__'
+      continue
+    }
+    const action = await navigation.select({
+      title: moduleLabel(module),
+      searchable: false,
+      choices: [
+        { id: 'up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
+        { id: 'down', label: ui('下移', 'Move down'), ...(index === modules.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
+        { id: 'remove', label: ui('移除', 'Remove') },
+      ],
+    })
+    initialChoiceId = selected.id
+    if (action === undefined) continue
+    if (action.id === 'remove') {
+      modules.splice(index, 1)
+      initialChoiceId = modules.length === 0 ? '__add__' : `module:${String(Math.min(index, modules.length - 1))}`
+    } else {
+      const other = action.id === 'up' ? index - 1 : index + 1
+      if (other >= 0 && other < modules.length) {
+        [modules[index], modules[other]] = [modules[other]!, modules[index]!]
+        initialChoiceId = `module:${String(other)}`
+      }
+    }
+    current = { ...current, fastfetch: { ...current.fastfetch, modules } }
   }
-  const index = Number.parseInt(selected.id.slice('module:'.length), 10)
-  const module = modules[index]
-  if (module === undefined) return settings
-  const action = await navigation.select({
-    title: moduleLabel(module),
-    searchable: false,
-    choices: [
-      { id: 'up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
-      { id: 'down', label: ui('下移', 'Move down'), ...(index === modules.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
-      { id: 'remove', label: ui('移除', 'Remove') },
-    ],
-  })
-  if (action === undefined) return settings
-  if (action.id === 'remove') modules.splice(index, 1)
-  else {
-    const other = action.id === 'up' ? index - 1 : index + 1
-    if (other >= 0 && other < modules.length) [modules[index], modules[other]] = [modules[other]!, modules[index]!]
-  }
-  return { ...settings, fastfetch: { ...settings.fastfetch, modules } }
+  return current
 }
 
 async function editFastfetch(
   navigation: OverlayNavigation,
   settings: TuiWelcomeSettings,
 ): Promise<TuiWelcomeSettings> {
-  const action = await navigation.select({
-    title: 'Fastfetch',
-    searchable: false,
-    choices: [
-      {
-        id: 'source', label: ui('数据来源', 'Data source'),
-        description: settings.fastfetch.source === 'safe' ? ui('安全预设（--config none）', 'Safe preset (--config none)') : ui('信任用户配置', 'Trusted user config'),
-      },
-      { id: 'modules', label: ui('安全模块与顺序', 'Safe modules and order'), description: settings.fastfetch.modules.map(moduleLabel).join(' · ') },
-      { id: 'config', label: ui('用户配置路径', 'User config path'), description: settings.fastfetch.configPath || ui('Fastfetch 默认配置', 'Fastfetch default config') },
-    ],
-  })
-  if (action === undefined) return settings
-  if (action.id === 'modules') return editModules(navigation, settings)
-  if (action.id === 'config') {
-    const path = await navigation.input({
-      title: ui('Fastfetch 配置路径', 'Fastfetch config path'),
-      detail: ui('可留空以使用 Fastfetch 默认配置；只在“用户配置”模式生效。', 'Leave blank for the Fastfetch default; used only in user-config mode.'),
-      initialValue: settings.fastfetch.configPath,
+  let current = settings
+  let initialChoiceId: string | undefined
+  while (!navigation.signal.aborted) {
+    const action = await navigation.select({
+      title: 'Fastfetch',
+      detail: ui('修改字段后留在本页；按 Esc 返回欢迎页设置。', 'Changes stay on this page; press Esc to return to Welcome settings.'),
+      searchable: false,
+      ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
+      choices: [
+        {
+          id: 'source', label: ui('数据来源', 'Data source'),
+          description: current.fastfetch.source === 'safe' ? ui('安全预设（--config none）', 'Safe preset (--config none)') : ui('信任用户配置', 'Trusted user config'),
+        },
+        { id: 'modules', label: ui('安全模块与顺序', 'Safe modules and order'), description: current.fastfetch.modules.map(moduleLabel).join(' · ') },
+        { id: 'config', label: ui('用户配置路径', 'User config path'), description: current.fastfetch.configPath || ui('Fastfetch 默认配置', 'Fastfetch default config') },
+      ],
     })
-    return path === undefined ? settings : { ...settings, fastfetch: { ...settings.fastfetch, configPath: path } }
+    if (action === undefined) return current
+    initialChoiceId = action.id
+    if (action.id === 'modules') {
+      current = await editModules(navigation, current)
+      continue
+    }
+    if (action.id === 'config') {
+      const path = await navigation.input({
+        title: ui('Fastfetch 配置路径', 'Fastfetch config path'),
+        detail: ui('可留空以使用 Fastfetch 默认配置；用于“用户配置”信息或 Fastfetch Logo。', 'Leave blank for the Fastfetch default; used by user-config information or the Fastfetch logo.'),
+        initialValue: current.fastfetch.configPath,
+      })
+      if (path !== undefined) current = { ...current, fastfetch: { ...current.fastfetch, configPath: path } }
+      continue
+    }
+    const source = await navigation.select({
+      title: ui('Fastfetch 数据来源', 'Fastfetch data source'),
+      searchable: false,
+      initialChoiceId: current.fastfetch.source,
+      choices: [
+        { id: 'safe', label: ui('安全预设', 'Safe preset'), description: '--config none' },
+        { id: 'user-config', label: ui('用户配置（受信任）', 'User config (trusted)'), description: ui('配置可能包含 command 模块并执行外部命令', 'The config may contain command modules that execute external commands') },
+      ],
+    })
+    if (source === undefined || source.id === current.fastfetch.source) continue
+    if (source.id === 'user-config') {
+      const trusted = await navigation.confirm(
+        ui('信任 Fastfetch 用户配置？', 'Trust the Fastfetch user config?'),
+        ui('Fastfetch 配置可能包含 command 模块并执行任意外部命令。SeekTTY 只清理最终输出，无法约束配置内部行为。', 'A Fastfetch config may contain command modules that execute arbitrary external commands. SeekTTY sanitizes final output but cannot constrain the config itself.'),
+        ui('我信任此配置', 'Trust this config'),
+      )
+      if (!trusted) continue
+    }
+    current = { ...current, fastfetch: { ...current.fastfetch, source: source.id as 'safe' | 'user-config' } }
   }
-  const source = await navigation.select({
-    title: ui('Fastfetch 数据来源', 'Fastfetch data source'),
-    searchable: false,
-    initialChoiceId: settings.fastfetch.source,
-    choices: [
-      { id: 'safe', label: ui('安全预设', 'Safe preset'), description: '--config none' },
-      { id: 'user-config', label: ui('用户配置（受信任）', 'User config (trusted)'), description: ui('配置可能包含 command 模块并执行外部命令', 'The config may contain command modules that execute external commands') },
-    ],
-  })
-  if (source === undefined || source.id === settings.fastfetch.source) return settings
-  if (source.id === 'user-config') {
-    const trusted = await navigation.confirm(
-      ui('信任 Fastfetch 用户配置？', 'Trust the Fastfetch user config?'),
-      ui('Fastfetch 配置可能包含 command 模块并执行任意外部命令。SeekTTY 只清理最终输出，无法约束配置内部行为。', 'A Fastfetch config may contain command modules that execute arbitrary external commands. SeekTTY sanitizes final output but cannot constrain the config itself.'),
-      ui('我信任此配置', 'Trust this config'),
-    )
-    if (!trusted) return settings
-  }
-  return { ...settings, fastfetch: { ...settings.fastfetch, source: source.id as 'safe' | 'user-config' } }
+  return current
 }
 
 /** Open one draft transaction. No live state changes until Save succeeds. */
