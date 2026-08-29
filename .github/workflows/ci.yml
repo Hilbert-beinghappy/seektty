@@ -54,6 +54,7 @@ jobs:
         with:
           name: seektty-candidate
           path: .artifacts/seektty-*.tgz
+          include-hidden-files: true
           if-no-files-found: error
 
   pnpm11-layout:

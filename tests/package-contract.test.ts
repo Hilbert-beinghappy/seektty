@@ -189,6 +189,7 @@ describe('out-of-tree Bundle contract', () => {
     expect(workflow).toContain('pnpm11-layout:')
     expect(workflow).toContain('os: [ubuntu-latest, windows-latest, macos-latest]')
     expect(workflow).toContain('node: [22.x, 24.x]')
+    expect(workflow).toContain('include-hidden-files: true')
     expect(workflow).toContain('pnpm test:pnpm11-layout false .artifacts')
     expect(workflow).toContain('pnpm test:pnpm11-layout true .artifacts')
   })
