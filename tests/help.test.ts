@@ -12,6 +12,17 @@ afterEach(() => {
 })
 
 describe('in-app help keymap', () => {
+  it.each([
+    ['zh', '扩展键盘协议'],
+    ['en', 'extended keyboard input'],
+  ] as const)('qualifies Shift+Enter terminal support in %s', (locale, protocolText) => {
+    setUiLocale(locale)
+    expect(helpKeymapText()).toContain(protocolText)
+    expect(helpKeymapText()).toContain('Ctrl+Enter')
+    expect(helpSectionText('flows')).toContain(protocolText)
+    expect(helpSectionText('flows')).toContain('Ctrl+Enter')
+  })
+
   it.each(['zh', 'en'] as const)('groups every live binding exactly once and explains contextual keys in %s', locale => {
     setUiLocale(locale)
     const text = helpKeymapText()

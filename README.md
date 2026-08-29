@@ -272,7 +272,7 @@ SeekTTY starts with its DeepSeek dark theme. `/theme` opens the theme center; di
 /theme delete <name>
 ```
 
-Interface and code themes are independent. A palette of 3–16 HEX/RGB colors can generate light and dark candidates. `/theme import` reads local VS Code JSON/JSONC themes, resolves relative `include` files, and preserves portable TextMate colors and styles. Every customization path previews changes and flags low contrast before saving. Definitions live in the revision-protected `seektty-appearance` Harness Settings namespace.
+Interface and code themes are independent. A palette of 3–16 HEX/RGB colors can generate light and dark candidates. The built-in code themes provide fine-grained TextMate rules for common language, markup and data scopes. `/theme import` reads local VS Code JSON/JSONC themes, resolves relative `include` files, and preserves portable TextMate colors, selector precedence and styles as the authoritative syntax rules; compact SeekTTY role colors are used only for themes without `tokenColors`. Every customization path previews changes and flags low contrast before saving. Definitions live in the revision-protected `seektty-appearance` Harness Settings namespace.
 
 Hover is a foreground-only interaction state derived from the active interface theme. It uses the theme's `brand` color without a background fill, underline, bold, reverse video, extra marker, required setting, or saved-palette mutation. Selection remains the stronger filled state; `NO_COLOR` remains respected.
 

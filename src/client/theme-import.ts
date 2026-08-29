@@ -21,6 +21,7 @@ import {
   normalizeThemeColorOn,
 } from './theme-config.ts'
 import { ui } from './locale.ts'
+import { SYNTAX_ROLE_SCOPES } from './syntax-theme-rules.ts'
 
 const MAX_THEME_FILE_BYTES = 2 * 1024 * 1024
 const MAX_THEME_TOTAL_BYTES = 8 * 1024 * 1024
@@ -249,24 +250,6 @@ function textMateRules(value: LoadedThemeRecord, background: string): readonly T
   })
 }
 
-const ROLE_SCOPES: Readonly<Record<Exclude<keyof TuiSyntaxThemeColors, 'background' | 'foreground'>, readonly string[]>> = {
-  comment: ['comment'],
-  keyword: ['keyword', 'storage.type', 'storage.modifier'],
-  string: ['string'],
-  number: ['constant.numeric'],
-  constant: ['constant', 'variable.language'],
-  function: ['entity.name.function', 'support.function', 'meta.function-call'],
-  type: ['entity.name.type', 'entity.name.class', 'support.type', 'support.class'],
-  variable: ['variable.other', 'variable.language'],
-  property: ['variable.other.property', 'support.variable.property'],
-  parameter: ['variable.parameter'],
-  operator: ['keyword.operator'],
-  punctuation: ['punctuation'],
-  tag: ['entity.name.tag'],
-  attribute: ['entity.other.attribute-name'],
-  regexp: ['string.regexp'],
-}
-
 const SEMANTIC_TYPES: Readonly<Record<Exclude<keyof TuiSyntaxThemeColors, 'background' | 'foreground'>, readonly string[]>> = {
   comment: ['comment'], keyword: ['keyword', 'modifier'], string: ['string'], number: ['number'],
   constant: ['enumMember', 'macro'], function: ['function', 'method'],
@@ -312,7 +295,7 @@ function syntaxColors(
   rules: readonly TuiTextMateRule[],
   fallback: TuiSyntaxThemeColors,
 ): TuiSyntaxThemeColors {
-  const entries = Object.entries(ROLE_SCOPES).map(([role, candidates]) => {
+  const entries = Object.entries(SYNTAX_ROLE_SCOPES).map(([role, candidates]) => {
     const key = role as Exclude<keyof TuiSyntaxThemeColors, 'background' | 'foreground'>
     const textMate = scopedColor(rules, candidates, fallback[key])
     return [key, semanticColor(value.semanticTokenColors, SEMANTIC_TYPES[key], background, textMate)]

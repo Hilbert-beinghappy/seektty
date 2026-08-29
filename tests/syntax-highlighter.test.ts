@@ -89,6 +89,69 @@ describe('Shiki terminal syntax rendering', () => {
     }
   })
 
+  it('treats a supplied TextMate theme as authoritative instead of injecting coarse role colors', async () => {
+    truecolor()
+    const imported = {
+      ...BUILT_IN_THEMES.dark,
+      id: 'custom:authoritative' as const,
+      name: 'Authoritative',
+      source: 'vscode' as const,
+      tokenColors: [{
+        scope: ['keyword.control'],
+        foreground: '#123456',
+      }],
+    }
+    const highlighter = await SyntaxHighlighter.create(imported, () => undefined)
+    try {
+      const rendered = highlighter.highlight('if (ready) return true', 'typescript', 'inherit').join('\n')
+      expect(rendered).toContain('\u001B[38;2;18;52;86m')
+      expect(rendered).toContain('\u001B[38;2;221;226;238m')
+      expect(rendered).not.toContain('\u001B[38;2;240;113;127m')
+    } finally {
+      highlighter.dispose()
+    }
+  })
+
+  it('keeps function calls, arguments, and literals independently colored', async () => {
+    truecolor()
+    const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)
+    try {
+      const rendered = highlighter.highlight('run("value", 42)', 'typescript', 'inherit').join('\n')
+      expect(rendered).toContain('\u001B[38;2;127;155;255m')
+      expect(rendered).toContain('\u001B[38;2;66;201;154m')
+      expect(rendered).toContain('\u001B[38;2;229;170;89m')
+    } finally {
+      highlighter.dispose()
+    }
+  })
+
+  it('uses fine-grained built-in rules across structured data and markup', async () => {
+    truecolor()
+    const invalidate = vi.fn()
+    const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, invalidate)
+    try {
+      const json = highlighter.highlight('{"name":"SeekTTY","count":3}', 'json', 'inherit').join('\n')
+      expect(json).toContain('\u001B[38;2;180;194;255m')
+      expect(json).toContain('\u001B[38;2;66;201;154m')
+      expect(json).toContain('\u001B[38;2;229;170;89m')
+
+      const markdown = highlighter.highlight('# Heading\n**bold** and `code`', 'markdown', 'inherit').join('\n')
+      expect(markdown).toContain('\u001B[38;2;145;167;255m')
+      expect(markdown).toContain('\u001B[1m')
+      expect(markdown).toContain('\u001B[38;2;66;201;154m')
+
+      const firstHtml = highlighter.highlight('<button disabled title="Save">Save</button>', 'html', 'inherit').join('\n')
+      expect(firstHtml).toContain('\u001B[38;2;221;226;238m')
+      await vi.waitFor(() => { expect(invalidate).toHaveBeenCalledTimes(1) })
+      const html = highlighter.highlight('<button disabled title="Save">Save</button>', 'html', 'inherit').join('\n')
+      expect(html).toContain('\u001B[38;2;102;130;255m')
+      expect(html).toContain('\u001B[38;2;229;170;89m')
+      expect(html).toContain('\u001B[38;2;66;201;154m')
+    } finally {
+      highlighter.dispose()
+    }
+  })
+
   it('uses theme status colors for Diff insertions and deletions', async () => {
     truecolor()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)
