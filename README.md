@@ -88,10 +88,11 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.5` brings terminal-integrated backgrounds, VS Code-grade TextMate highlighting, more reliable transcript and selection controls, and pnpm 11 installation compatibility to official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
+SeekTTY `1.2.5` brings a Fastfetch-style welcome page, terminal-integrated backgrounds, VS Code-grade TextMate highlighting, more reliable transcript and selection controls, and pnpm 11 installation compatibility to official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
 
 ### What's new in 1.2.5
 
+- Empty sessions open with a responsive DeepSeek pixel-whale welcome page and Profile runtime facts. `/welcome` configures custom rows, optional safe/trusted Fastfetch information, built-in/file/local-Fastfetch logos, mixed ordering, live preview, refresh, and reset without writing welcome content into Session history.
 - The canvas can inherit terminal transparency, blur, and background images through `theme`, `terminal`, and backward-compatible `explicit` background modes. Overlay, panel, and ordinary code surfaces now follow the same inherited-background policy; contrast adaptation and terminal-color restoration keep text readable and terminal state recoverable.
 - Imported VS Code `tokenColors` are authoritative, built-in themes include detailed TextMate rules, and legacy themes receive a compatible fine-grained fallback. Highlighting is language-grammar aware while intentionally remaining visual rather than LSP-semantic.
 - Live and completed Thinking blocks can be folded without streaming reopening them; transcript hit rows are aligned, and collapsed tool cards now hide both parameters and results.

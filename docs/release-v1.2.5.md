@@ -4,7 +4,18 @@
 
 ## English
 
-SeekTTY 1.2.5 integrates the interface with terminal-owned backgrounds, upgrades code rendering to VS Code-grade visual TextMate highlighting, fixes several transcript and selector interactions, and makes pnpm 11 installation predictable on the tested official DeepSeek Harness.
+SeekTTY 1.2.5 replaces the old empty-session screen with a configurable Fastfetch-style welcome page, integrates the interface with terminal-owned backgrounds, upgrades code rendering to VS Code-grade visual TextMate highlighting, fixes several transcript and selector interactions, and makes pnpm 11 installation predictable on the tested official DeepSeek Harness.
+
+### Fastfetch-style welcome page and Settings UX
+
+- Empty Sessions show a responsive, non-durable welcome presentation instead of sendable task suggestions. The first API-key transaction keeps priority, and the welcome page disappears as soon as persistent conversation content exists.
+- The default is an original-color DeepSeek pixel whale plus current Profile facts such as SeekTTY version, workspace, model, reasoning effort, Agent mode, permission, and theme. It does not invoke Fastfetch by default.
+- `custom`, `fastfetch`, and `mixed` information modes support structured custom rows, configurable mixed ordering, a theme palette, and ordered safe Fastfetch modules. Custom rows can be added, edited, deleted, moved one step, or sent directly to the top or bottom without repeatedly leaving their management list.
+- `/welcome` and `/settings seektty-welcome` share a transactional editor with live draft preview, revision-protected Save, whole-draft Cancel, `/welcome refresh`, and confirmed `/welcome reset`. List operations remain in the list, leaf edits return one level, Escape moves back exactly one level, and mutations retain a useful focus.
+- Logo sources include the packaged large/compact whale, a user-created terminal-text file, no logo, or the logo rendered by an existing local Fastfetch configuration. Original ANSI colors or Fastfetch-compatible `$[1-9]` theme slots are supported; SeekTTY does not generate pixel art or use terminal image protocols.
+- Fastfetch is optional and is never installed or downloaded. Safe information collection launches the existing executable directly with no shell, `--config none`, no logo/color, a two-second timeout, and bounded output. Trusted user config requires explicit confirmation because it may run Fastfetch `command` modules.
+- Logo and information output are sanitized independently: cursor movement, clearing, OSC/DCS, hyperlinks, clipboard, and image protocols are removed; byte, row, and column limits apply. Collection is cached per process/configuration and stale async generations cannot overwrite newer settings.
+- The Settings center is grouped into Appearance, Welcome page, Mouse and scrolling, Input and shortcuts, Models and Agent, Permissions and security, Plugins and extensions, and Language and system. Direct technical namespace access remains available, and Agent-mode copy is localized in English UI.
 
 ### Terminal-integrated appearance
 
@@ -58,7 +69,18 @@ The package remains `private: true`. This pull request prepares versioned source
 
 ## 中文
 
-SeekTTY 1.2.5 让界面更完整地融合终端自身背景，把代码渲染升级到 VS Code 视觉级 TextMate 高亮，修复多项对话与选择器交互，并改善已测官方 DeepSeek Harness 下的 pnpm 11 安装可靠性。
+SeekTTY 1.2.5 使用可配置的 Fastfetch 风格欢迎页替换旧空会话界面，让界面更完整地融合终端自身背景，把代码渲染升级到 VS Code 视觉级 TextMate 高亮，修复多项对话与选择器交互，并改善已测官方 DeepSeek Harness 下的 pnpm 11 安装可靠性。
+
+### Fastfetch 风格欢迎页与 Settings 体验
+
+- 空 Session 显示响应式、非持久化欢迎页，不再提供可发送的任务候选；首次 API Key 事务继续优先，出现第一条持久会话内容后欢迎页立即隐藏。
+- 默认显示原色 DeepSeek 像素鲸鱼，以及 SeekTTY 版本、工作区、模型、推理强度、Agent 模式、权限和主题等当前 Profile 信息；默认不会执行 Fastfetch。
+- `custom`、`fastfetch`、`mixed` 三种信息模式支持结构化自定义行、混合顺序、主题色板和可排序的安全 Fastfetch 模块。自定义行可连续新增、编辑、删除、单步移动，或直接移到顶部／底部，不会每操作一次就退出列表。
+- `/welcome` 与 `/settings seektty-welcome` 复用事务式编辑器，提供草稿实时预览、带 revision 保护的保存、整份取消、`/welcome refresh` 和确认后的 `/welcome reset`。列表操作留在列表，叶子编辑返回一层，Esc 每次只退一层，变更后保留合理焦点。
+- Logo 可选随包大／小鲸鱼、用户自制终端文本文件、隐藏，或复用本机 Fastfetch 配置渲染的 Logo；支持保留原始 ANSI 色或使用 Fastfetch `$[1-9]` 主题槽。SeekTTY 不生成像素画，也不使用终端图片协议。
+- Fastfetch 始终可选，SeekTTY 不安装、不下载。安全信息采集直接启动现有程序，不经过 Shell，强制 `--config none`、关闭 Logo／颜色、限制两秒和输出大小；受信任用户配置可能执行 Fastfetch `command` 模块，因此启用前必须明确确认。
+- Logo 与信息输出分别清理：移除光标移动、清屏、OSC/DCS、超链接、剪贴板和图像协议，并限制字节、行数与列宽；采集按进程／配置缓存，过期异步结果不能覆盖新设置。
+- Settings 中心按外观、欢迎页、鼠标与滚动、输入与快捷键、模型与 Agent、权限与安全、插件与扩展、语言与系统分组；仍支持直接打开技术命名空间，英文界面的 Agent 模式说明也已本地化。
 
 ### 终端融合外观
 

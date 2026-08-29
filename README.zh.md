@@ -88,10 +88,11 @@ deepseek --update
 
 `deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
-SeekTTY `1.2.5` 为官方 Harness `0.1.1-rc.2` 带来终端背景融合、VS Code 视觉级 TextMate 高亮、更可靠的对话与选择控件，以及 pnpm 11 安装兼容，无需迁移 Settings 或 Session。
+SeekTTY `1.2.5` 为官方 Harness `0.1.1-rc.2` 带来 Fastfetch 风格欢迎页、终端背景融合、VS Code 视觉级 TextMate 高亮、更可靠的对话与选择控件，以及 pnpm 11 安装兼容，无需迁移 Settings 或 Session。
 
 ### 1.2.5 新增内容
 
+- 空会话显示响应式 DeepSeek 像素鲸鱼欢迎页与 Profile 运行信息；`/welcome` 可配置自定义信息行、可选的安全／受信任 Fastfetch 信息、内置／文件／本机 Fastfetch Logo、混合顺序、实时预览、刷新与重置，欢迎内容不会写入 Session 历史。
 - 主画布可通过 `theme`、`terminal` 和向后兼容的 `explicit` 三种背景模式继承终端透明、模糊和背景图片；overlay、panel 与普通代码表面使用同一继承策略，并补充对比度适配和退出时终端颜色恢复。
 - 导入的 VS Code `tokenColors` 成为权威规则，内置主题补齐精细 TextMate 配色，旧主题获得兼容的细粒度兜底；高亮按语言 grammar 区分，但明确不冒充 LSP 语义高亮。
 - 实时与已完成的思考块均可折叠，流式更新不会重新展开用户手动收起的内容；修正对话控件点击行偏移，工具卡收起后不再残留参数与结果。

@@ -3,7 +3,7 @@
 This is the review record for the `1.2.5` release candidate. It is not evidence that `v1.2.5` has been tagged or published.
 
 - Previous published release: `v1.2.4`.
-- Candidate branch: `codex/release-1.2.5`, based on current upstream `main` plus the pnpm 11 layout adapter and release-document updates.
+- Candidate branch: `codex/release-1.2.5`. Its cumulative scope is every merged change after `v1.2.4` (PRs #162, #164, #165, #169, #170, #172, #177, #178, and #180), the completed local Fastfetch-welcome series, the pnpm 11 layout adapter, and release-document updates.
 - Candidate artifact: `seektty-1.2.5.tgz`, built with pnpm `11.7.0`.
 - Tested Host: unmodified official `@deepseek-ai/dsh@0.1.1-rc.2`.
 - Release notes: [English and Chinese in one document](release-v1.2.5.md).
@@ -15,6 +15,14 @@ No credentials, Profile/Session contents, raw terminal logs, personal themes, or
 
 | Area | Primary implementation and evidence |
 | --- | --- |
+| Welcome settings and safe Fastfetch provider | `src/client/welcome-settings.ts`, `src/host/fastfetch.ts`, `src/protocol.ts`, Fastfetch/settings tests |
+| Sanitized Logo and responsive welcome renderer | `src/compat/terminal-logo.ts`, `src/client/welcome-logo.ts`, `welcome.ts`, packaged whale asset, [welcome acceptance record](fastfetch-welcome-acceptance.md) |
+| Transactional editor and Settings navigation | `src/client/welcome-editor.ts`, `src/client/actions.ts`, `settings.ts`, actions/welcome/navigation tests |
+| Terminal color lifecycle and background modes | `src/client/terminal-background.ts`, `appearance.ts`, `surface.ts`, terminal/background tests and compatibility records |
+| Transparent surfaces, hover, and code background | `src/client/theme.ts`, `overlays.ts`, `syntax-highlighter.ts`, transparent-surface acceptance record |
+| Visual TextMate highlighting | `src/client/syntax-theme-rules.ts`, `syntax-highlighter.ts`, theme import/config and syntax tests |
+| Transcript reasoning, tool cards, and hit rows | `src/client/transcript.ts`, transcript/tool-card/mouse tests |
+| Model, effort, permission, and overlay selection | `src/client/actions.ts`, `capabilities.ts`, `chrome.ts`, permission/model/overlay tests |
 | Per-command pnpm policy | `src/pnpm-compat.ts`, `src/bin.ts`, `src/host/profile-plugin-manager.ts`, launcher/plugin tests |
 | Exact failure classification and recovery | `src/pnpm-compat.ts`, `src/bin.ts`, `tests/pnpm-compat.test.ts`, `tests/launcher.test.ts` |
 | Profile plugin commands and help | `src/client/actions.ts`, `src/client/help.ts`, `src/host/profile-plugin-manager.ts` |
@@ -28,15 +36,16 @@ The final values below must describe the exact package inputs proposed for Owner
 
 | Gate | Result |
 | --- | --- |
-| `pnpm run check` | Pass — 117 test files; 1051 passed / 1 conditional skip; typecheck, build, and pack check passed |
+| `pnpm run check` | Pass — 123 test files; 1084 passed / 1 conditional skip; typecheck, build, and pack check passed |
 | Tracked `lib/` and launcher `--version` | Pass — generated bundle rebuilt; launcher reports `seektty 1.2.5` and tested dsh `0.1.1-rc.2` |
-| Package allowlist | Pass — 24 packaged entries; no Profile, Session, `.env`, cache, or personal theme paths included |
+| Package allowlist | Pass — 25 packaged entries, including the sanitized built-in welcome Logo; no Profile, Session, `.env`, cache, or personal theme paths included |
+| Welcome/Fastfetch automated coverage | Pass — defaults, three information modes, safe/trusted sources, process limits, cache generations, ANSI sanitization, responsive layouts, draft rollback, navigation, and direct top/bottom row movement |
 | Structural TUI performance | Pass — 12 isolated runs at 1k / 10k / 50k / 100k transcript lines, 80 columns × 24 rows |
 | Windows GVS=false isolated lifecycle | Pass — official dsh install plus add, boot, remove, re-add, second boot, launcher isolation, and Host identity checks |
 | Windows GVS=true compatibility branch | Pass as a diagnostic gate — real paths entered `store/v11/links`; the exact current dsh/Cordis failure and recovery advice were classified. This is not a claim of GVS=true support |
 | GitHub CI, Windows/macOS/Linux × Node 22/24 | Pending PR checks; Owner must review |
 
-Candidate SHA-256 (`seektty-1.2.5.tgz`): `16c6b46de8bfdfc015864dade138c3eb6b54733d78b9952668433393c4d33e62`.
+Candidate SHA-256 (`seektty-1.2.5.tgz`): `7ce2ec82c449bc5b58e0fb3dcca0ba973f80f196f0661610a3ff77163f1e877f`.
 
 Local evidence was collected on Windows `10.0.22631`, x64, Node.js `v26.1.0`, pnpm `11.7.0`, against the unmodified official dsh `0.1.1-rc.2`. The package targets Node `^22.19.0 || >=24`; the PR matrix separately covers Node 22 and 24.
 
@@ -88,6 +97,12 @@ pnpm test:pnpm11-layout true /path/to/candidate-directory
 
 ## Owner sign-off
 
+- [ ] **Welcome defaults and persistence:** open a genuinely empty Session and confirm API-key onboarding has priority, the original-color whale and runtime facts appear without invoking Fastfetch, tall content scrolls, and the first persistent message removes the non-durable welcome page.
+- [ ] **Welcome editor:** exercise `custom`, `fastfetch`, and `mixed`; continuous custom-row editing; one-step and direct top/bottom movement; Logo source/color choices; safe-module ordering; live preview; one-level Escape; Save/Cancel; refresh/reset; and save-failure rollback.
+- [ ] **Fastfetch trust boundary:** verify the missing-executable fallback, safe `--config none` information, local Fastfetch Logo reuse, and the explicit warning before a trusted user config. Use no unreviewed `command` module or secret-bearing output.
+- [ ] **Appearance and themes:** test `theme`, `terminal`, and `explicit` on a transparent and opaque Windows Terminal profile; switch themes, resize, open nested overlays/code, and exit. Confirm readable text, no stale cells or control-sequence leakage, and original terminal-color restoration where supported.
+- [ ] **Code highlighting:** compare built-in light/dark and at least one imported VS Code theme across representative Python/TypeScript/JSON/Markdown/Diff blocks. Confirm detailed language scopes and preserved explicit token styles/backgrounds.
+- [ ] **Interaction regressions:** fold live/completed Thinking, expand and fully collapse tools, click each model/effort/mode region, change permission in both directions including a failure, and resize a wide overlay without losing its search/selection/viewport state.
 - [ ] Review the source adapter and exact dsh range; confirm it does not alter global pnpm configuration or Profile ownership.
 - [ ] Confirm CI uses one uploaded candidate across all six OS/Node combinations and review every matrix result.
 - [ ] Download or locally produce the exact candidate, verify its allowlist and SHA-256, then run an isolated install and boot.
@@ -118,8 +133,8 @@ Do not delete `DSH_HOME`, Settings, Sessions, or plugin manifests. If the global
 
 ## 中文审核摘要
 
-本文件对应 1.2.5 Release 候选，不代表已经打 tag、创建 GitHub Release 或发布 npm 包。候选版本只增加 pnpm 11 包布局适配、精确故障诊断、跨平台共享候选门禁，并同步版本与过时文档；不迁移 Settings、Profile 或 Session，也不改变现有 TUI 功能。
+本文件对应 1.2.5 Release 候选，不代表已经打 tag、创建 GitHub Release 或发布 npm 包。候选范围覆盖 1.2.4 之后全部已合并 PR、完整 Fastfetch 风格欢迎页、Settings 导航整理、终端背景与透明表面、VS Code 视觉级高亮、思考／工具卡／点击命中、权限与选择器修复，以及 pnpm 11 包布局适配；不迁移 Settings、Profile 或 Session。
 
-Owner 需要审核适配器范围、六组 CI 矩阵、精确候选包、打包白名单和 SHA-256，并在隔离 `DSH_HOME` 下启动验证。GVS=true 当前若命中已知上游 Loader 错误，只能说明诊断正确，不能宣称已经支持该布局。macOS/Linux CI 与真实桌面终端人工验收继续分开记录。
+Owner 需要审核欢迎页与 Fastfetch 信任边界、主题／透明背景、代码高亮、对话与选择器交互、pnpm 适配范围、六组 CI 矩阵、精确候选包、打包白名单和 SHA-256，并在隔离 `DSH_HOME` 下启动验证。GVS=true 当前若命中已知上游 Loader 错误，只能说明诊断正确，不能宣称已经支持该布局。macOS/Linux CI 与真实桌面终端人工验收继续分开记录。
 
 合并这个 PR 不等于授权发布。只有 Owner 后续明确批准，才创建 `v1.2.5` 和 GitHub Release。包继续保留 `private: true`；npm 身份、权限、Trusted Publishing、provenance 与回滚没有单独审核前，不进行 npm 发布。
