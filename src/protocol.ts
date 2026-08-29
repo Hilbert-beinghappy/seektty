@@ -118,6 +118,141 @@ export const TUI_BEHAVIOR_SETTINGS_NAMESPACE = 'seektty-behavior'
 /** Harness Settings namespace that persists composer prompt history with revision. */
 export const TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE = 'seektty-composer-history'
 
+/** Harness Settings namespace that persists the non-durable startup presentation. */
+export const TUI_WELCOME_SETTINGS_NAMESPACE = 'seektty-welcome'
+
+/** Information source used by the empty-session welcome presentation. */
+export type TuiWelcomeInfoMode = 'custom' | 'fastfetch' | 'mixed'
+
+/** Block order when both custom and Fastfetch information are visible. */
+export type TuiWelcomeMixedOrder = 'custom-first' | 'fastfetch-first'
+
+/** Runtime facts which remain Host-owned and are resolved only while rendering. */
+export type TuiWelcomeFact =
+  | 'seekttyVersion'
+  | 'profile'
+  | 'workspace'
+  | 'model'
+  | 'reasoning'
+  | 'mode'
+  | 'permission'
+  | 'theme'
+  | 'platform'
+
+/** One user-controlled row in the custom welcome information block. */
+export type TuiWelcomeRow =
+  | { readonly kind: 'heading'; readonly text: string }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'field'; readonly label: string; readonly value: string }
+  | { readonly kind: 'fact'; readonly fact: TuiWelcomeFact; readonly label?: string }
+  | { readonly kind: 'separator' }
+  | { readonly kind: 'blank' }
+  | { readonly kind: 'palette' }
+
+/** Fastfetch modules which cannot execute commands or query network identity. */
+export type TuiSafeFastfetchModule =
+  | 'os'
+  | 'host'
+  | 'kernel'
+  | 'uptime'
+  | 'packages'
+  | 'shell'
+  | 'display'
+  | 'de'
+  | 'wm'
+  | 'terminal'
+  | 'terminalfont'
+  | 'cpu'
+  | 'gpu'
+  | 'memory'
+  | 'swap'
+  | 'disk'
+  | 'battery'
+  | 'locale'
+  | 'theme'
+  | 'colors'
+
+/** Complete welcome-page value owned by its Profile Settings namespace. */
+export interface TuiWelcomeSettings {
+  readonly infoMode: TuiWelcomeInfoMode
+  readonly mixedOrder: TuiWelcomeMixedOrder
+  readonly customRows: readonly TuiWelcomeRow[]
+  readonly logo: {
+    readonly source: 'builtin' | 'file' | 'none'
+    readonly colorMode: 'original' | 'theme'
+    readonly largePath: string
+    readonly compactPath: string
+  }
+  readonly fastfetch: {
+    readonly source: 'safe' | 'user-config'
+    readonly modules: readonly TuiSafeFastfetchModule[]
+    readonly configPath: string
+  }
+}
+
+/** Maximum persisted custom rows and one literal value's terminal-safe length. */
+export const MAX_WELCOME_ROWS = 64
+export const MAX_WELCOME_TEXT_LENGTH = 512
+
+/** Privacy-conscious first-run modules; Fastfetch is not invoked in custom mode. */
+export const DEFAULT_SAFE_FASTFETCH_MODULES: readonly TuiSafeFastfetchModule[] = Object.freeze([
+  'os',
+  'kernel',
+  'uptime',
+  'cpu',
+  'gpu',
+  'memory',
+  'shell',
+  'terminal',
+  'theme',
+])
+
+/** First-run welcome page shown to new and existing Profiles without this namespace. */
+export const DEFAULT_TUI_WELCOME: TuiWelcomeSettings = Object.freeze({
+  infoMode: 'custom',
+  mixedOrder: 'custom-first',
+  customRows: Object.freeze([
+    Object.freeze({ kind: 'heading', text: 'SeekTTY' }),
+    Object.freeze({ kind: 'fact', fact: 'seekttyVersion' }),
+    Object.freeze({ kind: 'fact', fact: 'workspace' }),
+    Object.freeze({ kind: 'fact', fact: 'model' }),
+    Object.freeze({ kind: 'fact', fact: 'reasoning' }),
+    Object.freeze({ kind: 'fact', fact: 'mode' }),
+    Object.freeze({ kind: 'fact', fact: 'permission' }),
+    Object.freeze({ kind: 'fact', fact: 'theme' }),
+  ] satisfies readonly TuiWelcomeRow[]),
+  logo: Object.freeze({
+    source: 'builtin',
+    colorMode: 'original',
+    largePath: '',
+    compactPath: '',
+  }),
+  fastfetch: Object.freeze({
+    source: 'safe',
+    modules: DEFAULT_SAFE_FASTFETCH_MODULES,
+    configPath: '',
+  }),
+})
+
+/** One sanitized Fastfetch row. No terminal control data crosses this contract. */
+export type TuiWelcomeFastfetchRow =
+  | { readonly kind: 'field'; readonly label: string; readonly value: string }
+  | { readonly kind: 'text'; readonly text: string }
+
+/** Host collection request after Profile settings have been validated. */
+export interface TuiWelcomeFastfetchRequest {
+  readonly source: 'safe' | 'user-config'
+  readonly modules: readonly TuiSafeFastfetchModule[]
+  readonly configPath: string
+}
+
+/** Bounded result from the optional external Fastfetch executable. */
+export interface TuiWelcomeFastfetchResult {
+  readonly status: 'ok' | 'unavailable' | 'timeout' | 'error' | 'cancelled'
+  readonly rows: readonly TuiWelcomeFastfetchRow[]
+  readonly diagnostic?: string
+}
+
 /** Startup presentation for tool cards in the transcript. */
 export type TuiToolCardDisplay = 'collapsed' | 'expanded' | 'hidden'
 
@@ -390,6 +525,12 @@ export interface TuiManagementBridge {
   }
   readonly jobs: {
     kill(id: string): Promise<'requested' | 'already-finished'>
+  }
+  readonly welcome: {
+    collectFastfetch(
+      request: TuiWelcomeFastfetchRequest,
+      signal?: AbortSignal,
+    ): Promise<TuiWelcomeFastfetchResult>
   }
 }
 
