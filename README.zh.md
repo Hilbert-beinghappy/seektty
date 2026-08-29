@@ -88,14 +88,16 @@ deepseek --update
 
 `deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
-SeekTTY `1.2.5` 改善官方 Harness `0.1.1-rc.2` 下的 pnpm 11 安装与 Profile 插件协调，无需迁移 Settings 或 Session。
+SeekTTY `1.2.5` 为官方 Harness `0.1.1-rc.2` 带来终端背景融合、VS Code 视觉级 TextMate 高亮、更可靠的对话与选择控件，以及 pnpm 11 安装兼容，无需迁移 Settings 或 Session。
 
 ### 1.2.5 新增内容
 
-- 启动器首次协调、兼容更新和 TUI 插件变更会逐命令关闭 pnpm 11 Global Virtual Store，不修改用户的全局 pnpm 配置。
-- 当前 dsh/Cordis Loader 因 `store/v11/links` 失败时，会与普通缺依赖错误分开诊断，并给出双语、已脱敏的恢复命令。
-- Windows、macOS、Linux 共用同一个候选包，在 Node 22/24 下验证 GVS 关闭流程，并记录 GVS 开启时的当前上游行为。
-- 适配器只覆盖精确支持的 dsh 范围，继续使用原生 `dsh plugin` 协调、Profile 所有权和既有 Bundle patch 合同。
+- 主画布可通过 `theme`、`terminal` 和向后兼容的 `explicit` 三种背景模式继承终端透明、模糊和背景图片；overlay、panel 与普通代码表面使用同一继承策略，并补充对比度适配和退出时终端颜色恢复。
+- 导入的 VS Code `tokenColors` 成为权威规则，内置主题补齐精细 TextMate 配色，旧主题获得兼容的细粒度兜底；高亮按语言 grammar 区分，但明确不冒充 LSP 语义高亮。
+- 实时与已完成的思考块均可折叠，流式更新不会重新展开用户手动收起的内容；修正对话控件点击行偏移，工具卡收起后不再残留参数与结果。
+- 权限切换会检查 Harness 原生命令结果并刷新权威状态；模型、推理强度和 Agent 模式拆成独立点击与选择入口，并新增 `/effort` 键盘入口。
+- 宽弹窗会使用可用空间显示完整选项描述，resize 时保留搜索、选中、滚动与鼠标命中；多层控件的 hover 和透明表面语义保持一致。
+- 启动器协调、兼容更新和 TUI 插件变更逐命令关闭 pnpm 11 Global Virtual Store。已知 `store/v11/links` Loader 故障会得到精确且脱敏的恢复提示，不修改全局 pnpm 配置，也不绕过原生 Profile 协调。
 
 完整变更见双语[发布说明](docs/release-v1.2.5.md)，验证边界见 [Owner 审核清单](docs/release-v1.2.5-verification.md)。在 Owner 明确批准并执行发布前，1.2.4 仍是最新正式版本。
 
@@ -347,7 +349,7 @@ dsh plugin --profile tui remove --config.enable-global-virtual-store=false seekt
 | 当前已测 Harness Host | `0.1.1-rc.2` |
 | pnpm 11 布局适配器 | pnpm `11.7.0`；dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`；每次变更单独关闭 GVS |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| 当前兼容候选版本 | SeekTTY `1.2.5` + 官方 dsh `0.1.1-rc.2`；本次发布不扩展可选插件的联合验收范围 |
+| 当前 Release 候选 | SeekTTY `1.2.5` + 官方 dsh `0.1.1-rc.2`；包含外观、高亮、交互与 pnpm 布局改动，但不扩展可选插件联合验收范围 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 

@@ -1,37 +1,56 @@
-# SeekTTY 1.2.5 — pnpm 11 installation compatibility
+# SeekTTY 1.2.5 — appearance, highlighting, interaction, and pnpm compatibility
 
-> Release candidate for Owner review. This document does not authorize or perform a tag, GitHub Release, npm publication, or repository visibility change.
+> Release candidate for Owner review. This document covers every merged change after `v1.2.4` plus the candidate-only pnpm adapter. It does not authorize or perform a tag, GitHub Release, npm publication, or repository visibility change.
 
 ## English
 
-SeekTTY 1.2.5 makes installation and Profile plugin management predictable with pnpm 11 while preserving official DeepSeek Harness ownership of runtime and persistence state.
+SeekTTY 1.2.5 integrates the interface with terminal-owned backgrounds, upgrades code rendering to VS Code-grade visual TextMate highlighting, fixes several transcript and selector interactions, and makes pnpm 11 installation predictable on the tested official DeepSeek Harness.
+
+### Terminal-integrated appearance
+
+- SeekTTY can query the original terminal background through guarded OSC 11 handling, synchronize it with the active interface theme, deduplicate color writes, and restore the captured color on supported cleanup paths. Fragmented, malformed, late, and unsolicited replies are consumed before they can reach editable fields.
+- `seektty-appearance.backgroundMode` adds `theme`, `terminal`, and `explicit` modes. `theme` keeps theme color synchronization while the canvas uses the terminal default background; `terminal` leaves terminal color ownership untouched; `explicit` preserves the previous explicit RGB fill behavior.
+- In `theme` and `terminal`, the canvas, overlays, panels, context menus, and ordinary code backgrounds share the terminal default `SGR 49` semantic. They still erase and fill their complete regions, so inherited transparency does not expose stale transcript characters.
+- Hover no longer uses a mixed background or underline fallback. Eligible controls use the theme's interaction foreground without changing layout or hit geometry; selection remains a distinct explicit background.
+- When a known terminal RGB background conflicts with theme text, canvas foreground colors are adapted to at least 4.5:1 contrast. Unknown or unavailable backgrounds use terminal default foreground rather than guessing black or white.
+- Theme selection refreshes its authoritative Settings state after save or submenu return, retaining search, selection, and list position. Terminal-specific opacity APIs and terminal configuration files remain untouched.
+
+### VS Code-grade visual highlighting
+
+- Imported VS Code `tokenColors` are now the authoritative TextMate rules instead of being unconditionally mixed with SeekTTY's coarse semantic-role colors.
+- Built-in DeepSeek light and dark code themes gain detailed rules for common programming languages, markup, structured data, and Diff scopes. Legacy or palette-only themes receive a compatible fine-grained fallback.
+- Function names, parameters, strings, numbers, keywords, types, properties, constants, and punctuation can resolve independently according to each language grammar and the selected theme.
+- VS Code selector precedence, foreground colors, explicit special token backgrounds, and portable font styles are preserved. In inherited-background modes, only the ordinary base code background becomes `SGR 49`; `explicit` retains the previous code background design.
+- This is visual TextMate highlighting. It does not add an LSP or claim project-aware Semantic Tokens.
+
+### Transcript, tools, and click targeting
+
+- Live and completed Thinking blocks have a clickable header and independent presentation state. Streaming updates do not reopen a block the user manually folded, and Session data remains unchanged.
+- Transcript control hit rows now account correctly for synthetic top padding versus real Session blank lines, so the first click targets the visible reasoning control.
+- Collapsed tool cards retain only their title. Parameters and results appear only while expanded, including running tools; projection-node keys and tool `callId` values no longer cause stale expanded frames.
+- Wide single- and multi-select overlays use their actual available width for descriptions instead of truncating everything at 60 cells. Resize retains search, checked/selected items, viewport offset, and one-row mouse geometry.
+
+### Models, reasoning, and permissions
+
+- Model, reasoning effort, and Agent mode are separate footer hit regions and selection flows. `/model` handles Provider/model routing, while `/effort` directly opens the supported reasoning-strength choices.
+- Switching model applies that Provider/model's default effort before any explicit effort adjustment. Unsupported models show a non-blocking explanation rather than opening a misleading selector.
+- Permission switching checks the complete native Harness command result instead of treating transport success as state success. The footer subscribes to the authoritative permission projection and refreshes after changes.
+- Failed permission changes keep the overlay open with a visible error. Stale menu state, Session changes during confirmation, legacy command signatures, and narrow-window feedback are handled without retrying a possibly executed unknown contract.
 
 ### pnpm 11 Global Virtual Store compatibility
 
-- Launcher provisioning, compatible SeekTTY/dsh updates, and TUI plugin mutations now pass `--config.enable-global-virtual-store=false` to the individual package-tree command they own.
+- Launcher provisioning, compatible SeekTTY/dsh updates, and TUI plugin mutations pass `--config.enable-global-virtual-store=false` to each package-tree command they own.
 - SeekTTY does not change global pnpm configuration, set `NODE_PATH`, copy Host packages, install a second Host graph, or bypass native `dsh plugin` reconciliation.
-- The adapter is restricted to the declared dsh range `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; the release candidate is tested against the unmodified official `@deepseek-ai/dsh@0.1.1-rc.2` and pnpm `11.7.0`.
+- When affected packages resolve below `store/v11/links` and the current dsh/Cordis loader emits its known failure, SeekTTY reports that precise condition and bilingual, credential-redacted recovery commands instead of calling it a normal missing dependency.
+- The adapter is restricted to the declared dsh range `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; this candidate is tested against unmodified official `@deepseek-ai/dsh@0.1.1-rc.2` and pnpm `11.7.0`.
 
-### Actionable failure diagnosis
+### Documentation and compatibility notes
 
-- When an affected package is actually resolved below `store/v11/links` and the current dsh/Cordis loader emits its known load failure, SeekTTY reports that precise condition instead of calling it a normal missing dependency.
-- Recovery output is bilingual, uses the same per-command compatibility option, and redacts credentials from commands displayed to the user.
-- Unsupported, unrelated, and future loader failures are not reclassified as this known issue.
-
-### Release gates
-
-- One candidate tarball is shared by the Windows, macOS, and Linux CI matrix on Node 22 and 24.
-- With GVS disabled, the gate installs official dsh and SeekTTY in an isolated environment, then performs add, boot, remove, re-add, second boot, launcher isolation, and Host module-identity checks.
-- With GVS enabled, the gate verifies the real `store/v11/links` layout. It accepts a complete lifecycle if upstream becomes compatible; otherwise it requires both the exact current loader signature and SeekTTY's recovery diagnosis.
-- Unit tests cover command construction, supported-range boundaries, classification, credential redaction, and package/document contracts.
-
-### Compatibility and upgrade
-
-- Tested Host: unmodified official `@deepseek-ai/dsh@0.1.1-rc.2`.
-- Node.js: `^22.19.0 || >=24`.
-- No Settings, Profile, Session, theme, or plugin-manifest migration is introduced.
-- Existing mouse, input, theme, welcome-page, and syntax-highlighting behavior is unchanged by this compatibility release.
-- Clarify and Auxiliary Runtime remain optional; this release does not extend their historical joint-acceptance range.
+- The shortcut reference now states that Shift+Enter depends on a terminal reporting modified Enter distinctly; Ctrl+Enter remains the portable multiline fallback where it does not.
+- No Settings, Profile, Session, theme, or plugin-manifest migration is introduced. No runtime dependency is added.
+- Node.js remains `^22.19.0 || >=24`; the tested Host remains official dsh `0.1.1-rc.2`.
+- Clarify and Auxiliary Runtime remain optional. This release does not extend their historical joint-acceptance range.
+- Windows real-terminal observations, PTY tests, and synthetic renderer tests are recorded separately. macOS/Linux CI does not count as completed desktop-terminal visual acceptance.
 
 ### Owner publication boundary
 
@@ -39,34 +58,53 @@ The package remains `private: true`. This pull request prepares versioned source
 
 ## 中文
 
-SeekTTY 1.2.5 让 pnpm 11 下的安装与 Profile 插件管理更加可预测，同时继续由官方 DeepSeek Harness 持有运行时和持久化状态。
+SeekTTY 1.2.5 让界面更完整地融合终端自身背景，把代码渲染升级到 VS Code 视觉级 TextMate 高亮，修复多项对话与选择器交互，并改善已测官方 DeepSeek Harness 下的 pnpm 11 安装可靠性。
+
+### 终端融合外观
+
+- SeekTTY 可通过受控 OSC 11 流程查询终端原背景、随界面主题同步颜色、去重写入，并在可捕获的清理路径恢复原色。分片、畸形、迟到或未经请求的回复会在进入输入框前被消费。
+- `seektty-appearance.backgroundMode` 新增 `theme`、`terminal`、`explicit` 三种模式：`theme` 保留主题改色但画布使用终端默认背景，`terminal` 不接管终端颜色，`explicit` 保留过去的显式 RGB 填充。
+- 在 `theme`／`terminal` 下，主画布、overlay、panel、右键菜单与普通代码基础背景共用终端默认 `SGR 49` 语义；各区域仍完整擦除和填充，不会因透明而露出旧 transcript 字符。
+- hover 删除混色背景和下划线兜底，合适的控件只使用主题交互前景色，不改变布局与命中；selection 继续保留独立显式背景。
+- 已知终端 RGB 背景与主题文字冲突时，主画布前景会适配到至少 4.5:1 对比度；背景未知或查询不可用时使用终端默认前景，不猜测黑白。
+- 主题保存或从子菜单返回后会重新读取权威 Settings，同时保留搜索、选中和列表位置；不调用终端专用透明度 API，也不修改终端配置文件。
+
+### VS Code 视觉级高亮
+
+- 导入的 VS Code `tokenColors` 成为权威 TextMate 规则，不再无条件混入 SeekTTY 的粗粒度语义角色色。
+- 内置 DeepSeek 明暗代码主题补齐常见编程语言、标记语言、结构化数据和 Diff 的精细规则；旧主题或仅调色板主题获得兼容的细粒度兜底。
+- 函数名、参数、字符串、数字、关键字、类型、属性、常量和标点可根据不同语言 grammar 与当前主题分别配色。
+- 保留 VS Code 选择器优先级、前景色、显式特殊 token 背景和可移植字体样式。继承背景模式只把普通代码基础背景改为 `SGR 49`，`explicit` 继续保留原有代码背景设计。
+- 这是视觉级 TextMate 高亮，不增加 LSP，也不宣称具备项目上下文的 Semantic Tokens。
+
+### 对话、工具与点击命中
+
+- 实时与已完成的思考块都有可点击标题和独立显示状态；流式更新不会重新展开用户手动收起的内容，也不修改 Session 数据。
+- transcript 控件命中会正确区分渲染器合成顶部留白和 Session 真实空行，第一次点击即可命中视觉上的思考控件。
+- 工具卡收起后只保留标题，参数与结果仅在展开时显示，运行中工具也一致；投影节点 key 与工具 `callId` 不同不再造成旧展开帧复用。
+- 单选／多选宽弹窗按真实可用宽度显示说明，不再固定截到 60 列；resize 时保留搜索、勾选／选中、滚动位置和单行鼠标命中。
+
+### 模型、推理与权限
+
+- 模型、推理强度和 Agent 模式拆成独立底栏命中与选择流程；`/model` 负责 Provider／模型路由，新增 `/effort` 直接选择当前模型支持的推理档位。
+- 切换模型先应用该 Provider／模型的默认推理强度，再允许单独调整；不支持可调强度时给出非阻塞说明。
+- 权限切换检查完整 Harness 原生命令结果，不再把传输成功误认为状态成功；底栏订阅权威权限投影并在变化后刷新。
+- 切换失败会保留弹窗并显示错误；旧菜单状态、确认期间切换 Session、旧命令签名和窄窗口提示均有保护，不会用另一组参数重试可能已经执行的未知合同。
 
 ### pnpm 11 Global Virtual Store 兼容
 
-- 启动器首次协调、兼容范围内的 SeekTTY/dsh 更新，以及 TUI 插件变更，都会给自己发起的单次包树命令附加 `--config.enable-global-virtual-store=false`。
-- SeekTTY 不会修改全局 pnpm 配置、设置 `NODE_PATH`、复制 Host 包、安装第二套 Host 依赖图，也不会绕过原生 `dsh plugin` 协调。
-- 适配器严格限制在声明的 dsh 范围 `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`；本候选版本针对未修改的官方 `@deepseek-ai/dsh@0.1.1-rc.2` 与 pnpm `11.7.0` 验证。
+- 启动器首次协调、兼容范围内的 SeekTTY/dsh 更新和 TUI 插件变更，会给自己发起的每次包树命令附加 `--config.enable-global-virtual-store=false`。
+- SeekTTY 不修改全局 pnpm 配置、不设置 `NODE_PATH`、不复制 Host 包、不安装第二套 Host 图，也不绕过原生 `dsh plugin` 协调。
+- 受影响的包真实解析到 `store/v11/links` 且当前 dsh/Cordis Loader 命中已知错误时，会给出精确的中英文、凭据脱敏恢复命令，不误称为普通缺依赖。
+- 适配器严格限制在声明范围 `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`；候选版本针对未修改的官方 `@deepseek-ai/dsh@0.1.1-rc.2` 与 pnpm `11.7.0` 验证。
 
-### 可执行的失败诊断
+### 文档与兼容说明
 
-- 只有受影响的包真实解析到 `store/v11/links`，且当前 dsh/Cordis Loader 出现已知加载错误时，SeekTTY 才会报告该精确条件，不再把它误称为普通缺少依赖。
-- 恢复提示提供中英文说明，使用相同的逐命令兼容参数，并对展示给用户的命令做凭据脱敏。
-- 不支持、无关或未来出现的新 Loader 错误不会被误判为这个已知问题。
-
-### Release 门禁
-
-- Windows、macOS、Linux 的 Node 22/24 矩阵共用同一个候选 tarball。
-- GVS 关闭时，门禁在隔离环境安装官方 dsh 与 SeekTTY，再执行 add、boot、remove、re-add、第二次 boot、启动器隔离和 Host 模块身份检查。
-- GVS 开启时，门禁确认真实 `store/v11/links` 布局。若上游已兼容则接受完整生命周期；否则必须同时命中当前精确 Loader 特征和 SeekTTY 恢复诊断。
-- 单元测试覆盖命令构造、支持范围边界、错误分类、凭据脱敏以及包与文档合同。
-
-### 兼容与升级
-
-- 已测 Host：未修改的官方 `@deepseek-ai/dsh@0.1.1-rc.2`。
-- Node.js：`^22.19.0 || >=24`。
-- 不引入 Settings、Profile、Session、主题或插件 manifest 迁移。
-- 本兼容版本不改变现有鼠标、输入、主题、欢迎页或代码高亮行为。
-- Clarify 与 Auxiliary Runtime 仍是可选插件；本次发布不扩展它们的历史联合验收范围。
+- 键位速查明确说明：只有终端能把带修饰键的 Enter 独立上报时 Shift+Enter 才可用；不支持时继续使用更通用的 Ctrl+Enter 多行输入通道。
+- 不引入 Settings、Profile、Session、主题或插件 manifest 迁移，不新增运行时依赖。
+- Node.js 仍为 `^22.19.0 || >=24`，当前已测 Host 仍为官方 dsh `0.1.1-rc.2`。
+- Clarify 与 Auxiliary Runtime 继续作为可选插件，本次发布不扩展历史联合验收范围。
+- Windows 实机观察、PTY 测试和模拟渲染测试分开记录；macOS/Linux CI 不等于已经完成桌面终端视觉人工验收。
 
 ### Owner 发布边界
 

@@ -88,14 +88,16 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.5` makes pnpm 11 installation and Profile plugin reconciliation reliable on official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
+SeekTTY `1.2.5` brings terminal-integrated backgrounds, VS Code-grade TextMate highlighting, more reliable transcript and selection controls, and pnpm 11 installation compatibility to official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
 
 ### What's new in 1.2.5
 
-- Launcher provisioning, compatible updates, and TUI plugin mutations now disable pnpm 11 Global Virtual Store per command, without changing the user's global pnpm configuration.
-- Failures caused by the current dsh/Cordis loader reading `store/v11/links` are identified separately from ordinary missing-dependency errors, with bilingual, credential-redacted recovery commands.
-- A shared-candidate Windows, macOS, and Linux CI matrix verifies Node 22/24 with GVS disabled and records the current upstream behavior with GVS enabled.
-- The adapter is restricted to the exact supported dsh range and preserves native `dsh plugin` reconciliation, Profile ownership, and the existing Bundle patch contract.
+- The canvas can inherit terminal transparency, blur, and background images through `theme`, `terminal`, and backward-compatible `explicit` background modes. Overlay, panel, and ordinary code surfaces now follow the same inherited-background policy; contrast adaptation and terminal-color restoration keep text readable and terminal state recoverable.
+- Imported VS Code `tokenColors` are authoritative, built-in themes include detailed TextMate rules, and legacy themes receive a compatible fine-grained fallback. Highlighting is language-grammar aware while intentionally remaining visual rather than LSP-semantic.
+- Live and completed Thinking blocks can be folded without streaming reopening them; transcript hit rows are aligned, and collapsed tool cards now hide both parameters and results.
+- Permission switching validates native Harness results and refreshes authoritative state. Model, reasoning effort, and Agent mode have independent click targets and selectors; `/effort` provides the keyboard path.
+- Wide overlays use available space for full option descriptions while preserving search, selection, scroll position, and pointer geometry across resize. Hover styling and transparent surfaces are consistent across nested controls.
+- Launcher provisioning, compatible updates, and TUI plugin mutations disable pnpm 11 Global Virtual Store per command. Known `store/v11/links` loader failures receive precise, credential-redacted recovery without changing global pnpm configuration or bypassing native Profile reconciliation.
 
 See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits. Version 1.2.4 remains the latest published release until the Owner explicitly approves and performs publication.
 
@@ -347,7 +349,7 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Current tested Harness Host | `0.1.1-rc.2` |
 | pnpm 11 layout adapter | pnpm `11.7.0`; dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current compatibility candidate | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
+| Current release candidate | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; appearance, highlighting, interaction, and pnpm-layout changes are included; optional plugin joint acceptance is not extended |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
