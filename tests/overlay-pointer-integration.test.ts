@@ -8,7 +8,7 @@ import { decodeMouseSequence } from '../src/client/mouse-protocol.ts'
 import { OverlayQueue, type OverlayNavigation } from '../src/client/overlays.ts'
 import { tuiFrameApi } from '../src/client/pi-tui-adapters.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
-import { background, setTheme } from '../src/client/theme.ts'
+import { interaction, setTheme } from '../src/client/theme.ts'
 
 class VirtualTerminal implements Terminal {
   columns = 100
@@ -216,7 +216,7 @@ describe('overlay pointer / frame integration', () => {
         expect(visited).toHaveBeenCalledTimes(depth)
         h.terminal.writes = []
         await h.hover('footer-confirm')
-        const hoverColor = background.hover('probe').match(/\u001B\[48;2;\d+;\d+;\d+m/u)?.[0]
+        const hoverColor = interaction.hover('probe').match(/\u001B\[38;2;\d+;\d+;\d+m/u)?.[0]
         expect(hoverColor).toBeDefined()
         expect(h.terminal.writes.join('')).toContain(hoverColor)
         await h.click('footer-confirm') // one click, unlike an option's select-then-activate
@@ -387,7 +387,7 @@ describe('overlay pointer / frame integration', () => {
         identities.add(target.id)
         harness.terminal.writes = []
         await harness.hover('next')
-        const hoverColor = background.hover('probe').match(/\u001B\[48;2;\d+;\d+;\d+m/u)?.[0]
+        const hoverColor = interaction.hover('probe').match(/\u001B\[38;2;\d+;\d+;\d+m/u)?.[0]
         expect(hoverColor).toBeDefined()
         expect(harness.terminal.writes.join('')).toContain(hoverColor)
         expect(visited).toHaveBeenCalledTimes(depth)

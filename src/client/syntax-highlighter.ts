@@ -13,7 +13,7 @@ import {
 } from '@shikijs/engine-javascript'
 import type { TuiSyntaxThemeColors } from '@deepseek-ai/dsh-tui-protocol'
 import { normalizeThemeColor, type ResolvedTuiTheme } from './theme-config.ts'
-import { styleTerminalText, terminalColorLevel } from './theme.ts'
+import { styleTerminalText, terminalColorLevel, type CodeBackgroundPolicy } from './theme.ts'
 import { measureStartup } from '../startup-trace.ts'
 
 type LanguageLoader = () => Promise<{ readonly default: LanguageRegistration[] }>
@@ -188,11 +188,24 @@ function safeTokenColor(value: string | undefined, fallback: string): string {
   try { return normalizeThemeColor(value) } catch { return fallback }
 }
 
-function renderToken(token: ThemedToken, theme: ResolvedTuiTheme): string {
+/** Resolve a token background without turning the theme's block fill into a per-token color. */
+export function syntaxTokenBackground(
+  value: string | undefined,
+  fallback: string,
+  policy: CodeBackgroundPolicy,
+): string | undefined {
+  const resolved = safeTokenColor(value, fallback)
+  return policy === 'inherit' && resolved === normalizeThemeColor(fallback)
+    ? undefined
+    : resolved
+}
+
+function renderToken(token: ThemedToken, theme: ResolvedTuiTheme, background: CodeBackgroundPolicy): string {
   const fontStyle = token.fontStyle ?? 0
+  const resolvedBackground = syntaxTokenBackground(token.bgColor, theme.syntax.background, background)
   return styleTerminalText(token.content, {
     foreground: safeTokenColor(token.color, theme.syntax.foreground),
-    background: safeTokenColor(token.bgColor, theme.syntax.background),
+    ...(resolvedBackground === undefined ? {} : { background: resolvedBackground }),
     italic: (fontStyle & 1) !== 0,
     bold: (fontStyle & 2) !== 0,
     underline: (fontStyle & 4) !== 0,
@@ -200,10 +213,10 @@ function renderToken(token: ThemedToken, theme: ResolvedTuiTheme): string {
   })
 }
 
-function plainLines(code: string, theme: ResolvedTuiTheme): string[] {
+function plainLines(code: string, theme: ResolvedTuiTheme, background: CodeBackgroundPolicy): string[] {
   return code.split('\n').map(line => styleTerminalText(line, {
     foreground: theme.syntax.foreground,
-    background: theme.syntax.background,
+    ...(background === 'explicit' ? { background: theme.syntax.background } : {}),
   }))
 }
 
@@ -297,15 +310,15 @@ export class SyntaxHighlighter {
    * @param language - Markdown or tool-provided language id.
    * @returns ANSI-styled lines or a safe plain fallback.
    */
-  highlight(code: string, language?: string): string[] {
-    if (this.disposed || !highlightable(code) || terminalColorLevel() === 0) return plainLines(code, this.theme)
+  highlight(code: string, language: string | undefined, background: CodeBackgroundPolicy): string[] {
+    if (this.disposed || !highlightable(code) || terminalColorLevel() === 0) return plainLines(code, this.theme, background)
     const canonical = languageOf(language)
-    if (canonical === undefined) return plainLines(code, this.theme)
+    if (canonical === undefined) return plainLines(code, this.theme, background)
     if (!this.loaded.has(canonical)) {
       this.load(canonical)
-      return plainLines(code, this.theme)
+      return plainLines(code, this.theme, background)
     }
-    const key = `${this.themeName}:${String(terminalColorLevel())}:${canonical}:${code}`
+    const key = `${this.themeName}:${String(terminalColorLevel())}:${background}:${canonical}:${code}`
     const cached = this.cache.get(key)
     if (cached !== undefined) {
       this.cache.delete(key)
@@ -319,10 +332,10 @@ export class SyntaxHighlighter {
         theme: this.themeName,
         tokenizeTimeLimit: 0,
       })
-      lines = result.tokens.map(line => line.map(token => renderToken(token, this.theme)).join(''))
+      lines = result.tokens.map(line => line.map(token => renderToken(token, this.theme, background)).join(''))
     } catch {
       this.failed.add(canonical)
-      return plainLines(code, this.theme)
+      return plainLines(code, this.theme, background)
     }
     this.cache.set(key, lines)
     if (this.cache.size > MAX_CACHE_ENTRIES) this.cache.delete(this.cache.keys().next().value as string)

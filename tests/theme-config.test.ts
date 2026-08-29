@@ -10,7 +10,6 @@ import {
   normalizeThemeColorOn,
   parseThemePalette,
   resolveAppearanceTheme,
-  resolveHoverStyle,
   resolveCodeTheme,
   resolveTheme,
   themeContrast,
@@ -21,19 +20,6 @@ import {
 afterEach(() => { setUiLocale('zh') })
 
 describe('theme colors and generated palettes', () => {
-  it('derives readable hover styles for built-in, generated and unchanged legacy custom palettes', () => {
-    const generated = generateThemeCandidates('ocean', 'Ocean', '#071426 #F4F8FF #6682FF #37C99B')
-    for (const theme of [BUILT_IN_THEMES.dark, BUILT_IN_THEMES.light, generated.dark, generated.light]) {
-      const before = { ...theme.colors }
-      const hover = resolveHoverStyle(theme.colors)
-      expect(hover.background).not.toBe(theme.colors.surface)
-      expect(hover.background).not.toBe(theme.colors.selection)
-      expect(themeContrast(hover.background, theme.colors.text)).toBeGreaterThanOrEqual(4.5)
-      expect(theme.colors).toEqual(before)
-    }
-    const colors = { ...BUILT_IN_THEMES.dark.colors, surface: '#222222', selection: '#222222' }
-    expect(resolveHoverStyle(colors).underline).toBe(true)
-  })
   it('localizes built-in theme names at the display site', () => {
     setUiLocale('en')
     expect(BUILT_IN_THEMES.dark.name).toBe('DeepSeek dark')

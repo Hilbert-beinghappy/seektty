@@ -52,6 +52,7 @@ import {
   color,
   escapeTerminalText,
   highlightCodeLines,
+  interaction,
   markdownTheme,
   terminalColorLevel,
 } from './theme.ts'
@@ -2273,7 +2274,7 @@ export class Transcript implements Component, Focusable {
       const control = this.lastPointerControls.find(candidate => candidate.row === row)
       const controlId = control === undefined ? undefined : `transcript:${control.kind}:${control.id}`
       return controlId !== undefined && controlId === this.hoveredRegionId
-        ? background.selection(content)
+        ? interaction.hover(content)
         : content
     })
     const withSearch = this.search === undefined

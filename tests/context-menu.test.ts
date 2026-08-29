@@ -8,7 +8,7 @@ import { decodeMouseSequence } from '../src/client/mouse-protocol.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder, type CellPoint, type HitRegion } from '../src/client/mouse-hit-map.ts'
 import { tuiFrameApi } from '../src/client/pi-tui-adapters.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
-import { background, setTheme } from '../src/client/theme.ts'
+import { interaction, setTheme } from '../src/client/theme.ts'
 
 class VirtualTerminal implements Terminal {
   columns = 100
@@ -649,7 +649,7 @@ describe('transient context menu / real frames and SGR', () => {
       h.terminal.writes = []
       h.send(h.center(h.region('cancel')), 35)
       await h.frame()
-      const color = background.hover('probe').match(/\u001B\[48;2;\d+;\d+;\d+m/u)?.[0]
+      const color = interaction.hover('probe').match(/\u001B\[38;2;\d+;\d+;\d+m/u)?.[0]
       expect(color).toBeDefined()
       expect(h.terminal.writes.join('')).toContain(color)
       await h.click({ col: 80, row: 20 })

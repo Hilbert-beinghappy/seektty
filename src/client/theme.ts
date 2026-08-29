@@ -5,7 +5,7 @@ import {
   type EditorTheme,
   type MarkdownTheme,
 } from '@mariozechner/pi-tui'
-import { BUILT_IN_THEMES, resolveHoverStyle, type ResolvedTuiTheme } from './theme-config.ts'
+import { BUILT_IN_THEMES, type ResolvedTuiTheme } from './theme-config.ts'
 import { DEFAULT_TUI_BACKGROUND_MODE, type TuiBackgroundMode } from '@deepseek-ai/dsh-tui-protocol'
 import { ui } from './locale.ts'
 import { readableCanvas } from './canvas-foreground.ts'
@@ -38,8 +38,6 @@ interface ThemePalette {
   readonly danger: SemanticColor
   readonly canvas: SemanticColor
   readonly surface: SemanticColor
-  readonly hover: SemanticColor
-  readonly hoverUnderline: boolean
   readonly selection: SemanticColor
   readonly codeBackground: SemanticColor
   readonly codeForeground: SemanticColor
@@ -66,7 +64,6 @@ function mixColor(left: SemanticColor, right: SemanticColor, amount: number): Se
 }
 
 function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
-  const hover = resolveHoverStyle(theme.colors)
   const brand = semanticColor(theme.colors.brand)
   const accent = semanticColor(theme.colors.accent)
   const border = semanticColor(theme.colors.border)
@@ -92,8 +89,6 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
     danger: semanticColor(theme.colors.danger),
     canvas: semanticColor(theme.colors.canvas),
     surface: semanticColor(theme.colors.surface),
-    hover: semanticColor(hover.background),
-    hoverUnderline: hover.underline,
     selection: semanticColor(theme.colors.selection),
     codeBackground: semanticColor(theme.syntax.background),
     codeForeground: semanticColor(theme.syntax.foreground),
@@ -103,8 +98,11 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
 let selectedTheme: ResolvedTuiTheme = BUILT_IN_THEMES.dark
 let backgroundMode: TuiBackgroundMode = DEFAULT_TUI_BACKGROUND_MODE
 let palette = runtimePalette(selectedTheme)
-const hoverUnderlineByLevel = new Map<TerminalColorLevel, boolean>()
-let codeHighlighter: ((code: string, lang?: string) => string[]) | undefined
+
+/** Whether syntax rendering should emit the theme's default code background. */
+export type CodeBackgroundPolicy = 'inherit' | 'explicit'
+
+let codeHighlighter: ((code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[]) | undefined
 
 function controlStringEnd(text: string, start: number): number {
   for (let index = start; index < text.length; index += 1) {
@@ -282,20 +280,6 @@ function ansi(code: number, text: string): string {
   return terminalColorLevel() === 0 ? safeText : `\u001B[${String(code)}m${safeText}${RESET}`
 }
 
-function hoverLayer(text: string): string {
-  const level = terminalColorLevel()
-  if (level === 0) return text
-  let needsUnderline = hoverUnderlineByLevel.get(level)
-  if (needsUnderline === undefined) {
-    const hover = backgroundSequence(palette.hover, level)
-    // Resolve once per theme/color depth, not for every pointer motion or rendered row.
-    needsUnderline = palette.hoverUnderline || [palette.canvas, palette.surface, palette.selection]
-      .some(entry => backgroundSequence(entry, level) === hover)
-    hoverUnderlineByLevel.set(level, needsUnderline)
-  }
-  return layer(palette.hover, needsUnderline ? ansi(4, text) : text)
-}
-
 /** Styling request for one syntax token or generated preview fragment. */
 export interface TerminalTextStyle {
   readonly foreground?: string
@@ -333,13 +317,12 @@ export function styleTerminalText(text: string, style: TerminalTextStyle): strin
 export function setTheme(theme: ResolvedTuiTheme): void {
   selectedTheme = theme
   palette = runtimePalette(theme)
-  hoverUnderlineByLevel.clear()
 }
 
 /** Return the complete theme currently used by renderers. */
 export function currentTheme(): ResolvedTuiTheme { return selectedTheme }
 
-/** Independent of theme previews/imports; only the main canvas inherits terminal effects. */
+/** Independent of theme previews/imports; controls which UI surfaces inherit terminal effects. */
 export function setBackgroundMode(mode: TuiBackgroundMode): void { backgroundMode = mode }
 
 let terminalCanvasBackground: string | undefined
@@ -351,7 +334,9 @@ export function setTerminalCanvasBackground(color?: string): void { terminalCanv
  * Connect the asynchronously prepared syntax highlighter to Markdown rendering.
  * @param highlighter - synchronous cached renderer, or undefined during teardown.
  */
-export function setCodeHighlighter(highlighter?: (code: string, lang?: string) => string[]): void {
+export function setCodeHighlighter(
+  highlighter?: (code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[],
+): void {
   codeHighlighter = highlighter
 }
 
@@ -362,10 +347,11 @@ export function setCodeHighlighter(highlighter?: (code: string, lang?: string) =
  * @returns one safely styled entry per source line.
  */
 export function highlightCodeLines(code: string, language?: string): string[] {
-  return codeHighlighter?.(code, language)
+  const codeBackground = backgroundMode === 'explicit' ? 'explicit' : 'inherit'
+  return codeHighlighter?.(code, language, codeBackground)
     ?? code.split('\n').map(line => styleTerminalText(line, {
       foreground: selectedTheme.syntax.foreground,
-      background: selectedTheme.syntax.background,
+      ...(codeBackground === 'explicit' ? { background: selectedTheme.syntax.background } : {}),
     }))
 }
 
@@ -385,6 +371,11 @@ export const color = {
   danger: (text: string): string => paint(palette.danger, text),
 } as const
 
+/** Foreground-only interaction states; never introduce a background or text decoration. */
+export const interaction = {
+  hover: (text: string): string => paint(palette.brand, text),
+} as const
+
 /** Background layers shared by the full frame, panels, and selected rows. */
 export const background = {
   canvas: (text: string): string => {
@@ -393,10 +384,13 @@ export const background = {
       || terminalCanvasBackground?.toLowerCase() === selectedTheme.colors.canvas.toLowerCase()) return row
     return readableCanvas(row, terminalColorLevel() === 3 ? terminalCanvasBackground : undefined)
   },
-  surface: (text: string): string => layer(palette.surface, text),
-  hover: hoverLayer,
+  surface: (text: string): string => layer(backgroundMode === 'explicit' ? palette.surface : undefined, text),
   selection: (text: string): string => layer(palette.selection, text),
-  code: (text: string): string => layer(palette.codeBackground, text, palette.codeForeground),
+  code: (text: string): string => layer(
+    backgroundMode === 'explicit' ? palette.codeBackground : undefined,
+    text,
+    palette.codeForeground,
+  ),
 } as const
 
 /**

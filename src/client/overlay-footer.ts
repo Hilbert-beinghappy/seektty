@@ -2,7 +2,7 @@
 import { truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
 import type { HitRegion } from './mouse-hit-map.ts'
 import { ui } from './locale.ts'
-import { background, color, escapeTerminalText } from './theme.ts'
+import { color, escapeTerminalText, interaction } from './theme.ts'
 
 export type OverlayFooterCommand = 'footer-confirm' | 'footer-back'
 
@@ -50,7 +50,7 @@ export function renderOverlayFooter(
       action: { kind: 'overlay', command: action.command },
     })
     line += !action.enabled ? color.muted(label)
-      : hovered === action.command ? background.hover(label) : color.accent(label)
+      : hovered === action.command ? interaction.hover(label) : color.accent(label)
     used += cells
   }
   if (used > 0) lines.push(line)

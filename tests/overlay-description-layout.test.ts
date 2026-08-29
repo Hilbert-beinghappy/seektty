@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SelectList, visibleWidth, type Component, type OverlayHandle, type TUI } from '@mariozechner/pi-tui'
 import { setUiLocale } from '../src/client/locale.ts'
 import { OverlayQueue } from '../src/client/overlays.ts'
-import { background, editorTheme, setTheme } from '../src/client/theme.ts'
+import { editorTheme, interaction, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES, generateThemeCandidates, normalizeAppearance, resolveTheme } from '../src/client/theme-config.ts'
 import { stripCopyDecorations } from '../src/client/text-selection.ts'
 
@@ -216,7 +216,7 @@ it('does not pre-truncate the disabled reason or make the disabled row clickable
 
 it('truncates descriptions once at the native row budget, with opt-in ellipsis only', () => {
   const description = '中文🙂 '.repeat(25)
-  const items = [{ value: 'one', label: 'One', description: background.hover(description) }]
+  const items = [{ value: 'one', label: 'One', description: interaction.hover(description) }]
   const list = new SelectList(items, 3, editorTheme.selectList!, { descriptionEllipsis: '…' })
   const native = new SelectList(items, 3, editorTheme.selectList!)
   const row = list.render(80)[0]!

@@ -196,6 +196,37 @@ describe('composer chrome', () => {
     })
 
     expect(composer.render(60).at(-1)).toMatch(/v4-pro · 最大推理 · 标准$/u)
+    expect(composer.lastFactTokens().map(token => token.id)).toEqual(['model', 'reasoning', 'mode'])
+  })
+
+  it('keeps model, reasoning, and mode as independent hover targets', () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const composer = editor()
+    composer.setFacts({
+      hostVersion: '0.1.0',
+      nodeVersion: '24.0.0',
+      platform: 'win32',
+      architecture: 'x64',
+      profile: 'tui',
+      workspace: 'D:\\workspace',
+      session: 'session',
+      mode: 'standard',
+      model: 'deepseek-official/deepseek-v4-pro · high',
+      permission: 'workspace-write',
+      running: false,
+    })
+
+    const idle = composer.render(80).at(-1) ?? ''
+    composer.setHoveredTarget('chrome:reasoning')
+    const hovered = composer.render(80).at(-1) ?? ''
+
+    expect(composer.lastFactTokens().map(token => token.id)).toEqual(['model', 'reasoning', 'mode'])
+    expect(hovered).not.toBe(idle)
+    expect(hovered).toContain('\u001B[38;2;102;130;255m高推理\u001B[0m')
+    expect(hovered).not.toContain('\u001B[38;2;102;130;255mv4-pro')
+    expect(hovered).not.toContain('\u001B[38;2;102;130;255m标准')
   })
 
   it('shows pending image drafts on a dedicated composer row', () => {

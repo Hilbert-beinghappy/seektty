@@ -33,7 +33,7 @@ describe('command catalog copy (review #60)', () => {
 
   it('puts daily commands first and hides compatible aliases from the visible catalog', () => {
     const names = tuiCommands().map(command => command.name)
-    expect(names.slice(0, 6)).toEqual(['new', 'sessions', 'model', 'mode', 'permission', 'workspace'])
+    expect(names.slice(0, 7)).toEqual(['new', 'sessions', 'model', 'effort', 'mode', 'permission', 'workspace'])
     expect(names).toContain('plugin')
     expect(names).toContain('mouse')
     expect(names).toContain('exit')

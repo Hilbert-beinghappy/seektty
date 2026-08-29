@@ -53,7 +53,7 @@ describe('shared background editor', () => {
         if (entry === 'settings') await vi.waitFor(() => { expect(h.text()).toContain(`${locale === 'zh' ? '设置' : 'Settings'} · seektty-appearance`) })
         if (entry === 'theme') h.key(locale === 'zh' ? '背景模式' : 'Background mode')
         h.key('\r')
-        await vi.waitFor(() => { expect(h.text()).toContain(locale === 'zh' ? '仅主画布继承终端效果' : 'Only the canvas inherits terminal effects') })
+        await vi.waitFor(() => { expect(h.text()).toContain(locale === 'zh' ? '主画布、弹窗面板和代码基础背景' : 'Canvas, panels and base code backgrounds') })
         const panel = h.text()
         panels.push(panel)
         if (locale === 'en') expect(panel).not.toMatch(/\p{Script=Han}/u)
@@ -79,7 +79,7 @@ describe('shared background editor', () => {
     try {
       await vi.waitFor(() => { expect(h.text()).toContain('设置 · seektty-appearance') })
       h.key('\r')
-      await vi.waitFor(() => { expect(h.text()).toContain('仅主画布继承终端效果') })
+      await vi.waitFor(() => { expect(h.text()).toContain('主画布、弹窗面板和代码基础背景') })
       if (outcome === 'failure') h.key('\u001B[B')
       h.key(outcome === 'cancel' ? '\u001B' : '\r')
       await vi.waitFor(() => {

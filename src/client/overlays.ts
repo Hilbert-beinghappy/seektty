@@ -19,7 +19,7 @@ import {
 } from '@mariozechner/pi-tui'
 import { translateUiText, ui } from './locale.ts'
 import { formatBusyFooter, lastOutputLines } from './busy-status.ts'
-import { background, color, editorTheme, escapeTerminalText, surfaceRow } from './theme.ts'
+import { background, color, editorTheme, escapeTerminalText, interaction, surfaceRow } from './theme.ts'
 import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
 import type { CellPoint, HitRegion } from './mouse-hit-map.ts'
 import { editorEditable, inputEditable, OverlayTextSelection, type OverlayEditable, type OverlayTextTarget } from './overlay-text.ts'
@@ -281,7 +281,7 @@ function renderChoiceList(
     const enabled = choice.disabledReason === undefined
     if (enabled && choice.id === hoveredOptionId && row.absoluteIndex !== snapshot?.selectedIndex) {
       const line = lines[row.visualRow] ?? ''
-      lines[row.visualRow] = background.hover(`${line}${' '.repeat(Math.max(0, frameContentWidth(width) - visibleWidth(line)))}`)
+      lines[row.visualRow] = interaction.hover(`${line}${' '.repeat(Math.max(0, frameContentWidth(width) - visibleWidth(line)))}`)
     }
     hits.push({
       id: `overlay:option:${choice.id}`,

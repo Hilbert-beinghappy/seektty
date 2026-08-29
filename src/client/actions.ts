@@ -465,6 +465,7 @@ export class TuiActions {
         case 'profile': await this.profile(args); break
         case 'mode': await this.mode(); break
         case 'model': await this.model(); break
+        case 'effort': await this.reasoningEffort(); break
         case 'language': await this.language(args); break
         case 'theme': await this.theme(args); break
         case 'permission': await this.permission(args); break
@@ -1143,19 +1144,47 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('模型', "Model"),
-        detail: ui('选择当前会话使用的 Provider、模型和推理强度', "Choose the Provider, model, and reasoning effort for the current session"),
+        detail: ui('选择当前会话使用的 Provider 和模型；推理强度由右侧独立入口调整', "Choose the Provider and model for the current session; adjust reasoning separately from the adjacent control"),
         choices,
         options,
       }, async (selected) => {
         const option = directory.options.find(candidate => candidate.id === selected.id)
         if (option === undefined) return
-        const selection = await this.reasoningSelection(option, navigation)
-        if (selection === undefined) return
-        await this.capabilities.selectModel(selection)
+        if (option.current) {
+          this.host.notice(ui(`${option.label} 已是当前模型`, `${option.label} is already the current model`), 'info')
+          return
+        }
+        await this.capabilities.selectModel(option.selection)
         this.host.refreshHeader()
-        this.host.notice(ui(`模型已切换为 ${selection.provider}/${selection.model}`, `Model changed to ${selection.provider}/${selection.model}`), 'success')
+        this.host.notice(ui(`模型已切换为 ${option.selection.provider}/${option.selection.model}`, `Model changed to ${option.selection.provider}/${option.selection.model}`), 'success')
       })
     }, options)
+  }
+
+  /** Change only the current model route's reasoning effort. */
+  private async reasoningEffort(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const directory = await this.capabilities.listModels()
+    const option = directory.options.find(candidate => candidate.current)
+    if (option === undefined) {
+      this.host.notice(ui('当前模型路由不可用；请先选择模型', 'The current model route is unavailable; choose a model first'), 'warning')
+      return
+    }
+    if (option.efforts.length === 0) {
+      this.host.notice(ui(`${option.label} 不提供可调推理强度`, `${option.label} does not expose adjustable reasoning effort`), 'info')
+      return
+    }
+    const selection = await this.reasoningSelection(option, overlays)
+    if (selection === undefined) return
+    if (selection.reasoningEffort === option.currentEffort) {
+      this.host.notice(ui('已是当前推理强度', 'This reasoning effort is already active'), 'info')
+      return
+    }
+    await this.capabilities.selectModel(selection)
+    this.host.refreshHeader()
+    const label = selection.reasoningEffort === undefined
+      ? ui('Provider 默认', 'Provider default')
+      : option.efforts.find(effort => effort.id === selection.reasoningEffort)?.name ?? selection.reasoningEffort
+    this.host.notice(ui(`推理强度已切换为 ${label}`, `Reasoning effort changed to ${label}`), 'success')
   }
 
   private async language(
@@ -1235,11 +1264,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       choices: [
         {
           id: '__default__',
-          label: ui(`Provider 默认${option.defaultEffort === undefined ? '' : `（${option.defaultEffort}）`}`, `Provider default${option.defaultEffort === undefined ? '' : ` (${option.defaultEffort})`}`),
+          label: `${currentMark(option.current && option.currentEffort === undefined)}${ui(`Provider 默认${option.defaultEffort === undefined ? '' : `（${option.defaultEffort}）`}`, `Provider default${option.defaultEffort === undefined ? '' : ` (${option.defaultEffort})`}`)}`,
         },
         ...option.efforts.map(effort => ({
           id: effort.id,
-          label: effort.name,
+          label: `${currentMark(option.current && option.currentEffort === effort.id)}${effort.name}`,
           ...(effort.description === undefined ? {} : { description: effort.description }),
         })),
       ],
@@ -1356,8 +1385,8 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const selected = await overlays.select({
       title: ui('背景模式', 'Background mode'),
       detail: ui(
-        '仅主画布继承终端效果，不设置透明度。弹窗、代码块和高亮保留独立底色；保存后立即生效。',
-        'Only the canvas inherits terminal effects; opacity is not changed. Panels, code blocks and highlights keep their backgrounds. Saves apply immediately.',
+        '主画布、弹窗面板和代码基础背景按模式继承终端效果，不设置透明度；选区与特殊 token 背景保留。保存后立即生效。',
+        'Canvas, panels and base code backgrounds inherit terminal effects by mode; opacity is not changed. Selections and explicit token backgrounds remain. Saves apply immediately.',
       ),
       searchable: false,
       initialChoiceId: current,
@@ -1372,7 +1401,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         },
         {
           id: 'explicit', label: ui('显式主题底色（兼容）', 'Explicit fill (compatibility)'),
-          description: ui('沿用 RGB 画布与主题改色；实际透明效果由终端决定', 'Keep the RGB canvas and theme color sync; the terminal still decides opacity'),
+          description: ui('沿用 RGB 画布、面板、代码背景与主题改色；实际透明效果由终端决定', 'Keep RGB canvas, panel and code backgrounds plus theme color sync; the terminal still decides opacity'),
         },
       ].map(choice => ({ ...choice, active: choice.id === current })),
       options: { width: 90, maxHeight: '90%', anchor: 'center', margin: 1 },

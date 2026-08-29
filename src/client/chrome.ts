@@ -14,7 +14,7 @@ import { horizontalRule } from './horizontal-rule.ts'
 import { formatByteSize } from './byte-size.ts'
 import { formatElapsed } from './elapsed.ts'
 import { translateUiText, ui } from './locale.ts'
-import { background, color, editorTheme } from './theme.ts'
+import { background, color, editorTheme, interaction } from './theme.ts'
 import { autocompleteTargetId, editorMouseApi } from './pi-tui-adapters.ts'
 
 /** Pending composer image shown above the model rule. */
@@ -58,7 +58,7 @@ function modeLabel(value: string): string {
   }
 }
 
-function modelLabel(value: string): string {
+function modelLabels(value: string): { readonly route: string; readonly reasoning?: string } {
   const [rawRoute = value, effort] = value.split(' · ', 2)
   const providerless = rawRoute.startsWith('deepseek-official/')
     ? rawRoute.slice('deepseek-official/'.length)
@@ -74,8 +74,9 @@ function modelLabel(value: string): string {
       max: ui('最大', 'Maximum'),
       ultra: ui('极致', 'Ultra'),
     }[effort] ?? effort)
-  const reasoning = effort === undefined ? '' : ui(` · ${reasoningLabel}推理`, ` · ${reasoningLabel} reasoning`)
-  return `${route}${reasoning}`
+  return effort === undefined
+    ? { route }
+    : { route, reasoning: ui(`${reasoningLabel}推理`, `${reasoningLabel} reasoning`) }
 }
 
 function permissionLabel(value: string): string {
@@ -99,7 +100,7 @@ function draftAttachmentLine(items: readonly ComposerDraftAttachment[]): string 
 
 /** One compactable chrome fact with a stable semantic id. */
 export interface ChromeFactToken {
-  readonly id: 'model' | 'mode' | 'permission' | 'detail'
+  readonly id: 'model' | 'reasoning' | 'mode' | 'permission' | 'detail'
   readonly text: string
 }
 
@@ -116,13 +117,14 @@ export interface ChromeHitToken {
 export function compactFactTokens(
   tokens: readonly ChromeFactToken[],
   width: number,
+  separator = ' · ',
 ): { readonly text: string; readonly tokens: readonly { readonly id: ChromeFactToken['id']; readonly col: number; readonly width: number }[] } {
   if (width <= 0 || tokens.length === 0) return { text: '', tokens: [] }
   let kept = [...tokens]
-  let text = kept.map(token => token.text).join(' · ')
+  let text = kept.map(token => token.text).join(separator)
   while (kept.length > 1 && visibleWidth(text) > width) {
     kept = kept.slice(1)
-    text = kept.map(token => token.text).join(' · ')
+    text = kept.map(token => token.text).join(separator)
   }
   if (visibleWidth(text) > width) {
     const last = kept[0]
@@ -133,7 +135,7 @@ export function compactFactTokens(
   const hits: { readonly id: ChromeFactToken['id']; readonly col: number; readonly width: number }[] = []
   let col = 0
   for (const [index, token] of kept.entries()) {
-    if (index > 0) col += 3
+    if (index > 0) col += visibleWidth(separator)
     const tokenWidth = visibleWidth(token.text)
     hits.push({ id: token.id, col, width: tokenWidth })
     col += tokenWidth
@@ -382,14 +384,12 @@ export class StatusBar implements Component {
       `使用权限：${permissionLabel(this.permission)}`,
       `Permission: ${permissionLabel(this.permission)}`,
     )
-    const permissionText = `${color.brand('▸▸')} ${
-      this.permission === 'danger-full-access'
+    const permissionLabelText = this.hoveredTokenId === 'permission'
+      ? interaction.hover(label)
+      : this.permission === 'danger-full-access'
         ? color.danger(label)
         : this.permission === 'read-only' ? color.muted(label) : color.accent(label)
-    }`
-    const permission = this.hoveredTokenId === 'permission'
-      ? background.hover(permissionText)
-      : permissionText
+    const permission = `${color.brand('▸▸')} ${permissionLabelText}`
     if (this.detail === undefined || this.detail === '') {
       const clipped = fit(permission, innerWidth)
       this.tokens = [{
@@ -407,7 +407,7 @@ export class StatusBar implements Component {
       )
     const left = permissionBudget === 0 ? '' : fit(permission, permissionBudget)
     const clippedDetail = fit(this.detail, innerWidth - visibleWidth(left) - (left === '' ? 0 : 1))
-    const detail = this.hoveredTokenId === 'detail' ? background.hover(clippedDetail) : clippedDetail
+    const detail = this.hoveredTokenId === 'detail' ? interaction.hover(clippedDetail) : clippedDetail
     const gap = innerWidth - visibleWidth(left) - visibleWidth(detail)
     this.tokens = [
       ...(left === '' ? [] : [{ id: 'permission' as const, rect: { col: prefix.length, row: 0, width: visibleWidth(left), height: 1 } }]),
@@ -531,7 +531,7 @@ export class PromptEditor extends Editor {
           autocompleteSnapshot?.generation ?? -1,
           visible.absoluteIndex,
           )
-      return hovered ? background.hover(row) : row
+      return hovered ? interaction.hover(row) : row
     })
 
     if (this.getText() === '' && !this.isShowingAutocomplete() && editorRows.length > 0) {
@@ -551,29 +551,25 @@ export class PromptEditor extends Editor {
         frameWidth,
       ))]
     const body = [...editorRows, ...attachmentRows, ...autocompleteRows].map(row => padded(row, frameWidth))
+    const model = this.facts === undefined ? undefined : modelLabels(this.facts.model)
+    const fact = (id: ChromeFactToken['id'], text: string): ChromeFactToken => ({
+      id,
+      text: this.hoveredTargetId === `chrome:${id}` ? interaction.hover(text) : color.muted(text),
+    })
     const source: ChromeFactToken[] = this.facts === undefined
       ? []
       : [
-        ...(this.facts.model === '' ? [] : [{
-          id: 'model' as const,
-          text: this.hoveredTargetId === 'chrome:model'
-            ? background.hover(modelLabel(this.facts.model))
-            : modelLabel(this.facts.model),
-        }]),
-        {
-          id: 'mode' as const,
-          text: this.hoveredTargetId === 'chrome:mode'
-            ? background.hover(modeLabel(this.facts.mode))
-            : modeLabel(this.facts.mode),
-        },
+        ...(model === undefined || model.route === '' ? [] : [fact('model', model.route)]),
+        ...(model?.reasoning === undefined ? [] : [fact('reasoning', model.reasoning)]),
+        fact('mode', modeLabel(this.facts.mode)),
       ]
     const compacted = source.length === 0
-      ? { text: ui('deepseek · 标准', 'deepseek · Standard'), tokens: [] as const }
-      : compactFactTokens(source, Math.max(0, frameWidth - 2))
+      ? { text: color.muted(ui('deepseek · 标准', 'deepseek · Standard')), tokens: [] as const }
+      : compactFactTokens(source, Math.max(0, frameWidth - 2), color.muted(' · '))
     const inner = [
       horizontalRule('', frameWidth, this.borderColor),
       ...body,
-      horizontalRule(compacted.text, frameWidth, this.borderColor),
+      horizontalRule(compacted.text, frameWidth, this.borderColor, text => text),
     ]
     const editorTop = 1
     const attachmentTop = editorTop + editorRows.length

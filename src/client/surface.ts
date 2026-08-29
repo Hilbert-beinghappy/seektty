@@ -350,7 +350,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       adoptSyntaxHighlighter(created, liveTheme, (ready) => {
         syntax = ready
         disposeConstructedSyntax = () => { ready.dispose() }
-        setCodeHighlighter((code, lang) => ready.highlight(code, lang))
+        setCodeHighlighter((code, lang, background) => ready.highlight(code, lang, background))
       })
       if (stopping !== undefined) {
         created.dispose()
@@ -1372,6 +1372,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const transcriptChanged = transcript.setHoveredRegion(id)
       const editorChanged = editor.setHoveredTarget(
         id?.startsWith('composer:autocomplete:') === true || id?.startsWith('chrome:model') === true
+          || id?.startsWith('chrome:reasoning') === true
           || id?.startsWith('chrome:mode') === true
           ? id
           : undefined,
@@ -1507,6 +1508,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (region?.action.kind === 'chrome') {
         const commandId = region.action.commandId
         if (commandId === 'model') void actions.execute('model', '')
+        else if (commandId === 'reasoning') void actions.execute('effort', '')
         else if (commandId === 'mode') void actions.execute('mode', '')
         else if (commandId === 'permission') void actions.execute('permission', '')
         else if (commandId === 'detail') void actions.execute('status', '')
