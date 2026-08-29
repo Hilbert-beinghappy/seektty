@@ -7,10 +7,12 @@ import {
   installed,
   internals,
   launch,
+  launcherUsesPnpmGvsLayout,
   launcherArgs,
   run,
 } from '../src/bin.ts'
 import { PACKAGE_VERSION, defaultPluginSpec } from '../src/dsh-compat.ts'
+import { PNPM_GVS_CONFIG_ARG } from '../src/pnpm-compat.ts'
 
 const temporaryHomes: string[] = []
 
@@ -118,7 +120,7 @@ describe('launcher provisioning', () => {
     expect(calls).toEqual([
       {
         command: '/stock/dsh',
-        args: ['plugin', '--profile', 'team', 'add', '/plugin.tgz'],
+        args: ['plugin', '--profile', 'team', 'add', PNPM_GVS_CONFIG_ARG, '/plugin.tgz'],
       },
       {
         command: '/stock/dsh',
@@ -140,8 +142,8 @@ describe('launcher provisioning', () => {
 
     expect(launch([], { DSH_BIN: '/stock/dsh' }, execute)).toBe(0)
     expect(calls.map(call => call.args)).toEqual([
-      ['plugin', '--profile', 'tui', 'remove', 'deepseek-tui'],
-      ['plugin', '--profile', 'tui', 'add', defaultPluginSpec(PACKAGE_VERSION)],
+      ['plugin', '--profile', 'tui', 'remove', PNPM_GVS_CONFIG_ARG, 'deepseek-tui'],
+      ['plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, defaultPluginSpec(PACKAGE_VERSION)],
       ['--profile', 'tui'],
     ])
   })
@@ -158,7 +160,24 @@ describe('launcher provisioning', () => {
     expect(launch([], { DSH_BIN: '/stock/dsh', DEEPSEEK_TUI_SPEC: '/legacy-plugin.tgz' }, execute)).toBe(17)
     expect(calls).toHaveLength(1)
     expect(calls[0]?.slice(0, 4)).toEqual(['plugin', '--profile', 'tui', 'add'])
-    expect(calls[0]?.[4]).toBe('/legacy-plugin.tgz')
+    expect(calls[0]?.slice(4)).toEqual([PNPM_GVS_CONFIG_ARG, '/legacy-plugin.tgz'])
+  })
+
+  it('prints cautious recovery commands after failure from a visible pnpm 11 GVS layout', () => {
+    const home = temporaryHome()
+    writeProfile(home, 'tui', { seektty: PACKAGE_VERSION })
+    const binDir = join(home, 'store', 'v11', 'links', 'host', 'bin')
+    mkdirSync(binDir, { recursive: true })
+    const dsh = join(binDir, process.platform === 'win32' ? 'dsh.cmd' : 'dsh')
+    writeFileSync(dsh, '')
+    expect(launcherUsesPnpmGvsLayout(dsh, {})).toBe(true)
+    const errors: string[] = []
+    expect(launch([], { DSH_HOME: home, DSH_BIN: dsh, LANG: 'en_US.UTF-8' }, () => 19, () => {}, chunk => {
+      errors.push(chunk)
+    })).toBe(19)
+    expect(errors.join('')).toContain('store/v11/links')
+    expect(errors.join('')).toContain(PNPM_GVS_CONFIG_ARG)
+    expect(errors.join('')).toContain('If the output above mentions')
   })
 
   it('prints version and skips spawning dsh', () => {

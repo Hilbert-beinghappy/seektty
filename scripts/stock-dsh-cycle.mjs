@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 const dsh = process.env.DSH_BIN?.trim()
 const pluginSpec = process.env.SEEKTTY_SPEC?.trim()
 const spawnSync = crossSpawn.sync
+const pnpmGvsFlag = '--config.enable-global-virtual-store=false'
 
 if (!dsh || !pluginSpec) {
   process.stderr.write('用法：DSH_BIN=/path/to/dsh SEEKTTY_SPEC=/path/to/seektty.tgz pnpm test:stock\n')
@@ -57,6 +58,7 @@ function assertPackedLauncher() {
   writeFileSync(join(packedRoot, 'package.json'), JSON.stringify({ private: true }))
   const install = spawnSync('pnpm', [
     'add',
+    pnpmGvsFlag,
     '--dir', packedRoot,
     '--prod',
     '--ignore-scripts',
@@ -134,7 +136,7 @@ function assertOfficialModuleIdentity() {
 
 try {
   assertPackedLauncher()
-  run(['plugin', '--profile', 'tui', 'add', pluginSpec])
+  run(['plugin', '--profile', 'tui', 'add', pnpmGvsFlag, pluginSpec])
   let manifest = profileManifest()
   assert(manifest.dependencies?.seektty !== undefined, 'add 后 Profile 缺少 seektty 依赖')
   assert(manifest.dsh?.profile?.bundles?.includes('seektty'), 'add 后 Bundle 未进入 Profile')
@@ -145,14 +147,14 @@ try {
   assert(run(['--profile', 'tui', '--help']).includes('Usage: deepseek'), 'TUI Bundle 无法由 stock dsh 加载')
   assertFullBootReachesTui()
 
-  run(['plugin', '--profile', 'tui', 'remove', 'seektty'])
+  run(['plugin', '--profile', 'tui', 'remove', pnpmGvsFlag, 'seektty'])
   manifest = profileManifest()
   assert(manifest.dependencies?.seektty === undefined, 'remove 后仍存在 seektty 依赖')
   assert(!manifest.dsh?.profile?.bundles?.includes('seektty'), 'remove 后 Bundle 仍在 Profile')
   dump = run(['--profile', 'tui', '--dump-config'])
   assert(!dump.includes('seektty'), 'remove 后 dump-config 仍包含 TUI entry')
 
-  run(['plugin', '--profile', 'tui', 'add', pluginSpec])
+  run(['plugin', '--profile', 'tui', 'add', pnpmGvsFlag, pluginSpec])
   const help = run(['--profile', 'tui', '--help'])
   assertOfficialModuleIdentity()
   assert(help.includes('Usage: deepseek'), 're-add 后 TUI Bundle 无法加载')

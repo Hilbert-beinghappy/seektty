@@ -44,6 +44,56 @@ jobs:
           SEEKTTY_SPEC="$RUNNER_TEMP/seektty-$VERSION.tgz" \
           node scripts/stock-dsh-cycle.mjs
 
+      - name: Build the shared pnpm-layout candidate
+        run: |
+          mkdir -p .artifacts
+          pnpm pack --pack-destination .artifacts
+
+      - name: Upload the shared candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: seektty-candidate
+          path: .artifacts/seektty-*.tgz
+          if-no-files-found: error
+
+  pnpm11-layout:
+    name: pnpm 11 layouts · ${{ matrix.os }} · Node ${{ matrix.node }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22.x, 24.x]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install acceptance dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the shared candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: seektty-candidate
+          path: .artifacts
+
+      - name: GVS disabled · full official dsh lifecycle
+        run: pnpm test:pnpm11-layout false .artifacts
+
+      - name: GVS enabled · positive boot or exact known-failure diagnosis
+        run: pnpm test:pnpm11-layout true .artifacts
+
   launcher-windows:
     name: Windows launcher
     runs-on: windows-latest

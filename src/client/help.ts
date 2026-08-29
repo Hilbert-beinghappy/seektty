@@ -3,6 +3,7 @@
 import { helpKeymapText } from './keymap.ts'
 import { ui } from './locale.ts'
 import { defaultPluginSpec, PACKAGE_VERSION } from '../dsh-compat.ts'
+import { pnpmCommand } from '../pnpm-compat.ts'
 
 export type HelpSectionId = 'keys' | 'flows' | 'doctor'
 
@@ -44,14 +45,14 @@ export function helpSectionText(id: HelpSectionId): string {
     [
       '输入 /doctor 检查 pnpm、Profile 插件和 Bundle 兼容性。',
       '启动前需要 Node、pnpm 和官方 dsh，且 dsh 需在 PATH 或 DSH_BIN 中。',
-      `安装：pnpm add --global ${defaultPluginSpec(PACKAGE_VERSION)}`,
+      `安装：${pnpmCommand(['add', '--global', defaultPluginSpec(PACKAGE_VERSION)])}`,
       '然后运行 deepseek。版本与兼容范围见 deepseek --version。',
       '更多步骤见仓库 QUICKSTART 与 README。',
     ].join('\n'),
     [
       'Run /doctor to check pnpm, Profile plugins, and Bundle compatibility.',
       'Before launch you need Node, pnpm, and official dsh on PATH or DSH_BIN.',
-      `Install: pnpm add --global ${defaultPluginSpec(PACKAGE_VERSION)}`,
+      `Install: ${pnpmCommand(['add', '--global', defaultPluginSpec(PACKAGE_VERSION)])}`,
       'Then run deepseek. See deepseek --version for the version and compatibility range.',
       'More steps are in the repository QUICKSTART and README.',
     ].join('\n'),

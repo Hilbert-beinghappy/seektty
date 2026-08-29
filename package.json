@@ -70,6 +70,7 @@
     "test": "vitest run",
     "perf:tui": "node scripts/tui-perf-harness.mjs",
     "test:stock": "node scripts/stock-dsh-cycle.mjs",
+    "test:pnpm11-layout": "node scripts/pnpm11-layout-acceptance.mjs",
     "test:clarify-doctor": "node scripts/clarify-doctor-acceptance.mjs",
     "pack:check": "node scripts/pack-check.mjs",
     "test:mouse-pty": "node scripts/mouse-pty-harness.mjs",

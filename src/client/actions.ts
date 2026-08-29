@@ -78,6 +78,7 @@ import {
 } from './settings.ts'
 import { toolApprovalPreview, type Transcript } from './transcript.ts'
 import { composeApprovalDetail } from './approval-preview.ts'
+import { pnpmCommand } from '../pnpm-compat.ts'
 import {
   appearanceFromSettings,
   appearanceSettings,
@@ -2785,8 +2786,8 @@ Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map
         title: pluginIdentity(plugin),
         detail,
         choices: [
-          { id: 'update', label: ui('更新…', "Update…"), description: `pnpm update ${plugin.name}` },
-          { id: 'remove', label: ui('移除…', "Remove…"), description: `pnpm remove ${plugin.name}` },
+          { id: 'update', label: ui('更新…', "Update…"), description: pnpmCommand(['update', plugin.name]) },
+          { id: 'remove', label: ui('移除…', "Remove…"), description: pnpmCommand(['remove', plugin.name]) },
         ],
         searchable: false,
       }, async (selected) => {
@@ -2858,7 +2859,7 @@ Diagnostics: ${plugin.diagnostics.length === 0 ? 'none' : plugin.diagnostics.map
       choices: [{
         id: 'install',
         label: ui('安装到当前 Profile…', "Install in current Profile…"),
-        description: `pnpm add --save-exact ${candidate.spec}`,
+        description: pnpmCommand(['add', '--save-exact', candidate.spec]),
         ...candidate.source !== 'git' && (!candidate.bundle || !candidate.patchValid)
           ? { disabledReason: ui('候选未通过 Bundle patch 安装前验证', "Candidate failed Bundle-patch preflight validation") }
           : {},
@@ -2927,11 +2928,11 @@ Warning: structural validation is not a security, trust, or quality review.`,
       ui(`安装 ${candidate.name} 到 ${profile}？`, `Install ${candidate.name} in ${profile}?`),
       ui(
         `${this.candidateDetail(candidate)}
-将执行：pnpm add --save-exact ${candidate.spec}
+将执行：${pnpmCommand(['add', '--save-exact', candidate.spec])}
 目标 Profile：${profile}
 pnpm 可能执行上述包脚本；Git 包只能在安装后由原生 Manager 再验证。此操作不使用 Agent 沙箱。`,
         `${this.candidateDetail(candidate)}
-Will run: pnpm add --save-exact ${candidate.spec}
+Will run: ${pnpmCommand(['add', '--save-exact', candidate.spec])}
 Target Profile: ${profile}
 pnpm may run the package scripts listed above; a Git package can be revalidated by the native Manager only after installation. This operation does not use the Agent sandbox.`,
       ),
@@ -2969,7 +2970,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       if (plugin === undefined) throw new Error(ui(`当前 Profile 未安装 ${JSON.stringify(target)}`, `${JSON.stringify(target)} is not installed in the current Profile`))
       const confirmed = await navigation.confirm(
         ui(`从 ${snapshot.profile} 移除 ${target}？`, `Remove ${target} from ${snapshot.profile}?`),
-        ui(`将执行：pnpm remove ${target}。Bundle 列表会由原生 Manager 对账。`, `This will run: pnpm remove ${target}. The Bundle list is reconciled by the native Manager.`),
+        ui(`将执行：${pnpmCommand(['remove', target])}。Bundle 列表会由原生 Manager 对账。`, `This will run: ${pnpmCommand(['remove', target])}. The Bundle list is reconciled by the native Manager.`),
         ui('移除', "Remove"),
       )
       if (!confirmed) return
@@ -2993,7 +2994,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
         const selected = await navigation.select({
           title: ui('更新插件', "Update plugin"),
           choices: [
-            { id: '__all__', label: ui('更新全部 Profile 依赖', "Update all Profile dependencies"), description: 'pnpm update' },
+            { id: '__all__', label: ui('更新全部 Profile 依赖', "Update all Profile dependencies"), description: pnpmCommand(['update']) },
             ...snapshot.plugins.map(plugin => ({ id: plugin.name, label: pluginIdentity(plugin), description: plugin.spec })),
           ],
         })
@@ -3005,7 +3006,7 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       const args = target === '' ? ['update'] : ['update', target]
       const confirmed = await navigation.confirm(
         target === '' ? ui(`更新 ${snapshot.profile} 全部依赖？`, `Update all dependencies in ${snapshot.profile}?`) : ui(`更新 ${target}？`, `Update ${target}?`),
-        ui(`将执行：pnpm ${args.join(' ')}。解析结果由 Profile lockfile 持久化。`, `This will run: pnpm ${args.join(' ')}. The resolution is persisted in the Profile lockfile.`),
+        ui(`将执行：${pnpmCommand(args)}。解析结果由 Profile lockfile 持久化。`, `This will run: ${pnpmCommand(args)}. The resolution is persisted in the Profile lockfile.`),
         ui('更新', "Update"),
       )
       if (!confirmed) return

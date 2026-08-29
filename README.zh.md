@@ -45,14 +45,14 @@
 在已测的官方 DeepSeek Harness `0.1.1-rc.2` 上安装 SeekTTY：
 
 ```sh
-pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 
 dsh --profile tui
 ```
 
-这些命令通过原生 `dsh plugin` 协调机制安装预构建 Bundle。Clarify 与 Auxiliary Runtime 均为可选插件，不是默认依赖；历史联合验收组合见[兼容性](#兼容与验证)。
+这些命令通过原生 `dsh plugin` 协调机制安装预构建 Bundle。逐命令 pnpm 参数会避开 pnpm 11 Global Virtual Store 布局；当前已测 dsh 版本的 Cordis Loader 还不能可靠加载该布局。SeekTTY 绝不会修改全局 pnpm 配置。Clarify 与 Auxiliary Runtime 均为可选插件，不是默认依赖；历史联合验收组合见[兼容性](#兼容与验证)。
 
 带版本号的下载地址仅在对应版本正式发布后可用。发布前请按 [1.2.4 审核与发布清单](docs/release-v1.2.4-verification.md)中的本地 tarball 方式测试。
 
@@ -61,7 +61,7 @@ dsh --profile tui
 安装 `dsh` 后，可全局安装同一个 SeekTTY Release，并把 Profile 协调固定到该 tarball：
 
 ```sh
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
@@ -69,7 +69,7 @@ deepseek
 PowerShell 使用相同的包地址：
 
 ```powershell
-pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 $env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 deepseek
 ```
@@ -317,8 +317,8 @@ TUI `/plugin` 与原生 `dsh plugin` 会协调同一份 Profile 依赖、Bundle 
 旧版 `deepseek-tui` 全局包只需替换一次：
 
 ```sh
-pnpm remove --global deepseek-tui
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
@@ -326,14 +326,14 @@ deepseek
 自定义 Profile 会在首次启动时分别迁移。只使用 dsh 原生入口时，可显式替换 Bundle：
 
 ```sh
-dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 ```
 
 移除 SeekTTY 只影响目标 Profile，不会修改 dsh 本体：
 
 ```sh
-dsh plugin --profile tui remove seektty
+dsh plugin --profile tui remove --config.enable-global-virtual-store=false seektty
 ```
 
 ## 兼容与验证
@@ -345,15 +345,25 @@ dsh plugin --profile tui remove seektty
 | Node.js | `^22.19.0 || >=24` |
 | 声明的最低 Harness Host | `0.1.0-rc.6` |
 | 当前已测 Harness Host | `0.1.1-rc.2` |
+| pnpm 11 布局适配器 | pnpm `11.7.0`；dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`；每次变更单独关闭 GVS |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
 | 当前鼠标与输入版本 | SeekTTY `1.2.4` + 官方 dsh `0.1.1-rc.2`；本次发布不扩展可选插件的联合验收范围 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 
+### pnpm 11 Global Virtual Store 兼容
+
+pnpm 11 可能把全局包放到 `store/v11/links`。当前已测的 dsh/Cordis Loader 会在 SeekTTY 启动前因该布局报出 `plugin tree failed to load`、`cordis:include` 等错误。在上游 dsh 新版本通过 GVS 正向生命周期门禁前，SeekTTY 仅对自身发起的包树变更附加 `--config.enable-global-virtual-store=false`：启动器首次协调、兼容范围内的自动更新，以及 TUI `/plugin` 的安装、更新、移除和协调。只读 pnpm 命令不受影响。
+
+该适配器不会运行 `pnpm config set`、设置 `NODE_PATH`、复制 Host 包，也不会绕过原生 dsh 协调去编辑 Profile manifest。启动失败且安装路径明确位于 `store/v11/links` 时，启动器会输出谨慎的双语诊断和精确的逐命令恢复方式，不会误报为 SeekTTY 缺少普通依赖。
+
+门禁合同、当前本机证据和适配器退出条件见双语的 [pnpm 11 布局验收记录](docs/pnpm11-layout-acceptance.md)。
+
 1.2.4 发布检查覆盖：
 
 - typecheck、单元／集成测试、生产构建、打包内容检查和重复 Host 包拒绝；
 - 使用同一候选 tarball，在未修改的官方 dsh `0.1.1-rc.2` 上隔离执行 add、boot、remove、re-add；
+- Windows、macOS、Linux 上使用共享候选包和 Node 22/24 的 CI 矩阵：GVS=false 必须通过完整生命周期；GVS=true 必须成功启动，或准确复现并分类已知 dsh/Cordis Loader 错误。CI runner 验证与真实终端人工签收分开记录；
 - Windows ConPTY 的启动、斜杠导航、右键菜单手势交接、resize 与正常退出。注入的 PTY 输入和模拟渲染测试不等价于真实 GUI 终端鼠标或剪贴板测试；
 - 十万行结构性 TUI 性能门禁。各平台人工签收状态在[发布清单](docs/release-v1.2.4-verification.md)中单独列明。
 
@@ -367,6 +377,9 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+pnpm test:pnpm11-layout false /path/to/candidate-directory
+pnpm test:pnpm11-layout true /path/to/candidate-directory
 
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \

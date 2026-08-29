@@ -45,14 +45,14 @@ For requirements that still need definition, the optional [Clarify Host plugin](
 Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
 
 ```sh
-pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 
 dsh --profile tui
 ```
 
-These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
+These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. The per-command pnpm option avoids the pnpm 11 Global Virtual Store layout that the Cordis loader in the currently tested dsh releases cannot reliably load. SeekTTY never changes global pnpm configuration. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
 
 Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.4 review and release checklist](docs/release-v1.2.4-verification.md).
 
@@ -61,7 +61,7 @@ Versioned download URLs become available only after that release is published. B
 After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to that tarball:
 
 ```sh
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
@@ -69,7 +69,7 @@ deepseek
 PowerShell uses the same package URL:
 
 ```powershell
-pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 $env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
 deepseek
 ```
@@ -317,8 +317,8 @@ TUI `/plugin` and native `dsh plugin` reconcile the same Profile dependencies, B
 Replace the former `deepseek-tui` global package once:
 
 ```sh
-pnpm remove --global deepseek-tui
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 deepseek
 ```
@@ -326,14 +326,14 @@ deepseek
 Custom Profiles migrate independently on first launch. Native dsh-only installations can replace the Bundle explicitly:
 
 ```sh
-dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
 ```
 
 Removing SeekTTY changes only the target Profile, never the dsh installation:
 
 ```sh
-dsh plugin --profile tui remove seektty
+dsh plugin --profile tui remove --config.enable-global-virtual-store=false seektty
 ```
 
 ## Compatibility and verification
@@ -345,15 +345,25 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Node.js | `^22.19.0 || >=24` |
 | Declared minimum Harness Host | `0.1.0-rc.6` |
 | Current tested Harness Host | `0.1.1-rc.2` |
+| pnpm 11 layout adapter | pnpm `11.7.0`; dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
 | Current mouse/input release | SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
+### pnpm 11 Global Virtual Store compatibility
+
+pnpm 11 can place global packages below `store/v11/links`. With the tested dsh/Cordis loader, that layout can fail before SeekTTY starts with messages such as `plugin tree failed to load` and `cordis:include`. Until an upstream dsh release passes the positive GVS lifecycle gate, SeekTTY applies `--config.enable-global-virtual-store=false` only to package-tree mutations it starts: launcher provisioning, compatible self-updates, and TUI `/plugin` install, update, remove, and reconciliation. Read-only pnpm commands are unchanged.
+
+This adapter does not run `pnpm config set`, set `NODE_PATH`, copy Host packages, or edit Profile manifests outside native dsh reconciliation. If a failed launcher is visibly installed below `store/v11/links`, it prints a cautious bilingual diagnosis and exact per-command recovery commands rather than reporting a missing SeekTTY dependency.
+
+See the bilingual [pnpm 11 layout acceptance record](docs/pnpm11-layout-acceptance.md) for the gate contract, current local evidence, and the adapter exit condition.
+
 The 1.2.4 release checks cover:
 
 - Type checking, unit/integration tests, production build, packed-content checks, and duplicate-Host-package rejection.
 - Isolated add, boot, remove, and re-add on unmodified official dsh `0.1.1-rc.2` using the exact candidate tarball.
+- A shared-candidate CI matrix on Windows, macOS, and Linux with Node 22 and 24: GVS=false must pass the complete lifecycle; GVS=true must either boot successfully or reproduce and accurately classify the known dsh/Cordis loader failure. CI runner coverage is separate from manual real-terminal sign-off.
 - Windows ConPTY startup, slash navigation, context-menu gesture handoff, resize, and clean exit. Injected PTY input and synthetic renderer tests are not equivalent to real GUI-terminal mouse or clipboard testing.
 - The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [release checklist](docs/release-v1.2.4-verification.md).
 
@@ -367,6 +377,9 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+pnpm test:pnpm11-layout false /path/to/candidate-directory
+pnpm test:pnpm11-layout true /path/to/candidate-directory
 
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \

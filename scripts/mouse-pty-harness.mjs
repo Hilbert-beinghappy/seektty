@@ -90,7 +90,7 @@ function ptyLaunch(args, home) {
 }
 
 function installCandidate(home, environment) {
-  const install = crossSpawn.sync(dsh, ['plugin', '--profile', 'tui', 'add', pluginSpec], {
+  const install = crossSpawn.sync(dsh, ['plugin', '--profile', 'tui', 'add', '--config.enable-global-virtual-store=false', pluginSpec], {
     cwd: root,
     env: environment,
     encoding: 'utf8',
