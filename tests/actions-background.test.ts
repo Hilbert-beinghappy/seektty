@@ -51,7 +51,8 @@ describe('shared background editor', () => {
       try {
         await vi.waitFor(() => { expect(h.text()).toContain(locale === 'zh' ? '背景模式' : 'Background mode') })
         if (entry === 'settings') await vi.waitFor(() => { expect(h.text()).toContain(`${locale === 'zh' ? '设置' : 'Settings'} · seektty-appearance`) })
-        if (entry === 'theme') h.key(locale === 'zh' ? '背景模式' : 'Background mode')
+        h.key('\u001B[B')
+        h.key('\u001B[B')
         h.key('\r')
         await vi.waitFor(() => { expect(h.text()).toContain(locale === 'zh' ? '主画布、弹窗面板和代码基础背景' : 'Canvas, panels and base code backgrounds') })
         const panel = h.text()
@@ -78,6 +79,8 @@ describe('shared background editor', () => {
     const pending = h.actions.execute('settings', TUI_APPEARANCE_SETTINGS_NAMESPACE)
     try {
       await vi.waitFor(() => { expect(h.text()).toContain('设置 · seektty-appearance') })
+      h.key('\u001B[B')
+      h.key('\u001B[B')
       h.key('\r')
       await vi.waitFor(() => { expect(h.text()).toContain('主画布、弹窗面板和代码基础背景') })
       if (outcome === 'failure') h.key('\u001B[B')

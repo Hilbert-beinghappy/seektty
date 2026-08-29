@@ -11,6 +11,7 @@ import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+  TUI_WELCOME_SETTINGS_NAMESPACE,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { ui, uiLocale } from './locale.ts'
 import type { TuiSettingsDocument } from './management.ts'
@@ -200,8 +201,87 @@ export function settingsSectionLabel(namespace: string): string {
   if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return ui('模型与 Provider', 'Models and Providers')
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return ui('SeekTTY 主题', 'SeekTTY themes')
   if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) return ui('SeekTTY 行为', 'SeekTTY behavior')
+  if (namespace === TUI_WELCOME_SETTINGS_NAMESPACE) return ui('SeekTTY 欢迎页', 'SeekTTY welcome page')
   if (namespace === 'tui-plugin-marketplace') return ui('插件市场来源', 'Plugin marketplace sources')
   return ui('通用设置', 'General settings')
+}
+
+/** Stable product-level information architecture for the Settings center. */
+export type SettingsCategoryId =
+  | 'appearance'
+  | 'welcome'
+  | 'mouse'
+  | 'input'
+  | 'model-agent'
+  | 'permissions'
+  | 'extensions'
+  | 'language-system'
+
+export const SETTINGS_CATEGORY_ORDER: readonly SettingsCategoryId[] = Object.freeze([
+  'appearance',
+  'welcome',
+  'mouse',
+  'input',
+  'model-agent',
+  'permissions',
+  'extensions',
+  'language-system',
+])
+
+export function settingsCategoryLabel(category: SettingsCategoryId): string {
+  switch (category) {
+    case 'appearance': return ui('外观', 'Appearance')
+    case 'welcome': return ui('欢迎页', 'Welcome page')
+    case 'mouse': return ui('鼠标与滚动', 'Mouse and scrolling')
+    case 'input': return ui('输入与快捷键', 'Input and shortcuts')
+    case 'model-agent': return ui('模型与 Agent', 'Models and Agent')
+    case 'permissions': return ui('权限与安全', 'Permissions and security')
+    case 'extensions': return ui('插件与扩展', 'Plugins and extensions')
+    case 'language-system': return ui('语言与系统', 'Language and system')
+  }
+}
+
+export function settingsCategoryDescription(category: SettingsCategoryId): string {
+  switch (category) {
+    case 'appearance': return ui('主题、代码主题、背景和界面呈现', 'Themes, code colors, backgrounds, and presentation')
+    case 'welcome': return ui('信息内容、Logo 和 Fastfetch', 'Information, Logo, and Fastfetch')
+    case 'mouse': return ui('鼠标模式、滚轮、悬停、选择和滚动条', 'Mouse mode, wheel, hover, selection, and scrollbar')
+    case 'input': return ui('输入历史、剪贴板、确认行为和快捷键', 'Input history, clipboard, confirmations, and shortcuts')
+    case 'model-agent': return ui('Provider、模型、推理强度和 Agent 模式', 'Providers, models, reasoning, and Agent modes')
+    case 'permissions': return ui('默认权限、工作区边界和安全策略', 'Default access, workspace boundaries, and security policy')
+    case 'extensions': return ui('插件市场、插件、Skill 和 MCP 设置', 'Plugin catalogs, plugins, skills, and MCP settings')
+    case 'language-system': return ui('界面语言、通知、终端和其他系统设置', 'Language, notifications, terminal, and other system settings')
+  }
+}
+
+const APPEARANCE_BEHAVIOR_FIELDS = new Set(['toolCards', 'showReasoning', 'statusElapsed'])
+const MOUSE_BEHAVIOR_FIELDS = new Set([
+  'mouseMode', 'hoverFeedback', 'scrollbarVisibility', 'copyOnSelect',
+  'wheelScrollLines', 'wheelAcceleration',
+])
+const INPUT_BEHAVIOR_FIELDS = new Set([
+  'composerHistoryLimit', 'clipboardFallback', 'dangerConfirmDefault', 'keyBindings',
+])
+
+/** Assign one registered namespace or field to exactly one user-facing category. */
+export function settingsCategoryFor(
+  namespace: string,
+  path: readonly string[] = [],
+): SettingsCategoryId {
+  const root = path[0] ?? ''
+  if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return 'appearance'
+  if (namespace === TUI_WELCOME_SETTINGS_NAMESPACE) return 'welcome'
+  if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
+    if (APPEARANCE_BEHAVIOR_FIELDS.has(root)) return 'appearance'
+    if (MOUSE_BEHAVIOR_FIELDS.has(root)) return 'mouse'
+    if (INPUT_BEHAVIOR_FIELDS.has(root)) return 'input'
+    return 'language-system'
+  }
+  if (namespace === 'agent-default-model' || namespace === 'agent-presets'
+    || namespace.startsWith('llm-') || /(?:model|provider|agent)/iu.test(namespace)) return 'model-agent'
+  if (namespace === 'permission' || /(?:permission|security|sandbox|access)/iu.test(namespace)) return 'permissions'
+  if (namespace === 'tui-plugin-marketplace' || /(?:plugin|marketplace|skill|mcp|extension)/iu.test(namespace)) return 'extensions'
+  return 'language-system'
 }
 
 const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: string }>> = {
@@ -220,6 +300,12 @@ const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: 
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.toolOutputLineLimit`]: { zh: '工具输出行数上限', en: 'Tool output line limit' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.diffContextLines`]: { zh: 'Diff 上下文行数', en: 'Diff context lines' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.dangerConfirmDefault`]: { zh: '危险确认默认焦点', en: 'Danger confirm default focus' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.mouseMode`]: { zh: '鼠标模式', en: 'Mouse mode' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.hoverFeedback`]: { zh: '悬停反馈', en: 'Hover feedback' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.scrollbarVisibility`]: { zh: '滚动条显示', en: 'Scrollbar visibility' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.copyOnSelect`]: { zh: '选中后复制', en: 'Copy on select' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.wheelScrollLines`]: { zh: '滚轮每格行数', en: 'Lines per wheel step' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.wheelAcceleration`]: { zh: '滚轮加速', en: 'Wheel acceleration' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.keyBindings`]: { zh: '快捷键覆盖', en: 'Key binding overrides' },
 }
 
@@ -259,6 +345,7 @@ export function visibleSettingsDocuments(
  * @param path - schema path inside that namespace.
  */
 export function hasDedicatedSettingsEditor(namespace: string, path: readonly string[]): boolean {
+  if (namespace === TUI_WELCOME_SETTINGS_NAMESPACE) return true
   if (namespace === LOCALE_SETTINGS_NAMESPACE) return samePath(path, [LOCALE_PREFERENCE_FIELD])
   if (namespace === 'agent-default-model') {
     return samePath(path, ['provider']) || samePath(path, ['model']) || samePath(path, ['reasoningEffort'])
@@ -266,7 +353,8 @@ export function hasDedicatedSettingsEditor(namespace: string, path: readonly str
   if (namespace === 'permission' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
   if (namespace === 'agent-presets' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (
-    samePath(path, ['theme']) || samePath(path, ['codeTheme']) || samePath(path, ['customThemes'])
+    samePath(path, ['theme']) || samePath(path, ['codeTheme']) || samePath(path, ['backgroundMode'])
+    || samePath(path, ['customThemes'])
   )) {
     return true
   }
@@ -296,28 +384,27 @@ export interface SettingsRootChoice {
   readonly id: string
   readonly label: string
   readonly description: string
+  readonly disabledReason?: string
 }
 
-/**
- * Build the searchable Settings root: namespaces first, then every field.
- * @param documents - redacted Settings descriptors.
- */
-export function settingsRootChoices(
+/** Eight stable category rows; unavailable categories remain visible but disabled. */
+export function settingsCategoryChoices(
   documents: readonly TuiSettingsDocument[],
 ): readonly SettingsRootChoice[] {
   const visible = visibleSettingsDocuments(documents)
-  return [
-    ...visible.map(document => ({
-      id: document.namespace,
-      label: document.namespace,
-      description: `${settingsSectionLabel(document.namespace)} · ${document.applies === 'live' ? ui('立即生效', 'applies immediately') : ui('需重启', 'restart required')}`,
-    })),
-    ...indexSettingsFields(visible).map(item => ({
-      id: `field:${item.namespace}:${JSON.stringify(item.field.path)}`,
-      label: item.field.label,
-      description: `${item.namespace}.${item.field.path.join('.')} · ${item.section}`,
-    })),
-  ]
+  const available = new Set<SettingsCategoryId>()
+  for (const document of visible) {
+    available.add(settingsCategoryFor(document.namespace))
+    for (const field of settingsFields(document)) {
+      available.add(settingsCategoryFor(document.namespace, field.path))
+    }
+  }
+  return SETTINGS_CATEGORY_ORDER.map(category => ({
+    id: category,
+    label: settingsCategoryLabel(category),
+    description: settingsCategoryDescription(category),
+    ...(available.has(category) ? {} : { disabledReason: ui('当前 Profile 没有相关设置', 'No related settings in this Profile') }),
+  }))
 }
 
 export function parseSettingsRootChoice(id: string): {

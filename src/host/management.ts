@@ -23,9 +23,13 @@ import {
   MAX_TOOL_OUTPUT_LINE_LIMIT,
   MAX_DIFF_CONTEXT_LINES,
   MAX_WHEEL_SCROLL_LINES,
+  MAX_WELCOME_ROWS,
+  MAX_WELCOME_TEXT_LENGTH,
+  DEFAULT_TUI_WELCOME,
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
+  TUI_WELCOME_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type {} from './marketplace-provider.ts'
@@ -36,11 +40,13 @@ import { markdownFromSessionLog } from '../client/conversation-markdown.ts'
 import { producedFilesFromSessionLog } from '../client/produced-files.ts'
 import { keyBindingsIssue, sanitizeKeyBindings } from '../client/keymap.ts'
 import { ui } from '../client/locale.ts'
+import { collectFastfetch, collectFastfetchLogo } from './fastfetch.ts'
 
 const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
 const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
 const BEHAVIOR_NAMESPACE = settingsNamespace(TUI_BEHAVIOR_SETTINGS_NAMESPACE)
 const COMPOSER_HISTORY_NAMESPACE = settingsNamespace(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE)
+const WELCOME_NAMESPACE = settingsNamespace(TUI_WELCOME_SETTINGS_NAMESPACE)
 const TUI_BUNDLE = 'seektty'
 const NON_TUI_SURFACE_BUNDLES = ['@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'] as const
 const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
@@ -142,6 +148,85 @@ export const AppearanceSettingsSchema = z.object({
       en: 'Named custom SeekTTY themes.',
     })),
 })
+
+const WelcomeTextSchema = z.string().max(MAX_WELCOME_TEXT_LENGTH)
+const WelcomeRowSchema = z.union([
+  z.object({ kind: z.union(['heading']).required(), text: WelcomeTextSchema.required() }),
+  z.object({ kind: z.union(['text']).required(), text: WelcomeTextSchema.required() }),
+  z.object({
+    kind: z.union(['field']).required(),
+    label: WelcomeTextSchema.required(),
+    value: WelcomeTextSchema.required(),
+  }),
+  z.object({
+    kind: z.union(['fact']).required(),
+    fact: z.union([
+      'seekttyVersion',
+      'profile',
+      'workspace',
+      'model',
+      'reasoning',
+      'mode',
+      'permission',
+      'theme',
+      'platform',
+    ]).required(),
+    label: WelcomeTextSchema,
+  }),
+  z.object({ kind: z.union(['separator']).required() }),
+  z.object({ kind: z.union(['blank']).required() }),
+  z.object({ kind: z.union(['palette']).required() }),
+])
+const SafeFastfetchModuleSchema = z.union([
+  'os', 'host', 'kernel', 'uptime', 'packages', 'shell', 'display', 'de', 'wm',
+  'terminal', 'terminalfont', 'cpu', 'gpu', 'memory', 'swap', 'disk', 'battery',
+  'locale', 'theme', 'colors',
+])
+
+/** Profile-scoped, live-applied startup presentation settings. */
+export const WelcomeSettingsSchema = z.object({
+  infoMode: z.union(['custom', 'fastfetch', 'mixed'])
+    .default(DEFAULT_TUI_WELCOME.infoMode)
+    .description(localeDescription({
+      zh: '空会话欢迎页的信息来源。',
+      en: 'Information source for the empty-session welcome page.',
+    })),
+  mixedOrder: z.union(['custom-first', 'fastfetch-first'])
+    .default(DEFAULT_TUI_WELCOME.mixedOrder)
+    .description(localeDescription({
+      zh: '混合模式下自定义信息与 Fastfetch 信息的顺序。',
+      en: 'Order of custom and Fastfetch blocks in mixed mode.',
+    })),
+  customRows: z.array(WelcomeRowSchema).max(MAX_WELCOME_ROWS)
+    .default([...DEFAULT_TUI_WELCOME.customRows] as never)
+    .description(localeDescription({
+      zh: '欢迎页的结构化自定义信息。请使用 /welcome 编辑。',
+      en: 'Structured custom welcome content. Edit it with /welcome.',
+    })),
+  logo: z.object({
+    source: z.union(['builtin', 'file', 'fastfetch', 'none']).default(DEFAULT_TUI_WELCOME.logo.source),
+    colorMode: z.union(['original', 'theme']).default(DEFAULT_TUI_WELCOME.logo.colorMode),
+    largePath: z.string().max(2_048).default(''),
+    compactPath: z.string().max(2_048).default(''),
+  }).default({ ...DEFAULT_TUI_WELCOME.logo })
+    .description(localeDescription({
+      zh: '内置或用户提供的终端文本 Logo；SeekTTY 不转换普通图片。',
+      en: 'Built-in or user-provided terminal-text logo; SeekTTY does not convert ordinary images.',
+    })),
+  fastfetch: z.object({
+    source: z.union(['safe', 'user-config']).default(DEFAULT_TUI_WELCOME.fastfetch.source),
+    modules: z.array(SafeFastfetchModuleSchema).max(20)
+      .default([...DEFAULT_TUI_WELCOME.fastfetch.modules]),
+    configPath: z.string().max(2_048).default(''),
+  }).default({
+    ...DEFAULT_TUI_WELCOME.fastfetch,
+    modules: [...DEFAULT_TUI_WELCOME.fastfetch.modules],
+  }).description(localeDescription({
+    zh: '可选 Fastfetch 数据源；用户配置可能执行 command 模块。',
+    en: 'Optional Fastfetch source; user configuration may execute command modules.',
+  })),
+})
+
 export const BehaviorSettingsSchema = z.object({
   toolCards: z.union(['collapsed', 'expanded', 'hidden'])
     .default(DEFAULT_TUI_BEHAVIOR.toolCards)
@@ -506,6 +591,7 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
   settings.register(APPEARANCE_NAMESPACE, AppearanceSettingsSchema, { applies: 'live' })
   settings.register(BEHAVIOR_NAMESPACE, BehaviorSettingsSchema, { applies: 'live' })
   settings.register(COMPOSER_HISTORY_NAMESPACE, ComposerHistorySettingsSchema, { applies: 'live' })
+  settings.register(WELCOME_NAMESPACE, WelcomeSettingsSchema, { applies: 'live' })
   const marketplace = new PluginMarketplace({
     cwd,
     resolveCredential: async ref => (await credentials.resolve(credentialRef(ref)))?.value,
@@ -691,6 +777,10 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     },
     jobs: {
       kill: id => Promise.resolve(killHostJob(ctx.get('jobs') as HostJobRegistry | undefined, id)),
+    },
+    welcome: {
+      collectFastfetch,
+      collectFastfetchLogo,
     },
   }
 }
