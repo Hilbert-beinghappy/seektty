@@ -296,10 +296,13 @@ describe('conversation viewport', () => {
         { kind: 'text', text: '结论' },
       ]),
     ]))
-    const collapsed = transcript.render(60).join('\n')
+    const collapsedLines = transcript.render(60)
+    const collapsed = collapsedLines.join('\n')
     expect(collapsed).toContain('思考（已折叠）')
     expect(collapsed).not.toContain('完成后的推理')
     const hits = transcript.controlHitRegions({ col: 0, row: 0, width: 60, height: 12 })
+    const reasoningHit = hits.find(region => region.id === 'transcript:reasoning:a1')
+    expect(reasoningHit?.rect.row).toBe(collapsedLines.findIndex(line => line.includes('思考（已折叠）')))
     expect(hits.some(region => region.id === 'transcript:reasoning:a1'
       && region.activation === 'direct'
       && region.action.kind === 'transcript'
@@ -307,6 +310,28 @@ describe('conversation viewport', () => {
 
     expect(transcript.pointerToggleReasoning('a1')).toBe(true)
     expect(transcript.render(60).join('\n')).toContain('完成后的推理')
+    transcript.dispose()
+  })
+
+  it('keeps a collapsed reasoning hit on its rendered row when the viewport starts with a block gap', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 3)
+    transcript.update(snapshot([
+      user('u1', 'earlier question'),
+      assistantStep('a1', 'settled', [
+        { kind: 'reasoning', text: '完成后的推理' },
+        { kind: 'text', text: '结论' },
+      ]),
+    ]))
+
+    const rendered = transcript.render(60)
+    const headerRow = rendered.findIndex(line => line.includes('思考（已折叠）'))
+    expect(headerRow).toBe(1)
+
+    const origin = { col: 0, row: 4, width: 60, height: 3 }
+    const hit = transcript.controlHitRegions(origin)
+      .find(region => region.id === 'transcript:reasoning:a1')
+    expect(hit?.rect.row).toBe(origin.row + headerRow)
     transcript.dispose()
   })
 

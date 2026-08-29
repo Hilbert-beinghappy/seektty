@@ -1322,6 +1322,12 @@ interface TranscriptViewportState {
   readonly hasNewer: boolean
 }
 
+interface TranscriptViewportLines {
+  readonly lines: readonly string[]
+  /** Synthetic rows inserted before the first logical transcript line. */
+  readonly leadingPadding: number
+}
+
 interface TranscriptSearchIndex {
   readonly width: number
   readonly generation: number
@@ -1640,8 +1646,10 @@ export class Transcript implements Component, Focusable {
     affinity: SelectionAnchor['affinity'] = 'before',
   ): SelectionAnchor | undefined {
     const maps = [...this.lastViewportMaps].sort((left, right) => left.row - right.row)
-    const map = edge === 'older' ? maps[0] : maps.at(-1)
-    if (map === undefined || map.cellOffsets.length === 0) return undefined
+    const map = edge === 'older'
+      ? maps.find(candidate => candidate.cellOffsets.some(offset => offset !== undefined))
+      : maps.findLast(candidate => candidate.cellOffsets.some(offset => offset !== undefined))
+    if (map === undefined) return undefined
     const inset = width >= 12 ? 2 : 0
     const localCol = Math.max(0, Math.min(col - inset, map.cellOffsets.length - 1))
     return anchorAtCell(map, localCol, affinity)
@@ -2121,8 +2129,10 @@ export class Transcript implements Component, Focusable {
     return { visible, index, offset }
   }
 
-  private finiteViewportLines(contentWidth: number, rows: number): string[] {
-    if (this.blocks.length === 0) return Array.from({ length: rows }, () => '')
+  private finiteViewportLines(contentWidth: number, rows: number): TranscriptViewportLines {
+    if (this.blocks.length === 0) {
+      return { lines: Array.from({ length: rows }, () => ''), leadingPadding: rows }
+    }
     let startIndex: number
     let startOffset: number
     if (this.viewportAnchor.followLatest) {
@@ -2150,6 +2160,7 @@ export class Transcript implements Component, Focusable {
         remaining -= rendered.lines.length - offset
       }
       let visible = parts.flatMap(part => part.lines)
+      let leadingPadding = 0
       const hasOlder = startIndex > 0 || startOffset > 0 || this.hasMore
       if (hasOlder && visible.length > 0) {
         let lineBase = 0
@@ -2166,8 +2177,9 @@ export class Transcript implements Component, Focusable {
           lineBase += part.lines.length
         }
         if (latestTurn !== undefined && visible.length - latestTurn.visibleOffset <= rows) {
+          leadingPadding = rows - (visible.length - latestTurn.visibleOffset)
           visible = [
-            ...Array.from({ length: rows - (visible.length - latestTurn.visibleOffset) }, () => ''),
+            ...Array.from({ length: leadingPadding }, () => ''),
             ...visible.slice(latestTurn.visibleOffset),
           ]
           startIndex = latestTurn.blockIndex
@@ -2181,7 +2193,7 @@ export class Transcript implements Component, Focusable {
       this.viewportAnchor = { ...start, followLatest: true }
       this.viewportState = { contentWidth, rows, start, hasOlder, hasNewer: false }
       this.scrollOffset = 0
-      return result
+      return { lines: result, leadingPadding: leadingPadding + padding }
     }
 
     startIndex = this.blocks.findIndex(block => block.key === this.viewportAnchor.blockKey)
@@ -2212,7 +2224,10 @@ export class Transcript implements Component, Focusable {
     this.viewportAnchor = { ...start, followLatest: false }
     this.viewportState = { contentWidth, rows, start, hasOlder, hasNewer }
     const padding = Math.max(0, rows - filled.visible.length)
-    return [...filled.visible, ...Array.from({ length: padding }, () => '')].slice(0, rows)
+    return {
+      lines: [...filled.visible, ...Array.from({ length: padding }, () => '')].slice(0, rows),
+      leadingPadding: 0,
+    }
   }
 
   private logicalRowLines(row: TranscriptRow): readonly string[] {
@@ -2309,6 +2324,7 @@ export class Transcript implements Component, Focusable {
   private captureViewportMaps(
     lines: readonly string[],
     contentWidth: number,
+    leadingPadding: number,
   ): { readonly lines: readonly string[]; readonly maps: readonly ViewportCellMap[] } {
     const start = this.viewportState?.start
     const maps: ViewportCellMap[] = []
@@ -2320,11 +2336,8 @@ export class Transcript implements Component, Focusable {
     }
     let blockIndex = this.blocks.findIndex(block => block.key === start.blockKey)
     let lineOffset = start.lineOffset
-    let started = false
     for (let row = 0; row < lines.length; row += 1) {
-      const empty = (lines[row] ?? '').replace(/\u001B\[[0-9;:]*m/gu, '').trim() === ''
-      if (!started && empty) continue
-      started = true
+      if (row < leadingPadding) continue
       const block = this.blocks[blockIndex]
       if (block === undefined) break
       const copy = this.ownerCopy.get(block.key)
@@ -2370,7 +2383,7 @@ export class Transcript implements Component, Focusable {
     if (Number.isFinite(totalRows) && !this.emptyState) {
       const rows = this.search === undefined ? totalRows : Math.max(1, totalRows - 1)
       const visible = this.finiteViewportLines(contentWidth, rows)
-      const mapped = this.captureViewportMaps(visible, contentWidth)
+      const mapped = this.captureViewportMaps(visible.lines, contentWidth, visible.leadingPadding)
       const highlighted = this.search === undefined
         ? mapped.lines
         : this.highlightVisible(mapped.lines, this.search.query)
