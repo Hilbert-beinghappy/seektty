@@ -50,6 +50,12 @@ export type SubagentPublicStatusEvidence =
   | { readonly kind: 'session-running'; readonly running: boolean }
   | { readonly kind: 'pending-interaction'; readonly interaction: 'approval' | 'plan-review' | 'question' }
   | { readonly kind: 'completion-notification'; readonly completed: true }
+  | { readonly kind: 'turn-timing'; readonly settledMs: number; readonly active: boolean }
+
+export interface SubagentPublicSummary {
+  readonly text: string
+  readonly source: 'displayTitle' | 'title'
+}
 
 export interface SubagentPublicStatus {
   readonly sessionId: SessionId
@@ -65,6 +71,11 @@ export interface SubagentPresentationCapabilities {
   openChild(sessionId: SessionId): SubagentCapabilityResult<OpenChildResult>
   continuation(sessionId: SessionId): SubagentCapabilityResult<SubagentContinuation>
   publicStatusEvidence(sessionId: SessionId): SubagentCapabilityResult<SubagentPublicStatus>
+  publicSummary?(sessionId: SessionId): SubagentCapabilityResult<SubagentPublicSummary | undefined>
+  subscribeDirectChildren?(
+    parentSessionId: SessionId,
+    listener: () => void,
+  ): SubagentCapabilityResult<() => void>
   subscribePublicStatus?(
     sessionId: SessionId,
     listener: (status: SubagentPublicStatus) => void,
@@ -82,6 +93,7 @@ export interface SubagentRuntimeLike {
   refreshSubagents?(parentSessionId: SessionId): Promise<void>
   openSubagent?(address: SubagentAddress): void
   subagentAddress?(sessionId: SessionId): SubagentAddress | undefined
+  navigationAddress?(sessionId: SessionId): SubagentAddress | undefined
   binding?(sessionId: SessionId): { readonly session?: { getSnapshot?(): unknown } } | undefined
 }
 
@@ -93,6 +105,10 @@ function subagentRecord(value: unknown): Readonly<Record<string, unknown>> | und
 
 function sessionId(value: unknown): SessionId | undefined {
   return typeof value === 'string' && value !== '' ? value as SessionId : undefined
+}
+
+function nonnegativeFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
 }
 
 function knownAddress(value: unknown, expectedChild?: SessionId): SubagentAddress | undefined {
@@ -173,11 +189,41 @@ function addressFor(runtime: SubagentRuntimeLike, childSessionId: SessionId):
   | { readonly state: 'absent' }
   | { readonly state: 'invalid' }
   | { readonly state: 'ready'; readonly address: SubagentAddress } {
-  if (typeof runtime.subagentAddress !== 'function') return { state: 'absent' }
-  const raw = runtime.subagentAddress(childSessionId)
-  if (raw === undefined) return { state: 'absent' }
-  const address = knownAddress(raw, childSessionId)
-  return address === undefined ? { state: 'invalid' } : { state: 'ready', address }
+  for (const resolve of [runtime.subagentAddress, runtime.navigationAddress]) {
+    if (typeof resolve !== 'function') continue
+    const raw = resolve.call(runtime, childSessionId)
+    if (raw === undefined) continue
+    const address = knownAddress(raw, childSessionId)
+    return address === undefined ? { state: 'invalid' } : { state: 'ready', address }
+  }
+
+  const matches: SubagentAddress[] = []
+  const catalogs = subagentRecord(runtimeSnapshot(runtime)?.subagentsByParent)
+  if (catalogs !== undefined) {
+    for (const [rawParentId, rawCatalog] of Object.entries(catalogs)) {
+      const parentSessionId = sessionId(rawParentId)
+      const entries = subagentRecord(rawCatalog)?.entries
+      if (parentSessionId === undefined || !Array.isArray(entries)) continue
+      for (const rawEntry of entries) {
+        const parsed = parseEntry(rawEntry)
+        if (!('entry' in parsed) || parsed.entry.kind !== 'child' || parsed.entry.id !== childSessionId) continue
+        const address = knownAddress({
+          parentSessionId,
+          childSessionId,
+          mode: parsed.entry.mode,
+        }, childSessionId)
+        if (address !== undefined) matches.push(address)
+      }
+    }
+  }
+  if (matches.length === 0) return { state: 'absent' }
+  if (matches.length > 1) return { state: 'invalid' }
+  return { state: 'ready', address: matches[0] as SubagentAddress }
+}
+
+function hasNavigationSurface(runtime: SubagentRuntimeLike): boolean {
+  if (typeof runtime.subagentAddress === 'function' || typeof runtime.navigationAddress === 'function') return true
+  return subagentRecord(runtimeSnapshot(runtime)?.subagentsByParent) !== undefined
 }
 
 function parentAvailability(runtime: SubagentRuntimeLike, address: SubagentAddress): boolean | undefined {
@@ -207,6 +253,20 @@ function statusEvidence(
     evidence.push({ kind: 'pending-interaction', interaction: pending })
   }
   if (summary?.completed === true) evidence.push({ kind: 'completion-notification', completed: true })
+  const timing = subagentRecord(subagentRecord(summary?.projectionValues)?.subagentTiming)
+  const settledMs = nonnegativeFiniteNumber(timing?.settledMs)
+  if (settledMs !== undefined) {
+    if (timing?.active === undefined) {
+      evidence.push({ kind: 'turn-timing', settledMs, active: false })
+    } else {
+      const active = subagentRecord(timing.active)
+      const since = nonnegativeFiniteNumber(active?.since)
+      const through = nonnegativeFiniteNumber(active?.through)
+      if (since !== undefined && through !== undefined && through >= since) {
+        evidence.push({ kind: 'turn-timing', settledMs, active: true })
+      }
+    }
+  }
 
   const catalogs = subagentRecord(snapshot.subagentsByParent)
   if (catalogs !== undefined) {
@@ -246,7 +306,7 @@ export function createSubagentPresentationCapabilities(
       }
       const snapshot = runtimeSnapshot(runtime)
       if (subagentRecord(snapshot?.subagentsByParent) === undefined) {
-        if (typeof runtime.subagentAddress !== 'function') {
+        if (!hasNavigationSurface(runtime)) {
           return { support: 'unsupported', reason: 'catalog-unavailable' }
         }
         const children: DirectSubagentChild[] = []
@@ -320,7 +380,7 @@ export function createSubagentPresentationCapabilities(
     },
 
     openChild(childSessionId) {
-      if (typeof runtime.openSubagent !== 'function' || typeof runtime.subagentAddress !== 'function') {
+      if (typeof runtime.openSubagent !== 'function' || !hasNavigationSurface(runtime)) {
         return { support: 'unsupported', reason: 'navigation-unavailable' }
       }
       const resolved = addressFor(runtime, childSessionId)
@@ -335,7 +395,7 @@ export function createSubagentPresentationCapabilities(
     },
 
     continuation(childSessionId) {
-      if (typeof runtime.subagentAddress !== 'function') {
+      if (!hasNavigationSurface(runtime)) {
         return { support: 'unsupported', reason: 'navigation-unavailable' }
       }
       const resolved = addressFor(runtime, childSessionId)
@@ -355,6 +415,31 @@ export function createSubagentPresentationCapabilities(
 
     publicStatusEvidence(childSessionId) {
       return statusEvidence(runtime, childSessionId)
+    },
+
+    publicSummary(childSessionId) {
+      const snapshot = runtimeSnapshot(runtime)
+      if (snapshot === undefined) {
+        return { support: 'unsupported', reason: 'session-status-unavailable' }
+      }
+      const summary = subagentRecord(subagentRecord(snapshot.byId)?.[childSessionId])
+      if (typeof summary?.displayTitle === 'string' && summary.displayTitle.trim() !== '') {
+        return {
+          support: 'supported',
+          value: { text: summary.displayTitle, source: 'displayTitle' },
+        }
+      }
+      if (typeof summary?.title === 'string' && summary.title.trim() !== '') {
+        return { support: 'supported', value: { text: summary.title, source: 'title' } }
+      }
+      return { support: 'supported', value: undefined }
+    },
+
+    subscribeDirectChildren(_parentSessionId, listener) {
+      if (typeof runtime.list?.subscribe !== 'function') {
+        return { support: 'unsupported', reason: 'catalog-unavailable' }
+      }
+      return { support: 'supported', value: runtime.list.subscribe(listener) }
     },
 
     subscribePublicStatus(childSessionId, listener) {
@@ -493,9 +578,12 @@ export function deriveLifecycle(evidence: readonly SubagentLifecycleEvidence[]):
   const apiError = evidence.some(item => item.kind === 'api-error')
   if (terminal?.kind === 'terminal') return { lifecycle: terminal.status, partial, apiError }
   if (evidence.some(item => item.kind === 'pending-interaction')) return { lifecycle: 'waiting', partial, apiError }
+  const timing = [...evidence].reverse().find(item => item.kind === 'turn-timing')
+  if (timing?.kind === 'turn-timing' && timing.active) return { lifecycle: 'running', partial, apiError }
   const running = [...evidence].reverse().find(item => item.kind === 'session-running')
   if (running?.kind === 'session-running' && running.running) return { lifecycle: 'running', partial, apiError }
   if (evidence.some(item => item.kind === 'completion-notification')) return { lifecycle: 'completed', partial, apiError }
+  if (timing?.kind === 'turn-timing' && timing.settledMs > 0) return { lifecycle: 'completed', partial, apiError }
   if (running?.kind === 'session-running') return { lifecycle: 'idle', partial, apiError }
   const catalog = [...evidence].reverse().find(item => item.kind === 'catalog-activity')
   if (catalog?.kind === 'catalog-activity') {
@@ -614,11 +702,14 @@ function appendEvidence(node: AgentNodeView, evidence: EvidenceRef): readonly Ev
 
 function newerOrEqual(incoming: EvidenceRef, current: EvidenceRef | undefined): boolean {
   if (current === undefined) return true
-  if (incoming.revision !== undefined && current.revision !== undefined) {
+  // Revisions are scoped to their evidence stream. A catalog revision cannot
+  // order a Session projection update, so cross-stream evidence falls back to
+  // its observation cut instead of permanently blocking live status.
+  if (incoming.source === current.source
+    && incoming.revision !== undefined
+    && current.revision !== undefined) {
     return incoming.revision >= current.revision
   }
-  if (incoming.revision !== undefined) return true
-  if (current.revision !== undefined) return false
   return incoming.observedAt >= current.observedAt
 }
 

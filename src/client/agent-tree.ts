@@ -15,7 +15,7 @@ import {
   type SubagentPresentationCapabilities,
 } from './subagent-presentation.ts'
 import type { CellRect, HitRegion } from './mouse-hit-map.ts'
-import { color } from './theme.ts'
+import { background, color, escapeTerminalText, surfaceRow } from './theme.ts'
 import { ui } from './locale.ts'
 import { stripCopyDecorations } from './text-selection.ts'
 
@@ -41,6 +41,7 @@ export interface AgentTreeDockOptions {
 export interface AgentTreeVisibleRow {
   readonly sessionId: SessionId
   readonly depth: number
+  readonly branch: string
   readonly selected: boolean
   readonly expanded: boolean
   readonly expandable: boolean
@@ -92,10 +93,54 @@ function lifecycleGlyph(lifecycle: AgentLifecycle): string {
   }
 }
 
+function lifecycleLabel(lifecycle: AgentLifecycle): string {
+  switch (lifecycle) {
+    case 'running': return color.brand(ui('运行中', 'running'))
+    case 'waiting': return color.warning(ui('等待中', 'waiting'))
+    case 'completed': return color.success(ui('已完成', 'completed'))
+    case 'failed': return color.danger(ui('失败', 'failed'))
+    case 'cancelled': return color.muted(ui('已取消', 'cancelled'))
+    case 'unavailable': return color.danger(ui('不可用', 'unavailable'))
+    case 'idle': return color.muted(ui('空闲', 'idle'))
+    case 'unknown': return color.muted(ui('状态未知', 'unknown'))
+  }
+}
+
 function fitRow(text: string, width: number): string {
   if (width <= 0) return ''
   const clipped = truncateToWidth(text, width, '…')
   return `${clipped}${' '.repeat(Math.max(0, width - visibleWidth(clipped)))}`
+}
+
+function fitSides(left: string, right: string, width: number): string {
+  if (right === '') return fitRow(left, width)
+  const gap = '   '
+  const available = width - visibleWidth(left) - visibleWidth(gap)
+  if (available <= 0) return fitRow(left, width)
+  const fittedRight = truncateToWidth(right, available, '…')
+  const spacing = ' '.repeat(Math.max(visibleWidth(gap), width - visibleWidth(left) - visibleWidth(fittedRight)))
+  return fitRow(`${left}${spacing}${fittedRight}`, width)
+}
+
+function lifecycleCounts(
+  aggregate: { readonly discovered: number; readonly running: number; readonly waiting: number; readonly failed: number },
+  width: number,
+  open: boolean,
+): string {
+  const arrow = open ? '▾' : '▸'
+  const full = ui(
+    `${arrow} 代理树 · ${aggregate.discovered.toLocaleString('en-US')} 个节点 · 运行 ${aggregate.running}  等待 ${aggregate.waiting}  失败 ${aggregate.failed}`,
+    `${arrow} Agent Tree · ${aggregate.discovered.toLocaleString('en-US')} nodes · running ${aggregate.running}  waiting ${aggregate.waiting}  failed ${aggregate.failed}`,
+  )
+  const compact = ui(
+    `${arrow} ${aggregate.discovered.toLocaleString('en-US')} 节点 · 运行${aggregate.running} 等待${aggregate.waiting} 失败${aggregate.failed}`,
+    `${arrow} ${aggregate.discovered.toLocaleString('en-US')} nodes · R${aggregate.running} W${aggregate.waiting} F${aggregate.failed}`,
+  )
+  const minimal = ui(
+    `${arrow} 节点${aggregate.discovered.toLocaleString('en-US')} 运${aggregate.running} 等${aggregate.waiting} 失${aggregate.failed}`,
+    `${arrow} N${aggregate.discovered.toLocaleString('en-US')} R${aggregate.running} W${aggregate.waiting} F${aggregate.failed}`,
+  )
+  return visibleWidth(full) <= width ? full : visibleWidth(compact) <= width ? compact : minimal
 }
 
 /** Resolve the owning root strictly from public continuation addresses. */
@@ -135,6 +180,7 @@ export class AgentTreeDock implements Component, Focusable {
   private readonly inflight = new Map<string, { readonly token: number; readonly controller: AbortController; readonly promise: Promise<void> }>()
   private readonly summaries = new Map<SessionId, CachedSummary>()
   private readonly statusSubscriptions = new Map<SessionId, () => void>()
+  private catalogSubscription: (() => void) | undefined
   private summaryBytes = 0
   private renderTimer: ReturnType<typeof setTimeout> | undefined
   private paintedRows: readonly PaintedRow[] = []
@@ -155,22 +201,29 @@ export class AgentTreeDock implements Component, Focusable {
     this.suspended = true
     this.cancelInflight()
     this.clearStatusSubscriptions()
+    this.clearCatalogSubscription()
     this.scheduleRender()
   }
 
   resume(): void {
     this.suspended = false
+    this.ensureCatalogSubscription()
+    this.refreshVisibleStatus()
     this.scheduleRender()
   }
 
-  /** Show the default collapsed entry without querying children. */
+  /** Show the default collapsed entry and maintain only its direct-child aggregate. */
   showCollapsedRoot(owningRootId: SessionId, selectedSessionId?: SessionId): void {
     if (this.rootId === owningRootId) {
       if (selectedSessionId !== undefined) this.selectedId = selectedSessionId
+      if (this.tree?.rootChildren === 'unrequested' || this.tree?.rootChildren === 'error') {
+        void this.loadChildren(owningRootId, this.rootToken, true)
+      }
       return
     }
     this.cancelInflight()
     this.clearStatusSubscriptions()
+    this.clearCatalogSubscription()
     this.rootToken += 1
     this.rootId = owningRootId
     this.tree = createAgentTreeState(owningRootId)
@@ -182,6 +235,8 @@ export class AgentTreeDock implements Component, Focusable {
     this.viewportOffset = 0
     this.composerSnapshot = undefined
     this.scheduleRender()
+    this.ensureCatalogSubscription()
+    void this.loadChildren(owningRootId, this.rootToken, true)
   }
 
   /** Idempotently open the owning root tree, or only focus an already-open tree. */
@@ -190,6 +245,7 @@ export class AgentTreeDock implements Component, Focusable {
     if (this.rootId !== owningRootId) {
       this.cancelInflight()
       this.clearStatusSubscriptions()
+      this.clearCatalogSubscription()
       this.rootToken += 1
       this.rootId = owningRootId
       this.tree = createAgentTreeState(owningRootId)
@@ -204,6 +260,7 @@ export class AgentTreeDock implements Component, Focusable {
     this.focused = true
     if (selectedSessionId !== undefined && selectedSessionId !== owningRootId) this.selectedId = selectedSessionId
     this.scheduleRender()
+    this.ensureCatalogSubscription()
     if (!focusOnly) void this.loadChildren(owningRootId, this.rootToken, true)
   }
 
@@ -211,8 +268,8 @@ export class AgentTreeDock implements Component, Focusable {
   collapse(): void {
     this.open = false
     this.focused = false
-    this.cancelInflight()
-    this.clearStatusSubscriptions()
+    this.cancelExpandedWork()
+    this.syncStatusSubscriptions(this.directRootSessionIds())
     this.scheduleRender()
   }
 
@@ -276,20 +333,29 @@ export class AgentTreeDock implements Component, Focusable {
     const tree = this.tree
     if (tree === undefined) return
     let next = tree
-    for (const row of this.visibleRows()) {
-      const status = this.options.presentation.publicStatusEvidence(row.sessionId)
+    const sessionIds = this.open
+      ? this.visibleRows(this.options.maxVisibleRows ?? DEFAULT_VISIBLE_ROWS, false).map(row => row.sessionId)
+      : this.directRootSessionIds()
+    for (const sessionId of sessionIds) {
+      const status = this.options.presentation.publicStatusEvidence(sessionId)
       if (status.support !== 'supported') continue
       const now = this.now()
+      const statusRevision = ++this.revision
       const lifecycle = deriveLifecycle(status.value.evidence).lifecycle
       next = reduceAgentTree(next, {
         kind: 'lifecycle',
         rootSessionId: tree.rootSessionId,
-        sessionId: row.sessionId,
+        sessionId,
         lifecycle,
-        evidence: { source: 'session', observedAt: now, id: `status:${row.sessionId}:${now}:${lifecycle}` },
+        restart: lifecycle === 'running',
+        evidence: {
+          source: 'session', observedAt: now, revision: statusRevision,
+          id: `status:${sessionId}:${statusRevision}:${lifecycle}`,
+        },
       })
     }
     this.tree = next
+    this.syncStatusSubscriptions(sessionIds)
     this.scheduleRender()
   }
 
@@ -298,21 +364,27 @@ export class AgentTreeDock implements Component, Focusable {
     const root = this.rootId
     if (tree === undefined || root === undefined || !this.open || this.suspended || limit <= 0) return []
     const flattened: Omit<AgentTreeVisibleRow, 'selected'>[] = []
-    const append = (parent: SessionId, depth: number): void => {
-      for (const node of orderedAgentChildren(tree, parent)) {
+    const append = (parent: SessionId, depth: number, ancestorHasNext: readonly boolean[]): void => {
+      const children = orderedAgentChildren(tree, parent)
+      for (const [index, node] of children.entries()) {
+        const hasNext = index < children.length - 1
         const summary = this.summaries.get(node.sessionId)?.value?.text
+        const branch = `${ancestorHasNext.map(more => more ? '│  ' : '   ').join('')}${hasNext ? '├─ ' : '└─ '}`
         flattened.push({
           sessionId: node.sessionId,
           depth,
+          branch,
           expanded: this.expanded.has(node.sessionId),
           expandable: node.hasChildren,
           node,
           ...(summary === undefined ? {} : { summary }),
         })
-        if (node.hasChildren && this.expanded.has(node.sessionId)) append(node.sessionId, depth + 1)
+        if (node.hasChildren && this.expanded.has(node.sessionId)) {
+          append(node.sessionId, depth + 1, [...ancestorHasNext, hasNext])
+        }
       }
     }
-    append(root, 0)
+    append(root, 0, [])
     const selectedIndex = this.selectedId === undefined
       ? -1
       : flattened.findIndex(row => row.sessionId === this.selectedId)
@@ -334,44 +406,68 @@ export class AgentTreeDock implements Component, Focusable {
     this.paintedRows = []
     this.paintedText = []
     if (this.rootId === undefined || this.suspended || width <= 0) return []
-    const aggregate = this.tree === undefined ? undefined : rootAgentAggregate(this.tree)
-    const total = aggregate?.discovered ?? 0
-    const activity = aggregate === undefined || aggregate.running + aggregate.waiting === 0
-      ? ''
-      : ui(` · 运行 ${aggregate.running} · 等待 ${aggregate.waiting}`, ` · running ${aggregate.running} · waiting ${aggregate.waiting}`)
-    const clickHint = this.options.mouseMode?.() === 'native'
-      ? ' · /subagents'
-      : ui(' · 点击展开 · /subagents', ' · click to expand · /subagents')
-    const bar = `${this.open ? '▾' : '▸'} ${ui('子 Agent', 'Subagents')} ${total.toLocaleString('en-US')}${activity}${this.open ? '' : clickHint}`
+    const aggregate = this.tree === undefined
+      ? { discovered: 0, running: 0, waiting: 0, failed: 0, partial: 0, activityPreview: [] }
+      : rootAgentAggregate(this.tree)
+    const counts = lifecycleCounts(aggregate, width, this.open)
+    const activity = aggregate.activityPreview.map(item => item.label).join(' · ')
+    const mouseHint = this.options.mouseMode?.() === 'native'
+      ? '/subagents'
+      : ui('点击展开 · /subagents', 'click to expand · /subagents')
+    const right = this.open
+      ? activity === '' ? '' : ui(`活动：${activity}`, `Activity: ${activity}`)
+      : activity === '' ? mouseHint : `${activity} · ${mouseHint}`
+    const divider = color.muted('─'.repeat(Math.max(0, width)))
+    const bar = fitSides(this.focused ? color.brand(counts) : color.muted(counts), color.muted(right), width)
     if (!this.open) {
-      const collapsed = fitRow(this.focused ? color.brand(bar) : color.muted(bar), width)
-      this.paintedText = [stripCopyDecorations(collapsed)]
-      return [collapsed]
+      const collapsed = [divider, surfaceRow(bar, width)]
+      this.paintedText = collapsed.map(stripCopyDecorations)
+      return collapsed
     }
     const rows = this.visibleRows()
-    const rendered = [fitRow(this.focused ? color.brand(bar) : color.muted(bar), width)]
+    const rendered = [divider, surfaceRow(bar, width)]
     for (const [index, row] of rows.entries()) {
-      const indent = '  '.repeat(row.depth + 1)
       const chevron = row.expandable ? row.expanded ? '▾' : '▸' : ' '
-      const label = row.node.label ?? row.sessionId
-      const continuation = row.node.continuation === 'available' ? ui('可继续', 'continuable') : undefined
-      const suffix = [row.summary, continuation].filter(Boolean).join(' · ')
-      const marker = row.selected ? color.brand('❯') : ' '
-      rendered.push(fitRow(`${marker}${indent}${chevron} ${lifecycleGlyph(row.node.lifecycle)} ${label}${suffix === '' ? '' : ` · ${suffix}`}`, width))
+      const label = escapeTerminalText(row.node.label ?? row.sessionId)
+      const continuation = row.node.continuation === 'available'
+        ? ui('可继续', 'continuable')
+        : row.node.continuation === 'stale' ? ui('只读', 'read-only') : undefined
+      const summary = [row.summary === undefined ? undefined : escapeTerminalText(row.summary), continuation, row.node.partial ? ui('部分结果', 'partial result') : undefined]
+        .filter(Boolean).join(' · ')
+      const marker = row.selected ? '❯ ' : '  '
+      const treeText = `${marker}${row.branch}${chevron} ${lifecycleGlyph(row.node.lifecycle)} ${label}`
+      let content: string
+      if (width >= 54) {
+        const statusWidth = 10
+        const treeWidth = Math.max(24, Math.floor(width * 0.48))
+        const summaryWidth = Math.max(0, width - treeWidth - statusWidth - 2)
+        content = `${fitRow(treeText, treeWidth)}  ${fitRow(lifecycleLabel(row.node.lifecycle), statusWidth)}${fitRow(summary, summaryWidth)}`
+      } else if (width >= 32) {
+        const statusWidth = 10
+        content = `${fitRow(treeText, Math.max(0, width - statusWidth))}${fitRow(lifecycleLabel(row.node.lifecycle), statusWidth)}`
+      } else {
+        content = `${treeText} ${lifecycleLabel(row.node.lifecycle)}`
+      }
+      const fitted = fitRow(content, width)
+      rendered.push(row.selected ? background.selection(stripCopyDecorations(fitted)) : surfaceRow(fitted, width))
       this.paintedRows = [...this.paintedRows, {
         sessionId: row.sessionId,
-        row: index + 1,
-        chevronWidth: visibleWidth(`${marker}${indent}${chevron}`),
+        row: index + 2,
+        chevronWidth: visibleWidth(`${marker}${row.branch}${chevron}`),
       }]
     }
     if (rows.length === 0) {
       const state = this.tree?.rootChildren
-      rendered.push(fitRow(state === 'loading' || state === 'unrequested'
+      rendered.push(surfaceRow(fitRow(state === 'loading' || state === 'unrequested'
         ? ui('  正在读取子 Agent…', '  Loading subagents…')
         : state === 'error'
           ? ui('  子 Agent 目录暂不可用', '  Subagent catalog unavailable')
-          : ui('  当前没有子 Agent', '  No subagents yet'), width))
+          : ui('  当前没有子 Agent', '  No subagents yet'), width), width))
     }
+    rendered.push(surfaceRow(fitRow(color.muted(ui(
+      '←/→ 展开收起   Enter 打开   Esc 关闭',
+      '←/→ expand/collapse   Enter open   Esc close',
+    )), width), width))
     this.paintedText = rendered.map(stripCopyDecorations)
     return rendered
   }
@@ -379,9 +475,9 @@ export class AgentTreeDock implements Component, Focusable {
   /** Full-mode hit regions only. Native mode deliberately returns none. */
   hitRegions(rect: CellRect, mouseMode: 'full' | 'native'): readonly HitRegion[] {
     if (mouseMode === 'native' || this.suspended || rect.height <= 0 || rect.width <= 0 || this.rootId === undefined) return []
-    const regions: HitRegion[] = [{
+    const regions: HitRegion[] = rect.height <= 1 ? [] : [{
       id: `agent-tree:entry:${this.rootId}`,
-      rect: { col: rect.col, row: rect.row, width: rect.width, height: 1 },
+      rect: { col: rect.col, row: rect.row + 1, width: rect.width, height: 1 },
       zIndex: 30,
       role: 'button',
       enabled: true,
@@ -489,6 +585,7 @@ export class AgentTreeDock implements Component, Focusable {
   dispose(): void {
     this.cancelInflight()
     this.clearStatusSubscriptions()
+    this.clearCatalogSubscription()
     if (this.renderTimer !== undefined) clearTimeout(this.renderTimer)
     this.renderTimer = undefined
   }
@@ -499,6 +596,12 @@ export class AgentTreeDock implements Component, Focusable {
     const rows = this.visibleRows(Number.MAX_SAFE_INTEGER, false)
     this.viewportOffset = oldOffset
     return rows
+  }
+
+  private directRootSessionIds(): SessionId[] {
+    const root = this.rootId
+    if (root === undefined || this.tree === undefined) return []
+    return orderedAgentChildren(this.tree, root).map(node => node.sessionId)
   }
 
   private select(sessionId: SessionId | undefined): void {
@@ -577,14 +680,21 @@ export class AgentTreeDock implements Component, Focusable {
   }
 
   async loadSummary(sessionId: SessionId): Promise<void> {
-    if (this.options.loadSummary === undefined || this.summaries.has(sessionId)) return
+    const publicSummary = this.options.presentation.publicSummary
+    if ((this.options.loadSummary === undefined && publicSummary === undefined) || this.summaries.has(sessionId)) return
     const key = `summary:${sessionId}`
     if (this.inflight.has(key)) return this.inflight.get(key)?.promise
     const token = this.rootToken
     const controller = new AbortController()
-    const promise = this.options.loadSummary(sessionId, controller.signal).then((value) => {
+    const loading = this.options.loadSummary !== undefined
+      ? this.options.loadSummary(sessionId, controller.signal)
+      : Promise.resolve(publicSummary?.call(this.options.presentation, sessionId))
+        .then(result => result?.support === 'supported' ? result.value : undefined)
+    const promise = loading.then((value) => {
       if (controller.signal.aborted || token !== this.rootToken) return
-      const bytes = value?.bytes ?? (value === undefined ? 0 : Buffer.byteLength(value.text, 'utf8'))
+      const bytes = value !== undefined && 'bytes' in value && value.bytes !== undefined
+        ? value.bytes
+        : value === undefined ? 0 : Buffer.byteLength(value.text, 'utf8')
       this.putSummary(sessionId, value === undefined ? { bytes } : { value, bytes })
       this.scheduleRender()
     }, () => undefined).finally(() => { this.inflight.delete(key) })
@@ -631,20 +741,39 @@ export class AgentTreeDock implements Component, Focusable {
     this.inflight.clear()
   }
 
+  /** Stop expanded-only work while preserving a root catalog pull needed by the collapsed aggregate. */
+  private cancelExpandedWork(): void {
+    const root = this.rootId
+    const rootRequestPrefix = root === undefined ? undefined : `${root}:${root}:`
+    for (const [key, request] of this.inflight) {
+      if (rootRequestPrefix !== undefined && key.startsWith(rootRequestPrefix)) continue
+      request.controller.abort()
+      this.inflight.delete(key)
+    }
+  }
+
   subscribePublicStatus(sessionId: SessionId): void {
-    if (!this.open || this.suspended || this.statusSubscriptions.has(sessionId)) return
+    const node = this.tree?.nodes.get(sessionId)
+    const visibleWhileCollapsed = !this.open && node?.parentSessionId === this.rootId
+    if (this.suspended || (!this.open && !visibleWhileCollapsed) || this.statusSubscriptions.has(sessionId)) return
     const subscribe = this.options.presentation.subscribePublicStatus
     if (subscribe === undefined) return
     this.statusSubscriptions.set(sessionId, () => undefined)
     const result = subscribe(sessionId, (status) => {
       const tree = this.tree
-      if (!this.open || tree === undefined || !this.statusSubscriptions.has(sessionId)) return
+      const directWhileCollapsed = !this.open && tree?.nodes.get(sessionId)?.parentSessionId === this.rootId
+      if ((!this.open && !directWhileCollapsed) || tree === undefined || !this.statusSubscriptions.has(sessionId)) return
       const now = this.now()
+      const statusRevision = ++this.revision
       const lifecycle = deriveLifecycle(status.evidence).lifecycle
       this.tree = reduceAgentTree(tree, {
         kind: 'lifecycle', rootSessionId: tree.rootSessionId, sessionId,
         lifecycle,
-        evidence: { source: 'session', observedAt: now, id: `subscription:${sessionId}:${now}:${lifecycle}` },
+        restart: lifecycle === 'running',
+        evidence: {
+          source: 'session', observedAt: now, revision: statusRevision,
+          id: `subscription:${sessionId}:${statusRevision}:${lifecycle}`,
+        },
       })
       this.scheduleRender()
     })
@@ -665,6 +794,23 @@ export class AgentTreeDock implements Component, Focusable {
   private clearStatusSubscriptions(): void {
     for (const dispose of this.statusSubscriptions.values()) dispose()
     this.statusSubscriptions.clear()
+  }
+
+  private ensureCatalogSubscription(): void {
+    const root = this.rootId
+    const subscribe = this.options.presentation.subscribeDirectChildren
+    if (root === undefined || this.suspended || this.catalogSubscription !== undefined || subscribe === undefined) return
+    const token = this.rootToken
+    const result = subscribe(root, () => {
+      if (this.suspended || this.rootId !== root || this.rootToken !== token) return
+      void this.loadChildren(root, token, false)
+    })
+    if (result.support === 'supported') this.catalogSubscription = result.value
+  }
+
+  private clearCatalogSubscription(): void {
+    this.catalogSubscription?.()
+    this.catalogSubscription = undefined
   }
 
   private now(): number { return this.options.now?.() ?? Date.now() }

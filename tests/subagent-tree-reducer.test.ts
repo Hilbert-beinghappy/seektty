@@ -126,6 +126,16 @@ describe('Agent Tree presentation reducer', () => {
     })
   })
 
+  it('allows a newer Session status cut to supersede an unrelated catalog revision', () => {
+    const state = apply(
+      createAgentTreeState(root),
+      catalog(root, [{ id: child }], { id: 'catalog', source: 'catalog', observedAt: 10, revision: 7 }),
+      lifecycle(child, 'completed', { id: 'status', source: 'session', observedAt: 11 }),
+    )
+
+    expect(state.nodes.get(child)?.lifecycle).toBe('completed')
+  })
+
   it('merges late continuation without letting an older catalog regress it', () => {
     const state = apply(
       createAgentTreeState(root),

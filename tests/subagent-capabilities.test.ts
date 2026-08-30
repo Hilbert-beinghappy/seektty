@@ -25,9 +25,16 @@ function currentRuntime(options: {
   const snapshot = {
     byId: {
       [child]: {
+        displayTitle: 'Research session',
         running: true,
         pendingInteraction: 'approval',
         completed: true,
+        projectionValues: {
+          subagentTiming: {
+            settledMs: 8120,
+            active: { since: 100, through: 240 },
+          },
+        },
       },
     },
     subagentsByParent: {
@@ -52,6 +59,7 @@ function currentRuntime(options: {
     refreshSubagents: vi.fn(async () => undefined),
     openSubagent: vi.fn(),
     subagentAddress: (id: SessionId) => id === child ? address : undefined,
+    navigationAddress: (id: SessionId) => id === child ? address : undefined,
     binding: () => ({
       session: {
         getSnapshot: () => ({
@@ -117,6 +125,47 @@ describe('current dsh subagent presentation contract', () => {
     })
   })
 
+  it('opens a freshly catalog-discovered child before the Runtime retains its transport address', async () => {
+    const runtime = currentRuntime()
+    runtime.subagentAddress = () => undefined
+    const adapter = createSubagentPresentationCapabilities(runtime)
+
+    const catalog = await adapter.listDirectChildren(parent, { refresh: true })
+    expect(catalog.support).toBe('supported')
+    expect(adapter.openChild(child)).toEqual({
+      support: 'supported',
+      value: {
+        opened: true,
+        address: { parentSessionId: parent, childSessionId: child, mode: 'continuable' },
+      },
+    })
+    expect(runtime.openSubagent).toHaveBeenCalledWith({
+      parentSessionId: parent,
+      childSessionId: child,
+      mode: 'continuable',
+    })
+    expect(adapter.continuation(child)).toMatchObject({
+      support: 'supported',
+      value: {
+        state: 'available',
+        address: { parentSessionId: parent, childSessionId: child, mode: 'continuable' },
+      },
+    })
+  })
+
+  it('keeps catalog navigation readable when the parent is unavailable', async () => {
+    const runtime = currentRuntime({ parentAvailable: false })
+    runtime.subagentAddress = () => undefined
+    const adapter = createSubagentPresentationCapabilities(runtime)
+
+    await adapter.listDirectChildren(parent, { refresh: true })
+    expect(adapter.openChild(child)).toMatchObject({ support: 'supported', value: { opened: true } })
+    expect(adapter.continuation(child)).toMatchObject({
+      support: 'supported',
+      value: { state: 'stale' },
+    })
+  })
+
   it('distinguishes available, stale, absent, and unknown continuation', () => {
     expect(createSubagentPresentationCapabilities(currentRuntime()).continuation(child)).toMatchObject({
       support: 'supported', value: { state: 'available' },
@@ -146,10 +195,31 @@ describe('current dsh subagent presentation contract', () => {
           { kind: 'session-running', running: true },
           { kind: 'pending-interaction', interaction: 'approval' },
           { kind: 'completion-notification', completed: true },
+          { kind: 'turn-timing', settledMs: 8120, active: true },
           { kind: 'catalog-activity', activity: 'running', parentSessionId: parent },
         ],
       },
     })
+  })
+
+  it('projects only a public Session title as the optional node summary', () => {
+    expect(createSubagentPresentationCapabilities(currentRuntime()).publicSummary?.(child)).toEqual({
+      support: 'supported',
+      value: { text: 'Research session', source: 'displayTitle' },
+    })
+  })
+
+  it('ignores a malformed active timing interval instead of misreporting a settled turn', () => {
+    const runtime = currentRuntime()
+    const snapshot = runtime.list.getSnapshot() as { byId: Record<string, { projectionValues: { subagentTiming: unknown } }> }
+    snapshot.byId[child]!.projectionValues.subagentTiming = {
+      settledMs: 8120,
+      active: { since: 240, through: 100 },
+    }
+    const result = createSubagentPresentationCapabilities(runtime).publicStatusEvidence(child)
+    expect(result.support === 'supported'
+      ? result.value.evidence.some(item => item.kind === 'turn-timing')
+      : true).toBe(false)
   })
 
   it('fails soft on old hosts and never probes future fields', async () => {
@@ -164,6 +234,9 @@ describe('current dsh subagent presentation contract', () => {
       support: 'unsupported', reason: 'navigation-unavailable',
     })
     expect(adapter.publicStatusEvidence(child)).toEqual({
+      support: 'unsupported', reason: 'session-status-unavailable',
+    })
+    expect(adapter.publicSummary?.(child)).toEqual({
       support: 'unsupported', reason: 'session-status-unavailable',
     })
   })

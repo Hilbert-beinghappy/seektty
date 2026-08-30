@@ -49,7 +49,8 @@ describe('current dsh public tree integration', () => {
         subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
       },
       refreshSubagents,
-      subagentAddress: sessionId => addresses.get(sessionId),
+      subagentAddress: () => undefined,
+      navigationAddress: sessionId => addresses.get(sessionId),
       openSubagent,
       binding: sessionId => ({
         session: { getSnapshot: () => ({ subagent: { address: addresses.get(sessionId), parentAvailable: true } }) },
@@ -68,7 +69,7 @@ describe('current dsh public tree integration', () => {
     ])
     expect(refreshSubagents).toHaveBeenCalledTimes(2)
     expect(conversationFetch).not.toHaveBeenCalled()
-    expect(listeners.size).toBe(2)
+    expect(listeners.size).toBe(3)
 
     const childView = new ChildSessionView()
     expect(childView.openChildView({
@@ -93,8 +94,9 @@ describe('current dsh public tree integration', () => {
     expect(childView.closeChildView({ openParent: vi.fn(), restore: () => 'exact' }).transcriptRestore).toBe('exact')
 
     dock.collapse()
-    expect(listeners.size).toBe(0)
+    expect(listeners.size).toBe(2)
     dock.dispose()
+    expect(listeners.size).toBe(0)
   })
 
   it('uses exact public addresses for an old-host direct list and reports unsupported without inventing relationships', async () => {

@@ -61,6 +61,64 @@ afterEach(() => {
 })
 
 describe('AgentTreeDock', () => {
+  it('loads and maintains the direct-root aggregate while collapsed without opening details', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const adapter = presentation({
+      root: catalog('root', [
+        { id: 'running', label: '运行节点', running: true },
+        { id: 'idle', label: '完成节点' },
+      ]),
+    })
+    const dock = new AgentTreeDock({ presentation: adapter, requestRender: vi.fn() })
+
+    dock.showCollapsedRoot(id('root'))
+    await settle()
+
+    expect(adapter.listDirectChildren).toHaveBeenCalledTimes(1)
+    expect(adapter.listDirectChildren).toHaveBeenCalledWith(id('root'), { refresh: true })
+    const collapsed = dock.render(100).join('\n')
+    expect(collapsed).toContain('代理树 · 2 个节点')
+    expect(collapsed).toContain('运行 1')
+    expect(collapsed).toContain('等待 0')
+    expect(collapsed).toContain('失败 0')
+    expect(collapsed).toContain('/subagents')
+    expect(dock.visibleRows()).toEqual([])
+    dock.dispose()
+  })
+
+  it('discovers a new direct child from the cached catalog subscription while collapsed', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    let current = catalog('root', [{ id: 'first' }])
+    let catalogChanged: (() => void) | undefined
+    const adapter = presentation({})
+    adapter.listDirectChildren = vi.fn(async (_parent, options) => ({
+      support: 'supported' as const,
+      value: current,
+      options,
+    })) as SubagentPresentationCapabilities['listDirectChildren']
+    adapter.subscribeDirectChildren = (_parent, listener) => {
+      catalogChanged = listener
+      return { support: 'supported', value: () => undefined }
+    }
+    adapter.publicStatusEvidence = sessionId => ({
+      support: 'supported',
+      value: { sessionId, evidence: [{ kind: 'session-running', running: sessionId === id('second') }] },
+    })
+    const dock = new AgentTreeDock({ presentation: adapter, requestRender: vi.fn() })
+    dock.showCollapsedRoot(id('root'))
+    await dock.loadChildren(id('root'))
+    expect(dock.render(80).join('\n')).toContain('1 个节点')
+
+    current = catalog('root', [{ id: 'first' }, { id: 'second', running: true }])
+    catalogChanged?.()
+    await dock.loadChildren(id('root'))
+    const updated = dock.render(80).join('\n')
+    expect(updated).toContain('2 个节点')
+    expect(updated).toContain('运行 1')
+    expect(adapter.listDirectChildren).toHaveBeenLastCalledWith(id('root'), { refresh: false })
+    dock.dispose()
+  })
+
   it('opens idempotently, preserves the draft, and renders stable full-mode hit identities', async () => {
     vi.stubEnv('NO_COLOR', '1')
     const adapter = presentation({
@@ -78,17 +136,18 @@ describe('AgentTreeDock', () => {
     expect(adapter.listDirectChildren).toHaveBeenCalledTimes(1)
     expect(dock.selectedNode()?.sessionId).toBe(id('running'))
     expect(dock.render(22).every(line => line.replace(/\u001B\[[0-9;:]*m/gu, '').length <= 22)).toBe(true)
-    const full = dock.hitRegions({ col: 0, row: 5, width: 22, height: 3 }, 'full')
+    const renderedHeight = dock.render(22).length
+    const full = dock.hitRegions({ col: 0, row: 5, width: 22, height: renderedHeight }, 'full')
     expect(full.map(region => region.id)).toEqual([
       'agent-tree:entry:root',
       'agent:running',
       'agent:child',
     ])
-    expect(dock.hitRegions({ col: 0, row: 5, width: 80, height: 3 }, 'native')).toEqual([])
+    expect(dock.hitRegions({ col: 0, row: 5, width: 80, height: renderedHeight }, 'native')).toEqual([])
     expect(dock.render(80)).toBeDefined()
-    expect(dock.hitRegions({ col: 0, row: 5, width: 80, height: 3 }, 'full').map(region => region.id))
+    expect(dock.hitRegions({ col: 0, row: 5, width: 80, height: dock.render(80).length }, 'full').map(region => region.id))
       .toEqual(full.map(region => region.id))
-    dock.selectText({ col: 0, row: 5, width: 80, height: 3 }, { row: 6 }, { row: 7 })
+    dock.selectText({ col: 0, row: 5, width: 80, height: dock.render(80).length }, { row: 7 }, { row: 8 })
     expect(dock.copySelectionText()).toContain('正在运行的子 Agent')
     expect(dock.copySelectionText()).toContain('超长中文节点名称')
 
@@ -114,6 +173,77 @@ describe('AgentTreeDock', () => {
     expect(adapter.listDirectChildren).toHaveBeenCalledTimes(2)
     expect(dock.visibleRows().map(row => row.sessionId)).toEqual([id('child'), id('grandchild')])
     expect(dock.handleClick('row', id('grandchild'), 2)).toEqual({ consumed: true, openedSessionId: id('grandchild') })
+    dock.dispose()
+  })
+
+  it('renders the target hierarchy, status and summary columns, selected row, footer, and narrow fallback', async () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const adapter = presentation({
+      root: catalog('root', [
+        { id: 'running', label: '调研协调器', running: true, hasChildren: true },
+        { id: 'waiting', label: '终端渲染' },
+      ]),
+      running: catalog('running', [{ id: 'completed', label: 'dsh 能力审计' }]),
+    })
+    adapter.publicStatusEvidence = vi.fn(sessionId => ({
+      support: 'supported' as const,
+      value: {
+        sessionId,
+        evidence: sessionId === id('running')
+          ? [{ kind: 'session-running' as const, running: true }]
+          : sessionId === id('waiting')
+            ? [{ kind: 'pending-interaction' as const, interaction: 'approval' as const }]
+            : [{ kind: 'turn-timing' as const, settledMs: 10, active: false }],
+      },
+    }))
+    adapter.publicSummary = vi.fn(sessionId => ({
+      support: 'supported' as const,
+      value: { text: `摘要:${sessionId}`, source: 'displayTitle' as const },
+    }))
+    const dock = new AgentTreeDock({
+      presentation: adapter,
+      requestRender: vi.fn(),
+      mouseMode: () => 'full',
+    })
+    dock.openOrFocus(id('root'))
+    await dock.loadChildren(id('root'))
+    dock.handleClick('chevron', id('running'), 1)
+    await dock.loadChildren(id('running'))
+    dock.render(100)
+    await settle()
+
+    const wide = dock.render(100)
+    const plain = wide.join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+    expect(plain).toContain('代理树 · 3 个节点 · 运行 1  等待 1  失败 0')
+    expect(plain).toContain('├─ ▾')
+    expect(plain).toContain('│  └─')
+    expect(plain).toContain('运行中')
+    expect(plain).toContain('等待中')
+    expect(plain).toContain('已完成')
+    expect(plain).toContain('摘要:completed')
+    expect(plain).toContain('←/→ 展开收起   Enter 打开   Esc 关闭')
+    expect(wide[2]).toMatch(/\u001B\[48;2;/u)
+
+    const narrow = dock.render(30).join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
+    expect(narrow).toContain('3 节点 · 运行1 等待1 失败0')
+    expect(narrow).not.toContain('摘要:')
+    dock.dispose()
+  })
+
+  it('does not claim the collapsed bar is clickable in native mouse mode', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', []) }),
+      requestRender: vi.fn(),
+      mouseMode: () => 'native',
+    })
+    dock.showCollapsedRoot(id('root'))
+    await dock.loadChildren(id('root'))
+    const text = dock.render(80).join('\n')
+    expect(text).toContain('/subagents')
+    expect(text).not.toContain('点击展开')
     dock.dispose()
   })
 
@@ -167,8 +297,8 @@ describe('AgentTreeDock', () => {
     expect(dock.visibleRows()).toHaveLength(7)
     await settle()
     expect(loadSummary).toHaveBeenCalledTimes(7)
-    expect(dock.render(60)).toHaveLength(8)
-    expect(dock.render(60)[0]).toContain('1,000')
+    expect(dock.render(60)).toHaveLength(10)
+    expect(dock.render(60)[1]).toContain('1,000')
     dock.dispose()
   })
 

@@ -21,6 +21,8 @@ describe('conservative subagent lifecycle', () => {
     ['cancelled', { kind: 'terminal', status: 'cancelled' } as const],
     ['waiting', { kind: 'pending-interaction', interaction: 'approval' } as const],
     ['running', { kind: 'session-running', running: true } as const],
+    ['running', { kind: 'turn-timing', settledMs: 10, active: true } as const],
+    ['completed', { kind: 'turn-timing', settledMs: 10, active: false } as const],
     ['idle', { kind: 'session-running', running: false } as const],
     ['unavailable', { kind: 'catalog-diagnostic', reason: 'unavailable', parentSessionId: id('root') } as const],
   ])('derives %s only from matching public evidence', (expected, evidence) => {
@@ -41,6 +43,13 @@ describe('conservative subagent lifecycle', () => {
     expect(deriveLifecycle([
       { kind: 'completion-notification', completed: true },
       { kind: 'session-running', running: true },
+    ]).lifecycle).toBe('running')
+  })
+
+  it('uses a new public active-turn interval as restart evidence after a settled turn', () => {
+    expect(deriveLifecycle([
+      { kind: 'turn-timing', settledMs: 8120, active: false },
+      { kind: 'turn-timing', settledMs: 8120, active: true },
     ]).lifecycle).toBe('running')
   })
 

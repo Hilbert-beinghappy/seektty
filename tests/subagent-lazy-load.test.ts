@@ -45,7 +45,7 @@ describe('subagent lazy loading budgets', () => {
     dock.dispose()
   })
 
-  it('aborts visible summary work and public status subscriptions on collapse', async () => {
+  it('aborts visible summary work but retains direct-root status subscriptions on collapse', async () => {
     let signal: AbortSignal | undefined
     const summary = vi.fn((_sessionId: SessionId, nextSignal: AbortSignal) => {
       signal = nextSignal
@@ -62,7 +62,29 @@ describe('subagent lazy loading budgets', () => {
     expect(signal?.aborted).toBe(false)
     dock.collapse()
     expect(signal?.aborted).toBe(true)
+    expect(dispose).not.toHaveBeenCalled()
+    dock.dispose()
     expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a collapsed direct-root aggregate live and permits a completed child to restart', async () => {
+    let listener: ((status: { sessionId: SessionId; evidence: readonly [{ kind: 'turn-timing'; settledMs: number; active: boolean }] }) => void) | undefined
+    const presentation = adapter(async parent => ({ support: 'supported', value: direct(parent, ['child']) }))
+    presentation.subscribePublicStatus = (_sessionId, next) => {
+      listener = next
+      return { support: 'supported', value: () => undefined }
+    }
+    const dock = new AgentTreeDock({ presentation, requestRender: vi.fn() })
+    dock.showCollapsedRoot(id('root'))
+    await dock.loadChildren(id('root'))
+    expect(listener).toBeDefined()
+
+    listener?.({ sessionId: id('child'), evidence: [{ kind: 'turn-timing', settledMs: 20, active: false }] })
+    expect(dock.node(id('child'))?.lifecycle).toBe('completed')
+    listener?.({ sessionId: id('child'), evidence: [{ kind: 'turn-timing', settledMs: 20, active: true }] })
+    expect(dock.node(id('child'))?.lifecycle).toBe('running')
+    listener?.({ sessionId: id('child'), evidence: [{ kind: 'turn-timing', settledMs: 35, active: false }] })
+    expect(dock.node(id('child'))?.lifecycle).toBe('completed')
     dock.dispose()
   })
 

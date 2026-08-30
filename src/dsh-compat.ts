@@ -36,6 +36,7 @@ export const CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT = Object.freeze({
     'SessionSummary.running',
     'SessionSummary.completed',
     'SessionSummary.projections',
+    'SessionSummary.projectionValues.subagentTiming',
     'SessionListStore.subscribe',
     'ConversationSnapshot.subagent',
     'ConversationSnapshot.views.trajectory',
