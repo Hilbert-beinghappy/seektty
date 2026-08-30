@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crossSpawn from 'cross-spawn'
 import {
@@ -28,6 +28,14 @@ import {
   updatePlan,
 } from './version-scan.ts'
 import { measureStartupSync } from './startup-trace.ts'
+import {
+  dshPluginArgs,
+  dshPluginCommand,
+  pnpmCommand,
+  pnpmGvsRecoveryAdvice,
+  isPnpmGlobalVirtualStorePath,
+  withPnpmGvsCompatibility,
+} from './pnpm-compat.ts'
 
 const LEGACY_PACKAGE_NAME = 'deepseek-tui'
 const DEFAULT_SPEC = defaultPluginSpec(PACKAGE_VERSION)
@@ -228,6 +236,7 @@ export const internals: {
 }
 
 function missingDshMessage(command: string, english: boolean): string {
+  const installCommand = pnpmCommand(['add', '--global', DSH_INSTALL_SPEC])
   return [
     launcherCopy(
       `${command} 未安装或不在 PATH 中。`,
@@ -235,8 +244,8 @@ function missingDshMessage(command: string, english: boolean): string {
       english,
     ),
     launcherCopy(
-      `请先安装 DeepSeek Harness：pnpm add --global ${DSH_INSTALL_SPEC}`,
-      `Install DeepSeek Harness: pnpm add --global ${DSH_INSTALL_SPEC}`,
+      `请先安装 DeepSeek Harness：${installCommand}`,
+      `Install DeepSeek Harness: ${installCommand}`,
       english,
     ),
     launcherCopy(
@@ -250,6 +259,34 @@ function missingDshMessage(command: string, english: boolean): string {
 function classifySpawnError(command: string, error: NodeJS.ErrnoException, english: boolean): Error {
   if (error.code === 'ENOENT') return new Error(missingDshMessage(command, english))
   return error
+}
+
+function realPathUsesPnpmGvs(path: string): boolean {
+  try {
+    return existsSync(path) && isPnpmGlobalVirtualStorePath(realpathSync(path))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Detect a visible pnpm 11 GVS installation without probing or changing pnpm
+ * configuration. The launcher module covers Profile/global SeekTTY installs;
+ * explicit dsh paths and PNPM_HOME cover the stock Host installation.
+ */
+export function launcherUsesPnpmGvsLayout(
+  dsh: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const candidates = [fileURLToPath(import.meta.url)]
+  if (dsh.includes('/') || dsh.includes('\\')) {
+    candidates.push(dsh, join(dirname(dsh), 'node_modules', '@deepseek-ai', 'dsh'))
+  }
+  const pnpmHome = environment.PNPM_HOME?.trim()
+  if (pnpmHome !== undefined && pnpmHome !== '') {
+    candidates.push(join(pnpmHome, 'node_modules', '@deepseek-ai', 'dsh'))
+  }
+  return candidates.some(realPathUsesPnpmGvs)
 }
 
 export function run(command: string, args: readonly string[]): number {
@@ -272,6 +309,7 @@ export function launch(
   environment: NodeJS.ProcessEnv = process.env,
   execute: (command: string, args: readonly string[]) => number = run,
   write: (chunk: string) => void = chunk => { process.stdout.write(chunk) },
+  writeError: (chunk: string) => void = chunk => { process.stderr.write(chunk) },
 ): number {
   if (isVersionRequest(args)) {
     write(versionMessage({
@@ -283,24 +321,40 @@ export function launch(
   }
   const { profile, inner } = launcherArgs(args, environment)
   const dsh = environment.DSH_BIN?.trim() || 'dsh'
-  const stderr = (chunk: string): void => { process.stderr.write(chunk) }
+  const stderr = writeError
   let manifest = measureStartupSync('launcher-manifest', () => profileManifest(profile, environment), environment, stderr)
+  const recoverySpec = environment.SEEKTTY_SPEC?.trim()
+    || environment.DEEPSEEK_TUI_SPEC?.trim()
+    || manifest?.dependencies?.[PACKAGE_NAME]
+    || DEFAULT_SPEC
+  let compatibilityHintWritten = false
+  const finish = (status: number): number => {
+    if (status === 0 || compatibilityHintWritten || !launcherUsesPnpmGvsLayout(dsh, environment)) return status
+    compatibilityHintWritten = true
+    writeError(`${pnpmGvsRecoveryAdvice({
+      english: launcherPrefersEnglish(environment),
+      profile,
+      dshSpec: DSH_INSTALL_SPEC,
+      pluginSpec: recoverySpec,
+    })}\n`)
+    return status
+  }
   if (hasDependency(manifest, LEGACY_PACKAGE_NAME)) {
-    const status = execute(dsh, ['plugin', '--profile', profile, 'remove', LEGACY_PACKAGE_NAME])
-    if (status !== 0) return status
+    const status = execute(dsh, dshPluginArgs(profile, ['remove', LEGACY_PACKAGE_NAME]))
+    if (status !== 0) return finish(status)
     manifest = measureStartupSync('launcher-manifest', () => profileManifest(profile, environment), environment, stderr)
   }
   if (!hasDependency(manifest, PACKAGE_NAME)) {
     const spec = environment.SEEKTTY_SPEC?.trim() || environment.DEEPSEEK_TUI_SPEC?.trim() || DEFAULT_SPEC
     const status = measureStartupSync(
       'plugin-add',
-      () => execute(dsh, ['plugin', '--profile', profile, 'add', spec]),
+      () => execute(dsh, dshPluginArgs(profile, ['add', spec])),
       environment,
       stderr,
     )
-    if (status !== 0) return status
+    if (status !== 0) return finish(status)
   }
-  return execute(dsh, ['--profile', profile, ...inner])
+  return finish(execute(dsh, ['--profile', profile, ...inner]))
 }
 
 async function applyUpdatePlan(
@@ -322,14 +376,15 @@ async function applyUpdatePlan(
     ))
   }
   if (exclusive.dshSpec !== undefined) {
-    write(launcherCopy(`更新 dsh：pnpm add --global ${exclusive.dshSpec}\n`, `Updating dsh: pnpm add --global ${exclusive.dshSpec}\n`, english))
+    const command = pnpmCommand(['add', '--global', exclusive.dshSpec])
+    write(launcherCopy(`更新 dsh：${command}\n`, `Updating dsh: ${command}\n`, english))
     let status: number
     try {
-      status = execute('pnpm', ['add', '--global', exclusive.dshSpec])
+      status = execute('pnpm', withPnpmGvsCompatibility(['add', '--global', exclusive.dshSpec]))
     } catch {
       write(launcherCopy(
-        `pnpm 不可用。请手动运行：pnpm add --global ${exclusive.dshSpec}\n`,
-        `pnpm is unavailable. Run manually: pnpm add --global ${exclusive.dshSpec}\n`,
+        `pnpm 不可用。请手动运行：${command}\n`,
+        `pnpm is unavailable. Run manually: ${command}\n`,
         english,
       ))
       return 1
@@ -338,8 +393,9 @@ async function applyUpdatePlan(
   }
   if (exclusive.seekttySpec !== undefined) {
     const dsh = environment.DSH_BIN?.trim() || 'dsh'
-    write(launcherCopy(`更新 SeekTTY：dsh plugin --profile ${profile} add ${exclusive.seekttySpec}\n`, `Updating SeekTTY: dsh plugin --profile ${profile} add ${exclusive.seekttySpec}\n`, english))
-    const status = execute(dsh, ['plugin', '--profile', profile, 'add', exclusive.seekttySpec])
+    const command = dshPluginCommand(profile, ['add', exclusive.seekttySpec])
+    write(launcherCopy(`更新 SeekTTY：${command}\n`, `Updating SeekTTY: ${command}\n`, english))
+    const status = execute(dsh, dshPluginArgs(profile, ['add', exclusive.seekttySpec]))
     if (status !== 0) return status
   } else if (options.announceCurrentSeektty) {
     write(facts.seekttyPinned

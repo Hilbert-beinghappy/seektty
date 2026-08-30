@@ -139,6 +139,7 @@ export interface TuiHeaderFacts {
   readonly workspace: string
   readonly session: string
   readonly mode: string
+  readonly reasoning?: string
   readonly model: string
   readonly permission: string
   readonly running: boolean
@@ -268,6 +269,7 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'profile', description: ui('管理 Profile', 'Manage Profiles'), argumentHint: '[list|switch|create|copy]', source: 'TUI', behavior: 'local' },
     { name: 'language', description: ui('切换界面语言', 'Switch interface language'), argumentHint: '[auto|zh|en]', source: 'TUI', behavior: 'local' },
     { name: 'theme', description: ui('切换界面或独立代码主题', 'Switch interface or code theme'), argumentHint: '[dark|light|code|use|edit|palette|import|export|delete]', source: 'TUI', behavior: 'local' },
+    { name: 'welcome', description: ui('配置 Fastfetch 风格欢迎页', 'Configure the Fastfetch-style welcome page'), argumentHint: '[refresh|reset]', source: 'TUI', behavior: 'local' },
     { name: 'queue', description: ui('管理排队消息', 'Manage queued messages'), source: 'TUI', behavior: 'local' },
     { name: 'steer', description: ui('发送引导消息', 'Send steering message'), argumentHint: ui('<消息>', '<message>'), source: 'TUI', behavior: 'local' },
     { name: 'attach', description: ui('添加图片', 'Attach image'), argumentHint: ui('[图片路径]', '[image-path]'), source: 'TUI', behavior: 'local' },
@@ -612,6 +614,7 @@ export class HarnessTuiCapabilities {
     const modelRoute = model === undefined
       ? latestModelRoute(active.session.getSnapshot())
       : `${model.provider}/${model.model}${model.reasoningEffort === undefined ? '' : ` · ${model.reasoningEffort}`}`
+    const effortSeparator = modelRoute?.lastIndexOf(' · ') ?? -1
     const permission = this.permissionValue(active.session)
     const context = this.sessionStatistics().context
     const connection = (this.ctx as TuiClientContext & { readonly connection: ConnectionHandle }).connection
@@ -625,6 +628,9 @@ export class HarnessTuiCapabilities {
       session: active.summary.displayTitle,
       mode: active.summary.agentPreset ?? ui('未声明', 'Not declared'),
       model: modelRoute ?? '',
+      ...(model?.reasoningEffort !== undefined
+        ? { reasoning: model.reasoningEffort }
+        : effortSeparator === -1 ? {} : { reasoning: modelRoute?.slice(effortSeparator + 3) ?? '' }),
       permission: permission?.currentValue ?? ui('未提供', 'Not available'),
       running: active.session.getSnapshot().running,
       ...(context === undefined ? {} : { context }),

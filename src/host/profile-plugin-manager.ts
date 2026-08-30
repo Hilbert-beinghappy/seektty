@@ -32,6 +32,13 @@ import {
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
 import { ui } from '../client/locale.ts'
+import {
+  PNPM_GVS_CONFIG_ARG,
+  PNPM_GVS_DSH_RANGE,
+  isKnownPnpmGvsLoaderFailure,
+  isPnpmGlobalVirtualStorePath,
+  withPnpmGvsCompatibility,
+} from '../pnpm-compat.ts'
 import { InstallerOutputRedactor, installerSecrets, redactInstallerText } from './installer-output.ts'
 
 const NAME = 'dsh'
@@ -310,7 +317,7 @@ export class ProfilePluginManager {
     const initialized = this.ensureProfile()
     const beforeSnapshot = this.snapshot()
     const before = readProfileManifest(NAME, this.dir)
-    const command = args.map(argument => this.anchorPathSpec(argument))
+    const command = withPnpmGvsCompatibility(args.map(argument => this.anchorPathSpec(argument)))
     let stdout = ''
     let stderr = ''
     const stdoutRedactor = new InstallerOutputRedactor()
@@ -371,7 +378,7 @@ export class ProfilePluginManager {
       flushVisible()
     }
     this.forgetInstalled()
-    const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
+    const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode, `${stdout}\n${stderr}`)
     const snapshot = this.snapshot()
     const changed = initialized || !sameSnapshotState(beforeSnapshot, snapshot)
     return {
@@ -399,7 +406,7 @@ export class ProfilePluginManager {
     const initialized = this.ensureProfile()
     const beforeSnapshot = this.snapshot()
     const before = readProfileManifest(NAME, this.dir)
-    const command = args.map(argument => this.anchorPathSpec(argument))
+    const command = withPnpmGvsCompatibility(args.map(argument => this.anchorPathSpec(argument)))
     const result = crossSpawn.sync('pnpm', command, {
       cwd: this.dir,
       encoding: 'utf8',
@@ -411,7 +418,9 @@ export class ProfilePluginManager {
       : (spawnError as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1
     if (spawnError !== undefined && (spawnError as NodeJS.ErrnoException).code !== 'ENOENT') throw spawnError
     this.forgetInstalled()
-    const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode)
+    const stdout = typeof result.stdout === 'string' ? redactInstallerText(result.stdout, installerSecrets()) : ''
+    const stderr = typeof result.stderr === 'string' ? redactInstallerText(result.stderr, installerSecrets()) : ''
+    const warnings = exitCode === 0 ? this.reconcile(before) : this.failureWarnings(command, exitCode, `${stdout}\n${stderr}`)
     const snapshot = this.snapshot()
     const changed = initialized || !sameSnapshotState(beforeSnapshot, snapshot)
     return {
@@ -419,8 +428,8 @@ export class ProfilePluginManager {
       dir: this.dir,
       command: ['pnpm', ...command.map(safeDependencySpec)],
       exitCode,
-      stdout: typeof result.stdout === 'string' ? redactInstallerText(result.stdout, installerSecrets()) : '',
-      stderr: typeof result.stderr === 'string' ? redactInstallerText(result.stderr, installerSecrets()) : '',
+      stdout,
+      stderr,
       warnings,
       initialized,
       changed,
@@ -468,6 +477,16 @@ export class ProfilePluginManager {
     for (const plugin of snapshot.plugins) {
       for (const diagnostic of plugin.diagnostics) {
         diagnostics.push({ level: plugin.active ? 'error' : 'warning', message: `${plugin.name}: ${diagnostic}` })
+      }
+      const packageDir = this.installedFacts(plugin.name).packageDir
+      if (packageDir !== undefined && isPnpmGlobalVirtualStorePath(packageDir)) {
+        diagnostics.push({
+          level: 'warning',
+          message: ui(
+            `${plugin.name} 位于 pnpm 11 Global Virtual Store（store/v11/links）；dsh ${PNPM_GVS_DSH_RANGE} 的 Cordis 加载器可能无法加载该布局。后续插件操作将自动附加 ${PNPM_GVS_CONFIG_ARG}。`,
+            `${plugin.name} is under pnpm 11's Global Virtual Store (store/v11/links); the Cordis loader in dsh ${PNPM_GVS_DSH_RANGE} may not load this layout. Future plugin operations automatically add ${PNPM_GVS_CONFIG_ARG}.`,
+          ),
+        })
       }
     }
     for (const bundle of snapshot.bundles) {
@@ -714,7 +733,7 @@ export class ProfilePluginManager {
     return `${match.groups.prefix ?? ''}${resolve(this.invokingCwd, match.groups.path)}`
   }
 
-  private failureWarnings(command: readonly string[], exitCode: number): readonly string[] {
+  private failureWarnings(command: readonly string[], exitCode: number, output: string): readonly string[] {
     if (exitCode === 127) {
       return [({
         zh: 'pnpm 不在 PATH 中；请安装 pnpm 后重试',
@@ -725,6 +744,12 @@ export class ProfilePluginManager {
       `pnpm 在 Profile 目录 ${this.dir} 中失败，退出码 ${exitCode}`,
       `pnpm failed in Profile directory ${this.dir} with exit code ${exitCode}`,
     )]
+    if (isKnownPnpmGvsLoaderFailure(output)) {
+      warnings.push(ui(
+        `检测到 pnpm 11 Global Virtual Store（store/v11/links）导致的 dsh/Cordis 加载失败；请使用 ${PNPM_GVS_CONFIG_ARG} 重新安装相关依赖。SeekTTY 不会修改全局 pnpm 配置。`,
+        `Detected the dsh/Cordis loader failure caused by pnpm 11's Global Virtual Store (store/v11/links); reinstall the affected dependency with ${PNPM_GVS_CONFIG_ARG}. SeekTTY does not change global pnpm configuration.`,
+      ))
+    }
     if (command.some(argument => /^git\+|^github:|\.git(?:#|$)/.test(argument))) {
       warnings.push(ui(
         `Git 插件的 prepare/install 脚本可能需要在 ${join(this.dir, 'pnpm-workspace.yaml')} 的 allowBuilds 中明确授权`,

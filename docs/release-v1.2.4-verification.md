@@ -60,7 +60,7 @@ pnpm pack --pack-destination $reviewRoot
 $env:DSH_HOME = Join-Path $reviewRoot 'dsh-home'
 $env:SEEKTTY_UPDATE = 'off'
 $env:SEEKTTY_SPEC = Join-Path $reviewRoot 'seektty-1.2.4.tgz'
-dsh plugin --profile tui add $env:SEEKTTY_SPEC
+dsh plugin --profile tui add --config.enable-global-virtual-store=false $env:SEEKTTY_SPEC
 dsh --profile tui
 ```
 
@@ -74,7 +74,7 @@ pnpm pack --pack-destination "$review_root"
 export DSH_HOME="$review_root/dsh-home"
 export SEEKTTY_UPDATE=off
 export SEEKTTY_SPEC="$review_root/seektty-1.2.4.tgz"
-dsh plugin --profile tui add "$SEEKTTY_SPEC"
+dsh plugin --profile tui add --config.enable-global-virtual-store=false "$SEEKTTY_SPEC"
 dsh --profile tui
 ```
 
@@ -121,7 +121,7 @@ The release request authorizes publication. No automatic publishing workflow or 
 No state migration is introduced. Exit TUI and use native `dsh plugin --profile tui add` with a retained, known-good tarball for the intended Profile. The published predecessor is:
 
 ```sh
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.3/seektty-1.2.3.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.3/seektty-1.2.3.tgz
 ```
 
 Keep automatic updates off during rollback testing. If the global `deepseek` launcher was upgraded, pin its package and `SEEKTTY_SPEC` to the same chosen tarball. Do not delete `DSH_HOME`, Settings, or Session data. Version 1.2.3 retains its known mouse limitations; native selection is a temporary fallback.

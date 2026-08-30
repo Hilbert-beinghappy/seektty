@@ -7,7 +7,7 @@
 <p>A terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.4-orange" alt="Version 1.2.4"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.5-orange" alt="Version 1.2.5"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -45,32 +45,32 @@ For requirements that still need definition, the optional [Clarify Host plugin](
 Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
 
 ```sh
-pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 
 dsh --profile tui
 ```
 
-These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
+These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. The per-command pnpm option avoids the pnpm 11 Global Virtual Store layout that the Cordis loader in the currently tested dsh releases cannot reliably load. SeekTTY never changes global pnpm configuration. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
 
-Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.4 review and release checklist](docs/release-v1.2.4-verification.md).
+Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.5 owner review and release checklist](docs/release-v1.2.5-verification.md). This pull request is a release candidate only; merging it does not publish a tag, GitHub Release, or npm package.
 
 ### Bare `deepseek` launcher
 
 After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to that tarball:
 
 ```sh
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 deepseek
 ```
 
 PowerShell uses the same package URL:
 
 ```powershell
-pnpm add --global 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz'
+pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
+$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
 deepseek
 ```
 
@@ -88,16 +88,19 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.4` improves mouse navigation and input editing on official Harness `0.1.1-rc.2`, retaining native terminal selection as a fallback. No Settings or Session migration is required.
+SeekTTY `1.2.5` brings a Fastfetch-style welcome page, terminal-integrated backgrounds, VS Code-grade TextMate highlighting, more reliable transcript and selection controls, and pnpm 11 installation compatibility to official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
 
-### What's new in 1.2.4
+### What's new in 1.2.5
 
-- Lists keep their viewport instead of recentering on selection; ordinary mouse actions work at startup, and nested overlays share theme-aware hover and clickable footer buttons.
-- Overlay text and non-secret inputs support selection and clipboard editing. Ctrl+Z undoes edits in each input; the shortcut reference is grouped by purpose.
-- Context menus are independent of the page stack. Wheel and left-drag gestures dismiss the menu and continue immediately; right-drag opens it at the release position.
-- Escape followed by a mouse report no longer types protocol fragments into search fields. Dangerous confirmations remain keyboard-only, and F3 or `/mouse` retains native selection.
+- Empty sessions open with a responsive DeepSeek pixel-whale welcome page and Profile runtime facts. `/welcome` configures custom rows, optional safe/trusted Fastfetch information, built-in/file/local-Fastfetch logos, mixed ordering, live preview, refresh, and reset without writing welcome content into Session history.
+- The canvas can inherit terminal transparency, blur, and background images through `theme`, `terminal`, and backward-compatible `explicit` background modes. Overlay, panel, and ordinary code surfaces now follow the same inherited-background policy; contrast adaptation and terminal-color restoration keep text readable and terminal state recoverable.
+- Imported VS Code `tokenColors` are authoritative, built-in themes include detailed TextMate rules, and legacy themes receive a compatible fine-grained fallback. Highlighting is language-grammar aware while intentionally remaining visual rather than LSP-semantic.
+- Live and completed Thinking blocks can be folded without streaming reopening them; transcript hit rows are aligned, and collapsed tool cards now hide both parameters and results.
+- Permission switching validates native Harness results and refreshes authoritative state. Model, reasoning effort, and Agent mode have independent click targets and selectors; `/effort` provides the keyboard path.
+- Wide overlays use available space for full option descriptions while preserving search, selection, scroll position, and pointer geometry across resize. Hover styling and transparent surfaces are consistent across nested controls.
+- Launcher provisioning, compatible updates, and TUI plugin mutations disable pnpm 11 Global Virtual Store per command. Known `store/v11/links` loader failures receive precise, credential-redacted recovery without changing global pnpm configuration or bypassing native Profile reconciliation.
 
-See the [release notes](docs/release-v1.2.4.md) for changes and the [review checklist](docs/release-v1.2.4-verification.md) for verification limits.
+See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits. Version 1.2.4 remains the latest published release until the Owner explicitly approves and performs publication.
 
 ## Interface
 
@@ -110,6 +113,8 @@ See the [release notes](docs/release-v1.2.4.md) for changes and the [review chec
 | ![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png) | ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png) |
 
 The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Sent user messages use the composer's top and bottom horizontal rules to separate them from unframed assistant replies. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. Holding a selection at the transcript edge auto-scrolls across loaded pages while preserving one logical text anchor; only the visible viewport is repainted. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
+
+An empty session now opens with a responsive Fastfetch-style welcome page rather than sendable task suggestions. The default uses a packaged, original-color DeepSeek pixel whale plus runtime facts from the current Profile; it does **not** execute Fastfetch. The first-time API-key prompt remains higher priority and finishes before optional Fastfetch collection starts.
 
 ## Clarify and Plan
 
@@ -148,6 +153,7 @@ See [Compatibility and verification](#compatibility-and-verification) for the ac
 | Profiles and Settings | Create, copy, switch, and diagnose Profiles; edit every registered Settings namespace with Schema fallbacks, revision checks, and write-only secrets |
 | Plugins, Skills, and MCP | Plugin center, native Bundle reconciliation, dynamic Skill commands, MCP instances, load state, settings, and risk information |
 | Themes and language | Independent interface/code themes, terminal background effects, palette generation, VS Code theme import, contrast checks, `NO_COLOR`, and live Chinese/English switching |
+| Welcome page | Responsive DeepSeek pixel-whale terminal logo, custom rows, optional Fastfetch facts, live draft preview, and revision-protected Profile settings |
 | Diagnostics and feedback | Runtime status, actionable `/doctor` checks, Session feedback, Assistant-message ratings, and feedback removal |
 
 SeekTTY reads these catalogs from the active Harness Profile. Unsupported optional capabilities degrade safely while dedicated terminal views continue to evolve.
@@ -179,7 +185,7 @@ Typing `/` opens a searchable menu that merges SeekTTY commands, Host commands f
 | Runtime content | `/tools`, `/files`, `/jobs`, `/subagents`, `/trajectory` |
 | Extensions | `/plugin`, `/plugins`, `/skills`, `/mcp` |
 | Plugin workflow | `/clarify` appears when a compatible Clarify Remote and Auxiliary Runtime are active |
-| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/status`, `/doctor`, `/feedback`, `/restart` |
+| Configuration and diagnostics | `/settings`, `/language`, `/theme`, `/welcome`, `/status`, `/doctor`, `/feedback`, `/restart` |
 | Help and exit | `/help`, `/quit`, `/exit` |
 
 `/plugin`, `/workspace`, and `/profile` provide interactive centers and direct subcommands. Unknown commands stay inside the command surface and show nearby suggestions.
@@ -189,6 +195,32 @@ Autocomplete and overlay lists keep their scroll position: the wheel browses wit
 Overlay footers have single-click Select/Confirm/Save and Back/Close buttons, with theme-aware hover. They share keyboard validation and navigation; dangerous confirmations remain keyboard-only. Ordinary mouse actions work immediately after startup without minimizing the terminal. Focus reports, when available, protect against accidental activation for 250 ms after refocusing.
 
 Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerShell `Set-Clipboard` writer, macOS runs `pbcopy` under a UTF-8 locale, Wayland declares `text/plain;charset=utf-8`, and X11 requests `UTF8_STRING`; OSC 52 remains available for terminal, SSH, and tmux paths.
+
+## Settings center
+
+`/settings` is organized by product intent instead of exposing a flat namespace/field index: **Appearance**, **Welcome page**, **Mouse and scrolling**, **Input and shortcuts**, **Models and Agent**, **Permissions and security**, **Plugins and extensions**, and **Language and system**. Existing Harness namespaces and persisted values are unchanged; `/settings <namespace>` remains available for direct compatibility access.
+
+Navigation follows one rule across the dedicated editors: list operations stay in their list, leaf changes return one level, Escape goes back exactly one level, and only Save/Cancel exits a draft transaction. Add, delete, and move operations retain the nearest useful focus. The Welcome Logo, Fastfetch settings, custom rows, and safe-module ordering all follow this rule.
+
+## Welcome page
+
+`/welcome` opens one transactional editor for the empty-session presentation; `/settings seektty-welcome` opens the same editor. Changes stay in a draft until **Save**, then apply immediately under the Settings revision. Escape or **Cancel all changes** leaves the live page unchanged.
+
+Information modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `custom` (default) | Structured headings, text, fixed fields, runtime facts, separators, blank rows, and a theme palette; never runs Fastfetch |
+| `fastfetch` | Shows parsed output from a `fastfetch` executable already on `PATH` |
+| `mixed` | Shows both blocks in the configured custom-first or Fastfetch-first order |
+
+The default runtime facts are SeekTTY version, workspace, model, reasoning effort, Agent mode, permission, and theme. Welcome rows are temporary UI state: they are not written to the Session or chat history, and disappear as soon as the Session has persistent conversation content. Tall welcome content uses transcript scrolling instead of being silently truncated. Resize and theme changes only reflow/recolor cached content.
+
+The built-in large and compact assets are pre-generated terminal versions of the DeepSeek pixel whale from the MIT-licensed `seek-on-dsh` project; the pinned source revision and license are recorded in `THIRD_PARTY_NOTICES.md`. Original mode preserves its blue-and-white palette, while theme mode maps blue to `brand` and white to `text`. SeekTTY does not generate pixel art and does not use Kitty, iTerm, Sixel, or other image protocols. A user-provided UTF-8 terminal-text file can either preserve safely parsed ANSI colors or use Fastfetch-compatible `$[1-9]` foreground slots (`$$` emits a literal `$`) mapped to the current SeekTTY theme. The fourth Logo source reuses the Logo rendered by the local Fastfetch configuration: SeekTTY forces an empty module structure, captures the Logo once, preserves its original ANSI colors, and sanitizes it before layout. This does not run Fastfetch information or `command` modules. Cursor movement, clearing, OSC/DCS, hyperlinks, clipboard commands, and image protocols are removed. Files and captured logos are limited to 256 KiB, 256 columns, and 120 rows; invalid or unavailable sources fall back to the built-in logo with one notice.
+
+Fastfetch remains optional and is never installed or downloaded. The safe information source runs the existing executable directly without a shell, forces `--config none`, disables its logo and colors, and exposes an ordered privacy-conscious module list. The trusted user-config information source may run a Fastfetch `command` module or other external behavior, so enabling it requires an explicit warning confirmation. Logo-only reuse is independent of the information mode and uses the same optional Fastfetch config path (blank means its default config). All collectors have a 2-second timeout and bounded, control-sequence-sanitized output. Collection is cached once per process/configuration; `/welcome refresh` clears both information and Logo caches, while `/welcome reset` restores the non-Fastfetch default.
+
+See the [implementation and compatibility acceptance record](docs/fastfetch-welcome-acceptance.md) for automated coverage and real-terminal boundaries.
 
 ## Common controls
 
@@ -317,23 +349,23 @@ TUI `/plugin` and native `dsh plugin` reconcile the same Profile dependencies, B
 Replace the former `deepseek-tui` global package once:
 
 ```sh
-pnpm remove --global deepseek-tui
-pnpm add --global https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
+pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 deepseek
 ```
 
 Custom Profiles migrate independently on first launch. Native dsh-only installations can replace the Bundle explicitly:
 
 ```sh
-dsh plugin --profile tui remove deepseek-tui
-dsh plugin --profile tui add https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.4/seektty-1.2.4.tgz
+dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
+dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
 ```
 
 Removing SeekTTY changes only the target Profile, never the dsh installation:
 
 ```sh
-dsh plugin --profile tui remove seektty
+dsh plugin --profile tui remove --config.enable-global-virtual-store=false seektty
 ```
 
 ## Compatibility and verification
@@ -345,19 +377,29 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Node.js | `^22.19.0 || >=24` |
 | Declared minimum Harness Host | `0.1.0-rc.6` |
 | Current tested Harness Host | `0.1.1-rc.2` |
+| pnpm 11 layout adapter | pnpm `11.7.0`; dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current mouse/input release | SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`; optional plugin joint acceptance is not extended by this release |
+| Current release candidate | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; appearance, highlighting, interaction, and pnpm-layout changes are included; optional plugin joint acceptance is not extended |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
-The 1.2.4 release checks cover:
+### pnpm 11 Global Virtual Store compatibility
+
+pnpm 11 can place global packages below `store/v11/links`. With the tested dsh/Cordis loader, that layout can fail before SeekTTY starts with messages such as `plugin tree failed to load` and `cordis:include`. Until an upstream dsh release passes the positive GVS lifecycle gate, SeekTTY applies `--config.enable-global-virtual-store=false` only to package-tree mutations it starts: launcher provisioning, compatible self-updates, and TUI `/plugin` install, update, remove, and reconciliation. Read-only pnpm commands are unchanged.
+
+This adapter does not run `pnpm config set`, set `NODE_PATH`, copy Host packages, or edit Profile manifests outside native dsh reconciliation. If a failed launcher is visibly installed below `store/v11/links`, it prints a cautious bilingual diagnosis and exact per-command recovery commands rather than reporting a missing SeekTTY dependency.
+
+See the bilingual [pnpm 11 layout acceptance record](docs/pnpm11-layout-acceptance.md) for the gate contract, current local evidence, and the adapter exit condition.
+
+The 1.2.5 release-candidate checks cover:
 
 - Type checking, unit/integration tests, production build, packed-content checks, and duplicate-Host-package rejection.
 - Isolated add, boot, remove, and re-add on unmodified official dsh `0.1.1-rc.2` using the exact candidate tarball.
+- A shared-candidate CI matrix on Windows, macOS, and Linux with Node 22 and 24: GVS=false must pass the complete lifecycle; GVS=true must either boot successfully or reproduce and accurately classify the known dsh/Cordis loader failure. CI runner coverage is separate from manual real-terminal sign-off.
 - Windows ConPTY startup, slash navigation, context-menu gesture handoff, resize, and clean exit. Injected PTY input and synthetic renderer tests are not equivalent to real GUI-terminal mouse or clipboard testing.
-- The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [release checklist](docs/release-v1.2.4-verification.md).
+- The 100k-line structural TUI performance gate. Platform-specific manual sign-off remains explicit in the [owner review checklist](docs/release-v1.2.5-verification.md).
 
-Earlier Clarify, attachment, Vision-Exp, and Provider observations are historical evidence, not renewed acceptance of those optional workflows in 1.2.4. The declared Host range is unchanged; this release's stock lifecycle rerun targets `0.1.1-rc.2`, not every legacy version.
+Earlier Clarify, attachment, Vision-Exp, mouse/input, and Provider observations are historical evidence, not renewed acceptance of those optional workflows in 1.2.5. The declared Host range is unchanged; this candidate's stock lifecycle rerun targets `0.1.1-rc.2`, not every legacy version.
 
 Reusable checks:
 
@@ -367,6 +409,9 @@ pnpm run check
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \
 pnpm test:stock
+
+pnpm test:pnpm11-layout false /path/to/candidate-directory
+pnpm test:pnpm11-layout true /path/to/candidate-directory
 
 DSH_BIN=/path/to/dsh \
 SEEKTTY_SPEC=/path/to/seektty.tgz \

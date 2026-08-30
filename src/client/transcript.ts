@@ -35,10 +35,6 @@ import type {
   WorkflowRunPhaseData,
 } from '@deepseek-ai/dsh-client-ui-workflow-run/projection'
 import { producedForClosing } from './compat/deliverables-rc6.ts'
-import {
-  EMPTY_SESSION_EXAMPLES,
-  emptyExampleText,
-} from './empty-examples.ts'
 import { translateUiText, ui } from './locale.ts'
 import {
   findLineMatches,
@@ -162,6 +158,8 @@ type TranscriptRow = ({
   readonly liveDurationSince?: number
   /** Empty-session starter prompt that Enter can submit while browsing. */
   readonly exampleId?: string
+  /** Width-aware replacement for the ordinary plain-text component. */
+  readonly welcome?: boolean
   /** Tool-card identity for per-card expand in focus mode. */
   readonly toolKey?: string
   /** Reasoning-region identity for pointer-only presentation toggles. */
@@ -216,6 +214,12 @@ export type TranscriptFocusAction = {
 } | {
   readonly kind: 'tool'
   readonly key: string
+}
+
+/** Width-aware, non-durable empty-state renderer supplied by the Surface. */
+export interface TranscriptWelcomeRenderer {
+  render(width: number, hasSession: boolean): readonly string[]
+  fingerprint(): number
 }
 
 function thinkingRow(key: string, expanded: boolean): TranscriptRow {
@@ -1404,6 +1408,7 @@ export class Transcript implements Component, Focusable {
     readonly id: string
   }[] = []
   private hoveredRegionId: string | undefined
+  private emptyScrollPrimed = false
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1414,6 +1419,7 @@ export class Transcript implements Component, Focusable {
     private readonly viewportRows: () => number = () => Number.POSITIVE_INFINITY,
     private readonly requestRender: () => void = () => undefined,
     private readonly requestOlder: () => void = () => undefined,
+    private readonly welcome?: TranscriptWelcomeRenderer,
   ) {}
 
   /**
@@ -1556,15 +1562,8 @@ export class Transcript implements Component, Focusable {
    * @param id - EMPTY_SESSION_EXAMPLES id.
    */
   focusExample(id: string): boolean {
-    if (!this.emptyState || this.snapshot === undefined) return false
-    const index = EMPTY_SESSION_EXAMPLES.findIndex(example => example.id === id)
-    if (index < 0) return false
-    if (this.exampleCursor !== index) {
-      this.exampleCursor = index
-      this.replace(this.emptySessionRows())
-    }
-    this.requestRender()
-    return true
+    void id
+    return false
   }
 
   /**
@@ -1741,8 +1740,9 @@ export class Transcript implements Component, Focusable {
     this.lastPointerControls = []
     this.reasoningStates.clear()
     this.selection = undefined
+    this.emptyScrollPrimed = false
     this.syncHeightIndexCounters()
-    this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
+    this.replace(this.emptySessionRows())
   }
 
   private emptyCopy(): string {
@@ -1783,6 +1783,7 @@ export class Transcript implements Component, Focusable {
       this.ownerCopy.clear()
       this.lastViewportMaps = []
       this.selection = undefined
+      this.emptyScrollPrimed = false
       this.syncHeightIndexCounters()
     }
     this.imageLoader = imageLoader
@@ -1888,8 +1889,8 @@ export class Transcript implements Component, Focusable {
     this.emptyState = !hasVisibleRows
     if (this.emptyState) {
       take('__empty__', JSON.stringify({
-        cursor: this.exampleCursor,
         session: this.sessionId,
+        welcome: this.welcome?.fingerprint() ?? 0,
       }), () => this.emptySessionRows())
     }
     for (const key of [...this.nodeCache.keys()]) {
@@ -1915,10 +1916,7 @@ export class Transcript implements Component, Focusable {
    * @returns the prompt to send, or undefined when Enter has no local action.
    */
   activateFocused(): TranscriptFocusAction | undefined {
-    if (this.emptyState && this.snapshot !== undefined) {
-      const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
-      return example === undefined ? undefined : { kind: 'example', text: emptyExampleText(example) }
-    }
+    if (this.emptyState) return undefined
     if (!this.toolFocus) {
       this.enterToolFocus()
       return undefined
@@ -1967,7 +1965,7 @@ export class Transcript implements Component, Focusable {
     const snapshot = this.snapshot
     this.nodeCache.clear()
     if (snapshot === undefined) {
-      this.replace([{ format: 'plain', text: color.muted(this.emptyCopy()) }])
+      this.replace(this.emptySessionRows())
     } else {
       this.update(snapshot, this.imageLoader)
     }
@@ -2239,6 +2237,7 @@ export class Transcript implements Component, Focusable {
   private logicalRowLines(row: TranscriptRow): readonly string[] {
     if (row.format === 'rule') return []
     if (row.format === 'image') return [imageLabel(row.attachment)]
+    if (row.welcome === true) return []
     return row.text.split('\n')
   }
 
@@ -2282,13 +2281,7 @@ export class Transcript implements Component, Focusable {
   }
 
   private presentLines(lines: readonly string[], width: number, inset: number, contentWidth: number): string[] {
-    if (this.emptyState) {
-      this.lastPointerControls = EMPTY_SESSION_EXAMPLES.flatMap((example) => {
-        const needle = emptyExampleText(example)
-        const row = lines.findIndex(line => line.includes(needle))
-        return row < 0 ? [] : [{ row, kind: 'example' as const, id: example.id }]
-      })
-    }
+    if (this.emptyState) this.lastPointerControls = []
     const totalRows = Math.max(1, Math.floor(this.viewportRows()))
     const body = lines.map((line, row) => {
       const content = line === '' ? '' : `${' '.repeat(inset)}${line}`
@@ -2373,6 +2366,40 @@ export class Transcript implements Component, Focusable {
     return { lines, maps }
   }
 
+  private paintEmptySelection(
+    lines: readonly string[],
+    leadingPadding: number,
+    sourceStart: number,
+    contentWidth: number,
+  ): string[] {
+    const block = this.blocks[0]
+    const copy = block === undefined ? undefined : this.ownerCopy.get(block.key)
+    if (block === undefined || copy === undefined) {
+      this.lastViewportMaps = []
+      return [...lines]
+    }
+    const maps: ViewportCellMap[] = []
+    for (let row = leadingPadding; row < lines.length; row += 1) {
+      const lineOffset = sourceStart + row - leadingPadding
+      if (lineOffset >= copy.lineStarts.length) break
+      const line = lines[row] ?? ''
+      const leading = /^ */u.exec(line)?.[0].length ?? 0
+      const startOffset = copy.lineStarts[lineOffset] ?? 0
+      const mapped = mapCopyableLine(line, startOffset - leading, contentWidth, { skipLeading: leading })
+      maps.push({
+        row,
+        ownerKey: block.key,
+        surface: 'transcript',
+        startOffset,
+        endOffset: mapped.endOffset,
+        cellOffsets: mapped.cellOffsets,
+        hardBreakAfter: mapped.hardBreakAfter,
+      })
+    }
+    this.lastViewportMaps = maps
+    return paintSelection(lines, maps, this.selection, [block.key])
+  }
+
   render(width: number): string[] {
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
@@ -2413,10 +2440,10 @@ export class Transcript implements Component, Focusable {
       lines.push(...rendered.lines)
     }
     if (this.emptyState) {
+      const blockWidth = lines.reduce((maximum, line) => Math.max(maximum, visibleWidth(line.trimEnd())), 0)
+      const before = Math.max(0, Math.floor((contentWidth - blockWidth) / 2))
       for (const [index, line] of lines.entries()) {
-        if (line === '') continue
-        const content = line.trimEnd()
-        lines[index] = `${' '.repeat(Math.max(0, Math.floor((contentWidth - visibleWidth(content)) / 2)))}${content}`
+        lines[index] = line === '' ? '' : `${' '.repeat(before)}${line.trimEnd()}`
       }
     }
     const previousRenderedLineCount = this.renderedLineCount
@@ -2441,30 +2468,32 @@ export class Transcript implements Component, Focusable {
       this.scrollOffset = 0
       const remaining = rows - painted.length
       const before = this.emptyState ? Math.floor(remaining / 2) : remaining
-      return this.presentLines([
+      const visible = [
         ...Array.from({ length: before }, () => ''),
         ...painted,
         ...Array.from({ length: remaining - before }, () => ''),
-      ], width, inset, contentWidth)
+      ]
+      const selected = this.emptyState
+        ? this.paintEmptySelection(visible, before, 0, contentWidth)
+        : visible
+      return this.presentLines(selected, width, inset, contentWidth)
     }
     const maxOffset = Math.max(0, painted.length - rows)
     if (this.emptyState) {
-      const example = EMPTY_SESSION_EXAMPLES[this.exampleCursor]
-      const needle = example === undefined ? undefined : emptyExampleText(example)
-      const selected = needle === undefined
-        ? -1
-        : painted.findIndex(line => line.includes(needle))
-      this.scrollOffset = scrollOffsetToContain(
-        painted.length,
-        rows,
-        selected === -1 ? 0 : selected,
-      )
+      if (!this.emptyScrollPrimed) {
+        this.scrollOffset = maxOffset
+        this.emptyScrollPrimed = true
+      } else this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
     } else {
       this.scrollOffset = Math.min(this.scrollOffset, maxOffset)
     }
     const end = painted.length - this.scrollOffset
     const start = Math.max(0, end - rows)
-    return this.presentLines(painted.slice(start, end), width, inset, contentWidth)
+    const visible = painted.slice(start, end)
+    const selected = this.emptyState
+      ? this.paintEmptySelection(visible, 0, start, contentWidth)
+      : visible
+    return this.presentLines(selected, width, inset, contentWidth)
   }
 
   handleInput(data: string): void {
@@ -2475,18 +2504,6 @@ export class Transcript implements Component, Focusable {
     if (data === '/') {
       this.beginSearch()
       return
-    }
-    if (this.emptyState && this.snapshot !== undefined) {
-      if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
-        const delta = matchesKey(data, Key.up) ? -1 : 1
-        const next = this.exampleCursor + delta
-        if (next >= 0 && next < EMPTY_SESSION_EXAMPLES.length) {
-          this.exampleCursor = next
-          this.replace(this.emptySessionRows())
-          this.requestRender()
-        }
-        return
-      }
     }
     if (this.toolFocus && (matchesKey(data, Key.up) || matchesKey(data, Key.down))) {
       const keys = this.toolKeys()
@@ -2827,23 +2844,9 @@ export class Transcript implements Component, Focusable {
   }
 
   private emptySessionRows(): TranscriptRow[] {
-    this.exampleCursor = Math.max(0, Math.min(this.exampleCursor, EMPTY_SESSION_EXAMPLES.length - 1))
-    return [
-      {
-        format: 'plain',
-        text: `${color.brand('deepseek')}\n${color.muted(ui('探索未至之境', 'Explore beyond the known'))}\n${color.muted(ui('直接描述你想完成的事', 'Describe what you want to accomplish'))}`,
-      },
-      {
-        format: 'plain',
-        text: color.muted(ui('试试这些，Tab 后回车发送：', 'Try one of these; Tab then Enter to send:')),
-        gapBefore: true,
-      },
-      ...EMPTY_SESSION_EXAMPLES.map((example, index) => ({
-        format: 'plain' as const,
-        text: `${index === this.exampleCursor ? color.accent('› ') : '  '}${emptyExampleText(example)}`,
-        exampleId: example.id,
-      })),
-    ]
+    return this.welcome === undefined
+      ? [{ format: 'plain', text: color.muted(this.emptyCopy()) }]
+      : [{ format: 'plain', text: '', welcome: true }]
   }
 
   private replace(rows: readonly TranscriptRow[]): void {
@@ -2892,6 +2895,12 @@ export class Transcript implements Component, Focusable {
   }
 
   private component(row: TranscriptRow): Component {
+    if (row.welcome === true) {
+      return {
+        render: width => [...(this.welcome?.render(width, this.snapshot !== undefined) ?? [])],
+        invalidate: () => undefined,
+      }
+    }
     if (row.format === 'rule') {
       return {
         render: width => [horizontalRule(row.text, width, color.brand)],

@@ -8,6 +8,7 @@ import { PluginMarketplace } from '../src/host/plugin-marketplace.ts'
 import { AUTO_PERMITTED_DSH_EXACT, AUTO_PERMITTED_DSH_MINIMUM } from '../src/version-scan.ts'
 import { dshPeerRange } from '../scripts/dsh-peer-range.mjs'
 import { DSH_COMPATIBILITY, PACKAGE_VERSION, compareDshVersion } from '../src/dsh-compat.ts'
+import { PNPM_GVS_DSH_RANGE, PNPM_GVS_TESTED_WITH } from '../src/pnpm-compat.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as Record<string, unknown>
@@ -37,14 +38,17 @@ describe('out-of-tree Bundle contract', () => {
     }
   })
 
-  it('pins SeekTTY 1.2.4 to tested 0.1.1-rc.2 with a legacy union plus exact Host peer', () => {
-    expect(manifest.version).toBe('1.2.4')
-    expect(PACKAGE_VERSION).toBe('1.2.4')
+  it('pins SeekTTY 1.2.5 to tested 0.1.1-rc.2 with a legacy union plus exact Host peer', () => {
+    expect(manifest.version).toBe('1.2.5')
+    expect(PACKAGE_VERSION).toBe('1.2.5')
     expect(DSH_COMPATIBILITY).toEqual({ minimum: '0.1.0-rc.6', tested: '0.1.1-rc.2' })
     expect(AUTO_PERMITTED_DSH_MINIMUM).toBe(DSH_COMPATIBILITY.minimum)
     expect(AUTO_PERMITTED_DSH_EXACT).toBe(DSH_COMPATIBILITY.tested)
     const expectedPeer = dshPeerRange(DSH_COMPATIBILITY.minimum, DSH_COMPATIBILITY.tested)
     expect(expectedPeer).toBe('>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2')
+    expect(PNPM_GVS_DSH_RANGE).toBe(expectedPeer)
+    expect(PNPM_GVS_TESTED_WITH).toEqual({ dsh: DSH_COMPATIBILITY.tested, pnpm: '11.7.0' })
+    expect(manifest.packageManager).toBe(`pnpm@${PNPM_GVS_TESTED_WITH.pnpm}`)
     const peers = manifest.peerDependencies as Record<string, string>
     for (const [name, spec] of Object.entries(peers)) {
       if (!name.startsWith('@deepseek-ai/dsh-')) continue
@@ -170,7 +174,7 @@ describe('out-of-tree Bundle contract', () => {
     expect(candidate.bundle).toBe(true)
     expect(candidate.patchValid).toBe(true)
     expect(candidate.diagnostics).toEqual([
-      '安装包声明脚本：build、typecheck、test、perf:tui、test:stock、test:clarify-doctor、pack:check、test:mouse-pty、check',
+      '安装包声明脚本：build、typecheck、test、perf:tui、test:stock、test:pnpm11-layout、test:clarify-doctor、pack:check、test:mouse-pty、check',
     ])
   })
 
@@ -182,6 +186,12 @@ describe('out-of-tree Bundle contract', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8')
     expect(workflow).toContain('SEEKTTY_SPEC="$RUNNER_TEMP/seektty-$VERSION.tgz"')
     expect(workflow).toContain("require('./package.json').dsh.compatibility.tested")
+    expect(workflow).toContain('pnpm11-layout:')
+    expect(workflow).toContain('os: [ubuntu-latest, windows-latest, macos-latest]')
+    expect(workflow).toContain('node: [22.x, 24.x]')
+    expect(workflow).toContain('include-hidden-files: true')
+    expect(workflow).toContain('pnpm test:pnpm11-layout false .artifacts')
+    expect(workflow).toContain('pnpm test:pnpm11-layout true .artifacts')
   })
 
   it('keeps both READMEs on the release version and explains pre-publication testing', () => {
@@ -192,7 +202,8 @@ describe('out-of-tree Bundle contract', () => {
       expect(text).toContain('https://github.com/Hilbert-beinghappy/seektty/releases')
       expect(text).toContain(`/releases/download/v${PACKAGE_VERSION}/seektty-${PACKAGE_VERSION}.tgz`)
       expect(text).not.toContain('/releases/download/v1.2.0/')
-      expect(text).toContain('pnpm add --global @deepseek-ai/dsh@0.1.1-rc.2')
+      expect(text).toContain('pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2')
+      expect(text).toContain('store/v11/links')
       expect(text).toContain(`docs/release-v${PACKAGE_VERSION}.md`)
       expect(text).toContain(`docs/release-v${PACKAGE_VERSION}-verification.md`)
       expect(text).toMatch(/Before publication|发布前/u)
@@ -204,8 +215,8 @@ describe('out-of-tree Bundle contract', () => {
     const chinese = readFileSync(resolve(root, 'README.zh.md'), 'utf8')
     expect(english).toContain('The current tested Host is official `0.1.1-rc.2`')
     expect(chinese).toContain('当前已测 Host 是官方 `0.1.1-rc.2`')
-    expect(english).toContain('SeekTTY `1.2.4` on official dsh `0.1.1-rc.2`')
-    expect(chinese).toContain('SeekTTY `1.2.4` + 官方 dsh `0.1.1-rc.2`')
+    expect(english).toContain('SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`')
+    expect(chinese).toContain('SeekTTY `1.2.5` + 官方 dsh `0.1.1-rc.2`')
     const release = readFileSync(resolve(root, `docs/release-v${PACKAGE_VERSION}.md`), 'utf8')
     expect(release).toContain(`# SeekTTY ${PACKAGE_VERSION}`)
     expect(release).toContain('## English')

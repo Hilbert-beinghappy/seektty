@@ -74,7 +74,7 @@ pnpm pack --pack-destination $backgroundTestRoot
 $backgroundPreviousDshHome = $env:DSH_HOME
 try {
     $env:DSH_HOME = Join-Path $backgroundTestRoot 'home'
-    dsh plugin --profile tui add (Join-Path $backgroundTestRoot 'seektty-1.2.4.tgz')
+    dsh plugin --profile tui add --config.enable-global-virtual-store=false (Join-Path $backgroundTestRoot 'seektty-1.2.4.tgz')
     if ($LASTEXITCODE -ne 0) { throw 'Candidate installation failed' }
     dsh --profile tui
 } finally {
@@ -88,7 +88,7 @@ macOS/Linux shell:
 pnpm run build
 background_test_dir="$(mktemp -d)"
 pnpm pack --pack-destination "$background_test_dir"
-DSH_HOME="$background_test_dir/home" dsh plugin --profile tui add "$background_test_dir/seektty-1.2.4.tgz" &&
+DSH_HOME="$background_test_dir/home" dsh plugin --profile tui add --config.enable-global-virtual-store=false "$background_test_dir/seektty-1.2.4.tgz" &&
 DSH_HOME="$background_test_dir/home" dsh --profile tui
 ```
 

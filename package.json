@@ -1,6 +1,6 @@
 {
   "name": "seektty",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [
@@ -43,6 +43,7 @@
   "files": [
     "lib/*.js",
     "assets/seektty-logo.png",
+    "assets/seektty-welcome-logo.json",
     "assets/seektty-tui.png",
     "assets/seektty-tui-dark.png",
     "assets/seektty-code-light.png",
@@ -70,6 +71,7 @@
     "test": "vitest run",
     "perf:tui": "node scripts/tui-perf-harness.mjs",
     "test:stock": "node scripts/stock-dsh-cycle.mjs",
+    "test:pnpm11-layout": "node scripts/pnpm11-layout-acceptance.mjs",
     "test:clarify-doctor": "node scripts/clarify-doctor-acceptance.mjs",
     "pack:check": "node scripts/pack-check.mjs",
     "test:mouse-pty": "node scripts/mouse-pty-harness.mjs",

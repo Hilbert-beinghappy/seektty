@@ -25,6 +25,7 @@ import {
   runUpdate,
   updateMode,
 } from '../src/bin.ts'
+import { PNPM_GVS_CONFIG_ARG } from '../src/pnpm-compat.ts'
 
 const facts = (overrides: Partial<InstalledFacts> = {}): InstalledFacts => ({
   dshTested: '0.1.1-rc.2',
@@ -289,7 +290,7 @@ describe('launcher update flow', () => {
     )
     expect(status).toBe(0)
     expect(calls).toEqual([
-      ['dsh', 'plugin', '--profile', 'team', 'add', 'github:Hilbert-beinghappy/seektty#v9.9.9'],
+      ['dsh', 'plugin', '--profile', 'team', 'add', PNPM_GVS_CONFIG_ARG, 'github:Hilbert-beinghappy/seektty#v9.9.9'],
     ])
   })
 
@@ -309,7 +310,7 @@ describe('launcher update flow', () => {
     )
     expect(status).toBe(0)
     expect(calls).toEqual([
-      ['pnpm', 'add', '--global', '@deepseek-ai/dsh@0.1.1-rc.2'],
+      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'],
     ])
   })
 
@@ -344,7 +345,7 @@ describe('launcher update flow', () => {
     )
     expect(status).toBe(0)
     expect(execute).toHaveBeenCalledTimes(1)
-    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', '@deepseek-ai/dsh@0.1.1-rc.2'])
+    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'])
     expect(chunks.join('')).toMatch(/SEEKTTY_SPEC|pinned/u)
     expect(chunks.join('')).not.toMatch(/already the latest/u)
   })
@@ -438,7 +439,7 @@ describe('launcher update flow', () => {
       () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatestTag: 'v9.9.9' }),
     )
     expect(calls).toEqual([
-      ['dsh', 'plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty#v9.9.9'],
+      ['dsh', 'plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'github:Hilbert-beinghappy/seektty#v9.9.9'],
     ])
     calls.length = 0
     await maybeAutoUpdate(
@@ -449,7 +450,7 @@ describe('launcher update flow', () => {
       () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatestTag: 'v9.9.9' }),
     )
     expect(calls).toEqual([
-      ['pnpm', 'add', '--global', '@deepseek-ai/dsh@0.1.1-rc.2'],
+      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'],
     ])
     calls.length = 0
     await maybeAutoUpdate(
@@ -460,7 +461,7 @@ describe('launcher update flow', () => {
       () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatestTag: 'v9.9.9' }),
     )
     expect(calls).toEqual([
-      ['pnpm', 'add', '--global', '@deepseek-ai/dsh@0.1.1-rc.2'],
+      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'],
     ])
     calls.length = 0
     await maybeAutoUpdate(
@@ -493,7 +494,7 @@ describe('launcher update flow', () => {
     expect(execute).toHaveBeenCalledTimes(1)
     expect(execute).toHaveBeenCalledWith(
       'dsh',
-      ['plugin', '--profile', 'tui', 'add', 'github:Hilbert-beinghappy/seektty#v9.9.9'],
+      ['plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'github:Hilbert-beinghappy/seektty#v9.9.9'],
     )
   })
 
@@ -507,7 +508,7 @@ describe('launcher update flow', () => {
       () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatestTag: 'v9.9.9' }),
     )).resolves.toBeUndefined()
     expect(execute).toHaveBeenCalledTimes(1)
-    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', '@deepseek-ai/dsh@0.1.1-rc.2'])
+    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'])
   })
 
   it('skips future and gap Hosts during auto-update instead of installing them', async () => {
