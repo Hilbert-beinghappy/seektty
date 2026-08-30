@@ -317,3 +317,386 @@ export function createSubagentPresentationCapabilities(
     },
   }
 }
+
+export type AgentChildrenState = 'unrequested' | 'loading' | 'loaded' | 'error' | 'unsupported'
+export type AgentDetailState = 'unloaded' | 'summaryLoading' | 'summaryReady' | 'viewOpen' | 'viewError'
+export type AgentLifecycle = 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'cancelled' | 'unknown' | 'unavailable'
+export type AgentContinuationState = 'unknown' | 'absent' | 'available' | 'stale'
+
+export interface EvidenceRef {
+  readonly source: 'catalog' | 'session' | 'trajectory' | 'continuation' | 'diagnostic'
+  readonly observedAt: number
+  readonly revision?: number
+  readonly id?: string
+}
+
+export interface AgentNodeView {
+  readonly sessionId: SessionId
+  readonly parentSessionId?: SessionId
+  readonly label?: string
+  readonly hasChildren: boolean
+  readonly harnessOrder: number
+  readonly createdAt?: number
+  readonly children: AgentChildrenState
+  readonly detail: AgentDetailState
+  readonly lifecycle: AgentLifecycle
+  readonly continuation: AgentContinuationState
+  readonly partial: boolean
+  readonly evidence: readonly EvidenceRef[]
+  readonly catalogEvidence?: EvidenceRef
+  readonly lifecycleEvidence?: EvidenceRef
+  readonly continuationEvidence?: EvidenceRef
+  readonly childrenEvidence?: EvidenceRef
+  readonly partialEvidence?: EvidenceRef
+  readonly issue?: 'cycle' | 'cross-root' | 'parent-conflict' | 'diagnostic'
+}
+
+export interface AgentTreeState {
+  readonly rootSessionId: SessionId
+  readonly rootChildren: AgentChildrenState
+  readonly rootChildrenEvidence?: EvidenceRef
+  readonly nodes: ReadonlyMap<SessionId, AgentNodeView>
+  readonly appliedEvidence: ReadonlySet<string>
+}
+
+export type AgentTreeEvent =
+  | {
+    readonly kind: 'catalog'
+    readonly rootSessionId: SessionId
+    readonly parentSessionId: SessionId
+    readonly catalog: DirectSubagentCatalog
+    readonly evidence: EvidenceRef
+  }
+  | {
+    readonly kind: 'children-state'
+    readonly rootSessionId: SessionId
+    readonly sessionId?: SessionId
+    readonly state: AgentChildrenState
+    readonly evidence: EvidenceRef
+  }
+  | {
+    readonly kind: 'lifecycle'
+    readonly rootSessionId: SessionId
+    readonly sessionId: SessionId
+    readonly lifecycle: AgentLifecycle
+    readonly restart?: boolean
+    readonly evidence: EvidenceRef
+  }
+  | {
+    readonly kind: 'continuation'
+    readonly rootSessionId: SessionId
+    readonly sessionId: SessionId
+    readonly continuation: AgentContinuationState
+    readonly evidence: EvidenceRef
+  }
+  | {
+    readonly kind: 'partial'
+    readonly rootSessionId: SessionId
+    readonly sessionId: SessionId
+    readonly present: boolean
+    readonly evidence: EvidenceRef
+  }
+
+const TERMINAL_LIFECYCLES = new Set<AgentLifecycle>(['completed', 'failed', 'cancelled'])
+
+export function createAgentTreeState(rootSessionId: SessionId): AgentTreeState {
+  return {
+    rootSessionId,
+    rootChildren: 'unrequested',
+    nodes: new Map(),
+    appliedEvidence: new Set(),
+  }
+}
+
+function evidenceKey(event: AgentTreeEvent): string {
+  const target = event.kind === 'catalog'
+    ? event.parentSessionId
+    : event.sessionId ?? event.rootSessionId
+  const ref = event.evidence
+  const detail = event.kind === 'lifecycle'
+    ? event.lifecycle
+    : event.kind === 'continuation'
+      ? event.continuation
+      : event.kind === 'partial'
+        ? String(event.present)
+        : event.kind === 'children-state'
+          ? event.state
+          : event.catalog.state
+  return ref.id ?? [
+    event.kind,
+    event.rootSessionId,
+    target,
+    ref.source,
+    ref.revision ?? '',
+    ref.observedAt,
+    detail,
+  ].join(':')
+}
+
+function appendEvidence(node: AgentNodeView, evidence: EvidenceRef): readonly EvidenceRef[] {
+  const key = evidence.id ?? `${evidence.source}:${evidence.revision ?? ''}:${evidence.observedAt}`
+  return node.evidence.some(candidate =>
+    (candidate.id ?? `${candidate.source}:${candidate.revision ?? ''}:${candidate.observedAt}`) === key)
+    ? node.evidence
+    : [...node.evidence, evidence]
+}
+
+function newerOrEqual(incoming: EvidenceRef, current: EvidenceRef | undefined): boolean {
+  if (current === undefined) return true
+  if (incoming.revision !== undefined && current.revision !== undefined) {
+    return incoming.revision >= current.revision
+  }
+  if (incoming.revision !== undefined) return true
+  if (current.revision !== undefined) return false
+  return incoming.observedAt >= current.observedAt
+}
+
+function baseNode(sessionId: SessionId): AgentNodeView {
+  return {
+    sessionId,
+    hasChildren: false,
+    harnessOrder: Number.MAX_SAFE_INTEGER,
+    children: 'unrequested',
+    detail: 'unloaded',
+    lifecycle: 'unknown',
+    continuation: 'unknown',
+    partial: false,
+    evidence: [],
+  }
+}
+
+function mergeLifecycle(
+  node: AgentNodeView,
+  lifecycle: AgentLifecycle,
+  evidence: EvidenceRef,
+  restart = false,
+): AgentNodeView {
+  const history = appendEvidence(node, evidence)
+  if (!newerOrEqual(evidence, node.lifecycleEvidence)) return { ...node, evidence: history }
+  if (TERMINAL_LIFECYCLES.has(node.lifecycle)
+    && !TERMINAL_LIFECYCLES.has(lifecycle)
+    && !restart) {
+    return { ...node, evidence: history }
+  }
+  return { ...node, lifecycle, lifecycleEvidence: evidence, evidence: history }
+}
+
+function mergeContinuation(
+  node: AgentNodeView,
+  continuation: AgentContinuationState,
+  evidence: EvidenceRef,
+): AgentNodeView {
+  const history = appendEvidence(node, evidence)
+  return newerOrEqual(evidence, node.continuationEvidence)
+    ? { ...node, continuation, continuationEvidence: evidence, evidence: history }
+    : { ...node, evidence: history }
+}
+
+function mergeChildren(
+  node: AgentNodeView,
+  children: AgentChildrenState,
+  evidence: EvidenceRef,
+): AgentNodeView {
+  const history = appendEvidence(node, evidence)
+  return newerOrEqual(evidence, node.childrenEvidence)
+    ? { ...node, children, childrenEvidence: evidence, evidence: history }
+    : { ...node, evidence: history }
+}
+
+function unavailable(node: AgentNodeView, issue: NonNullable<AgentNodeView['issue']>, evidence: EvidenceRef): AgentNodeView {
+  const history = appendEvidence(node, evidence)
+  if (!newerOrEqual(evidence, node.lifecycleEvidence)) return { ...node, evidence: history }
+  return {
+    ...node,
+    lifecycle: 'unavailable',
+    lifecycleEvidence: evidence,
+    issue,
+    evidence: history,
+  }
+}
+
+function cycleMembers(nodes: ReadonlyMap<SessionId, AgentNodeView>, start: SessionId): SessionId[] {
+  const path: SessionId[] = []
+  const positions = new Map<SessionId, number>()
+  let cursor: SessionId | undefined = start
+  while (cursor !== undefined) {
+    const cycleStart = positions.get(cursor)
+    if (cycleStart !== undefined) return path.slice(cycleStart)
+    positions.set(cursor, path.length)
+    path.push(cursor)
+    cursor = nodes.get(cursor)?.parentSessionId
+  }
+  return []
+}
+
+function catalogLifecycle(entry: Extract<SubagentListEntry, { kind: 'child' }>): AgentLifecycle {
+  return entry.activity === 'running' ? 'running' : 'unknown'
+}
+
+function catalogContinuation(entry: Extract<SubagentListEntry, { kind: 'child' }>): AgentContinuationState {
+  return entry.mode === 'one-shot' ? 'absent' : 'unknown'
+}
+
+/** Pure stable-id reducer. It never creates or mutates Harness Session state. */
+export function reduceAgentTree(state: AgentTreeState, event: AgentTreeEvent): AgentTreeState {
+  const key = evidenceKey(event)
+  if (state.appliedEvidence.has(key)) return state
+  const appliedEvidence = new Set(state.appliedEvidence)
+  appliedEvidence.add(key)
+  const nodes = new Map(state.nodes)
+
+  if (event.rootSessionId !== state.rootSessionId) {
+    const sessionIds: SessionId[] = []
+    if (event.kind === 'catalog') {
+      sessionIds.push(...event.catalog.children.map(child => child.entry.id))
+    } else if (event.sessionId !== undefined) {
+      sessionIds.push(event.sessionId)
+    }
+    for (const sessionId of sessionIds) {
+      nodes.set(sessionId, unavailable(nodes.get(sessionId) ?? baseNode(sessionId), 'cross-root', event.evidence))
+    }
+    return { ...state, nodes, appliedEvidence }
+  }
+
+  if (event.kind === 'children-state') {
+    if (event.sessionId === undefined) {
+      return newerOrEqual(event.evidence, state.rootChildrenEvidence)
+        ? { ...state, rootChildren: event.state, rootChildrenEvidence: event.evidence, appliedEvidence }
+        : { ...state, appliedEvidence }
+    }
+    nodes.set(event.sessionId, mergeChildren(
+      nodes.get(event.sessionId) ?? baseNode(event.sessionId),
+      event.state,
+      event.evidence,
+    ))
+    return { ...state, nodes, appliedEvidence }
+  }
+
+  if (event.kind === 'lifecycle') {
+    nodes.set(event.sessionId, mergeLifecycle(
+      nodes.get(event.sessionId) ?? baseNode(event.sessionId),
+      event.lifecycle,
+      event.evidence,
+      event.restart,
+    ))
+    return { ...state, nodes, appliedEvidence }
+  }
+
+  if (event.kind === 'continuation') {
+    nodes.set(event.sessionId, mergeContinuation(
+      nodes.get(event.sessionId) ?? baseNode(event.sessionId),
+      event.continuation,
+      event.evidence,
+    ))
+    return { ...state, nodes, appliedEvidence }
+  }
+
+  if (event.kind === 'partial') {
+    const current = nodes.get(event.sessionId) ?? baseNode(event.sessionId)
+    const history = appendEvidence(current, event.evidence)
+    nodes.set(event.sessionId, newerOrEqual(event.evidence, current.partialEvidence)
+      ? { ...current, partial: event.present, partialEvidence: event.evidence, evidence: history }
+      : { ...current, evidence: history })
+    return { ...state, nodes, appliedEvidence }
+  }
+
+  const parent = event.parentSessionId
+  if (parent === state.rootSessionId) {
+    // Root children state lives on the tree root rather than a synthetic node.
+  } else {
+    const parentNode = nodes.get(parent) ?? baseNode(parent)
+    nodes.set(parent, mergeChildren(parentNode, event.catalog.state === 'error'
+      ? 'error'
+      : event.catalog.state === 'loading'
+        ? 'loading'
+        : 'loaded', event.evidence))
+  }
+
+  for (const [harnessOrder, child] of event.catalog.children.entries()) {
+    const entry = child.entry
+    const current = nodes.get(entry.id) ?? baseNode(entry.id)
+    if (entry.kind === 'diagnostic') {
+      nodes.set(entry.id, unavailable({
+        ...current,
+        parentSessionId: parent,
+        harnessOrder,
+      }, 'diagnostic', event.evidence))
+      continue
+    }
+    if (entry.id === state.rootSessionId
+      || (current.parentSessionId !== undefined && current.parentSessionId !== parent)) {
+      nodes.set(entry.id, unavailable(current, 'parent-conflict', event.evidence))
+      continue
+    }
+    const catalogIsCurrent = newerOrEqual(event.evidence, current.catalogEvidence)
+    const recovered = catalogIsCurrent && current.issue === 'diagnostic'
+      ? (({ issue: _issue, ...rest }) => rest)(current)
+      : current
+    let next: AgentNodeView = catalogIsCurrent
+      ? {
+          ...recovered,
+          parentSessionId: parent,
+          ...(entry.label === undefined ? {} : { label: entry.label }),
+          hasChildren: entry.hasChildren,
+          harnessOrder,
+          catalogEvidence: event.evidence,
+          evidence: appendEvidence(recovered, event.evidence),
+        }
+      : {
+          ...recovered,
+          ...(recovered.parentSessionId === undefined ? { parentSessionId: parent } : {}),
+          evidence: appendEvidence(recovered, event.evidence),
+        }
+    if (!entry.hasChildren) next = mergeChildren(next, 'loaded', event.evidence)
+    next = mergeContinuation(next, catalogContinuation(entry), event.evidence)
+    next = mergeLifecycle(next, catalogLifecycle(entry), event.evidence)
+    nodes.set(entry.id, next)
+  }
+
+  const cycle = cycleMembers(nodes, parent)
+  for (const sessionId of cycle) {
+    const node = nodes.get(sessionId)
+    if (node !== undefined) nodes.set(sessionId, unavailable(node, 'cycle', event.evidence))
+  }
+  const updateRoot = parent === state.rootSessionId
+    && newerOrEqual(event.evidence, state.rootChildrenEvidence)
+  const rootChildren: AgentChildrenState = updateRoot
+    ? event.catalog.state === 'error'
+      ? 'error'
+      : event.catalog.state === 'loading'
+        ? 'loading'
+        : 'loaded'
+    : state.rootChildren
+  return {
+    ...state,
+    rootChildren,
+    ...(updateRoot ? { rootChildrenEvidence: event.evidence } : {}),
+    nodes,
+    appliedEvidence,
+  }
+}
+
+const LIFECYCLE_PRIORITY: Readonly<Record<AgentLifecycle, number>> = {
+  running: 0,
+  waiting: 1,
+  idle: 2,
+  completed: 2,
+  failed: 2,
+  cancelled: 2,
+  unknown: 2,
+  unavailable: 2,
+}
+
+/** Stable sibling order used by tree virtualization and selection. */
+export function orderedAgentChildren(
+  state: AgentTreeState,
+  parentSessionId: SessionId,
+): AgentNodeView[] {
+  return [...state.nodes.values()]
+    .filter(node => node.parentSessionId === parentSessionId)
+    .sort((left, right) =>
+      LIFECYCLE_PRIORITY[left.lifecycle] - LIFECYCLE_PRIORITY[right.lifecycle]
+      || left.harnessOrder - right.harnessOrder
+      || (left.createdAt ?? Number.MAX_SAFE_INTEGER) - (right.createdAt ?? Number.MAX_SAFE_INTEGER)
+      || left.sessionId.localeCompare(right.sessionId))
+}
