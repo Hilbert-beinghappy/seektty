@@ -173,6 +173,7 @@ export interface LayoutContentGeometry {
   readonly height: number
   readonly context: CellRect
   readonly transcript: CellRect
+  readonly agentTree: CellRect
   readonly composer: CellRect
   readonly status: CellRect
 }
@@ -206,11 +207,14 @@ export class BottomAnchoredLayout implements Component {
     private readonly composer: Component,
     private readonly status: Component,
     private readonly centerTranscript: () => boolean = () => false,
+    private readonly agentTree?: Component,
+    private readonly showComposer: () => boolean = () => true,
   ) {}
 
   invalidate(): void {
     this.context.invalidate()
     this.transcript.invalidate()
+    this.agentTree?.invalidate()
     this.composer.invalidate()
     this.status.invalidate()
   }
@@ -228,10 +232,11 @@ export class BottomAnchoredLayout implements Component {
   render(width: number): string[] {
     const contextRows = this.context.render(width)
     const transcriptRows = this.transcript.render(width)
-    const composerRows = this.composer.render(width)
+    const agentTreeRows = this.agentTree?.render(width) ?? []
+    const composerRows = this.showComposer() ? this.composer.render(width) : []
     const statusRows = this.status.render(width)
     const requestedRows = Math.floor(this.viewportRows())
-    const fixedRows = contextRows.length + composerRows.length + statusRows.length + 2
+    const fixedRows = contextRows.length + agentTreeRows.length + composerRows.length + statusRows.length + 2
     const minimumRows = Number.isFinite(requestedRows) ? Math.max(1, requestedRows) : undefined
     const transcriptCapacity = minimumRows === undefined
       ? transcriptRows.length
@@ -253,6 +258,7 @@ export class BottomAnchoredLayout implements Component {
       ...visibleTranscript,
       ...Array.from({ length: flexibleAfter }, () => ''),
       '',
+      ...agentTreeRows,
       ...composerRows,
       ...statusRows,
     ]
@@ -264,7 +270,8 @@ export class BottomAnchoredLayout implements Component {
       : rendered.slice(-minimumRows)
     const contextRow = 0
     const transcriptRow = contextRows.length + 1 + flexibleBefore
-    const composerRow = transcriptRow + visibleTranscript.length + flexibleAfter + 1
+    const agentTreeRow = transcriptRow + visibleTranscript.length + flexibleAfter + 1
+    const composerRow = agentTreeRow + agentTreeRows.length
     const statusRow = composerRow + composerRows.length
     const shift = (row: number, height: number): CellRect => {
       const next = row - sliceOffset
@@ -277,6 +284,7 @@ export class BottomAnchoredLayout implements Component {
       height: visible.length,
       context: shift(contextRow, contextRows.length),
       transcript: shift(transcriptRow, visibleTranscript.length),
+      agentTree: shift(agentTreeRow, agentTreeRows.length),
       composer: shift(composerRow, composerRows.length),
       status: shift(statusRow, statusRows.length),
     }
@@ -290,6 +298,7 @@ export class ContextBar implements Component {
     | { readonly kind: 'loading' | 'empty'; readonly profile: string; readonly workspace: string }
     | { readonly kind: 'facts'; readonly facts: TuiHeaderFacts }
     | { readonly kind: 'error'; readonly profile: string; readonly workspace: string; readonly message: string }
+  private childContext: { readonly root: string; readonly child: string; readonly readOnly: boolean } | undefined
 
   constructor(profile: string, workspace: string) {
     this.state = { kind: 'loading', profile, workspace }
@@ -320,6 +329,12 @@ export class ContextBar implements Component {
     this.state = { kind: 'error', profile, workspace, message }
   }
 
+  setChildContext(root: string, child: string, readOnly: boolean): void {
+    this.childContext = { root, child, readOnly }
+  }
+
+  clearChildContext(): void { this.childContext = undefined }
+
   invalidate(): void { /* presentation is derived directly from state */ }
 
   render(width: number): string[] {
@@ -334,7 +349,10 @@ export class ContextBar implements Component {
         ? color.accent(`${ui('● 生成中', '● Generating')}${elapsed}${ui(' · Ctrl+C 停止', ' · Ctrl+C to stop')}`)
         : color.muted(ui('就绪', 'Ready'))
       const right = context === undefined ? runtime : `${color.muted(context)} · ${runtime}`
-      return [`${prefix}${columns('', right, innerWidth)}`]
+      const child = this.childContext === undefined
+        ? ''
+        : `${this.childContext.root} › ${this.childContext.child} · ${this.childContext.readOnly ? ui('只读', 'Read only') : ui('可继续', 'Continuable')} · ${ui('轨迹', 'Trajectory')} /trajectory`
+      return [`${prefix}${columns(color.muted(child), right, innerWidth)}`]
     }
     const state = this.state.kind === 'error'
       ? color.danger(translateUiText(this.state.message))

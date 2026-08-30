@@ -24,6 +24,7 @@ import {
   setBackgroundMode,
   setTerminalCanvasBackground,
   setTheme,
+  statusColor,
   styleTerminalText,
   surfaceRow,
   terminalColorLevel,
@@ -75,10 +76,10 @@ describe('terminal themes', () => {
       enableTruecolor()
       setTheme(BUILT_IN_THEMES[theme])
       setBackgroundMode('terminal')
-      const cached = `body ${color.muted('muted')} ${color.brand('heading')} ${color.danger('error')} ${color.accent('link')}`
+      const cached = `body ${color.muted('muted')} ${color.brand('heading')} ${color.danger('error')} ${color.accent('link')} ${statusColor.running('running')} ${statusColor.waiting('waiting')} ${statusColor.failed('failed')}`
       setTerminalCanvasBackground(terminalBackground)
       const row = background.canvas(cached)
-      for (const word of ['body', 'muted', 'heading', 'error', 'link']) {
+      for (const word of ['body', 'muted', 'heading', 'error', 'link', 'running', 'waiting', 'failed']) {
         const actual = foregroundAt(row, word)
         expect(actual).toBeDefined()
         expect(themeContrast(actual!, terminalBackground)).toBeGreaterThanOrEqual(4.5)
@@ -87,7 +88,7 @@ describe('terminal themes', () => {
       expect(currentTheme()).toBe(BUILT_IN_THEMES[theme])
       // Repaint the same cached row when the background becomes unknown.
       setTerminalCanvasBackground(undefined)
-      for (const word of ['body', 'muted', 'heading', 'error', 'link']) {
+      for (const word of ['body', 'muted', 'heading', 'error', 'link', 'running', 'waiting', 'failed']) {
         expect(foregroundAt(background.canvas(cached), word)).toBeUndefined()
       }
     },
@@ -96,15 +97,18 @@ describe('terminal themes', () => {
   it.each(['theme', 'terminal'] as const)('uses terminal foregrounds for unknown %s backgrounds, preserving explicit islands', mode => {
     enableTruecolor()
     setBackgroundMode(mode)
-    const inherited = [background.surface('panel'), interaction.hover('hover'), background.code('code')]
+    const inherited = [
+      background.surface('panel'), interaction.hover('hover'), background.code('code'),
+      statusColor.running('running'), statusColor.waiting('waiting'), statusColor.failed('failed'),
+    ]
     const islands = [background.selection('selection')]
     const row = background.canvas(`body ${color.muted('muted')} \u001B[1mbold\u001B[0m ${inherited.join(' ')} ${islands.join(' ')} tail`)
-    for (const word of ['body', 'muted', 'bold', 'panel', 'hover', 'code', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
+    for (const word of ['body', 'muted', 'bold', 'panel', 'hover', 'code', 'running', 'waiting', 'failed', 'tail']) expect(foregroundAt(row, word)).toBeUndefined()
     for (const [index, word] of ['selection'].entries()) {
       expect(foregroundAt(row, word)).toBe(foregroundAt(islands[index]!, word))
     }
     expect(row).toContain('\u001B[1mbold')
-    expect(row.replace(/\u001B\[[0-9;:]*m/gu, '')).toBe('body muted bold panel hover code selection tail')
+    expect(row.replace(/\u001B\[[0-9;:]*m/gu, '')).toBe('body muted bold panel hover code running waiting failed selection tail')
   })
 
   it('keeps saved theme colors for explicit fill and confirmed matching theme backgrounds', () => {
@@ -137,6 +141,9 @@ describe('terminal themes', () => {
     expect(color.brand('brand')).toContain('\u001B[38;2;102;130;255m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;52;65;95m')
     expect(color.pulse('◆', 4)).toContain('\u001B[38;2;145;167;255m')
+    expect(statusColor.running('运行')).toContain('\u001B[38;2;34;211;238m')
+    expect(statusColor.waiting('等待')).toContain('\u001B[38;2;250;204;21m')
+    expect(statusColor.failed('失败')).toContain('\u001B[38;2;248;113;113m')
 
     setTheme(BUILT_IN_THEMES.light)
     expect(currentTheme().id).toBe('light')
@@ -146,6 +153,19 @@ describe('terminal themes', () => {
     expect(color.brand('brand')).toContain('\u001B[38;2;49;86;216m')
     expect(color.pulse('◆', 0)).toContain('\u001B[38;2;198;208;231m')
     expect(color.pulse('◆', 4)).toContain('\u001B[38;2;65;95;201m')
+    expect(statusColor.running('运行')).toContain('\u001B[38;2;12;100;120m')
+    expect(statusColor.waiting('等待')).toContain('\u001B[38;2;133;77;14m')
+    expect(statusColor.failed('失败')).toContain('\u001B[38;2;185;28;28m')
+    for (const [painted, text] of [
+      [statusColor.running('运行'), '运行'],
+      [statusColor.waiting('等待'), '等待'],
+      [statusColor.failed('失败'), '失败'],
+    ] as const) {
+      const foreground = foregroundAt(painted, text)
+      expect(foreground).toBeDefined()
+      expect(themeContrast(foreground!, BUILT_IN_THEMES.light.colors.canvas)).toBeGreaterThanOrEqual(4.5)
+      expect(themeContrast(foreground!, BUILT_IN_THEMES.light.colors.selection)).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   it.each(['theme', 'terminal', 'explicit'] as const)('restores the %s panel background after nested foreground resets', mode => {

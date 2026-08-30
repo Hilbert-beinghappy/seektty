@@ -102,4 +102,24 @@ describe('command palette execution', () => {
     expect(execute).not.toHaveBeenCalled()
     execute.mockRestore()
   })
+
+  it('routes both direct and Ctrl+P /subagents through the same dock action without editing the composer', async () => {
+    const catalog = [command('subagents', 'local')]
+    const actionHost = host({
+      select: vi.fn(async () => ({ id: 'subagents', label: '/subagents' })),
+    })
+    const openAgentTree = vi.fn(async () => true)
+    Object.assign(actionHost, { openAgentTree })
+    const capabilities = {
+      commandCatalog: async () => catalog,
+      active: () => ({ sessionId: 'root' }),
+    } as unknown as HarnessTuiCapabilities
+    const actions = new TuiActions(capabilities, actionHost)
+
+    await actions.execute('subagents', '')
+    await actions.commandPalette()
+
+    expect(openAgentTree).toHaveBeenCalledTimes(2)
+    expect(actionHost.setEditor).not.toHaveBeenCalled()
+  })
 })

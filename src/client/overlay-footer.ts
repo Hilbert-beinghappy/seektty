@@ -1,6 +1,6 @@
 /** Typed modal actions: presentation and hit geometry share one layout. */
 import { truncateToWidth, visibleWidth } from '@mariozechner/pi-tui'
-import type { HitRegion } from './mouse-hit-map.ts'
+import type { HitRegion, MouseAction } from './mouse-hit-map.ts'
 import { ui } from './locale.ts'
 import { color, escapeTerminalText, interaction } from './theme.ts'
 
@@ -14,15 +14,28 @@ export interface OverlayPrimaryAction {
   run(): void
 }
 
-export interface OverlayFooterAction extends OverlayPrimaryAction {
-  readonly command: OverlayFooterCommand
+export interface ActionFooterItem<Command extends string = string> {
+  readonly command: Command
+  readonly label: string
+  readonly key: string
+  readonly enabled: boolean
+  readonly keyboardOnly?: boolean
 }
 
-/** Rows are content-local; hits include the modal's two-cell left inset. */
-export function renderOverlayFooter(
-  actions: readonly OverlayFooterAction[],
+export interface OverlayFooterAction extends OverlayPrimaryAction, ActionFooterItem<OverlayFooterCommand> {}
+
+export interface ActionFooterTarget<Command extends string> {
+  readonly idPrefix: string
+  readonly zIndex?: number
+  action(command: Command): MouseAction
+}
+
+/** Shared action footer; callers own the surrounding two-cell visual inset. */
+export function renderActionFooter<Command extends string>(
+  actions: readonly ActionFooterItem<Command>[],
   width: number,
-  hovered: OverlayFooterCommand | undefined,
+  hovered: Command | undefined,
+  target: ActionFooterTarget<Command>,
 ): { lines: string[]; hits: HitRegion[] } {
   const available = Math.max(1, width - 4)
   const lines: string[] = []
@@ -42,12 +55,12 @@ export function renderOverlayFooter(
     }
     if (used > 0) { line += '  '; used += 2 }
     hits.push({
-      id: `overlay:${action.command}`,
+      id: `${target.idPrefix}:${action.command}`,
       rect: { col: 2 + used, row: lines.length, width: cells, height: 1 },
-      zIndex: 3, role: 'button', enabled: action.enabled,
+      zIndex: target.zIndex ?? 3, role: 'button', enabled: action.enabled,
       activation: action.keyboardOnly === true ? 'enter-only' : 'direct',
       hover: action.enabled ? 'highlight' : 'none',
-      action: { kind: 'overlay', command: action.command },
+      action: target.action(action.command),
     })
     line += !action.enabled ? color.muted(label)
       : hovered === action.command ? interaction.hover(label) : color.accent(label)
@@ -55,4 +68,16 @@ export function renderOverlayFooter(
   }
   if (used > 0) lines.push(line)
   return { lines, hits }
+}
+
+/** Rows are content-local; hits include the modal's two-cell left inset. */
+export function renderOverlayFooter(
+  actions: readonly OverlayFooterAction[],
+  width: number,
+  hovered: OverlayFooterCommand | undefined,
+): { lines: string[]; hits: HitRegion[] } {
+  return renderActionFooter(actions, width, hovered, {
+    idPrefix: 'overlay',
+    action: command => ({ kind: 'overlay', command }),
+  })
 }

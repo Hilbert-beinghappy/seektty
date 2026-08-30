@@ -158,6 +158,9 @@ export interface TuiActionHost {
   workspacePath?(): string
   setEditor(text: string): void
   composerText?(): string
+  canChangeSession?(): boolean
+  openAgentTree?(): Promise<boolean>
+  interactionOrigin?(sessionId: SessionId): string | undefined
   copy(text: string): void
   close(code: number): void
   restart(profile: string, notice: string): void
@@ -472,6 +475,7 @@ export class TuiActions {
   async execute(name: string, rawArgs: string): Promise<void> {
     const args = rawArgs.trim()
     try {
+      if (['new', 'resume', 'sessions', 'fork', 'archive'].includes(name) && !this.sessionChangeAllowed()) return
       switch (name) {
         case 'new': await this.newSession(); break
         case 'resume':
@@ -635,7 +639,8 @@ export class TuiActions {
 
   private async sessions(query: string): Promise<void> {
     const current = this.capabilities.active()?.sessionId
-    const rows = sortSessionsByUpdatedAt(this.capabilities.listSessions())
+    const rootProjection = await this.capabilities.listRootSessions?.()
+    const rows = sortSessionsByUpdatedAt(rootProjection?.roots ?? this.capabilities.listSessions())
     if (rows.length === 0) throw new Error(ui('没有可恢复的会话', "No resumable sessions"))
     const hits = query === ''
       ? undefined
@@ -646,7 +651,7 @@ export class TuiActions {
         label: `${row.id === current ? '● ' : ''}${row.displayTitle}`,
         description: `${row.cwd ?? ui('无工作区', "No workspace")} · ${relativeTime(row.updatedAt)} · ${row.running ? ui('运行中', "Running") : row.pendingInteraction ?? ui('空闲', "Idle")}`,
       }))
-      : hits.items.map((hit) => {
+      : hits.items.filter(hit => rows.some(row => row.id === hit.sessionId)).map((hit) => {
         const row = rows.find(candidate => candidate.id === hit.sessionId)
         return {
           id: hit.sessionId,
@@ -657,7 +662,10 @@ export class TuiActions {
     if (choices.length === 0) throw new Error(ui(`没有匹配 ${JSON.stringify(query)} 的会话`, `No session matches ${JSON.stringify(query)}`))
     const selected = await this.host.overlays.select({
       title: query === '' ? ui('会话', "Session") : ui(`搜索会话 · ${query}`, `Search sessions · ${query}`),
-      detail: ui(`归档会话不会出现在这里${hits?.hasMore === true ? ' · 结果已达到上限' : ''}`, `Archived sessions do not appear here${hits?.hasMore === true ? ' · results reached the limit' : ''}`),
+      detail: ui(
+        `归档会话不会出现在这里${rootProjection?.support === 'unsupported' ? ' · 当前 Host 未提供可靠层级，保留兼容列表' : rootProjection?.support === 'partial' ? ' · 部分层级无法确认，未隐藏相关会话' : ''}${hits?.hasMore === true ? ' · 结果已达到上限' : ''}`,
+        `Archived sessions do not appear here${rootProjection?.support === 'unsupported' ? ' · the current Host has no reliable lineage, so the compatibility list is retained' : rootProjection?.support === 'partial' ? ' · some lineage is unresolved, so affected sessions remain visible' : ''}${hits?.hasMore === true ? ' · results reached the limit' : ''}`,
+      ),
       choices,
       options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
@@ -805,6 +813,7 @@ export class TuiActions {
     const parsed = commandParts(args)
     if (parsed.command === 'add' || parsed.command === 'open') {
       if (parsed.rest === '') throw new Error(ui(`用法：/workspace ${parsed.command} <目录>`, `Usage: /workspace ${parsed.command} <directory>`))
+      if (!this.sessionChangeAllowed()) return
       await this.capabilities.openWorkspace(parsed.rest)
       this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
       return
@@ -841,6 +850,7 @@ export class TuiActions {
       return
     }
     if (parsed.command !== '' && parsed.command !== 'list') {
+      if (!this.sessionChangeAllowed()) return
       await this.capabilities.openWorkspace(args)
       this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
       return
@@ -866,6 +876,7 @@ export class TuiActions {
         if (selected.id === '__add__') {
           const path = await navigation.input({ title: ui('添加工作区', "Add workspace"), placeholder: ui('输入目录路径', "Enter a directory path") })
           if (path === undefined || path.trim() === '') return
+          if (!this.sessionChangeAllowed()) return
           await this.capabilities.openWorkspace(path)
           this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
           return
@@ -887,6 +898,7 @@ ${workspace.sessionIds.length} registered session(s)`),
         })
         if (action === undefined) return
         if (action.id === 'open') {
+          if (!this.sessionChangeAllowed()) return
           const sessionId = await this.capabilities.selectWorkspace(workspace.workspaceId)
           this.host.notice(ui(`已打开会话 ${sessionId}`, `Opened session ${sessionId}`), 'success')
         } else if (action.id === 'rename') await this.renameWorkspace(workspace, '', navigation)
@@ -900,6 +912,15 @@ ${workspace.sessionIds.length} registered session(s)`),
   private currentWorkspace(): WorkspaceView | undefined {
     const id = this.capabilities.active()?.workspaceId
     return this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === id)
+  }
+
+  private sessionChangeAllowed(): boolean {
+    if (this.host.canChangeSession?.() !== false) return true
+    this.host.notice(ui(
+      '当前正在查看子 Agent；请先按 Esc 返回父会话，再切换会话。',
+      'A child Agent is open; press Esc to return to the parent before changing Sessions.',
+    ), 'warning')
+    return false
   }
 
   private async chooseWorkspace(
@@ -3880,6 +3901,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
   private async subagents(): Promise<void> {
     const parent = this.capabilities.active()
     if (parent === undefined) throw new Error(ui('当前没有打开的父会话', "No parent session is open"))
+    if (await this.host.openAgentTree?.() === true) return
     this.capabilities.setSubagentCatalogOpen(parent.sessionId, true)
     try {
       await this.host.overlays.navigate(async (nav) => {
@@ -4179,11 +4201,15 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
 
   private async status(): Promise<void> {
     const openedSessionId = this.capabilities.active()?.sessionId
-    const [status, fetchedAuxiliaryUsage] = await Promise.all([
+    const subagentPresentation = this.capabilities.subagentPresentation?.()
+    const [status, fetchedAuxiliaryUsage, subagentHierarchy] = await Promise.all([
       this.capabilities.headerFacts(true),
       this.capabilities.auxiliaryUsageStatistics?.(
         openedSessionId === undefined ? {} : { sessionId: openedSessionId },
       ).catch(() => undefined),
+      openedSessionId === undefined || subagentPresentation === undefined
+        ? undefined
+        : subagentPresentation.listDirectChildren(openedSessionId),
     ])
     const auxiliaryUsage = this.capabilities.active()?.sessionId === openedSessionId
       ? fetchedAuxiliaryUsage
@@ -4212,6 +4238,11 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           `Profile ${status.profile} · ${status.running ? ui('运行中', 'running') : ui('空闲', 'idle')}`,
           status.workspace,
           `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
+          subagentHierarchy === undefined
+            ? ui('Agent 层级：无当前 Session', 'Agent hierarchy: no current Session')
+            : subagentHierarchy.support === 'supported'
+              ? ui('Agent 层级：支持直接子节点查询', 'Agent hierarchy: direct-child queries supported')
+              : ui('Agent 层级：当前 Host 不支持', 'Agent hierarchy: unsupported by this Host'),
           ...statistics.lines,
           ...(auxiliaryUsage?.lines ?? []),
         ].join('\n'),
@@ -4270,10 +4301,11 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       preview: toolApprovalPreview(call),
     })
     const options = { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 } as const
+    const origin = this.host.interactionOrigin?.(wait.sessionId)
     let decision: 'allowed-once' | 'rejected' | undefined
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
-        title: ui(`工具审批 · ${wait.payload.toolName}`, `Tool approval · ${wait.payload.toolName}`),
+        title: ui(`工具审批 · ${origin ?? '来源未确认'} · ${wait.payload.toolName}`, `Tool approval · ${origin ?? 'origin unconfirmed'} · ${wait.payload.toolName}`),
         detail: composed.detail,
         searchable: false,
         initialChoiceId: 'reject',

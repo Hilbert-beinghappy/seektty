@@ -111,6 +111,34 @@ describe('composer chrome', () => {
     expect(transcriptViewportRows(24, 3)).toBe(17)
   })
 
+  it('hides the composer only for a read-only child view and keeps the breadcrumb', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const context = new ContextBar('tui', '/workspace')
+    context.setFacts({
+      hostVersion: '0.1.1-rc.2', nodeVersion: '24', platform: 'darwin', architecture: 'arm64',
+      profile: 'tui', workspace: '/workspace', session: 'child', mode: 'standard', model: 'deepseek',
+      permission: 'workspace-write', running: false,
+    })
+    context.setChildContext('Root', 'Researcher', true)
+    let showComposer = false
+    const layout = new BottomAnchoredLayout(
+      () => 8,
+      context,
+      rows('child transcript'),
+      rows('composer top', 'composer body'),
+      rows('status'),
+      () => false,
+      rows('▾ 子 Agent 1'),
+      () => showComposer,
+    )
+    const readOnly = layout.render(80)
+    expect(readOnly.join('\n')).toContain('Root › Researcher · 只读 · 轨迹 /trajectory')
+    expect(readOnly).not.toContain('composer body')
+
+    showComposer = true
+    expect(layout.render(80)).toContain('composer body')
+  })
+
   it('uses open horizontal rules without side borders or corner glyphs', () => {
     vi.stubEnv('NO_COLOR', '1')
     const rows = editor().render(40)

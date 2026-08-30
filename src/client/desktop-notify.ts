@@ -49,8 +49,9 @@ export function nextDesktopNotify(
  * @param locale - current terminal locale.
  * @returns a short notification body.
  */
-export function desktopNotifyBody(kind: DesktopNotifyKind): string {
-  if (kind === 'approval') return ui('SeekTTY：需要工具审批', 'SeekTTY: tool approval needed')
-  if (kind === 'question') return ui('SeekTTY：有问题待回答', 'SeekTTY: a question is waiting')
-  return ui('SeekTTY：回合完成', 'SeekTTY: turn complete')
+export function desktopNotifyBody(kind: DesktopNotifyKind, origin?: string): string {
+  const suffix = origin === undefined ? '' : ` · ${origin}`
+  if (kind === 'approval') return ui(`SeekTTY：需要工具审批${suffix}`, `SeekTTY: tool approval needed${suffix}`)
+  if (kind === 'question') return ui(`SeekTTY：有问题待回答${suffix}`, `SeekTTY: a question is waiting${suffix}`)
+  return ui(`SeekTTY：回合完成${suffix}`, `SeekTTY: turn complete${suffix}`)
 }

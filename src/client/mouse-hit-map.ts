@@ -15,6 +15,8 @@ export type HitRole = 'text' | 'scrollbar' | 'button' | 'option' | 'input' | 'li
 export type HitActivationPolicy = 'none' | 'select' | 'direct' | 'arm' | 'enter-only' | 'drag'
 export type HitHoverPolicy = 'none' | 'highlight'
 
+export type AgentTreeMouseCommand = 'bar' | 'row' | 'chevron' | 'footer-open' | 'footer-close'
+
 export type MouseAction =
   | { readonly kind: 'focus'; readonly targetId: string }
   | { readonly kind: 'transcript'; readonly command: string; readonly targetKey?: string }
@@ -27,6 +29,7 @@ export type MouseAction =
     }
   | { readonly kind: 'overlay'; readonly command: string; readonly optionId?: string }
   | { readonly kind: 'context-menu'; readonly menuId: number; readonly optionId?: string }
+  | { readonly kind: 'agent-tree'; readonly command: AgentTreeMouseCommand; readonly sessionId?: string }
   | { readonly kind: 'chrome'; readonly commandId: string }
 
 export interface HitRegion {
