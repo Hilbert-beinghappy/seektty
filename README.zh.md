@@ -100,7 +100,7 @@ SeekTTY `1.2.5` 为官方 Harness `0.1.1-rc.2` 带来 Fastfetch 风格欢迎页�
 - 宽弹窗会使用可用空间显示完整选项描述，resize 时保留搜索、选中、滚动与鼠标命中；多层控件的 hover 和透明表面语义保持一致。
 - 启动器协调、兼容更新和 TUI 插件变更逐命令关闭 pnpm 11 Global Virtual Store。已知 `store/v11/links` Loader 故障会得到精确且脱敏的恢复提示，不修改全局 pnpm 配置，也不绕过原生 Profile 协调。
 
-完整变更见双语[发布说明](docs/release-v1.2.5.md)，验证边界与 npm Registry 发布证据见 [Owner 审核清单](docs/release-v1.2.5-verification.md)。
+完整变更见双语[发布说明](docs/release-v1.2.5.md)，验证边界与发布流程见 [Owner 审核清单](docs/release-v1.2.5-verification.md)。
 
 ## 界面预览
 
@@ -380,7 +380,7 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 | 当前已测 Harness Host | `0.1.1-rc.2` |
 | pnpm 11 布局适配器 | pnpm `11.7.0`；dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`；每次变更单独关闭 GVS |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| 当前 Release 候选 | SeekTTY `1.2.5` + 官方 dsh `0.1.1-rc.2`；包含外观、高亮、交互与 pnpm 布局改动，但不扩展可选插件联合验收范围 |
+| 当前 Release | SeekTTY `1.2.5` + 官方 dsh `0.1.1-rc.2`；包含外观、高亮、交互与 pnpm 布局改动，但不扩展可选插件联合验收范围 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 
@@ -423,4 +423,4 @@ CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor
 ```
 
-用户包通过对应 GitHub Release 附带的预构建 tarball 分发，目前没有发布到 npm Registry。
+SeekTTY `1.2.5` 已发布到 npm Registry，可使用上文带逐命令 GVS 兼容参数的 pnpm 命令安装；同一份已审核包也作为预构建 tarball 附在对应的 GitHub Release 中。

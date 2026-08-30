@@ -100,7 +100,7 @@ SeekTTY `1.2.5` brings a Fastfetch-style welcome page, terminal-integrated backg
 - Wide overlays use available space for full option descriptions while preserving search, selection, scroll position, and pointer geometry across resize. Hover styling and transparent surfaces are consistent across nested controls.
 - Launcher provisioning, compatible updates, and TUI plugin mutations disable pnpm 11 Global Virtual Store per command. Known `store/v11/links` loader failures receive precise, credential-redacted recovery without changing global pnpm configuration or bypassing native Profile reconciliation.
 
-See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits and npm Registry publication evidence.
+See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits and the publication procedure.
 
 ## Interface
 
@@ -380,7 +380,7 @@ The current tested Host is official `0.1.1-rc.2`; the complete compatibility bou
 | Current tested Harness Host | `0.1.1-rc.2` |
 | pnpm 11 layout adapter | pnpm `11.7.0`; dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current release candidate | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; appearance, highlighting, interaction, and pnpm-layout changes are included; optional plugin joint acceptance is not extended |
+| Current release | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; appearance, highlighting, interaction, and pnpm-layout changes are included; optional plugin joint acceptance is not extended |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
@@ -423,4 +423,4 @@ CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor
 ```
 
-User packages are distributed as prebuilt tarballs attached to matching GitHub Releases. There is currently no npm Registry release.
+SeekTTY `1.2.5` is published on the npm Registry and can be installed with pnpm using the per-command GVS compatibility option shown above. The identical reviewed package is also available as a prebuilt tarball attached to the matching GitHub Release.
