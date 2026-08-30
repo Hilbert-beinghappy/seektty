@@ -65,7 +65,7 @@ SeekTTY 1.2.5 replaces the old empty-session screen with a configurable Fastfetc
 
 ### Owner publication boundary
 
-The package remains `private: true`. This pull request prepares versioned source, generated bundles, bilingual documentation, and verification evidence only. The Owner must review the exact artifact and CI matrix before separately deciding whether to create `v1.2.5` and a GitHub Release. There is no npm Registry publication step in this candidate.
+The package is configured for public publication at `https://registry.npmjs.org/`, and launcher provisioning and self-update use exact npm version specs. This document is not evidence that `seektty@1.2.5` has been published. The Owner must review the exact tarball, checksum, packed file list, and CI matrix, then explicitly confirm the first interactive npm publication.
 
 ## 中文
 
@@ -130,4 +130,4 @@ SeekTTY 1.2.5 使用可配置的 Fastfetch 风格欢迎页替换旧空会话界�
 
 ### Owner 发布边界
 
-包继续保留 `private: true`。本 PR 只准备版本化源码、生成 bundle、双语文档和验证证据。Owner 必须审核精确候选包与 CI 矩阵，再单独决定是否创建 `v1.2.5` 与 GitHub Release。本候选不包含 npm Registry 发布步骤。
+包已配置为公开发布到 `https://registry.npmjs.org/`，启动器首次协调和自更新均使用精确 npm 版本 spec。本文件不代表 `seektty@1.2.5` 已经发布。Owner 必须审核精确 tarball、SHA-256、打包文件清单和 CI 矩阵，再明确确认首次交互式 npm 发布。

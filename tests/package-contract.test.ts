@@ -26,6 +26,14 @@ describe('out-of-tree Bundle contract', () => {
     expect(DSH_COMPATIBILITY).toEqual((manifest.dsh as { compatibility: unknown }).compatibility)
   })
 
+  it('is configured for a public npm Registry publication', () => {
+    expect(manifest.private).not.toBe(true)
+    expect(manifest.publishConfig).toEqual({
+      access: 'public',
+      registry: 'https://registry.npmjs.org/',
+    })
+  })
+
   it('ships only for the supported terminal platforms', () => {
     expect(manifest.os).toEqual(['darwin', 'linux', 'win32'])
   })
@@ -194,19 +202,19 @@ describe('out-of-tree Bundle contract', () => {
     expect(workflow).toContain('pnpm test:pnpm11-layout true .artifacts')
   })
 
-  it('keeps both READMEs on the release version and explains pre-publication testing', () => {
+  it('keeps both READMEs on the release version and exact npm install spec', () => {
     for (const name of ['README.md', 'README.zh.md']) {
       const text = readFileSync(resolve(root, name), 'utf8')
       expect(text).toContain(`Version-${PACKAGE_VERSION}`)
       expect(text).toContain('DeepSeek%20Harness-0.1.1--rc.2')
       expect(text).toContain('https://github.com/Hilbert-beinghappy/seektty/releases')
-      expect(text).toContain(`/releases/download/v${PACKAGE_VERSION}/seektty-${PACKAGE_VERSION}.tgz`)
+      expect(text).toContain(`seektty@${PACKAGE_VERSION}`)
       expect(text).not.toContain('/releases/download/v1.2.0/')
       expect(text).toContain('pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2')
       expect(text).toContain('store/v11/links')
       expect(text).toContain(`docs/release-v${PACKAGE_VERSION}.md`)
       expect(text).toContain(`docs/release-v${PACKAGE_VERSION}-verification.md`)
-      expect(text).toMatch(/Before publication|发布前/u)
+      expect(text).toContain('npm Registry')
       expect(text).toMatch(/optional, not default dependencies|可选插件，不是默认依赖/u)
       expect(text).toMatch(/Vision-Exp/)
       expect(text).toMatch(/self-first|SeekTTY 自更新优先|每轮只安装一个/u)

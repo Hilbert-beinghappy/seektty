@@ -49,7 +49,7 @@ export interface InstalledFacts {
 export interface UpdatePlan {
   /** Global install spec for dsh, e.g. `@deepseek-ai/dsh@0.1.0-rc.7`. */
   readonly dshSpec?: string | undefined
-  /** Plugin spec for the newest SeekTTY release, e.g. `github:...#v1.2.1`. */
+  /** Exact npm spec for the newest SeekTTY release, e.g. `seektty@1.2.1`. */
   readonly seekttySpec?: string | undefined
 }
 
@@ -174,10 +174,11 @@ export function exclusiveUpdatePlan(plan: UpdatePlan): UpdatePlan {
  * peer-aligned auto range and newer than the actually installed Host.
  */
 export function updatePlan(scan: VersionScan, facts: InstalledFacts): UpdatePlan {
-  if (!facts.seekttyPinned && seekttyIsNewer(scan, facts)) {
+  const seekttyVersion = scan.seekttyLatestTag === undefined ? undefined : tagToVersion(scan.seekttyLatestTag)
+  if (!facts.seekttyPinned && seekttyVersion !== undefined && seekttyIsNewer(scan, facts)) {
     return exclusiveUpdatePlan({
       dshSpec: undefined,
-      seekttySpec: `github:Hilbert-beinghappy/seektty#${scan.seekttyLatestTag}`,
+      seekttySpec: `seektty@${seekttyVersion}`,
     })
   }
   return exclusiveUpdatePlan({

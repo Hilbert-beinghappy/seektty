@@ -47,30 +47,30 @@ Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
 ```sh
 pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.5
 
 dsh --profile tui
 ```
 
 These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. The per-command pnpm option avoids the pnpm 11 Global Virtual Store layout that the Cordis loader in the currently tested dsh releases cannot reliably load. SeekTTY never changes global pnpm configuration. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
 
-Versioned download URLs become available only after that release is published. Before publication, use the local-tarball instructions in the [1.2.5 owner review and release checklist](docs/release-v1.2.5-verification.md). This pull request is a release candidate only; merging it does not publish a tag, GitHub Release, or npm package.
+The exact `seektty@1.2.5` npm package and the GitHub Release tarball are built from the same reviewed package inputs. The [1.2.5 owner review and release checklist](docs/release-v1.2.5-verification.md) records the publication and verification procedure.
 
 ### Bare `deepseek` launcher
 
-After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to that tarball:
+After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to its exact npm version:
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.5
+export SEEKTTY_SPEC=seektty@1.2.5
 deepseek
 ```
 
-PowerShell uses the same package URL:
+PowerShell uses the same exact npm spec:
 
 ```powershell
-pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
+pnpm add --global --config.enable-global-virtual-store=false 'seektty@1.2.5'
+$env:SEEKTTY_SPEC='seektty@1.2.5'
 deepseek
 ```
 
@@ -100,7 +100,7 @@ SeekTTY `1.2.5` brings a Fastfetch-style welcome page, terminal-integrated backg
 - Wide overlays use available space for full option descriptions while preserving search, selection, scroll position, and pointer geometry across resize. Hover styling and transparent surfaces are consistent across nested controls.
 - Launcher provisioning, compatible updates, and TUI plugin mutations disable pnpm 11 Global Virtual Store per command. Known `store/v11/links` loader failures receive precise, credential-redacted recovery without changing global pnpm configuration or bypassing native Profile reconciliation.
 
-See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits. Version 1.2.4 remains the latest published release until the Owner explicitly approves and performs publication.
+See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [owner review checklist](docs/release-v1.2.5-verification.md) for verification limits and npm Registry publication evidence.
 
 ## Interface
 
@@ -350,8 +350,8 @@ Replace the former `deepseek-tui` global package once:
 
 ```sh
 pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
-pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.5
+export SEEKTTY_SPEC=seektty@1.2.5
 deepseek
 ```
 
@@ -359,13 +359,14 @@ Custom Profiles migrate independently on first launch. Native dsh-only installat
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
-dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.5
 ```
 
-Removing SeekTTY changes only the target Profile, never the dsh installation:
+To remove both the Profile Bundle and the optional global launcher while leaving the dsh installation untouched:
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false seektty
+pnpm remove --global --config.enable-global-virtual-store=false seektty
 ```
 
 ## Compatibility and verification

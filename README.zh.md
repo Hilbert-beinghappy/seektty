@@ -47,30 +47,30 @@
 ```sh
 pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
 
-dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.5
 
 dsh --profile tui
 ```
 
 这些命令通过原生 `dsh plugin` 协调机制安装预构建 Bundle。逐命令 pnpm 参数会避开 pnpm 11 Global Virtual Store 布局；当前已测 dsh 版本的 Cordis Loader 还不能可靠加载该布局。SeekTTY 绝不会修改全局 pnpm 配置。Clarify 与 Auxiliary Runtime 均为可选插件，不是默认依赖；历史联合验收组合见[兼容性](#兼容与验证)。
 
-带版本号的下载地址仅在对应版本正式发布后可用。发布前请按 [1.2.5 Owner 审核与发布清单](docs/release-v1.2.5-verification.md)中的本地 tarball 方式测试。本 PR 仅为 Release 候选；合并不会自动创建 tag、GitHub Release 或 npm 包。
+`seektty@1.2.5` npm 包与 GitHub Release tarball 使用同一份已审核包输入构建。[1.2.5 Owner 审核与发布清单](docs/release-v1.2.5-verification.md)记录发布和验证流程。
 
 ### 裸 `deepseek` 启动器
 
-安装 `dsh` 后，可全局安装同一个 SeekTTY Release，并把 Profile 协调固定到该 tarball：
+安装 `dsh` 后，可全局安装同一个 SeekTTY Release，并把 Profile 协调固定到精确 npm 版本：
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.5
+export SEEKTTY_SPEC=seektty@1.2.5
 deepseek
 ```
 
-PowerShell 使用相同的包地址：
+PowerShell 使用相同的精确 npm spec：
 
 ```powershell
-pnpm add --global --config.enable-global-virtual-store=false 'https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
-$env:SEEKTTY_SPEC='https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz'
+pnpm add --global --config.enable-global-virtual-store=false 'seektty@1.2.5'
+$env:SEEKTTY_SPEC='seektty@1.2.5'
 deepseek
 ```
 
@@ -100,7 +100,7 @@ SeekTTY `1.2.5` 为官方 Harness `0.1.1-rc.2` 带来 Fastfetch 风格欢迎页�
 - 宽弹窗会使用可用空间显示完整选项描述，resize 时保留搜索、选中、滚动与鼠标命中；多层控件的 hover 和透明表面语义保持一致。
 - 启动器协调、兼容更新和 TUI 插件变更逐命令关闭 pnpm 11 Global Virtual Store。已知 `store/v11/links` Loader 故障会得到精确且脱敏的恢复提示，不修改全局 pnpm 配置，也不绕过原生 Profile 协调。
 
-完整变更见双语[发布说明](docs/release-v1.2.5.md)，验证边界见 [Owner 审核清单](docs/release-v1.2.5-verification.md)。在 Owner 明确批准并执行发布前，1.2.4 仍是最新正式版本。
+完整变更见双语[发布说明](docs/release-v1.2.5.md)，验证边界与 npm Registry 发布证据见 [Owner 审核清单](docs/release-v1.2.5-verification.md)。
 
 ## 界面预览
 
@@ -350,8 +350,8 @@ TUI `/plugin` 与原生 `dsh plugin` 会协调同一份 Profile 依赖、Bundle 
 
 ```sh
 pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
-pnpm add --global --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
-export SEEKTTY_SPEC=https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.5
+export SEEKTTY_SPEC=seektty@1.2.5
 deepseek
 ```
 
@@ -359,13 +359,14 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
-dsh plugin --profile tui add --config.enable-global-virtual-store=false https://github.com/Hilbert-beinghappy/seektty/releases/download/v1.2.5/seektty-1.2.5.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.5
 ```
 
-移除 SeekTTY 只影响目标 Profile，不会修改 dsh 本体：
+如需同时移除 Profile Bundle 和可选的全局启动器，可执行以下命令；dsh 本体不受影响：
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false seektty
+pnpm remove --global --config.enable-global-virtual-store=false seektty
 ```
 
 ## 兼容与验证

@@ -3,7 +3,7 @@
 This is the review record for the `1.2.5` release candidate. It is not evidence that `v1.2.5` has been tagged or published.
 
 - Previous published release: `v1.2.4`.
-- Candidate branch: `codex/release-1.2.5`. Its cumulative scope is every merged change after `v1.2.4` (PRs #162, #164, #165, #169, #170, #172, #177, #178, and #180), the completed local Fastfetch-welcome series, the pnpm 11 layout adapter, and release-document updates.
+- Candidate branch: `codex/npm-publish-1.2.5`, based on merged PR #182. Its cumulative scope is every merged change after `v1.2.4`, the pnpm 11 layout adapter, and the npm publication contract.
 - Candidate artifact: `seektty-1.2.5.tgz`, built with pnpm `11.7.0`.
 - Tested Host: unmodified official `@deepseek-ai/dsh@0.1.1-rc.2`.
 - Release notes: [English and Chinese in one document](release-v1.2.5.md).
@@ -36,16 +36,16 @@ The final values below must describe the exact package inputs proposed for Owner
 
 | Gate | Result |
 | --- | --- |
-| `pnpm run check` | Pass — 123 test files; 1084 passed / 1 conditional skip; typecheck, build, and pack check passed |
+| `pnpm run check` | Pass — 123 test files; 1086 passed / 1 conditional skip; typecheck, build, and pack check passed |
 | Tracked `lib/` and launcher `--version` | Pass — generated bundle rebuilt; launcher reports `seektty 1.2.5` and tested dsh `0.1.1-rc.2` |
 | Package allowlist | Pass — 25 packaged entries, including the sanitized built-in welcome Logo; no Profile, Session, `.env`, cache, or personal theme paths included |
 | Welcome/Fastfetch automated coverage | Pass — defaults, three information modes, safe/trusted sources, process limits, cache generations, ANSI sanitization, responsive layouts, draft rollback, navigation, and direct top/bottom row movement |
 | Structural TUI performance | Pass — 12 isolated runs at 1k / 10k / 50k / 100k transcript lines, 80 columns × 24 rows |
 | Windows GVS=false isolated lifecycle | Pass — official dsh install plus add, boot, remove, re-add, second boot, launcher isolation, and Host identity checks |
 | Windows GVS=true compatibility branch | Pass as a diagnostic gate — real paths entered `store/v11/links`; the exact current dsh/Cordis failure and recovery advice were classified. This is not a claim of GVS=true support |
-| GitHub CI, Windows/macOS/Linux × Node 22/24 | Pending PR checks; Owner must review |
+| GitHub CI, Windows/macOS/Linux × Node 22/24 | Pass — all six pnpm 11 layout jobs plus the main check and Windows launcher job succeeded on PR #182 |
 
-Candidate SHA-256 (`seektty-1.2.5.tgz`): `7ce2ec82c449bc5b58e0fb3dcca0ba973f80f196f0661610a3ff77163f1e877f`.
+Record the final candidate SHA-256 in the draft GitHub Release and external `SHA256SUMS` after building from the approved merge commit. It is intentionally not embedded here because this document is part of the tarball being hashed.
 
 Local evidence was collected on Windows `10.0.22631`, x64, Node.js `v26.1.0`, pnpm `11.7.0`, against the unmodified official dsh `0.1.1-rc.2`. The package targets Node `^22.19.0 || >=24`; the PR matrix separately covers Node 22 and 24.
 
@@ -109,17 +109,18 @@ pnpm test:pnpm11-layout true /path/to/candidate-directory
 - [ ] Confirm the failure message contains no credential and does not misclassify unrelated loader failures.
 - [ ] Decide whether pending macOS/Linux real-terminal checks block publication or should remain explicitly untested.
 - [ ] Explicitly authorize tag and GitHub Release creation in a separate action. Merging this PR alone is not publication authorization.
-- [ ] Keep `private: true` unless npm identity, access, Trusted Publishing, provenance, and rollback are separately reviewed and approved.
+- [ ] Confirm npm identity, verified email, 2FA, public access, rollback, and the exact `seektty@1.2.5` package before the final interactive publish.
 
 ## Publication procedure — Owner only, after approval
 
 1. Confirm the merge commit has green required checks and no package-input changes after the reviewed artifact was produced.
 2. Rebuild `seektty-1.2.5.tgz`, verify its allowlist and checksum, and store `SHA256SUMS` outside the checkout.
-3. Create `v1.2.5` at the exact approved commit and prepare a **draft** GitHub Release using [the bilingual notes](release-v1.2.5.md).
-4. Attach the tarball and `SHA256SUMS`; verify version, tag, filename, and checksum before publishing the draft.
-5. After publication, download the assets again, compare SHA-256, and repeat isolated installation from the downloaded package.
+3. Confirm `npm whoami`, the public package name, version, `latest` dist-tag, packed file list, and checksum.
+4. Create `v1.2.5` at the exact approved commit and prepare a **draft** GitHub Release using [the bilingual notes](release-v1.2.5.md). Attach the same tarball and checksum file.
+5. After a final Owner confirmation, publish that exact tarball interactively with 2FA: `npm publish /absolute/path/seektty-1.2.5.tgz --access public --tag latest --registry=https://registry.npmjs.org/`.
+6. Verify Registry metadata and the isolated official-dsh lifecycle from `seektty@1.2.5`, then publish the prepared GitHub Release and compare its downloaded asset SHA-256.
 
-This candidate intentionally has no automated publishing workflow and no npm Registry publication step.
+This first npm release intentionally has no automated publishing workflow. Configure npm Trusted Publishing only after the package exists; do not add a long-lived write token.
 
 ## Rollback
 
@@ -137,4 +138,4 @@ Do not delete `DSH_HOME`, Settings, Sessions, or plugin manifests. If the global
 
 Owner 需要审核欢迎页与 Fastfetch 信任边界、主题／透明背景、代码高亮、对话与选择器交互、pnpm 适配范围、六组 CI 矩阵、精确候选包、打包白名单和 SHA-256，并在隔离 `DSH_HOME` 下启动验证。GVS=true 当前若命中已知上游 Loader 错误，只能说明诊断正确，不能宣称已经支持该布局。macOS/Linux CI 与真实桌面终端人工验收继续分开记录。
 
-合并这个 PR 不等于授权发布。只有 Owner 后续明确批准，才创建 `v1.2.5` 和 GitHub Release。包继续保留 `private: true`；npm 身份、权限、Trusted Publishing、provenance 与回滚没有单独审核前，不进行 npm 发布。
+合并准备 PR 不等于执行发布。包已配置为公开 npm 包，启动器与自更新改用精确 npm 版本 spec；Owner 仍需审核精确 tarball、文件清单、SHA-256、CI、npm 身份与回滚方案，并在 `npm publish` 前作最后一次明确确认。首次发布后再配置 Trusted Publishing，不保存长期写 Token。

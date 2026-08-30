@@ -10,8 +10,8 @@ import {
 } from '../src/dsh-compat.ts'
 
 describe('dsh version and compatibility', () => {
-  it('pins the default plugin spec to the package tag and prints --version without spawning', () => {
-    expect(defaultPluginSpec('1.0.0')).toBe('github:Hilbert-beinghappy/seektty#v1.0.0')
+  it('pins the default plugin spec to the exact npm version and prints --version without spawning', () => {
+    expect(defaultPluginSpec('1.0.0')).toBe('seektty@1.0.0')
     expect(isVersionRequest(['--cwd', '.', '--version'])).toBe(true)
     expect(isVersionRequest(['-V'])).toBe(true)
     expect(isVersionRequest(['--cwd', '.'])).toBe(false)

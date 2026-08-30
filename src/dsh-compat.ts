@@ -133,11 +133,11 @@ export function dshCompatibilityNotice(
 }
 
 /**
- * Default GitHub plugin spec pinned to this package version.
+ * Default npm plugin spec pinned to this package version.
  * @param version - package.json version without a leading v.
  */
 export function defaultPluginSpec(version: string): string {
-  return `github:Hilbert-beinghappy/seektty#v${version}`
+  return `seektty@${version}`
 }
 
 /**
