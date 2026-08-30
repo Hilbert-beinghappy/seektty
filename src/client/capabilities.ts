@@ -53,6 +53,11 @@ import {
   createSubagentPresentationCapabilities,
   type SubagentPresentationCapabilities,
 } from './subagent-presentation.ts'
+import {
+  RootSessionCatalogProjector,
+  rootCatalogRevision,
+  type RootCatalogResult,
+} from './root-session-catalog.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -491,6 +496,7 @@ export class HarnessTuiCapabilities {
   private readonly modelLoads = new Map<SessionId, Promise<SessionModels>>()
   private readonly attachments: TuiDraftAttachment[] = []
   private readonly subagentPresentationAdapter: SubagentPresentationCapabilities
+  private readonly rootSessionCatalogProjector = new RootSessionCatalogProjector()
   private modelGeneration = 0
 
   /**
@@ -517,6 +523,7 @@ export class HarnessTuiCapabilities {
     ctx.on('connection/reset', () => {
       this.commandCatalogs.clear()
       this.invalidateModels()
+      this.rootSessionCatalogProjector.clear()
     })
   }
 
@@ -965,6 +972,16 @@ export class HarnessTuiCapabilities {
       const row = sessions.byId[id]
       return row === undefined || archived.has(id) ? [] : [row]
     })
+  }
+
+  /** Root-only ordinary Session directory with conservative compatibility fallback. */
+  async listRootSessions(): Promise<RootCatalogResult<SessionSummary>> {
+    const rows = this.listSessions()
+    return this.rootSessionCatalogProjector.project(
+      rows,
+      rootCatalogRevision(rows),
+      this.subagentPresentationAdapter,
+    )
   }
 
   /**

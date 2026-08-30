@@ -635,7 +635,8 @@ export class TuiActions {
 
   private async sessions(query: string): Promise<void> {
     const current = this.capabilities.active()?.sessionId
-    const rows = sortSessionsByUpdatedAt(this.capabilities.listSessions())
+    const rootProjection = await this.capabilities.listRootSessions?.()
+    const rows = sortSessionsByUpdatedAt(rootProjection?.roots ?? this.capabilities.listSessions())
     if (rows.length === 0) throw new Error(ui('没有可恢复的会话', "No resumable sessions"))
     const hits = query === ''
       ? undefined
@@ -646,7 +647,7 @@ export class TuiActions {
         label: `${row.id === current ? '● ' : ''}${row.displayTitle}`,
         description: `${row.cwd ?? ui('无工作区', "No workspace")} · ${relativeTime(row.updatedAt)} · ${row.running ? ui('运行中', "Running") : row.pendingInteraction ?? ui('空闲', "Idle")}`,
       }))
-      : hits.items.map((hit) => {
+      : hits.items.filter(hit => rows.some(row => row.id === hit.sessionId)).map((hit) => {
         const row = rows.find(candidate => candidate.id === hit.sessionId)
         return {
           id: hit.sessionId,
@@ -657,7 +658,10 @@ export class TuiActions {
     if (choices.length === 0) throw new Error(ui(`没有匹配 ${JSON.stringify(query)} 的会话`, `No session matches ${JSON.stringify(query)}`))
     const selected = await this.host.overlays.select({
       title: query === '' ? ui('会话', "Session") : ui(`搜索会话 · ${query}`, `Search sessions · ${query}`),
-      detail: ui(`归档会话不会出现在这里${hits?.hasMore === true ? ' · 结果已达到上限' : ''}`, `Archived sessions do not appear here${hits?.hasMore === true ? ' · results reached the limit' : ''}`),
+      detail: ui(
+        `归档会话不会出现在这里${rootProjection?.support === 'unsupported' ? ' · 当前 Host 未提供可靠层级，保留兼容列表' : rootProjection?.support === 'partial' ? ' · 部分层级无法确认，未隐藏相关会话' : ''}${hits?.hasMore === true ? ' · 结果已达到上限' : ''}`,
+        `Archived sessions do not appear here${rootProjection?.support === 'unsupported' ? ' · the current Host has no reliable lineage, so the compatibility list is retained' : rootProjection?.support === 'partial' ? ' · some lineage is unresolved, so affected sessions remain visible' : ''}${hits?.hasMore === true ? ' · results reached the limit' : ''}`,
+      ),
       choices,
       options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
