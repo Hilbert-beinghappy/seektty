@@ -4179,11 +4179,15 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
 
   private async status(): Promise<void> {
     const openedSessionId = this.capabilities.active()?.sessionId
-    const [status, fetchedAuxiliaryUsage] = await Promise.all([
+    const subagentPresentation = this.capabilities.subagentPresentation?.()
+    const [status, fetchedAuxiliaryUsage, subagentHierarchy] = await Promise.all([
       this.capabilities.headerFacts(true),
       this.capabilities.auxiliaryUsageStatistics?.(
         openedSessionId === undefined ? {} : { sessionId: openedSessionId },
       ).catch(() => undefined),
+      openedSessionId === undefined || subagentPresentation === undefined
+        ? undefined
+        : subagentPresentation.listDirectChildren(openedSessionId),
     ])
     const auxiliaryUsage = this.capabilities.active()?.sessionId === openedSessionId
       ? fetchedAuxiliaryUsage
@@ -4212,6 +4216,11 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           `Profile ${status.profile} · ${status.running ? ui('运行中', 'running') : ui('空闲', 'idle')}`,
           status.workspace,
           `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
+          subagentHierarchy === undefined
+            ? ui('Agent 层级：无当前 Session', 'Agent hierarchy: no current Session')
+            : subagentHierarchy.support === 'supported'
+              ? ui('Agent 层级：支持直接子节点查询', 'Agent hierarchy: direct-child queries supported')
+              : ui('Agent 层级：当前 Host 不支持', 'Agent hierarchy: unsupported by this Host'),
           ...statistics.lines,
           ...(auxiliaryUsage?.lines ?? []),
         ].join('\n'),

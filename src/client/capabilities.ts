@@ -49,6 +49,10 @@ import {
   readAuxiliaryUsageSnapshot,
   type AuxiliaryUsageBuckets,
 } from './auxiliary-runtime-remote.ts'
+import {
+  createSubagentPresentationCapabilities,
+  type SubagentPresentationCapabilities,
+} from './subagent-presentation.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -486,6 +490,7 @@ export class HarnessTuiCapabilities {
   private readonly modelCatalogs = new Map<SessionId, SessionModels>()
   private readonly modelLoads = new Map<SessionId, Promise<SessionModels>>()
   private readonly attachments: TuiDraftAttachment[] = []
+  private readonly subagentPresentationAdapter: SubagentPresentationCapabilities
   private modelGeneration = 0
 
   /**
@@ -501,6 +506,7 @@ export class HarnessTuiCapabilities {
     private readonly initialWorkspacePath: string,
     private readonly management?: TuiManagementBridge,
   ) {
+    this.subagentPresentationAdapter = createSubagentPresentationCapabilities(ctx.sessions)
     ctx.remote.$on('commands/change', () => { this.commandCatalogs.clear() })
     ctx.remote.$on('agent-preset/selected', (sessionId: SessionId) => {
       this.dropCommandCatalog(sessionId)
@@ -512,6 +518,11 @@ export class HarnessTuiCapabilities {
       this.commandCatalogs.clear()
       this.invalidateModels()
     })
+  }
+
+  /** Feature-detected Harness-owned subagent presentation contract. */
+  subagentPresentation(): SubagentPresentationCapabilities {
+    return this.subagentPresentationAdapter
   }
 
   /**
@@ -1443,17 +1454,23 @@ export class HarnessTuiCapabilities {
    */
   async subagents(refresh = false): Promise<readonly TuiSubagentOption[]> {
     const active = this.requireActive()
-    if (refresh) await this.ctx.sessions.refreshSubagents(active.sessionId)
-    const list = this.ctx.sessions.list.getSnapshot()
-    const catalog = list.subagentsByParent[active.sessionId]
-    if (catalog?.state === 'error') {
+    const result = await this.subagentPresentationAdapter.listDirectChildren(active.sessionId, { refresh })
+    if (result.support === 'unsupported') {
       throw new Error(ui(
-        `读取子 Agent 失败：${catalog.error?.message ?? ui('未知错误', 'unknown error')}`,
-        `Failed to load subagents: ${catalog.error?.message ?? ui('未知错误', 'unknown error')}`,
+        '当前 Host 不提供可靠的子 Agent 目录',
+        'The current Host does not provide a reliable subagent catalog',
       ))
     }
+    const direct = result.value
+    if (direct.state === 'error') {
+      throw new Error(ui(
+        `读取子 Agent 失败：${direct.errorMessage ?? ui('未知错误', 'unknown error')}`,
+        `Failed to load subagents: ${direct.errorMessage ?? ui('未知错误', 'unknown error')}`,
+      ))
+    }
+    const list = this.ctx.sessions.list.getSnapshot()
     const now = Date.now()
-    return (catalog?.entries ?? []).map((entry) => {
+    return direct.children.map(({ entry, address }) => {
       const summary = list.byId[entry.id]
       const projectionValues = projectionRecord(summary?.projectionValues)
       const usage = projectionRecord(projectionValues?.tokenUsage)
@@ -1479,15 +1496,7 @@ export class HarnessTuiCapabilities {
           : Math.max(0, (entry.kind === 'child' && entry.activity === 'running' ? now : through ?? now) - since))
       return {
         entry,
-        ...(entry.kind === 'child'
-          ? {
-            address: {
-              parentSessionId: active.sessionId,
-              childSessionId: entry.id,
-              mode: entry.mode,
-            },
-          }
-          : {}),
+        ...(address === undefined ? {} : { address }),
         ...(totalTokens === undefined ? {} : { totalTokens }),
         ...(durationMs === undefined ? {} : { durationMs }),
       }
@@ -1499,7 +1508,13 @@ export class HarnessTuiCapabilities {
    * @param address - exact durable direct-parent address.
    */
   openSubagent(address: SubagentAddress): void {
-    this.ctx.sessions.openSubagent(address)
+    const result = this.subagentPresentationAdapter.openChild(address.childSessionId)
+    if (result.support === 'unsupported') {
+      throw new Error(ui('当前 Host 不支持打开子 Agent', 'The current Host cannot open subagents'))
+    }
+    if (!result.value.opened) {
+      throw new Error(ui('子 Agent 地址已失效，请刷新后重试', 'The subagent address is stale; refresh and try again'))
+    }
   }
 
   /**
