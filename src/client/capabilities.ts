@@ -1215,6 +1215,11 @@ export class HarnessTuiCapabilities {
     return [...this.attachments]
   }
 
+  /** Restore one frozen parent composer attachment list by exact object identity. */
+  restoreDraftAttachments(items: readonly TuiDraftAttachment[]): void {
+    this.attachments.splice(0, this.attachments.length, ...items)
+  }
+
   /** Clear transient image drafts without touching durable attachment storage. */
   clearAttachments(): void {
     this.attachments.splice(0)

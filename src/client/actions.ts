@@ -158,6 +158,8 @@ export interface TuiActionHost {
   workspacePath?(): string
   setEditor(text: string): void
   composerText?(): string
+  openAgentTree?(): Promise<boolean>
+  interactionOrigin?(sessionId: SessionId): string | undefined
   copy(text: string): void
   close(code: number): void
   restart(profile: string, notice: string): void
@@ -3884,6 +3886,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
   private async subagents(): Promise<void> {
     const parent = this.capabilities.active()
     if (parent === undefined) throw new Error(ui('当前没有打开的父会话', "No parent session is open"))
+    if (await this.host.openAgentTree?.() === true) return
     this.capabilities.setSubagentCatalogOpen(parent.sessionId, true)
     try {
       await this.host.overlays.navigate(async (nav) => {
@@ -4283,10 +4286,11 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       preview: toolApprovalPreview(call),
     })
     const options = { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 } as const
+    const origin = this.host.interactionOrigin?.(wait.sessionId)
     let decision: 'allowed-once' | 'rejected' | undefined
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
-        title: ui(`工具审批 · ${wait.payload.toolName}`, `Tool approval · ${wait.payload.toolName}`),
+        title: ui(`工具审批 · ${origin ?? '来源未确认'} · ${wait.payload.toolName}`, `Tool approval · ${origin ?? 'origin unconfirmed'} · ${wait.payload.toolName}`),
         detail: composed.detail,
         searchable: false,
         initialChoiceId: 'reject',

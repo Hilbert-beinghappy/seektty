@@ -149,7 +149,7 @@ Clarify 一次提出一个聚焦问题，把已确认的决定带入后续问题
 | 图片 | 粘贴或附加 PNG、JPEG、GIF、WebP；执行 Host 动态限制；恢复待发送附件；终端支持时内联显示 |
 | Plan、Goal、Todo 与压缩 | 原生 `/plan`、`/goal`、`/compact`，包含计划审查、目标状态、Todo 数量和 transcript 记录 |
 | 工具与文件 | 工具耗时、参数与结果高亮、带原文件行号的读取、Shell/JSON/Diff、产出文件浏览、路径复制与确认后外部打开 |
-| 子 Agent 与后台工作 | 查看或停止直接子 Agent；检查任务、工作流阶段、结果、失败、Token、耗时和结构化轨迹 |
+| 子 Agent 与后台工作 | 浏览所属根 Session 的嵌套 Agent Tree，打开独立 child transcript，返回时恢复父视口、草稿、附件与树状态；Host 证据不足时保守显示生命周期与可继续状态 |
 | Profile 与 Settings | 创建、复制、切换和诊断 Profile；通过 Schema 回退、revision 检查和只写 Secret 编辑全部设置命名空间 |
 | 插件、Skill 与 MCP | 插件中心、原生 Bundle 协调、动态 Skill 命令、MCP 实例、加载状态、设置与风险信息 |
 | 主题与语言 | 界面／代码主题独立切换、继承终端背景效果、配色生成、VS Code 主题导入、对比度检查、`NO_COLOR` 和中英文实时切换 |

@@ -29,6 +29,7 @@ export interface DirectSubagentCatalog {
   readonly parentAvailable?: boolean
   readonly children: readonly DirectSubagentChild[]
   readonly unresolved: readonly SubagentCatalogDiagnostic[]
+  readonly source?: 'catalog' | 'direct-address'
 }
 
 export interface OpenChildResult {
@@ -64,10 +65,15 @@ export interface SubagentPresentationCapabilities {
   openChild(sessionId: SessionId): SubagentCapabilityResult<OpenChildResult>
   continuation(sessionId: SessionId): SubagentCapabilityResult<SubagentContinuation>
   publicStatusEvidence(sessionId: SessionId): SubagentCapabilityResult<SubagentPublicStatus>
+  subscribePublicStatus?(
+    sessionId: SessionId,
+    listener: (status: SubagentPublicStatus) => void,
+  ): SubagentCapabilityResult<() => void>
 }
 
 interface SnapshotStoreLike {
   getSnapshot(): unknown
+  subscribe?(listener: () => void): () => void
 }
 
 /** Minimal public Runtime face. Every member is feature-detected at the call site. */
@@ -183,6 +189,46 @@ function parentAvailability(runtime: SubagentRuntimeLike, address: SubagentAddre
   return typeof catalog?.parentAvailable === 'boolean' ? catalog.parentAvailable : undefined
 }
 
+function statusEvidence(
+  runtime: SubagentRuntimeLike,
+  childSessionId: SessionId,
+): SubagentCapabilityResult<SubagentPublicStatus> {
+  const snapshot = runtimeSnapshot(runtime)
+  if (snapshot === undefined) {
+    return { support: 'unsupported', reason: 'session-status-unavailable' }
+  }
+  const evidence: SubagentPublicStatusEvidence[] = []
+  const summary = subagentRecord(subagentRecord(snapshot.byId)?.[childSessionId])
+  if (typeof summary?.running === 'boolean') {
+    evidence.push({ kind: 'session-running', running: summary.running })
+  }
+  const pending = summary?.pendingInteraction
+  if (pending === 'approval' || pending === 'plan-review' || pending === 'question') {
+    evidence.push({ kind: 'pending-interaction', interaction: pending })
+  }
+  if (summary?.completed === true) evidence.push({ kind: 'completion-notification', completed: true })
+
+  const catalogs = subagentRecord(snapshot.subagentsByParent)
+  if (catalogs !== undefined) {
+    for (const [rawParentId, rawCatalog] of Object.entries(catalogs)) {
+      const parentSessionId = sessionId(rawParentId)
+      if (parentSessionId === undefined) continue
+      const entries = subagentRecord(rawCatalog)?.entries
+      if (!Array.isArray(entries)) continue
+      const matching = entries.map(parseEntry).find((candidate) =>
+        'entry' in candidate && candidate.entry.id === childSessionId)
+      if (matching === undefined || !('entry' in matching)) continue
+      if (matching.entry.kind === 'diagnostic') {
+        evidence.push({ kind: 'catalog-diagnostic', reason: matching.entry.reason, parentSessionId })
+      } else {
+        evidence.push({ kind: 'catalog-activity', activity: matching.entry.activity, parentSessionId })
+      }
+      break
+    }
+  }
+  return { support: 'supported', value: { sessionId: childSessionId, evidence } }
+}
+
 /**
  * Adapt the current public dsh Runtime without reading Session files or inferring
  * relationships from tool names. Unknown future fields are deliberately omitted.
@@ -192,14 +238,50 @@ export function createSubagentPresentationCapabilities(
 ): SubagentPresentationCapabilities {
   return {
     async listDirectChildren(parentSessionId, options = {}) {
-      if (typeof runtime.list?.getSnapshot !== 'function'
-        || typeof runtime.refreshSubagents !== 'function') {
+      if (typeof runtime.list?.getSnapshot !== 'function') {
         return { support: 'unsupported', reason: 'catalog-unavailable' }
       }
-      if (options.refresh === true) await runtime.refreshSubagents(parentSessionId)
+      if (options.refresh === true && typeof runtime.refreshSubagents === 'function') {
+        await runtime.refreshSubagents(parentSessionId)
+      }
       const snapshot = runtimeSnapshot(runtime)
       if (subagentRecord(snapshot?.subagentsByParent) === undefined) {
-        return { support: 'unsupported', reason: 'catalog-unavailable' }
+        if (typeof runtime.subagentAddress !== 'function') {
+          return { support: 'unsupported', reason: 'catalog-unavailable' }
+        }
+        const children: DirectSubagentChild[] = []
+        for (const [rawSessionId, rawSummary] of Object.entries(subagentRecord(snapshot?.byId) ?? {})) {
+          const childSessionId = sessionId(rawSessionId)
+          if (childSessionId === undefined) continue
+          const resolved = addressFor(runtime, childSessionId)
+          if (resolved.state !== 'ready' || resolved.address.parentSessionId !== parentSessionId) continue
+          const summary = subagentRecord(rawSummary)
+          const label = typeof summary?.displayTitle === 'string'
+            ? summary.displayTitle
+            : typeof summary?.title === 'string' ? summary.title : childSessionId
+          children.push({
+            entry: {
+              kind: 'child',
+              id: childSessionId,
+              activity: summary?.running === true ? 'running' : 'inactive',
+              hasChildren: false,
+              ...(resolved.address.mode === 'continuable'
+                ? { mode: 'continuable', label }
+                : { mode: 'one-shot', label }),
+            },
+            address: resolved.address,
+          })
+        }
+        return {
+          support: 'supported',
+          value: {
+            parentSessionId,
+            state: 'ready',
+            children,
+            unresolved: [],
+            source: 'direct-address',
+          },
+        }
       }
       const catalog = catalogRecord(snapshot, parentSessionId)
       const rawEntries = Array.isArray(catalog?.entries) ? catalog.entries : []
@@ -272,48 +354,20 @@ export function createSubagentPresentationCapabilities(
     },
 
     publicStatusEvidence(childSessionId) {
-      const snapshot = runtimeSnapshot(runtime)
-      if (snapshot === undefined) {
+      return statusEvidence(runtime, childSessionId)
+    },
+
+    subscribePublicStatus(childSessionId, listener) {
+      if (typeof runtime.list?.subscribe !== 'function') {
         return { support: 'unsupported', reason: 'session-status-unavailable' }
       }
-      const evidence: SubagentPublicStatusEvidence[] = []
-      const summary = subagentRecord(subagentRecord(snapshot.byId)?.[childSessionId])
-      if (typeof summary?.running === 'boolean') {
-        evidence.push({ kind: 'session-running', running: summary.running })
+      const notify = (): void => {
+        const next = statusEvidence(runtime, childSessionId)
+        if (next.support === 'supported') listener(next.value)
       }
-      const pending = summary?.pendingInteraction
-      if (pending === 'approval' || pending === 'plan-review' || pending === 'question') {
-        evidence.push({ kind: 'pending-interaction', interaction: pending })
-      }
-      if (summary?.completed === true) evidence.push({ kind: 'completion-notification', completed: true })
-
-      const catalogs = subagentRecord(snapshot.subagentsByParent)
-      if (catalogs !== undefined) {
-        for (const [rawParentId, rawCatalog] of Object.entries(catalogs)) {
-          const parentSessionId = sessionId(rawParentId)
-          if (parentSessionId === undefined) continue
-          const entries = subagentRecord(rawCatalog)?.entries
-          if (!Array.isArray(entries)) continue
-          const matching = entries.map(parseEntry).find((candidate) =>
-            'entry' in candidate && candidate.entry.id === childSessionId)
-          if (matching === undefined || !('entry' in matching)) continue
-          if (matching.entry.kind === 'diagnostic') {
-            evidence.push({
-              kind: 'catalog-diagnostic',
-              reason: matching.entry.reason,
-              parentSessionId,
-            })
-          } else {
-            evidence.push({
-              kind: 'catalog-activity',
-              activity: matching.entry.activity,
-              parentSessionId,
-            })
-          }
-          break
-        }
-      }
-      return { support: 'supported', value: { sessionId: childSessionId, evidence } }
+      const dispose = runtime.list.subscribe(notify)
+      notify()
+      return { support: 'supported', value: dispose }
     },
   }
 }
@@ -322,6 +376,39 @@ export type AgentChildrenState = 'unrequested' | 'loading' | 'loaded' | 'error' 
 export type AgentDetailState = 'unloaded' | 'summaryLoading' | 'summaryReady' | 'viewOpen' | 'viewError'
 export type AgentLifecycle = 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'cancelled' | 'unknown' | 'unavailable'
 export type AgentContinuationState = 'unknown' | 'absent' | 'available' | 'stale'
+export type SubagentFallbackMode = 'tree' | 'direct-list' | 'generic-tool'
+
+export type SubagentLifecycleEvidence = SubagentPublicStatusEvidence
+  | { readonly kind: 'terminal'; readonly status: 'completed' | 'failed' | 'cancelled' }
+  | { readonly kind: 'partial-result'; readonly present: true }
+  | { readonly kind: 'api-error'; readonly message?: string }
+  | { readonly kind: 'creation-returned'; readonly created: true }
+
+export interface DerivedAgentLifecycle {
+  readonly lifecycle: AgentLifecycle
+  readonly partial: boolean
+  readonly apiError: boolean
+}
+
+export interface AgentOriginLabel {
+  readonly sessionId: SessionId
+  readonly label: string
+  readonly source: 'catalog' | 'current-session-context'
+  readonly breadcrumb: readonly SessionId[]
+}
+
+export interface RootAgentAggregate {
+  readonly discovered: number
+  readonly running: number
+  readonly waiting: number
+  readonly failed: number
+  readonly partial: number
+  readonly activityPreview: readonly AgentOriginLabel[]
+}
+
+export type PermissionOrigin =
+  | { readonly state: 'confirmed'; readonly origin: AgentOriginLabel }
+  | { readonly state: 'unconfirmed' }
 
 export interface EvidenceRef {
   readonly source: 'catalog' | 'session' | 'trajectory' | 'continuation' | 'diagnostic'
@@ -398,6 +485,90 @@ export type AgentTreeEvent =
   }
 
 const TERMINAL_LIFECYCLES = new Set<AgentLifecycle>(['completed', 'failed', 'cancelled'])
+
+/** Conservative lifecycle derivation: creation and API transport errors are never task terminal evidence. */
+export function deriveLifecycle(evidence: readonly SubagentLifecycleEvidence[]): DerivedAgentLifecycle {
+  const terminal = [...evidence].reverse().find(item => item.kind === 'terminal')
+  const partial = evidence.some(item => item.kind === 'partial-result')
+  const apiError = evidence.some(item => item.kind === 'api-error')
+  if (terminal?.kind === 'terminal') return { lifecycle: terminal.status, partial, apiError }
+  if (evidence.some(item => item.kind === 'pending-interaction')) return { lifecycle: 'waiting', partial, apiError }
+  const running = [...evidence].reverse().find(item => item.kind === 'session-running')
+  if (running?.kind === 'session-running' && running.running) return { lifecycle: 'running', partial, apiError }
+  if (evidence.some(item => item.kind === 'completion-notification')) return { lifecycle: 'completed', partial, apiError }
+  if (running?.kind === 'session-running') return { lifecycle: 'idle', partial, apiError }
+  const catalog = [...evidence].reverse().find(item => item.kind === 'catalog-activity')
+  if (catalog?.kind === 'catalog-activity') {
+    return { lifecycle: catalog.activity === 'running' ? 'running' : 'idle', partial, apiError }
+  }
+  if (evidence.some(item => item.kind === 'catalog-diagnostic')) return { lifecycle: 'unavailable', partial, apiError }
+  return { lifecycle: 'unknown', partial, apiError }
+}
+
+export function subagentFallbackMode(
+  result: SubagentCapabilityResult<DirectSubagentCatalog>,
+  genericToolAvailable = false,
+): SubagentFallbackMode {
+  if (result.support === 'supported') return result.value.source === 'direct-address' ? 'direct-list' : 'tree'
+  return genericToolAvailable ? 'generic-tool' : 'direct-list'
+}
+
+function breadcrumbFor(state: AgentTreeState, sessionId: SessionId): SessionId[] {
+  const result: SessionId[] = [sessionId]
+  const visited = new Set<SessionId>(result)
+  let parent = state.nodes.get(sessionId)?.parentSessionId
+  while (parent !== undefined && !visited.has(parent)) {
+    result.unshift(parent)
+    if (parent === state.rootSessionId) break
+    visited.add(parent)
+    parent = state.nodes.get(parent)?.parentSessionId
+  }
+  if (result[0] !== state.rootSessionId) result.unshift(state.rootSessionId)
+  return result
+}
+
+/** Label provenance is limited to the catalog or the explicitly active child context. */
+export function agentOriginLabel(
+  state: AgentTreeState,
+  sessionId: SessionId,
+  currentSessionId?: SessionId,
+): AgentOriginLabel | undefined {
+  const node = state.nodes.get(sessionId)
+  if (node?.label !== undefined) {
+    return { sessionId, label: node.label, source: 'catalog', breadcrumb: breadcrumbFor(state, sessionId) }
+  }
+  if (currentSessionId === sessionId) {
+    return { sessionId, label: sessionId, source: 'current-session-context', breadcrumb: breadcrumbFor(state, sessionId) }
+  }
+  return undefined
+}
+
+export function rootAgentAggregate(state: AgentTreeState): RootAgentAggregate {
+  const nodes = [...state.nodes.values()]
+  const activityPreview = nodes
+    .filter(node => node.lifecycle === 'running' || node.lifecycle === 'waiting')
+    .map(node => agentOriginLabel(state, node.sessionId))
+    .filter((origin): origin is AgentOriginLabel => origin !== undefined)
+    .slice(0, 3)
+  return {
+    discovered: nodes.length,
+    running: nodes.filter(node => node.lifecycle === 'running').length,
+    waiting: nodes.filter(node => node.lifecycle === 'waiting').length,
+    failed: nodes.filter(node => node.lifecycle === 'failed').length,
+    partial: nodes.filter(node => node.partial).length,
+    activityPreview,
+  }
+}
+
+export function permissionOrigin(
+  state: AgentTreeState,
+  ownerSessionId: SessionId | undefined,
+  currentSessionId?: SessionId,
+): PermissionOrigin {
+  if (ownerSessionId === undefined) return { state: 'unconfirmed' }
+  const origin = agentOriginLabel(state, ownerSessionId, currentSessionId)
+  return origin === undefined ? { state: 'unconfirmed' } : { state: 'confirmed', origin }
+}
 
 export function createAgentTreeState(rootSessionId: SessionId): AgentTreeState {
   return {

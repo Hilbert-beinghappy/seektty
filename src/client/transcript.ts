@@ -1324,6 +1324,23 @@ interface TranscriptViewportAnchor extends TranscriptCoordinate {
   readonly followLatest: boolean
 }
 
+/** Frozen presentation coordinates for leaving and later restoring one Session view. */
+export interface TranscriptPresentationSnapshot {
+  readonly sessionId?: string
+  readonly viewportAnchor: TranscriptViewportAnchor
+  readonly scrollOffset: number
+  readonly turnCursor?: TranscriptCoordinate
+  readonly selection?: TextSelection
+  readonly toolFocus: boolean
+  readonly focusedTool?: string
+  readonly expandedTools: readonly string[]
+  readonly collapsedTools: readonly string[]
+  readonly expandedReasoning: readonly string[]
+  readonly collapsedReasoning: readonly string[]
+}
+
+export type TranscriptRestoreResult = 'exact' | 'nearest' | 'session-mismatch'
+
 interface TranscriptViewportState {
   readonly contentWidth: number
   readonly rows: number
@@ -1471,6 +1488,59 @@ export class Transcript implements Component, Focusable {
   /** Whether the viewport is pinned to the latest output. */
   isFollowingLatest(): boolean {
     return this.viewportAnchor.followLatest
+  }
+
+  /** Freeze semantic presentation state without retaining rendered rows. */
+  snapshotPresentation(): TranscriptPresentationSnapshot {
+    return {
+      ...(this.sessionId === undefined ? {} : { sessionId: this.sessionId }),
+      viewportAnchor: { ...this.viewportAnchor },
+      scrollOffset: this.scrollOffset,
+      ...(this.turnCursor === undefined ? {} : { turnCursor: { ...this.turnCursor } }),
+      ...(this.selection === undefined
+        ? {}
+        : { selection: { ...this.selection, anchor: { ...this.selection.anchor }, focus: { ...this.selection.focus } } }),
+      toolFocus: this.toolFocus,
+      ...(this.toolFocus ? { focusedTool: this.toolKeys()[this.toolCursor] } : {}),
+      expandedTools: [...this.expandedTools],
+      collapsedTools: [...this.collapsedTools],
+      expandedReasoning: [...this.expandedReasoning],
+      collapsedReasoning: [...this.collapsedReasoning],
+    }
+  }
+
+  /** Restore a frozen parent view against the latest parent node set. */
+  restorePresentation(snapshot: TranscriptPresentationSnapshot): TranscriptRestoreResult {
+    if (snapshot.sessionId !== undefined && this.sessionId !== snapshot.sessionId) return 'session-mismatch'
+    this.expandedTools.clear()
+    this.collapsedTools.clear()
+    this.expandedReasoning.clear()
+    this.collapsedReasoning.clear()
+    for (const key of snapshot.expandedTools) this.expandedTools.add(key)
+    for (const key of snapshot.collapsedTools) this.collapsedTools.add(key)
+    for (const key of snapshot.expandedReasoning) this.expandedReasoning.add(key)
+    for (const key of snapshot.collapsedReasoning) this.collapsedReasoning.add(key)
+    const keys = this.blocks.map(block => block.key)
+    const exact = snapshot.viewportAnchor.blockKey === '' || keys.includes(snapshot.viewportAnchor.blockKey)
+    this.viewportAnchor = exact
+      ? { ...snapshot.viewportAnchor }
+      : this.blocks[0] === undefined
+        ? { blockKey: '', lineOffset: 0, followLatest: true }
+        : { blockKey: this.blocks[0].key, lineOffset: 0, followLatest: false }
+    this.scrollOffset = exact ? snapshot.scrollOffset : Math.max(1, snapshot.scrollOffset)
+    this.turnCursor = snapshot.turnCursor !== undefined && keys.includes(snapshot.turnCursor.blockKey)
+      ? { ...snapshot.turnCursor }
+      : undefined
+    this.selection = snapshot.selection === undefined
+      ? undefined
+      : selectionClearedForOwner(snapshot.selection, new Set(keys))
+    this.toolFocus = snapshot.toolFocus
+    const focusedIndex = snapshot.focusedTool === undefined
+      ? -1
+      : this.toolKeys().indexOf(snapshot.focusedTool)
+    if (focusedIndex >= 0) this.toolCursor = focusedIndex
+    this.requestRender()
+    return exact ? 'exact' : 'nearest'
   }
 
   /** Apply the Settings-owned scrollbar chrome without changing viewport coordinates. */

@@ -149,7 +149,7 @@ See [Compatibility and verification](#compatibility-and-verification) for the ac
 | Images | Paste or attach PNG, JPEG, GIF, or WebP; enforce live Host limits; restore pending attachments; render inline when the terminal supports it |
 | Plan, Goal, Todo, and compaction | Native `/plan`, `/goal`, and `/compact` with plan review, goal state, Todo counts, and transcript records |
 | Tools and files | Live tool duration, highlighted parameters and results, file reads with source line numbers, Shell/JSON/Diff views, produced-file browsing, path copy, and confirmed external open |
-| Subagents and background work | Inspect or stop direct subagents; view jobs, workflow phases, results, failures, token use, duration, and structured trajectory data |
+| Subagents and background work | Browse the owning root Session's nested Agent Tree, open child transcripts, and return with the parent viewport, draft, attachments, and tree state restored; lifecycle and continuation labels remain conservative when the Host lacks evidence |
 | Profiles and Settings | Create, copy, switch, and diagnose Profiles; edit every registered Settings namespace with Schema fallbacks, revision checks, and write-only secrets |
 | Plugins, Skills, and MCP | Plugin center, native Bundle reconciliation, dynamic Skill commands, MCP instances, load state, settings, and risk information |
 | Themes and language | Independent interface/code themes, terminal background effects, palette generation, VS Code theme import, contrast checks, `NO_COLOR`, and live Chinese/English switching |

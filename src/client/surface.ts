@@ -15,6 +15,7 @@ import {
   TuiSettingsConflictError,
   type TuiBackgroundMode,
 } from '@deepseek-ai/dsh-tui-protocol'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
 import { startTuiClient, type TuiClient } from './client-runtime.ts'
 import {
@@ -123,6 +124,8 @@ import {
   type TuiPerformanceSnapshot,
 } from './tui-performance.ts'
 import { PACKAGE_VERSION } from '../dsh-compat.ts'
+import { AgentTreeDock, owningAgentRoot } from './agent-tree.ts'
+import { ChildSessionView, type ParentViewSnapshot } from './child-session-view.ts'
 
 /** Replaceable terminal seams used by virtual-terminal tests. */
 export const internals: {
@@ -293,6 +296,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }).catch(() => { /* send must not wait on Settings */ })
     }
     let transcriptFocused = false
+    let hideComposer = false
     let mouseContentGeneration = 0
     let mouseArmed: MouseArmedActivation | undefined
     let transcriptPointerOrigin: {
@@ -346,7 +350,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       message => { reportWelcomeNotice(message) },
     )
     transcript = new Transcript(
-      () => transcriptViewportRows(terminal.rows, editor.render(terminal.columns).length),
+      () => transcriptViewportRows(terminal.rows, hideComposer ? 0 : editor.render(terminal.columns).length),
       () => { if (stopping === undefined) tui.requestRender() },
       () => {
         const current = active
@@ -398,6 +402,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       /* first frame already shown; highlighting stays off */
     })
     const status = new StatusBar()
+    const agentTree = new AgentTreeDock({
+      presentation: capabilities.subagentPresentation(),
+      requestRender: () => { if (stopping === undefined) tui.requestRender() },
+      mouseMode: () => liveBehavior.get().mouseMode,
+    })
+    const childView = new ChildSessionView()
     const canvas = new Box(0, 0, background.canvas)
     const renderCanvas = canvas.render.bind(canvas)
     canvas.render = (width: number): string[] => performanceProbe.measureRender(() => renderCanvas(width))
@@ -409,6 +419,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       editor,
       status,
       () => transcript.isEmptyState(),
+      agentTree,
+      () => !hideComposer,
     )
     canvas.addChild(layout)
     tui.addChild(canvas)
@@ -461,6 +473,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           hover: 'none',
           action: { kind: 'transcript', command: 'select' },
         })
+        for (const region of agentTree.hitRegions(slots.agentTree, liveBehavior.get().mouseMode)) {
+          builder.add(region)
+        }
         for (const region of transcript.scrollbarHitRegions(slots.transcript)) {
           builder.add(region)
         }
@@ -739,7 +754,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (liveBehavior.get().desktopNotifications) {
         const kind = nextDesktopNotify(chrome.notify, currentNotify, chrome.notifyPrimed)
         if (kind !== undefined) {
-          terminal.write(desktopNotifySequence(desktopNotifyBody(kind)))
+          const child = childView.snapshot()
+          const childLabel = child === undefined
+            ? undefined
+            : `${agentTree.selectedNode()?.label ?? child.childSessionId} · ${child.parentSessionId}`
+          terminal.write(desktopNotifySequence(desktopNotifyBody(kind, childLabel)))
         }
       }
       chrome.notify = currentNotify
@@ -847,10 +866,38 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const snapshot = current.session.getSnapshot()
       updateTranscript(current)
       actions.syncPending(snapshot)
-      editor.disableSubmit = false
+      editor.disableSubmit = childView.composerMode() === 'read-only'
       updateStatus()
       renderWhileOpen()
     }
+
+    const restoreParentView = (snapshot: ParentViewSnapshot) => {
+      const result = transcript.restorePresentation(snapshot.transcript)
+      editor.setText(snapshot.composer.text)
+      const api = editorMouseApi(editor)
+      api.setCursor?.(snapshot.composer.cursor.line, snapshot.composer.cursor.col)
+      if (snapshot.composer.selection === undefined) api.clearSelection?.()
+      else api.setSelection?.(snapshot.composer.selection.anchor, snapshot.composer.selection.focus)
+      capabilities.restoreDraftAttachments(snapshot.attachments)
+      agentTree.restorePresentation(snapshot.tree)
+      agentTree.resume()
+      contextBar.clearChildContext()
+      hideComposer = false
+      editor.disableSubmit = false
+      transcriptFocused = false
+      tui.setFocus(agentTree)
+      if (result === 'nearest') {
+        setNotice(ui('父会话在子视图期间已更新；已恢复到最近的语义位置', 'The parent changed while the child view was open; restored the nearest semantic position'), 'warning')
+      } else if (result === 'session-mismatch') {
+        setNotice(ui('父会话视图尚未就绪；未应用旧的视口坐标', 'The parent view is not ready; stale viewport coordinates were not applied'), 'warning')
+      }
+      return result
+    }
+
+    const closeAgentChildView = (): boolean => childView.closeChildView({
+      openParent: sessionId => { capabilities.openSession(sessionId) },
+      restore: restoreParentView,
+    }).closed
 
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
       detachFatalGuards()
@@ -871,6 +918,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         mouseController.dispose()
         welcome.dispose()
         transcript.dispose()
+        agentTree.dispose()
         setCodeHighlighter(undefined)
         try { syntax?.dispose() } catch (error) { failures.push(error) }
         try { unsubscribeActive() } catch (error) { failures.push(error) } finally {
@@ -973,6 +1021,29 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
       },
       composerText: () => editor.getText(),
+      interactionOrigin: (sessionId) => {
+        const child = childView.snapshot()
+        if (child !== undefined && child.childSessionId === sessionId) {
+          return `${child.parentSessionId} › ${agentTree.node(sessionId)?.label ?? sessionId}`
+        }
+        const current = capabilities.active()
+        return current?.sessionId === sessionId ? current.summary.displayTitle : undefined
+      },
+      openAgentTree: async () => {
+        const current = capabilities.active()
+        if (current === undefined) return false
+        const presentation = capabilities.subagentPresentation()
+        const root = owningAgentRoot(presentation, current.sessionId)
+        const probe = await presentation.listDirectChildren(root)
+        if (probe.support === 'unsupported' || probe.value.source === 'direct-address') return false
+        if (childView.isOpen()) closeAgentChildView()
+        capabilities.setSubagentCatalogOpen(root, true)
+        agentTree.openOrFocus(root, current.sessionId === root ? undefined : current.sessionId, editor.getExpandedText())
+        transcriptFocused = false
+        tui.setFocus(agentTree)
+        renderWhileOpen()
+        return true
+      },
       copy: (text) => {
         void writeClipboard(text, {
           fallback: liveBehavior.get().clipboardFallback,
@@ -1028,9 +1099,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return
       }
       active = current
+      const owningRoot = owningAgentRoot(capabilities.subagentPresentation(), current.sessionId)
+      agentTree.showCollapsedRoot(owningRoot, current.sessionId === owningRoot ? undefined : current.sessionId)
+      if (agentTree.isOpen()) agentTree.refreshVisibleStatus()
       updateTranscript(current)
       actions.syncPending(snapshot)
-      editor.disableSubmit = false
+      editor.disableSubmit = childView.composerMode() === 'read-only'
       if (latestSessionId !== current.sessionId) {
         contextMenu.close()
         latestSessionId = current.sessionId
@@ -1207,8 +1281,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const copyActiveSelection = (): void => {
       if (overlays.hasActive()) { copyText(overlays.textTarget()?.text ?? ''); return }
+      const agentTreeText = agentTree.copySelectionText()
       const transcriptText = transcript.copySelectionText()
-      copyText(transcriptText !== '' ? transcriptText : composerSelectionText())
+      copyText(agentTreeText !== '' ? agentTreeText : transcriptText !== '' ? transcriptText : composerSelectionText())
     }
 
     const openMouseContextMenu = async (
@@ -1221,7 +1296,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       restoreMouseFocus(region)
       const overlayTarget = inOverlay ? overlays.textTarget(region.role === 'input' ? 'input' : 'body') : undefined
       const composer = region?.role === 'input' || region?.action.kind === 'composer'
-      const selectionText = inOverlay ? overlayTarget?.text ?? '' : composer ? composerSelectionText() : transcript.copySelectionText()
+      const selectionText = inOverlay
+        ? overlayTarget?.text ?? ''
+        : composer
+          ? composerSelectionText()
+          : region.action.kind === 'agent-tree' ? agentTree.copySelectionText() : transcript.copySelectionText()
       const pasteSupported = (inOverlay ? overlayTarget?.editable === true : composer) && canReadClipboardText(process.platform)
       const choices = mouseContextChoices({
         target: inOverlay ? overlayTarget?.editable === true ? 'overlay-input' : 'overlay' : composer ? 'composer' : 'transcript',
@@ -1409,6 +1488,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const restoreMouseFocus = (region: { readonly action: { readonly kind: string } } | undefined): void => {
+      if (region?.action.kind === 'agent-tree') {
+        transcriptFocused = false
+        agentTree.focus()
+        tui.setFocus(agentTree)
+        return
+      }
       if (region?.action.kind === 'transcript') {
         transcriptFocused = true
         tui.setFocus(transcript)
@@ -1416,6 +1501,56 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
       if (region?.action.kind === 'overlay') return
       focusEditor()
+    }
+
+    const openAgentChild = (sessionId: SessionId): void => {
+      const rootSessionId = agentTree.owningRootId()
+      if (rootSessionId === undefined) return
+      const presentation = capabilities.subagentPresentation()
+      const continuation = presentation.continuation(sessionId)
+      const composerMode = continuation.support === 'supported' && continuation.value.state === 'available'
+        ? 'continuable' as const
+        : 'read-only' as const
+      const parent = capabilities.active()
+      const selected = agentTree.selectedNode()
+      const opened = childView.openChildView({
+        parentSessionId: rootSessionId,
+        childSessionId: sessionId,
+        composerMode,
+        capture: () => {
+          const api = editorMouseApi(editor)
+          const selection = api.getSelection?.()
+          const overlayId = overlays.activeOverlayId()
+          return {
+            transcript: transcript.snapshotPresentation(),
+            composer: {
+              text: editor.getExpandedText(),
+              cursor: { ...api.getCursor() },
+              ...(selection === undefined ? {} : { selection: { anchor: { ...selection.anchor }, focus: { ...selection.focus } } }),
+            },
+            attachments: capabilities.draftAttachments(),
+            tree: agentTree.snapshotPresentation(),
+            ...(overlayId === undefined ? {} : { overlayId }),
+          }
+        },
+        open: childSessionId => {
+          const result = presentation.openChild(childSessionId)
+          return result.support === 'supported' && result.value.opened
+        },
+      })
+      if (!opened) {
+        setNotice(ui('子 Agent 地址已失效，请刷新后重试', 'The subagent address is stale; refresh and try again'), 'warning')
+        return
+      }
+      capabilities.clearAttachments()
+      editor.setText('')
+      hideComposer = composerMode === 'read-only'
+      editor.disableSubmit = composerMode === 'read-only'
+      contextBar.setChildContext(parent?.summary.displayTitle ?? rootSessionId, selected?.label ?? sessionId, composerMode === 'read-only')
+      agentTree.blur()
+      agentTree.suspend()
+      transcriptFocused = composerMode === 'read-only'
+      tui.setFocus(composerMode === 'read-only' ? transcript : editor)
     }
 
     const applyHoverPresentation = (region: HitRegion | undefined): boolean => {
@@ -1490,6 +1625,26 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         } else if (region.role === 'input' || region.role === 'text') {
           applyOverlayPointer(semantic.point, undefined, region.role === 'input', semantic.count)
         }
+        return
+      }
+      if (region?.action.kind === 'agent-tree') {
+        const result = agentTree.handleClick(
+          region.action.command,
+          region.action.sessionId as SessionId,
+          semantic.count,
+        )
+        if (result.collapsed === true) {
+          const root = agentTree.owningRootId()
+          if (root !== undefined) capabilities.setSubagentCatalogOpen(root, false)
+          const snapshot = agentTree.restoreComposerSnapshot()
+          if (snapshot !== undefined) editor.setText(snapshot)
+          focusEditor()
+        } else if (result.requestedOpen === true) {
+          void actions.execute('subagents', '')
+        } else if (result.openedSessionId !== undefined) {
+          openAgentChild(result.openedSessionId)
+        }
+        renderWhileOpen()
         return
       }
       if (region?.role === 'scrollbar') {
@@ -1581,6 +1736,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       } else if (semantic.region?.action.kind === 'overlay') {
         clearTranscriptPointerGesture()
         applyOverlayPointer(semantic.point, semantic.origin, semantic.region.role === 'input', 1, semantic.ended === true)
+      } else if (semantic.region?.action.kind === 'agent-tree') {
+        clearTranscriptPointerGesture()
+        const origin = layout.lastContentGeometry()?.agentTree
+        if (origin !== undefined && semantic.origin !== undefined) agentTree.selectText(origin, semantic.origin, semantic.point)
       } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
         clearTranscriptPointerGesture()
         applyComposerPointer(semantic.point, semantic.origin, true)
@@ -1617,6 +1776,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           } else if (region?.action.kind === 'composer' || region?.role === 'input') {
             // A mouse wheel is a semantic navigation gesture, never keyboard bytes.
             // Inputs consume it without changing text or cursor state.
+          } else if (region?.action.kind === 'agent-tree') {
+            agentTree.scrollBy(outcome.semantic.lines)
+            needMouseRender = true
           } else if (outcome.scrollTranscript !== undefined) {
             if (pendingWheel !== 0) mouseController.noteCoalescedWheel()
             pendingWheel += outcome.scrollTranscript
@@ -1672,6 +1834,28 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       if (overlays.hasActive()) return undefined
+      if (childView.isOpen() && matchesKey(payload, Key.escape)) {
+        closeAgentChildView()
+        return { consume: true }
+      }
+      if (agentTree.isFocused() && matchesBinding('focusToggle', payload)) {
+        agentTree.blur()
+        focusEditor()
+        return { consume: true }
+      }
+      if (agentTree.isFocused()) {
+        const result = agentTree.handleInput(payload)
+        if (result.collapsed === true) {
+          const root = agentTree.owningRootId()
+          if (root !== undefined) capabilities.setSubagentCatalogOpen(root, false)
+          const snapshot = agentTree.restoreComposerSnapshot()
+          if (snapshot !== undefined) editor.setText(snapshot)
+          focusEditor()
+        } else if (result.openedSessionId !== undefined) {
+          openAgentChild(result.openedSessionId)
+        }
+        if (result.consumed) return { consume: true }
+      }
       const pasted = imagePathFromPasteText(payload)
       if (!transcriptFocused && pasted !== undefined) {
         return attachPastedImage(pasted.path, pasted.raw, pasted.rest)

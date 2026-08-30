@@ -27,6 +27,7 @@ export type MouseAction =
     }
   | { readonly kind: 'overlay'; readonly command: string; readonly optionId?: string }
   | { readonly kind: 'context-menu'; readonly menuId: number; readonly optionId?: string }
+  | { readonly kind: 'agent-tree'; readonly command: 'bar' | 'row' | 'chevron'; readonly sessionId: string }
   | { readonly kind: 'chrome'; readonly commandId: string }
 
 export interface HitRegion {
