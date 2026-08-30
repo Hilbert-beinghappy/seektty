@@ -15,7 +15,7 @@ import {
   type SubagentPresentationCapabilities,
 } from './subagent-presentation.ts'
 import type { CellRect, HitRegion } from './mouse-hit-map.ts'
-import { background, color, escapeTerminalText, surfaceRow } from './theme.ts'
+import { background, color, escapeTerminalText, statusColor, surfaceRow } from './theme.ts'
 import { ui } from './locale.ts'
 import { stripCopyDecorations } from './text-selection.ts'
 
@@ -82,10 +82,10 @@ function evidence(now: number, revision: number, id: string) {
 
 function lifecycleGlyph(lifecycle: AgentLifecycle): string {
   switch (lifecycle) {
-    case 'running': return color.brand('●')
-    case 'waiting': return color.warning('●')
+    case 'running': return statusColor.running('●')
+    case 'waiting': return statusColor.waiting('●')
     case 'completed': return color.success('✓')
-    case 'failed': return color.danger('×')
+    case 'failed': return statusColor.failed('×')
     case 'cancelled': return color.muted('–')
     case 'unavailable': return color.danger('!')
     case 'idle': return color.muted('○')
@@ -95,10 +95,10 @@ function lifecycleGlyph(lifecycle: AgentLifecycle): string {
 
 function lifecycleLabel(lifecycle: AgentLifecycle): string {
   switch (lifecycle) {
-    case 'running': return color.brand(ui('运行中', 'running'))
-    case 'waiting': return color.warning(ui('等待中', 'waiting'))
+    case 'running': return statusColor.running(ui('运行中', 'running'))
+    case 'waiting': return statusColor.waiting(ui('等待中', 'waiting'))
     case 'completed': return color.success(ui('已完成', 'completed'))
-    case 'failed': return color.danger(ui('失败', 'failed'))
+    case 'failed': return statusColor.failed(ui('失败', 'failed'))
     case 'cancelled': return color.muted(ui('已取消', 'cancelled'))
     case 'unavailable': return color.danger(ui('不可用', 'unavailable'))
     case 'idle': return color.muted(ui('空闲', 'idle'))
@@ -126,21 +126,42 @@ function lifecycleCounts(
   aggregate: { readonly discovered: number; readonly running: number; readonly waiting: number; readonly failed: number },
   width: number,
   open: boolean,
+  base: (text: string) => string,
 ): string {
   const arrow = open ? '▾' : '▸'
-  const full = ui(
-    `${arrow} 代理树 · ${aggregate.discovered.toLocaleString('en-US')} 个节点 · 运行 ${aggregate.running}  等待 ${aggregate.waiting}  失败 ${aggregate.failed}`,
-    `${arrow} Agent Tree · ${aggregate.discovered.toLocaleString('en-US')} nodes · running ${aggregate.running}  waiting ${aggregate.waiting}  failed ${aggregate.failed}`,
+  const discovered = aggregate.discovered.toLocaleString('en-US')
+  const variant = (
+    prefix: string,
+    running: string,
+    waiting: string,
+    failed: string,
+    separator: string,
+  ): { readonly plain: string; readonly painted: string } => ({
+    plain: `${prefix}${running}${separator}${waiting}${separator}${failed}`,
+    painted: `${base(prefix)}${statusColor.running(running)}${base(separator)}${statusColor.waiting(waiting)}${base(separator)}${statusColor.failed(failed)}`,
+  })
+  const full = variant(
+    ui(`${arrow} 代理树 · ${discovered} 个节点 · `, `${arrow} Agent Tree · ${discovered} nodes · `),
+    ui(`运行 ${aggregate.running}`, `running ${aggregate.running}`),
+    ui(`等待 ${aggregate.waiting}`, `waiting ${aggregate.waiting}`),
+    ui(`失败 ${aggregate.failed}`, `failed ${aggregate.failed}`),
+    '  ',
   )
-  const compact = ui(
-    `${arrow} ${aggregate.discovered.toLocaleString('en-US')} 节点 · 运行${aggregate.running} 等待${aggregate.waiting} 失败${aggregate.failed}`,
-    `${arrow} ${aggregate.discovered.toLocaleString('en-US')} nodes · R${aggregate.running} W${aggregate.waiting} F${aggregate.failed}`,
+  const compact = variant(
+    ui(`${arrow} ${discovered} 节点 · `, `${arrow} ${discovered} nodes · `),
+    ui(`运行${aggregate.running}`, `R${aggregate.running}`),
+    ui(`等待${aggregate.waiting}`, `W${aggregate.waiting}`),
+    ui(`失败${aggregate.failed}`, `F${aggregate.failed}`),
+    ' ',
   )
-  const minimal = ui(
-    `${arrow} 节点${aggregate.discovered.toLocaleString('en-US')} 运${aggregate.running} 等${aggregate.waiting} 失${aggregate.failed}`,
-    `${arrow} N${aggregate.discovered.toLocaleString('en-US')} R${aggregate.running} W${aggregate.waiting} F${aggregate.failed}`,
+  const minimal = variant(
+    ui(`${arrow} 节点${discovered} `, `${arrow} N${discovered} `),
+    ui(`运${aggregate.running}`, `R${aggregate.running}`),
+    ui(`等${aggregate.waiting}`, `W${aggregate.waiting}`),
+    ui(`失${aggregate.failed}`, `F${aggregate.failed}`),
+    ' ',
   )
-  return visibleWidth(full) <= width ? full : visibleWidth(compact) <= width ? compact : minimal
+  return visibleWidth(full.plain) <= width ? full.painted : visibleWidth(compact.plain) <= width ? compact.painted : minimal.painted
 }
 
 /** Resolve the owning root strictly from public continuation addresses. */
@@ -409,7 +430,7 @@ export class AgentTreeDock implements Component, Focusable {
     const aggregate = this.tree === undefined
       ? { discovered: 0, running: 0, waiting: 0, failed: 0, partial: 0, activityPreview: [] }
       : rootAgentAggregate(this.tree)
-    const counts = lifecycleCounts(aggregate, width, this.open)
+    const counts = lifecycleCounts(aggregate, width, this.open, this.focused ? color.brand : color.muted)
     const activity = aggregate.activityPreview.map(item => item.label).join(' · ')
     const mouseHint = this.options.mouseMode?.() === 'native'
       ? '/subagents'
@@ -418,7 +439,7 @@ export class AgentTreeDock implements Component, Focusable {
       ? activity === '' ? '' : ui(`活动：${activity}`, `Activity: ${activity}`)
       : activity === '' ? mouseHint : `${activity} · ${mouseHint}`
     const divider = color.muted('─'.repeat(Math.max(0, width)))
-    const bar = fitSides(this.focused ? color.brand(counts) : color.muted(counts), color.muted(right), width)
+    const bar = fitSides(counts, color.muted(right), width)
     if (!this.open) {
       const collapsed = [divider, surfaceRow(bar, width)]
       this.paintedText = collapsed.map(stripCopyDecorations)
@@ -449,7 +470,7 @@ export class AgentTreeDock implements Component, Focusable {
         content = `${treeText} ${lifecycleLabel(row.node.lifecycle)}`
       }
       const fitted = fitRow(content, width)
-      rendered.push(row.selected ? background.selection(stripCopyDecorations(fitted)) : surfaceRow(fitted, width))
+      rendered.push(row.selected ? background.selection(fitted) : surfaceRow(fitted, width))
       this.paintedRows = [...this.paintedRows, {
         sessionId: row.sessionId,
         row: index + 2,

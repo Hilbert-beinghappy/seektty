@@ -36,12 +36,28 @@ interface ThemePalette {
   readonly success: SemanticColor
   readonly warning: SemanticColor
   readonly danger: SemanticColor
+  readonly statusRunning: SemanticColor
+  readonly statusWaiting: SemanticColor
+  readonly statusFailed: SemanticColor
   readonly canvas: SemanticColor
   readonly surface: SemanticColor
   readonly selection: SemanticColor
   readonly codeBackground: SemanticColor
   readonly codeForeground: SemanticColor
 }
+
+const STATUS_COLORS = {
+  dark: {
+    running: semanticColor('#22D3EE'),
+    waiting: semanticColor('#FACC15'),
+    failed: semanticColor('#F87171'),
+  },
+  light: {
+    running: semanticColor('#0C6478'),
+    waiting: semanticColor('#854D0E'),
+    failed: semanticColor('#B91C1C'),
+  },
+} as const
 
 function semanticColor(value: string): SemanticColor {
   const match = /^#([0-9A-Fa-f]{6})$/u.exec(value)
@@ -77,6 +93,7 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
     mixColor(border, brand, 0.62),
     mixColor(border, brand, 0.3),
   ]
+  const statuses = STATUS_COLORS[theme.tone]
   return {
     text: semanticColor(theme.colors.text),
     brand,
@@ -87,6 +104,9 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
     success: semanticColor(theme.colors.success),
     warning: semanticColor(theme.colors.warning),
     danger: semanticColor(theme.colors.danger),
+    statusRunning: statuses.running,
+    statusWaiting: statuses.waiting,
+    statusFailed: statuses.failed,
     canvas: semanticColor(theme.colors.canvas),
     surface: semanticColor(theme.colors.surface),
     selection: semanticColor(theme.colors.selection),
@@ -403,6 +423,13 @@ export const color = {
     if (level === 0 || safeText === '') return safeText
     return `${foregroundSequence(foreground, level)}${background === undefined ? '' : backgroundSequence(background, level)}${safeText}${RESET}`
   },
+} as const
+
+/** Agent lifecycle foregrounds with independent dark/light contrast. */
+export const statusColor = {
+  running: (text: string): string => paint(palette.statusRunning, text),
+  waiting: (text: string): string => paint(palette.statusWaiting, text),
+  failed: (text: string): string => paint(palette.statusFailed, text),
 } as const
 
 /** Foreground-only interaction states; never introduce a background or text decoration. */

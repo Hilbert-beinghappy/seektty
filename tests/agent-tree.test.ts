@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import { AgentTreeDock, owningAgentRoot, type AgentTreeSummary } from '../src/client/agent-tree.ts'
+import { setTheme } from '../src/client/theme.ts'
+import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 import type {
   DirectSubagentCatalog,
   SubagentPresentationCapabilities,
@@ -56,6 +58,7 @@ async function settle(): Promise<void> {
 }
 
 afterEach(() => {
+  setTheme(BUILT_IN_THEMES.dark)
   vi.useRealTimers()
   vi.unstubAllEnvs()
 })
@@ -225,6 +228,18 @@ describe('AgentTreeDock', () => {
     expect(plain).toContain('摘要:completed')
     expect(plain).toContain('←/→ 展开收起   Enter 打开   Esc 关闭')
     expect(wide[2]).toMatch(/\u001B\[48;2;/u)
+    expect(wide[1]).toContain('\u001B[38;2;34;211;238m运行 1')
+    expect(wide[1]).toContain('\u001B[38;2;250;204;21m等待 1')
+    expect(wide[1]).toContain('\u001B[38;2;248;113;113m失败 0')
+    expect(wide[2]).toContain('\u001B[38;2;34;211;238m●')
+    expect(wide[2]).toContain('\u001B[38;2;34;211;238m运行中')
+
+    setTheme(BUILT_IN_THEMES.light)
+    const light = dock.render(100)
+    expect(light[1]).toContain('\u001B[38;2;12;100;120m运行 1')
+    expect(light[1]).toContain('\u001B[38;2;133;77;14m等待 1')
+    expect(light[1]).toContain('\u001B[38;2;185;28;28m失败 0')
+    expect(light[2]).toContain('\u001B[38;2;12;100;120m●')
 
     const narrow = dock.render(30).join('\n').replace(/\u001B\[[0-9;:]*m/gu, '')
     expect(narrow).toContain('3 节点 · 运行1 等待1 失败0')
