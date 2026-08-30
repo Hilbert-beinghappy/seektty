@@ -158,6 +158,7 @@ export interface TuiActionHost {
   workspacePath?(): string
   setEditor(text: string): void
   composerText?(): string
+  canChangeSession?(): boolean
   openAgentTree?(): Promise<boolean>
   interactionOrigin?(sessionId: SessionId): string | undefined
   copy(text: string): void
@@ -474,6 +475,7 @@ export class TuiActions {
   async execute(name: string, rawArgs: string): Promise<void> {
     const args = rawArgs.trim()
     try {
+      if (['new', 'resume', 'sessions', 'fork', 'archive'].includes(name) && !this.sessionChangeAllowed()) return
       switch (name) {
         case 'new': await this.newSession(); break
         case 'resume':
@@ -811,6 +813,7 @@ export class TuiActions {
     const parsed = commandParts(args)
     if (parsed.command === 'add' || parsed.command === 'open') {
       if (parsed.rest === '') throw new Error(ui(`用法：/workspace ${parsed.command} <目录>`, `Usage: /workspace ${parsed.command} <directory>`))
+      if (!this.sessionChangeAllowed()) return
       await this.capabilities.openWorkspace(parsed.rest)
       this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
       return
@@ -847,6 +850,7 @@ export class TuiActions {
       return
     }
     if (parsed.command !== '' && parsed.command !== 'list') {
+      if (!this.sessionChangeAllowed()) return
       await this.capabilities.openWorkspace(args)
       this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
       return
@@ -872,6 +876,7 @@ export class TuiActions {
         if (selected.id === '__add__') {
           const path = await navigation.input({ title: ui('添加工作区', "Add workspace"), placeholder: ui('输入目录路径', "Enter a directory path") })
           if (path === undefined || path.trim() === '') return
+          if (!this.sessionChangeAllowed()) return
           await this.capabilities.openWorkspace(path)
           this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
           return
@@ -893,6 +898,7 @@ ${workspace.sessionIds.length} registered session(s)`),
         })
         if (action === undefined) return
         if (action.id === 'open') {
+          if (!this.sessionChangeAllowed()) return
           const sessionId = await this.capabilities.selectWorkspace(workspace.workspaceId)
           this.host.notice(ui(`已打开会话 ${sessionId}`, `Opened session ${sessionId}`), 'success')
         } else if (action.id === 'rename') await this.renameWorkspace(workspace, '', navigation)
@@ -906,6 +912,15 @@ ${workspace.sessionIds.length} registered session(s)`),
   private currentWorkspace(): WorkspaceView | undefined {
     const id = this.capabilities.active()?.workspaceId
     return this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === id)
+  }
+
+  private sessionChangeAllowed(): boolean {
+    if (this.host.canChangeSession?.() !== false) return true
+    this.host.notice(ui(
+      '当前正在查看子 Agent；请先按 Esc 返回父会话，再切换会话。',
+      'A child Agent is open; press Esc to return to the parent before changing Sessions.',
+    ), 'warning')
+    return false
   }
 
   private async chooseWorkspace(

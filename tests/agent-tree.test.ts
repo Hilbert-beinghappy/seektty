@@ -64,6 +64,30 @@ afterEach(() => {
 })
 
 describe('AgentTreeDock', () => {
+  it('does not reserve collapsed rows until the Session has a subagent', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', []) }),
+      requestRender: vi.fn(),
+    })
+
+    dock.showCollapsedRoot(id('root'))
+    await dock.loadChildren(id('root'))
+    expect(dock.render(80)).toEqual([])
+    expect(dock.hitRegions({ col: 0, row: 5, width: 80, height: 0 }, 'full')).toEqual([])
+
+    dock.openOrFocus(id('root'))
+    await dock.loadChildren(id('root'))
+    const explicit = dock.render(80).join('\n')
+    expect(explicit).toContain('当前没有子 Agent')
+    expect(explicit).toContain('[Enter 打开]')
+    expect(explicit).toContain('[Esc 关闭]')
+    const open = dock.hitRegions({ col: 0, row: 5, width: 80, height: dock.render(80).length }, 'full')
+      .find(region => region.id === 'agent-tree:footer-open')
+    expect(open).toMatchObject({ role: 'button', enabled: false, hover: 'none' })
+    dock.dispose()
+  })
+
   it('loads and maintains the direct-root aggregate while collapsed without opening details', async () => {
     vi.stubEnv('NO_COLOR', '1')
     const adapter = presentation({
@@ -145,6 +169,8 @@ describe('AgentTreeDock', () => {
       'agent-tree:entry:root',
       'agent:running',
       'agent:child',
+      'agent-tree:footer-open',
+      'agent-tree:footer-close',
     ])
     expect(dock.hitRegions({ col: 0, row: 5, width: 80, height: renderedHeight }, 'native')).toEqual([])
     expect(dock.render(80)).toBeDefined()
@@ -226,7 +252,7 @@ describe('AgentTreeDock', () => {
     expect(plain).toContain('等待中')
     expect(plain).toContain('已完成')
     expect(plain).toContain('摘要:completed')
-    expect(plain).toContain('←/→ 展开收起   Enter 打开   Esc 关闭')
+    expect(plain).toContain('[Enter 打开]  [Esc 关闭]')
     expect(wide[2]).toMatch(/\u001B\[48;2;/u)
     expect(wide[1]).toContain('\u001B[38;2;34;211;238m运行 1')
     expect(wide[1]).toContain('\u001B[38;2;250;204;21m等待 1')
@@ -250,7 +276,7 @@ describe('AgentTreeDock', () => {
   it('does not claim the collapsed bar is clickable in native mouse mode', async () => {
     vi.stubEnv('NO_COLOR', '1')
     const dock = new AgentTreeDock({
-      presentation: presentation({ root: catalog('root', []) }),
+      presentation: presentation({ root: catalog('root', [{ id: 'child' }]) }),
       requestRender: vi.fn(),
       mouseMode: () => 'native',
     })
@@ -274,6 +300,32 @@ describe('AgentTreeDock', () => {
     expect(dock.handleInput('\r')).toEqual({ consumed: true, openedSessionId: id('b') })
     expect(dock.handleInput('x')).toEqual({ consumed: false })
     expect(dock.handleInput('\u001B')).toEqual({ consumed: true, collapsed: true })
+    dock.dispose()
+  })
+
+  it('routes footer buttons through the same actions as Enter and Escape', async () => {
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', [{ id: 'child' }]) }),
+      requestRender: vi.fn(),
+    })
+    dock.openOrFocus(id('root'), id('child'))
+    await settle()
+    const rendered = dock.render(80)
+    const hits = dock.hitRegions({ col: 3, row: 5, width: 80, height: rendered.length }, 'full')
+    const openHit = hits.find(region => region.id === 'agent-tree:footer-open')
+    expect(openHit).toMatchObject({
+      role: 'button', enabled: true, action: { kind: 'agent-tree', command: 'footer-open' },
+    })
+    expect(hits.find(region => region.id === 'agent-tree:footer-close')).toMatchObject({
+      role: 'button', enabled: true, action: { kind: 'agent-tree', command: 'footer-close' },
+    })
+    const footer = rendered.at(-1)?.replace(/\u001B\[[0-9;:]*m/gu, '') ?? ''
+    expect(openHit?.rect.col).toBe(3 + footer.indexOf('[Enter'))
+    expect(openHit?.rect.row).toBe(5 + rendered.length - 1)
+    expect(dock.handleClick('footer-open', undefined, 1)).toEqual(dock.handleInput('\r'))
+    expect(dock.handleHover('footer-close')).toBe(true)
+    expect(dock.handleHover('footer-close')).toBe(false)
+    expect(dock.handleClick('footer-close', undefined, 1)).toEqual({ consumed: true, collapsed: true })
     dock.dispose()
   })
 

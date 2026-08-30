@@ -26,28 +26,30 @@ function row(
 
 function capabilities(
   childrenByParent: Readonly<Record<string, readonly string[]>>,
-  list: SubagentPresentationCapabilities['listDirectChildren'] = vi.fn(async (parentSessionId: SessionId) => ({
-    support: 'supported' as const,
-    value: {
-      parentSessionId,
-      state: 'ready' as const,
-      children: (childrenByParent[parentSessionId] ?? []).map(id => ({
-        entry: {
-          kind: 'child' as const,
-          id: id as SessionId,
-          activity: 'inactive' as const,
-          hasChildren: false,
-          mode: 'one-shot' as const,
-        },
-      })),
-      unresolved: [],
-    },
-  })),
+  overrides: Partial<Pick<SubagentPresentationCapabilities, 'continuation' | 'listDirectChildren'>> = {},
 ): SubagentPresentationCapabilities {
   return {
-    listDirectChildren: list,
+    listDirectChildren: overrides.listDirectChildren ?? vi.fn(async (parentSessionId: SessionId) => ({
+      support: 'supported' as const,
+      value: { parentSessionId, state: 'ready' as const, children: [], unresolved: [] },
+    })),
     openChild: () => ({ support: 'supported', value: { opened: false, reason: 'address-absent' } }),
-    continuation: () => ({ support: 'supported', value: { state: 'absent' } }),
+    continuation: overrides.continuation ?? ((childSessionId) => {
+      const parents = Object.entries(childrenByParent)
+        .filter(([, children]) => children.includes(childSessionId))
+        .map(([parentSessionId]) => parentSessionId as SessionId)
+      if (parents.length > 1) return { support: 'supported', value: { state: 'unknown' } }
+      const parentSessionId = parents[0]
+      return parentSessionId === undefined
+        ? { support: 'supported', value: { state: 'absent' } }
+        : {
+            support: 'supported',
+            value: {
+              state: 'absent',
+              address: { parentSessionId, childSessionId, mode: 'one-shot' },
+            },
+          }
+    }),
     publicStatusEvidence: sessionId => ({
       support: 'supported', value: { sessionId, evidence: [] },
     }),
@@ -91,7 +93,7 @@ describe('root Session catalog projection', () => {
     ]))
   })
 
-  it('falls back to direct-child queries and preserves ordinary sessions', async () => {
+  it('uses retained navigation addresses and preserves ordinary sessions', async () => {
     const catalog = [row('root'), row('child'), row('grandchild'), row('ordinary')]
     const projector = new RootSessionCatalogProjector()
     const result = await projector.project(
@@ -100,45 +102,36 @@ describe('root Session catalog projection', () => {
       capabilities({ root: ['child'], child: ['grandchild'] }),
     )
 
-    expect(result.support).toBe('direct-query')
+    expect(result.support).toBe('navigation')
     expect(result.roots.map(candidate => candidate.id)).toEqual(['root', 'ordinary'])
     expect(result.hidden).toEqual(['child', 'grandchild'])
   })
 
-  it('does not hide conflicting or failed query results', async () => {
-    const catalog = [row('a'), row('b'), row('child')]
-    const list = vi.fn(async (parentSessionId: SessionId) => {
-      if (parentSessionId === 'b') throw new Error('offline')
-      return {
-        support: 'supported' as const,
-        value: {
-          parentSessionId,
-          state: 'ready' as const,
-          children: parentSessionId === 'a'
-            ? [{ entry: { kind: 'child' as const, id: 'child' as SessionId, activity: 'inactive' as const, hasChildren: false, mode: 'one-shot' as const } }]
-            : [],
-          unresolved: [],
-        },
-      }
-    })
+  it('keeps unresolved navigation rows visible while hiding authoritative children', async () => {
+    const catalog = [row('root'), row('known'), row('unknown')]
+    const base = capabilities({ root: ['known'] })
     const result = await new RootSessionCatalogProjector().project(
       catalog,
       rootCatalogRevision(catalog),
-      capabilities({}, list),
+      capabilities({ root: ['known'] }, {
+        continuation: sessionId => sessionId === 'unknown'
+          ? { support: 'supported', value: { state: 'unknown' } }
+          : base.continuation(sessionId),
+      }),
     )
 
     expect(result.support).toBe('partial')
-    expect(result.roots.map(candidate => candidate.id)).toEqual(['a', 'b'])
-    expect(result.hidden).toEqual(['child'])
-    expect(result.unresolved).toContainEqual({ sessionId: 'b', reason: 'query-failed' })
+    expect(result.roots.map(candidate => candidate.id)).toEqual(['root', 'unknown'])
+    expect(result.hidden).toEqual(['known'])
+    expect(result.unresolved).toContainEqual({ sessionId: 'unknown', reason: 'navigation-unresolved' })
   })
 
-  it('keeps a child visible when two direct catalogs claim different parents', async () => {
-    const catalog = [row('a'), row('b'), row('child')]
+  it('keeps a child visible when catalog lineage conflicts with its navigation address', async () => {
+    const catalog = [row('a'), row('b'), row('child', { parentId: 'a', origin: 'subagent' })]
     const result = await new RootSessionCatalogProjector().project(
       catalog,
       rootCatalogRevision(catalog),
-      capabilities({ a: ['child'], b: ['child'] }),
+      capabilities({ b: ['child'] }),
     )
 
     expect(result.roots.map(candidate => candidate.id)).toEqual(['a', 'b', 'child'])
@@ -148,57 +141,46 @@ describe('root Session catalog projection', () => {
     })
   })
 
-  it('caps direct queries at four concurrent requests', async () => {
+  it('never refreshes every direct-child catalog before opening the Session directory', async () => {
     const catalog = Array.from({ length: 12 }, (_, index) => row(`s${String(index)}`))
-    let active = 0
-    let maximum = 0
-    const list = vi.fn(async (parentSessionId: SessionId) => {
-      active += 1
-      maximum = Math.max(maximum, active)
-      await new Promise(resolve => setTimeout(resolve, 2))
-      active -= 1
-      return {
-        support: 'supported' as const,
-        value: { parentSessionId, state: 'ready' as const, children: [], unresolved: [] },
-      }
-    })
+    const list = vi.fn<SubagentPresentationCapabilities['listDirectChildren']>()
 
     await new RootSessionCatalogProjector().project(
       catalog,
       rootCatalogRevision(catalog),
-      capabilities({}, list),
+      capabilities({}, { listDirectChildren: list }),
     )
 
-    expect(maximum).toBe(4)
-    expect(list).toHaveBeenCalledTimes(12)
+    expect(list).not.toHaveBeenCalled()
   })
 
-  it('reuses query evidence only for the same lineage revision and keeps fresh row data', async () => {
+  it('does not retain stale navigation evidence for an unchanged Session catalog', async () => {
     const projector = new RootSessionCatalogProjector()
-    const list = vi.fn(async (parentSessionId: SessionId) => ({
-      support: 'supported' as const,
-      value: { parentSessionId, state: 'ready' as const, children: [], unresolved: [] },
-    }))
-    const adapter = capabilities({}, list)
-    const first = [row('root', { title: 'Old' })]
-    const revision = rootCatalogRevision(first)
+    const catalog = [row('root'), row('child')]
+    let addressed = true
+    const adapter = capabilities({}, {
+      continuation: childSessionId => childSessionId === 'child' && addressed
+        ? {
+            support: 'supported',
+            value: {
+              state: 'absent',
+              address: { parentSessionId: 'root' as SessionId, childSessionId, mode: 'one-shot' },
+            },
+          }
+        : { support: 'supported', value: { state: 'absent' } },
+    })
+    const revision = rootCatalogRevision(catalog)
 
-    await projector.project(first, revision, adapter)
-    const cached = await projector.project([row('root', { title: 'New' })], revision, adapter)
-    expect(list).toHaveBeenCalledTimes(1)
-    expect(cached.roots[0]?.title).toBe('New')
-
-    const changed = [row('root', { title: 'New' }), row('late')]
-    await projector.project(changed, rootCatalogRevision(changed), adapter)
-    expect(list).toHaveBeenCalledTimes(3)
+    expect((await projector.project(catalog, revision, adapter)).hidden).toEqual(['child'])
+    addressed = false
+    expect((await projector.project(catalog, revision, adapter)).hidden).toEqual([])
   })
 
-  it('retains the whole catalog when direct-child support is absent', async () => {
+  it('retains the whole catalog when navigation support is absent', async () => {
     const catalog = [row('root'), row('unknown')]
-    const unsupported = capabilities({}, vi.fn(async () => ({
-      support: 'unsupported' as const,
-      reason: 'catalog-unavailable' as const,
-    })))
+    const unsupported = capabilities({}, {
+      continuation: () => ({ support: 'unsupported', reason: 'navigation-unavailable' }),
+    })
     const result = await new RootSessionCatalogProjector().project(
       catalog,
       rootCatalogRevision(catalog),

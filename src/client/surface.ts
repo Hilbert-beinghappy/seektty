@@ -1021,6 +1021,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
       },
       composerText: () => editor.getText(),
+      canChangeSession: () => !childView.isOpen(),
       interactionOrigin: (sessionId) => {
         const child = childView.snapshot()
         if (child !== undefined && child.childSessionId === sessionId) {
@@ -1081,6 +1082,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const unsubscribeActive = capabilities.subscribeActive((current, snapshot) => {
       if (stopping !== undefined) return
       if (current === undefined || snapshot === undefined) {
+        if (childView.isOpen()) childView.discard()
+        agentTree.suspend()
         contextMenu.close()
         mouseController.endGesture()
         active = undefined
@@ -1098,6 +1101,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
         return
       }
+      const child = childView.snapshot()
+      if (child !== undefined && current.sessionId !== child.childSessionId) {
+        childView.discard()
+        agentTree.resume()
+        contextBar.clearChildContext()
+        hideComposer = false
+        editor.disableSubmit = false
+        transcriptFocused = false
+        focusEditor()
+      }
+      if (!childView.isOpen()) agentTree.resume()
       active = current
       const owningRoot = owningAgentRoot(capabilities.subagentPresentation(), current.sessionId)
       agentTree.showCollapsedRoot(owningRoot, current.sessionId === owningRoot ? undefined : current.sessionId)
@@ -1572,8 +1586,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         region?.action.kind === 'overlay' ? region.action.optionId : undefined,
         region?.action.kind === 'overlay' ? region.action.command : undefined,
       )
+      const agentTreeChanged = agentTree.handleHover(
+        region?.action.kind === 'agent-tree' ? region.action.command : undefined,
+      )
       const menuChanged = contextMenu.handleHover(region)
-      return transcriptChanged || editorChanged || statusChanged || overlayChanged || menuChanged
+      return transcriptChanged || editorChanged || statusChanged || overlayChanged || agentTreeChanged || menuChanged
     }
 
     clearHoverPresentation = (): boolean => {
@@ -1630,7 +1647,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (region?.action.kind === 'agent-tree') {
         const result = agentTree.handleClick(
           region.action.command,
-          region.action.sessionId as SessionId,
+          region.action.sessionId as SessionId | undefined,
           semantic.count,
         )
         if (result.collapsed === true) {

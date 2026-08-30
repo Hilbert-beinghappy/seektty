@@ -14,10 +14,11 @@ import {
   type DirectSubagentCatalog,
   type SubagentPresentationCapabilities,
 } from './subagent-presentation.ts'
-import type { CellRect, HitRegion } from './mouse-hit-map.ts'
+import type { AgentTreeMouseCommand, CellRect, HitRegion } from './mouse-hit-map.ts'
 import { background, color, escapeTerminalText, statusColor, surfaceRow } from './theme.ts'
 import { ui } from './locale.ts'
 import { stripCopyDecorations } from './text-selection.ts'
+import { renderActionFooter, type ActionFooterItem } from './overlay-footer.ts'
 
 const DEFAULT_VISIBLE_ROWS = 10
 const SUMMARY_CACHE_ENTRIES = 128
@@ -75,6 +76,8 @@ interface PaintedRow {
   readonly row: number
   readonly chevronWidth: number
 }
+
+type AgentTreeFooterCommand = 'footer-open' | 'footer-close'
 
 function evidence(now: number, revision: number, id: string) {
   return { source: 'catalog' as const, observedAt: now, revision, id }
@@ -206,6 +209,8 @@ export class AgentTreeDock implements Component, Focusable {
   private renderTimer: ReturnType<typeof setTimeout> | undefined
   private paintedRows: readonly PaintedRow[] = []
   private paintedText: readonly string[] = []
+  private paintedFooterHits: readonly HitRegion[] = []
+  private hoveredFooter: AgentTreeFooterCommand | undefined
   private textSelection: { readonly startRow: number; readonly endRow: number } | undefined
 
   constructor(private readonly options: AgentTreeDockOptions) {}
@@ -289,6 +294,7 @@ export class AgentTreeDock implements Component, Focusable {
   collapse(): void {
     this.open = false
     this.focused = false
+    this.hoveredFooter = undefined
     this.cancelExpandedWork()
     this.syncStatusSubscriptions(this.directRootSessionIds())
     this.scheduleRender()
@@ -426,10 +432,12 @@ export class AgentTreeDock implements Component, Focusable {
   render(width: number): string[] {
     this.paintedRows = []
     this.paintedText = []
+    this.paintedFooterHits = []
     if (this.rootId === undefined || this.suspended || width <= 0) return []
     const aggregate = this.tree === undefined
       ? { discovered: 0, running: 0, waiting: 0, failed: 0, partial: 0, activityPreview: [] }
       : rootAgentAggregate(this.tree)
+    if (!this.open && aggregate.discovered === 0) return []
     const counts = lifecycleCounts(aggregate, width, this.open, this.focused ? color.brand : color.muted)
     const activity = aggregate.activityPreview.map(item => item.label).join(' · ')
     const mouseHint = this.options.mouseMode?.() === 'native'
@@ -485,10 +493,17 @@ export class AgentTreeDock implements Component, Focusable {
           ? ui('  子 Agent 目录暂不可用', '  Subagent catalog unavailable')
           : ui('  当前没有子 Agent', '  No subagents yet'), width), width))
     }
-    rendered.push(surfaceRow(fitRow(color.muted(ui(
-      '←/→ 展开收起   Enter 打开   Esc 关闭',
-      '←/→ expand/collapse   Enter open   Esc close',
-    )), width), width))
+    const footerRow = rendered.length
+    const footer = renderActionFooter(this.footerActions(), width, this.hoveredFooter, {
+      idPrefix: 'agent-tree',
+      zIndex: 32,
+      action: command => ({ kind: 'agent-tree', command }),
+    })
+    rendered.push(...footer.lines.map(line => surfaceRow(fitRow(`  ${line}`, width), width)))
+    this.paintedFooterHits = footer.hits.map(hit => ({
+      ...hit,
+      rect: { ...hit.rect, row: footerRow + hit.rect.row },
+    }))
     this.paintedText = rendered.map(stripCopyDecorations)
     return rendered
   }
@@ -530,16 +545,26 @@ export class AgentTreeDock implements Component, Focusable {
         action: { kind: 'agent-tree', command: 'chevron', sessionId: painted.sessionId },
       })
     }
+    regions.push(...this.paintedFooterHits.map(hit => ({
+      ...hit,
+      rect: {
+        ...hit.rect,
+        col: rect.col + hit.rect.col,
+        row: rect.row + hit.rect.row,
+      },
+    })))
     return regions
   }
 
-  handleClick(command: 'bar' | 'row' | 'chevron', sessionId: SessionId, count: number): AgentTreeInputResult {
+  handleClick(command: AgentTreeMouseCommand, sessionId: SessionId | undefined, count: number): AgentTreeInputResult {
     this.textSelection = undefined
+    if (command === 'footer-open' || command === 'footer-close') return this.activateFooter(command)
     if (command === 'bar') {
       if (this.open) this.collapse()
       else return { consumed: true, requestedOpen: true }
       return { consumed: true, collapsed: true }
     }
+    if (sessionId === undefined) return { consumed: true }
     this.focused = true
     this.select(sessionId)
     if (command === 'chevron') {
@@ -552,8 +577,7 @@ export class AgentTreeDock implements Component, Focusable {
   handleInput(data: string): AgentTreeInputResult {
     if (!this.open || !this.focused) return { consumed: false }
     if (matchesKey(data, Key.escape)) {
-      this.collapse()
-      return { consumed: true, collapsed: true }
+      return this.activateFooter('footer-close')
     }
     if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
       const rows = this.allRows()
@@ -581,11 +605,35 @@ export class AgentTreeDock implements Component, Focusable {
       return { consumed: true }
     }
     if (matchesKey(data, Key.enter) || data === '\r' || data === '\n') {
+      return this.activateFooter('footer-open')
+    }
+    return { consumed: false }
+  }
+
+  handleHover(command: AgentTreeMouseCommand | undefined): boolean {
+    const hovered = command === 'footer-open' || command === 'footer-close' ? command : undefined
+    if (this.hoveredFooter === hovered) return false
+    this.hoveredFooter = hovered
+    return true
+  }
+
+  private footerActions(): readonly ActionFooterItem<AgentTreeFooterCommand>[] {
+    return [
+      { command: 'footer-open', key: 'Enter', label: ui('打开', 'Open'), enabled: this.selectedId !== undefined },
+      { command: 'footer-close', key: 'Esc', label: ui('关闭', 'Close'), enabled: true },
+    ]
+  }
+
+  private activateFooter(command: AgentTreeFooterCommand): AgentTreeInputResult {
+    const action = this.footerActions().find(candidate => candidate.command === command)
+    if (action?.enabled !== true) return { consumed: true }
+    if (command === 'footer-open') {
       return this.selectedId === undefined
         ? { consumed: true }
         : { consumed: true, openedSessionId: this.selectedId }
     }
-    return { consumed: false }
+    this.collapse()
+    return { consumed: true, collapsed: true }
   }
 
   selectText(rect: CellRect, origin: { readonly row: number }, focus: { readonly row: number }): void {

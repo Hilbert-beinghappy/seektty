@@ -1,9 +1,5 @@
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
-import type {
-  DirectSubagentCatalog,
-  SubagentCapabilityResult,
-  SubagentPresentationCapabilities,
-} from './subagent-presentation.ts'
+import type { SubagentPresentationCapabilities } from './subagent-presentation.ts'
 
 export interface RootCatalogSession {
   readonly id: SessionId
@@ -11,14 +7,14 @@ export interface RootCatalogSession {
   readonly origin?: 'subagent'
 }
 
-export type RootCatalogSupport = 'lineage' | 'direct-query' | 'partial' | 'unsupported'
+export type RootCatalogSupport = 'lineage' | 'navigation' | 'partial' | 'unsupported'
 
 export type RootCatalogUnresolvedReason =
   | 'missing-parent'
   | 'cycle'
   | 'conflicting-parent'
-  | 'query-failed'
-  | 'query-unsupported'
+  | 'navigation-unresolved'
+  | 'navigation-unsupported'
 
 export interface RootCatalogUnresolved {
   readonly sessionId: SessionId
@@ -37,7 +33,13 @@ export interface RootCatalogResult<T extends RootCatalogSession = RootCatalogSes
 
 interface ParentEvidence {
   readonly parentSessionId: SessionId
-  readonly source: 'lineage' | 'direct-query'
+  readonly source: 'lineage' | 'navigation'
+}
+
+interface NavigationEvidence {
+  readonly edges: ReadonlyMap<SessionId, SessionId>
+  readonly unresolved: readonly RootCatalogUnresolved[]
+  readonly supported: boolean
 }
 
 function uniqueUnresolved(rows: readonly RootCatalogUnresolved[]): RootCatalogUnresolved[] {
@@ -53,13 +55,11 @@ function uniqueUnresolved(rows: readonly RootCatalogUnresolved[]): RootCatalogUn
 function projectWithEvidence<T extends RootCatalogSession>(
   catalog: readonly T[],
   lineageRevision: string,
-  queriedEdges: ReadonlyMap<SessionId, SessionId> = new Map(),
-  queryUnresolved: readonly RootCatalogUnresolved[] = [],
-  queried = false,
+  navigation?: NavigationEvidence,
 ): RootCatalogResult<T> {
   const byId = new Map(catalog.map(row => [row.id, row]))
   const parentEdges = new Map<SessionId, ParentEvidence>()
-  const unresolved: RootCatalogUnresolved[] = [...queryUnresolved]
+  const unresolved: RootCatalogUnresolved[] = [...(navigation?.unresolved ?? [])]
 
   for (const row of catalog) {
     if (row.origin !== 'subagent') continue
@@ -74,15 +74,19 @@ function projectWithEvidence<T extends RootCatalogSession>(
     parentEdges.set(row.id, { parentSessionId: row.parentId, source: 'lineage' })
   }
 
-  for (const [childSessionId, parentSessionId] of queriedEdges) {
-    if (!byId.has(childSessionId) || !byId.has(parentSessionId)) continue
+  for (const [childSessionId, parentSessionId] of navigation?.edges ?? []) {
+    if (!byId.has(childSessionId)) continue
+    if (!byId.has(parentSessionId)) {
+      unresolved.push({ sessionId: childSessionId, parentSessionId, reason: 'missing-parent' })
+      continue
+    }
     const existing = parentEdges.get(childSessionId)
     if (existing !== undefined && existing.parentSessionId !== parentSessionId) {
       parentEdges.delete(childSessionId)
       unresolved.push({ sessionId: childSessionId, parentSessionId, reason: 'conflicting-parent' })
       continue
     }
-    parentEdges.set(childSessionId, { parentSessionId, source: existing?.source ?? 'direct-query' })
+    parentEdges.set(childSessionId, { parentSessionId, source: existing?.source ?? 'navigation' })
   }
 
   const invalid = new Set<SessionId>(unresolved
@@ -112,16 +116,15 @@ function projectWithEvidence<T extends RootCatalogSession>(
     .map(row => row.id)
   const hiddenSet = new Set(hidden)
   const hasLineage = [...parentEdges.values()].some(edge => edge.source === 'lineage')
-  const successfulQueries = [...parentEdges.values()].some(edge => edge.source === 'direct-query')
-  const failedQueries = queryUnresolved.some(row => row.reason === 'query-failed')
-  const unsupportedQueries = queryUnresolved.some(row => row.reason === 'query-unsupported')
-  const support: RootCatalogSupport = queried
-    ? failedQueries
-      ? hasLineage || successfulQueries ? 'partial' : 'unsupported'
-      : unsupportedQueries
-        ? hasLineage ? 'lineage' : 'unsupported'
-        : 'direct-query'
-    : hasLineage ? 'lineage' : 'unsupported'
+  const hasNavigation = [...parentEdges.values()].some(edge => edge.source === 'navigation')
+  const navigationUnresolved = unresolved.some(row => row.reason === 'navigation-unresolved')
+  const support: RootCatalogSupport = navigation === undefined
+    ? hasLineage ? 'lineage' : 'unsupported'
+    : !navigation.supported
+      ? hasLineage ? 'lineage' : 'unsupported'
+      : navigationUnresolved
+        ? hasLineage || hasNavigation ? 'partial' : 'unsupported'
+        : hasNavigation ? 'navigation' : hasLineage ? 'lineage' : 'navigation'
   return {
     roots: catalog.filter(row => !hiddenSet.has(row.id)),
     support,
@@ -147,89 +150,41 @@ export function rootCatalogRevision(catalog: readonly RootCatalogSession[]): str
     .join('\u0001')
 }
 
-async function queryDirectEdges<T extends RootCatalogSession>(
+function navigationEvidence<T extends RootCatalogSession>(
   catalog: readonly T[],
   capabilities: SubagentPresentationCapabilities,
-  concurrency: number,
-): Promise<{
-  readonly edges: ReadonlyMap<SessionId, SessionId>
-  readonly unresolved: readonly RootCatalogUnresolved[]
-}> {
+): NavigationEvidence {
   const edges = new Map<SessionId, SessionId>()
-  const conflicts = new Set<SessionId>()
   const unresolved: RootCatalogUnresolved[] = []
-  let next = 0
-  const worker = async (): Promise<void> => {
-    while (next < catalog.length) {
-      const index = next
-      next += 1
-      const parent = catalog[index]
-      if (parent === undefined) continue
-      let result: SubagentCapabilityResult<DirectSubagentCatalog>
-      try {
-        result = await capabilities.listDirectChildren(parent.id, { refresh: true })
-      } catch {
-        unresolved.push({ sessionId: parent.id, reason: 'query-failed' })
-        continue
-      }
-      if (result.support === 'unsupported') {
-        unresolved.push({ sessionId: parent.id, reason: 'query-unsupported' })
-        continue
-      }
-      if (result.value.state === 'error') {
-        unresolved.push({ sessionId: parent.id, reason: 'query-failed' })
-        continue
-      }
-      for (const child of result.value.children) {
-        if (child.entry.kind !== 'child') continue
-        const existing = edges.get(child.entry.id)
-        if (existing !== undefined && existing !== parent.id) {
-          edges.delete(child.entry.id)
-          conflicts.add(child.entry.id)
-          unresolved.push({
-            sessionId: child.entry.id,
-            parentSessionId: parent.id,
-            reason: 'conflicting-parent',
-          })
-          continue
-        }
-        if (!conflicts.has(child.entry.id)) edges.set(child.entry.id, parent.id)
-      }
+  let supported = true
+  for (const candidate of catalog) {
+    const continuation = capabilities.continuation(candidate.id)
+    if (continuation.support === 'unsupported') {
+      supported = false
+      continue
+    }
+    const address = continuation.value.address
+    if (address !== undefined) {
+      edges.set(candidate.id, address.parentSessionId)
+    } else if (continuation.value.state === 'unknown') {
+      unresolved.push({ sessionId: candidate.id, reason: 'navigation-unresolved' })
     }
   }
-  await Promise.all(Array.from(
-    { length: Math.min(Math.max(1, concurrency), Math.max(1, catalog.length)) },
-    worker,
-  ))
-  return { edges, unresolved }
+  if (!supported && catalog[0] !== undefined) {
+    unresolved.push({ sessionId: catalog[0].id, reason: 'navigation-unsupported' })
+  }
+  return { edges, unresolved, supported }
 }
 
-/** Revision-bound async projector with a strict direct-query concurrency cap. */
+/** Non-blocking projector using only lineage and already-discovered navigation addresses. */
 export class RootSessionCatalogProjector {
-  private cachedRevision: string | undefined
-  private cachedEvidence: Promise<{
-    readonly edges: ReadonlyMap<SessionId, SessionId>
-    readonly unresolved: readonly RootCatalogUnresolved[]
-  }> | undefined
-
   async project<T extends RootCatalogSession>(
     catalog: readonly T[],
     lineageRevision: string,
     capabilities: SubagentPresentationCapabilities,
   ): Promise<RootCatalogResult<T>> {
-    if (this.cachedRevision === lineageRevision && this.cachedEvidence !== undefined) {
-      const evidence = await this.cachedEvidence
-      return projectWithEvidence(catalog, lineageRevision, evidence.edges, evidence.unresolved, true)
-    }
-    const request = queryDirectEdges(catalog, capabilities, 4)
-    this.cachedRevision = lineageRevision
-    this.cachedEvidence = request
-    const evidence = await request
-    return projectWithEvidence(catalog, lineageRevision, evidence.edges, evidence.unresolved, true)
+    return projectWithEvidence(catalog, lineageRevision, navigationEvidence(catalog, capabilities))
   }
 
-  clear(): void {
-    this.cachedRevision = undefined
-    this.cachedEvidence = undefined
-  }
+  clear(): void { /* Projection is state-free; retained for the capability lifecycle contract. */ }
 }
