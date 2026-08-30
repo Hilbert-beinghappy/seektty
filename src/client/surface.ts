@@ -1588,6 +1588,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       )
       const agentTreeChanged = agentTree.handleHover(
         region?.action.kind === 'agent-tree' ? region.action.command : undefined,
+        region?.action.kind === 'agent-tree' ? region.action.sessionId as SessionId | undefined : undefined,
       )
       const menuChanged = contextMenu.handleHover(region)
       return transcriptChanged || editorChanged || statusChanged || overlayChanged || agentTreeChanged || menuChanged

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import { AgentTreeDock, owningAgentRoot, type AgentTreeSummary } from '../src/client/agent-tree.ts'
-import { setTheme } from '../src/client/theme.ts'
+import { interaction, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 import type {
   DirectSubagentCatalog,
@@ -326,6 +326,67 @@ describe('AgentTreeDock', () => {
     expect(dock.handleHover('footer-close')).toBe(true)
     expect(dock.handleHover('footer-close')).toBe(false)
     expect(dock.handleClick('footer-close', undefined, 1)).toEqual({ consumed: true, collapsed: true })
+    dock.dispose()
+  })
+
+  it('renders stable hover states for every agent-tree pointer target', async () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', [{ id: 'child', hasChildren: true }]) }),
+      requestRender: vi.fn(),
+      mouseMode: () => 'full',
+    })
+    dock.openOrFocus(id('root'))
+    await settle()
+
+    const idle = dock.render(80)
+    expect(dock.handleHover('bar', id('root'))).toBe(true)
+    expect(dock.render(80)[1]).not.toBe(idle[1])
+    expect(dock.render(80)[1]).toContain(interaction.hover('▾ 代理树 · 1 个节点 · '))
+
+    expect(dock.handleHover('row', id('child'))).toBe(true)
+    const hoveredRow = dock.render(80)[2] ?? ''
+    expect(hoveredRow).not.toBe(idle[2])
+    expect(hoveredRow).toContain(interaction.hover('child'))
+    dock.handleClick('row', id('child'), 1)
+    const selectedHoveredRow = dock.render(80)[2] ?? ''
+    expect(selectedHoveredRow).toMatch(/\u001B\[48;2;/u)
+    expect(selectedHoveredRow).toContain(interaction.hover('child'))
+    expect(dock.handleHover(undefined)).toBe(true)
+    const selectedIdle = dock.render(80)
+
+    expect(dock.handleHover('chevron', id('child'))).toBe(true)
+    const hoveredChevron = dock.render(80)[2] ?? ''
+    expect(hoveredChevron).not.toBe(hoveredRow)
+    expect(hoveredChevron).toContain(interaction.hover('▸'))
+
+    expect(dock.handleHover('footer-close')).toBe(true)
+    expect(dock.render(80).at(-1)).toContain(interaction.hover('[Esc 关闭]'))
+    expect(dock.handleHover('footer-close')).toBe(false)
+    expect(dock.handleHover(undefined)).toBe(true)
+    expect(dock.render(80)).toEqual(selectedIdle)
+    dock.dispose()
+  })
+
+  it('limits the expansion target to its chevron and exposes rows as options', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', [{ id: 'child', hasChildren: true }]) }),
+      requestRender: vi.fn(),
+    })
+    dock.openOrFocus(id('root'))
+    await settle()
+
+    const rendered = dock.render(80)
+    const origin = { col: 4, row: 7, width: 80, height: rendered.length }
+    const hits = dock.hitRegions(origin, 'full')
+    const row = hits.find(region => region.id === 'agent:child')
+    const chevron = hits.find(region => region.id === 'agent:child:chevron')
+    const chevronCol = (rendered[2] ?? '').indexOf('▸')
+    expect(row).toMatchObject({ role: 'option', action: { kind: 'agent-tree', command: 'row', sessionId: id('child') } })
+    expect(chevron?.rect).toEqual({ col: origin.col + chevronCol, row: origin.row + 2, width: 1, height: 1 })
     dock.dispose()
   })
 

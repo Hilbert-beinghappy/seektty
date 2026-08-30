@@ -15,7 +15,7 @@ import {
   type SubagentPresentationCapabilities,
 } from './subagent-presentation.ts'
 import type { AgentTreeMouseCommand, CellRect, HitRegion } from './mouse-hit-map.ts'
-import { background, color, escapeTerminalText, statusColor, surfaceRow } from './theme.ts'
+import { background, color, escapeTerminalText, interaction, statusColor, surfaceRow } from './theme.ts'
 import { ui } from './locale.ts'
 import { stripCopyDecorations } from './text-selection.ts'
 import { renderActionFooter, type ActionFooterItem } from './overlay-footer.ts'
@@ -74,10 +74,15 @@ interface CachedSummary {
 interface PaintedRow {
   readonly sessionId: SessionId
   readonly row: number
-  readonly chevronWidth: number
+  readonly chevronCol: number
 }
 
 type AgentTreeFooterCommand = 'footer-open' | 'footer-close'
+
+interface AgentTreeHoverTarget {
+  readonly command: AgentTreeMouseCommand
+  readonly sessionId?: SessionId
+}
 
 function evidence(now: number, revision: number, id: string) {
   return { source: 'catalog' as const, observedAt: now, revision, id }
@@ -210,7 +215,7 @@ export class AgentTreeDock implements Component, Focusable {
   private paintedRows: readonly PaintedRow[] = []
   private paintedText: readonly string[] = []
   private paintedFooterHits: readonly HitRegion[] = []
-  private hoveredFooter: AgentTreeFooterCommand | undefined
+  private hoveredTarget: AgentTreeHoverTarget | undefined
   private textSelection: { readonly startRow: number; readonly endRow: number } | undefined
 
   constructor(private readonly options: AgentTreeDockOptions) {}
@@ -225,6 +230,7 @@ export class AgentTreeDock implements Component, Focusable {
 
   suspend(): void {
     this.suspended = true
+    this.hoveredTarget = undefined
     this.cancelInflight()
     this.clearStatusSubscriptions()
     this.clearCatalogSubscription()
@@ -260,6 +266,7 @@ export class AgentTreeDock implements Component, Focusable {
     this.expanded.add(owningRootId)
     this.viewportOffset = 0
     this.composerSnapshot = undefined
+    this.hoveredTarget = undefined
     this.scheduleRender()
     this.ensureCatalogSubscription()
     void this.loadChildren(owningRootId, this.rootToken, true)
@@ -279,6 +286,7 @@ export class AgentTreeDock implements Component, Focusable {
       this.expanded.add(owningRootId)
       this.viewportOffset = 0
       this.composerSnapshot = composerSnapshot
+      this.hoveredTarget = undefined
     } else if (this.composerSnapshot === undefined && composerSnapshot !== undefined) {
       this.composerSnapshot = composerSnapshot
     }
@@ -294,7 +302,7 @@ export class AgentTreeDock implements Component, Focusable {
   collapse(): void {
     this.open = false
     this.focused = false
-    this.hoveredFooter = undefined
+    this.hoveredTarget = undefined
     this.cancelExpandedWork()
     this.syncStatusSubscriptions(this.directRootSessionIds())
     this.scheduleRender()
@@ -438,7 +446,13 @@ export class AgentTreeDock implements Component, Focusable {
       ? { discovered: 0, running: 0, waiting: 0, failed: 0, partial: 0, activityPreview: [] }
       : rootAgentAggregate(this.tree)
     if (!this.open && aggregate.discovered === 0) return []
-    const counts = lifecycleCounts(aggregate, width, this.open, this.focused ? color.brand : color.muted)
+    const barHovered = this.isHovered('bar', this.rootId)
+    const counts = lifecycleCounts(
+      aggregate,
+      width,
+      this.open,
+      barHovered ? interaction.hover : this.focused ? color.accent : color.muted,
+    )
     const activity = aggregate.activityPreview.map(item => item.label).join(' · ')
     const mouseHint = this.options.mouseMode?.() === 'native'
       ? '/subagents'
@@ -447,7 +461,7 @@ export class AgentTreeDock implements Component, Focusable {
       ? activity === '' ? '' : ui(`活动：${activity}`, `Activity: ${activity}`)
       : activity === '' ? mouseHint : `${activity} · ${mouseHint}`
     const divider = color.muted('─'.repeat(Math.max(0, width)))
-    const bar = fitSides(counts, color.muted(right), width)
+    const bar = fitSides(counts, barHovered ? interaction.hover(right) : color.muted(right), width)
     if (!this.open) {
       const collapsed = [divider, surfaceRow(bar, width)]
       this.paintedText = collapsed.map(stripCopyDecorations)
@@ -456,15 +470,22 @@ export class AgentTreeDock implements Component, Focusable {
     const rows = this.visibleRows()
     const rendered = [divider, surfaceRow(bar, width)]
     for (const [index, row] of rows.entries()) {
-      const chevron = row.expandable ? row.expanded ? '▾' : '▸' : ' '
-      const label = escapeTerminalText(row.node.label ?? row.sessionId)
+      const rowHovered = this.isHovered('row', row.sessionId)
+      const chevronHovered = this.isHovered('chevron', row.sessionId)
+      const rawChevron = row.expandable ? row.expanded ? '▾' : '▸' : ' '
+      const chevron = rowHovered || chevronHovered ? interaction.hover(rawChevron) : rawChevron
+      const rawLabel = escapeTerminalText(row.node.label ?? row.sessionId)
+      const label = rowHovered ? interaction.hover(rawLabel) : rawLabel
       const continuation = row.node.continuation === 'available'
         ? ui('可继续', 'continuable')
         : row.node.continuation === 'stale' ? ui('只读', 'read-only') : undefined
-      const summary = [row.summary === undefined ? undefined : escapeTerminalText(row.summary), continuation, row.node.partial ? ui('部分结果', 'partial result') : undefined]
+      const rawSummary = [row.summary === undefined ? undefined : escapeTerminalText(row.summary), continuation, row.node.partial ? ui('部分结果', 'partial result') : undefined]
         .filter(Boolean).join(' · ')
+      const summary = rowHovered && rawSummary !== '' ? interaction.hover(rawSummary) : rawSummary
       const marker = row.selected ? '❯ ' : '  '
-      const treeText = `${marker}${row.branch}${chevron} ${lifecycleGlyph(row.node.lifecycle)} ${label}`
+      const rawTreePrefix = `${marker}${row.branch}`
+      const treePrefix = rowHovered ? interaction.hover(rawTreePrefix) : rawTreePrefix
+      const treeText = `${treePrefix}${chevron} ${lifecycleGlyph(row.node.lifecycle)} ${label}`
       let content: string
       if (width >= 54) {
         const statusWidth = 10
@@ -482,7 +503,7 @@ export class AgentTreeDock implements Component, Focusable {
       this.paintedRows = [...this.paintedRows, {
         sessionId: row.sessionId,
         row: index + 2,
-        chevronWidth: visibleWidth(`${marker}${row.branch}${chevron}`),
+        chevronCol: visibleWidth(rawTreePrefix),
       }]
     }
     if (rows.length === 0) {
@@ -494,7 +515,7 @@ export class AgentTreeDock implements Component, Focusable {
           : ui('  当前没有子 Agent', '  No subagents yet'), width), width))
     }
     const footerRow = rendered.length
-    const footer = renderActionFooter(this.footerActions(), width, this.hoveredFooter, {
+    const footer = renderActionFooter(this.footerActions(), width, this.hoveredFooter(), {
       idPrefix: 'agent-tree',
       zIndex: 32,
       action: command => ({ kind: 'agent-tree', command }),
@@ -527,16 +548,22 @@ export class AgentTreeDock implements Component, Focusable {
         id: `agent:${painted.sessionId}`,
         rect: { col: rect.col, row: rect.row + painted.row, width: rect.width, height: 1 },
         zIndex: 30,
-        role: 'text',
+        role: 'option',
         enabled: true,
         activation: 'select',
         hover: 'highlight',
         action: { kind: 'agent-tree', command: 'row', sessionId: painted.sessionId },
       })
       const chevron = this.tree?.nodes.get(painted.sessionId)?.hasChildren === true
+        && painted.chevronCol < rect.width
       if (chevron) regions.push({
         id: `agent:${painted.sessionId}:chevron`,
-        rect: { col: rect.col, row: rect.row + painted.row, width: Math.min(rect.width, painted.chevronWidth + 1), height: 1 },
+        rect: {
+          col: rect.col + painted.chevronCol,
+          row: rect.row + painted.row,
+          width: 1,
+          height: 1,
+        },
         zIndex: 31,
         role: 'button',
         enabled: true,
@@ -610,11 +637,27 @@ export class AgentTreeDock implements Component, Focusable {
     return { consumed: false }
   }
 
-  handleHover(command: AgentTreeMouseCommand | undefined): boolean {
-    const hovered = command === 'footer-open' || command === 'footer-close' ? command : undefined
-    if (this.hoveredFooter === hovered) return false
-    this.hoveredFooter = hovered
+  handleHover(command: AgentTreeMouseCommand | undefined, sessionId?: SessionId): boolean {
+    const hovered: AgentTreeHoverTarget | undefined = command === undefined
+      ? undefined
+      : command === 'row' || command === 'chevron'
+        ? sessionId === undefined ? undefined : { command, sessionId }
+        : command === 'bar'
+          ? this.rootId === undefined ? undefined : { command, sessionId: this.rootId }
+          : { command }
+    if (this.hoveredTarget?.command === hovered?.command
+      && this.hoveredTarget?.sessionId === hovered?.sessionId) return false
+    this.hoveredTarget = hovered
     return true
+  }
+
+  private isHovered(command: AgentTreeMouseCommand, sessionId?: SessionId): boolean {
+    return this.hoveredTarget?.command === command && this.hoveredTarget.sessionId === sessionId
+  }
+
+  private hoveredFooter(): AgentTreeFooterCommand | undefined {
+    const command = this.hoveredTarget?.command
+    return command === 'footer-open' || command === 'footer-close' ? command : undefined
   }
 
   private footerActions(): readonly ActionFooterItem<AgentTreeFooterCommand>[] {
