@@ -337,19 +337,28 @@ describe('AgentTreeDock', () => {
       presentation: presentation({ root: catalog('root', [{ id: 'child', hasChildren: true }]) }),
       requestRender: vi.fn(),
       mouseMode: () => 'full',
+      loadSummary: vi.fn(async (): Promise<AgentTreeSummary> => ({ text: 'summary' })),
     })
     dock.openOrFocus(id('root'))
+    await settle()
+    dock.render(80)
     await settle()
 
     const idle = dock.render(80)
     expect(dock.handleHover('bar', id('root'))).toBe(true)
     expect(dock.render(80)[1]).not.toBe(idle[1])
-    expect(dock.render(80)[1]).toContain(interaction.hover('▾ 代理树 · 1 个节点 · '))
+    expect(dock.render(80)[1]).toContain(interaction.hover('代理树'))
+    expect(dock.render(80)[1]).not.toContain(interaction.hover('▾'))
+    expect(dock.render(80)[1]).not.toContain(interaction.hover('1 个节点'))
 
     expect(dock.handleHover('row', id('child'))).toBe(true)
     const hoveredRow = dock.render(80)[2] ?? ''
     expect(hoveredRow).not.toBe(idle[2])
     expect(hoveredRow).toContain(interaction.hover('child'))
+    expect(hoveredRow).not.toContain(interaction.hover('▸'))
+    expect(hoveredRow).not.toContain(interaction.hover('└─'))
+    expect(hoveredRow).not.toContain(interaction.hover('○'))
+    expect(hoveredRow).not.toContain(interaction.hover('summary'))
     dock.handleClick('row', id('child'), 1)
     const selectedHoveredRow = dock.render(80)[2] ?? ''
     expect(selectedHoveredRow).toMatch(/\u001B\[48;2;/u)

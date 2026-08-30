@@ -135,35 +135,54 @@ function lifecycleCounts(
   width: number,
   open: boolean,
   base: (text: string) => string,
+  hovered: boolean,
 ): string {
   const arrow = open ? '▾' : '▸'
   const discovered = aggregate.discovered.toLocaleString('en-US')
   const variant = (
-    prefix: string,
+    prefix: { readonly leading: string; readonly label: string; readonly trailing: string },
     running: string,
     waiting: string,
     failed: string,
     separator: string,
-  ): { readonly plain: string; readonly painted: string } => ({
-    plain: `${prefix}${running}${separator}${waiting}${separator}${failed}`,
-    painted: `${base(prefix)}${statusColor.running(running)}${base(separator)}${statusColor.waiting(waiting)}${base(separator)}${statusColor.failed(failed)}`,
-  })
+  ): { readonly plain: string; readonly painted: string } => {
+    const plainPrefix = `${prefix.leading}${prefix.label}${prefix.trailing}`
+    const paintedPrefix = hovered
+      ? `${base(prefix.leading)}${interaction.hover(prefix.label)}${base(prefix.trailing)}`
+      : base(plainPrefix)
+    return {
+      plain: `${plainPrefix}${running}${separator}${waiting}${separator}${failed}`,
+      painted: `${paintedPrefix}${statusColor.running(running)}${base(separator)}${statusColor.waiting(waiting)}${base(separator)}${statusColor.failed(failed)}`,
+    }
+  }
   const full = variant(
-    ui(`${arrow} 代理树 · ${discovered} 个节点 · `, `${arrow} Agent Tree · ${discovered} nodes · `),
+    {
+      leading: `${arrow} `,
+      label: ui('代理树', 'Agent Tree'),
+      trailing: ui(` · ${discovered} 个节点 · `, ` · ${discovered} nodes · `),
+    },
     ui(`运行 ${aggregate.running}`, `running ${aggregate.running}`),
     ui(`等待 ${aggregate.waiting}`, `waiting ${aggregate.waiting}`),
     ui(`失败 ${aggregate.failed}`, `failed ${aggregate.failed}`),
     '  ',
   )
   const compact = variant(
-    ui(`${arrow} ${discovered} 节点 · `, `${arrow} ${discovered} nodes · `),
+    {
+      leading: `${arrow} `,
+      label: ui(`${discovered} 节点`, `${discovered} nodes`),
+      trailing: ' · ',
+    },
     ui(`运行${aggregate.running}`, `R${aggregate.running}`),
     ui(`等待${aggregate.waiting}`, `W${aggregate.waiting}`),
     ui(`失败${aggregate.failed}`, `F${aggregate.failed}`),
     ' ',
   )
   const minimal = variant(
-    ui(`${arrow} 节点${discovered} `, `${arrow} N${discovered} `),
+    {
+      leading: `${arrow} `,
+      label: ui(`节点${discovered}`, `N${discovered}`),
+      trailing: ' ',
+    },
     ui(`运${aggregate.running}`, `R${aggregate.running}`),
     ui(`等${aggregate.waiting}`, `W${aggregate.waiting}`),
     ui(`失${aggregate.failed}`, `F${aggregate.failed}`),
@@ -451,7 +470,8 @@ export class AgentTreeDock implements Component, Focusable {
       aggregate,
       width,
       this.open,
-      barHovered ? interaction.hover : this.focused ? color.accent : color.muted,
+      this.focused ? color.accent : color.muted,
+      barHovered,
     )
     const activity = aggregate.activityPreview.map(item => item.label).join(' · ')
     const mouseHint = this.options.mouseMode?.() === 'native'
@@ -461,7 +481,7 @@ export class AgentTreeDock implements Component, Focusable {
       ? activity === '' ? '' : ui(`活动：${activity}`, `Activity: ${activity}`)
       : activity === '' ? mouseHint : `${activity} · ${mouseHint}`
     const divider = color.muted('─'.repeat(Math.max(0, width)))
-    const bar = fitSides(counts, barHovered ? interaction.hover(right) : color.muted(right), width)
+    const bar = fitSides(counts, color.muted(right), width)
     if (!this.open) {
       const collapsed = [divider, surfaceRow(bar, width)]
       this.paintedText = collapsed.map(stripCopyDecorations)
@@ -473,7 +493,7 @@ export class AgentTreeDock implements Component, Focusable {
       const rowHovered = this.isHovered('row', row.sessionId)
       const chevronHovered = this.isHovered('chevron', row.sessionId)
       const rawChevron = row.expandable ? row.expanded ? '▾' : '▸' : ' '
-      const chevron = rowHovered || chevronHovered ? interaction.hover(rawChevron) : rawChevron
+      const chevron = chevronHovered ? interaction.hover(rawChevron) : rawChevron
       const rawLabel = escapeTerminalText(row.node.label ?? row.sessionId)
       const label = rowHovered ? interaction.hover(rawLabel) : rawLabel
       const continuation = row.node.continuation === 'available'
@@ -481,11 +501,10 @@ export class AgentTreeDock implements Component, Focusable {
         : row.node.continuation === 'stale' ? ui('只读', 'read-only') : undefined
       const rawSummary = [row.summary === undefined ? undefined : escapeTerminalText(row.summary), continuation, row.node.partial ? ui('部分结果', 'partial result') : undefined]
         .filter(Boolean).join(' · ')
-      const summary = rowHovered && rawSummary !== '' ? interaction.hover(rawSummary) : rawSummary
+      const summary = rawSummary
       const marker = row.selected ? '❯ ' : '  '
       const rawTreePrefix = `${marker}${row.branch}`
-      const treePrefix = rowHovered ? interaction.hover(rawTreePrefix) : rawTreePrefix
-      const treeText = `${treePrefix}${chevron} ${lifecycleGlyph(row.node.lifecycle)} ${label}`
+      const treeText = `${rawTreePrefix}${chevron} ${lifecycleGlyph(row.node.lifecycle)} ${label}`
       let content: string
       if (width >= 54) {
         const statusWidth = 10
