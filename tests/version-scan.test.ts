@@ -200,9 +200,16 @@ describe('update plan gates', () => {
     )
     expect(plan).toEqual({
       dshSpec: undefined,
-      seekttySpec: 'github:Hilbert-beinghappy/seektty#v1.3.0',
+      seekttySpec: 'seektty@1.3.0',
     })
     expect(plannedSpecs(plan)).toHaveLength(1)
+  })
+
+  it('does not form an npm spec from an invalid GitHub release tag', () => {
+    expect(updatePlan({ seekttyLatestTag: 'not-a-version' }, facts())).toEqual({
+      dshSpec: undefined,
+      seekttySpec: undefined,
+    })
   })
 
   it('plans at most one spec in every combination', () => {
@@ -217,10 +224,10 @@ describe('update plan gates', () => {
     for (const plan of cases) expect(plannedSpecs(plan).length).toBeLessThanOrEqual(1)
     expect(exclusiveUpdatePlan({
       dshSpec: '@deepseek-ai/dsh@0.1.1-rc.2',
-      seekttySpec: 'github:Hilbert-beinghappy/seektty#v1.3.0',
+      seekttySpec: 'seektty@1.3.0',
     })).toEqual({
       dshSpec: undefined,
-      seekttySpec: 'github:Hilbert-beinghappy/seektty#v1.3.0',
+      seekttySpec: 'seektty@1.3.0',
     })
   })
 
@@ -290,7 +297,7 @@ describe('launcher update flow', () => {
     )
     expect(status).toBe(0)
     expect(calls).toEqual([
-      ['dsh', 'plugin', '--profile', 'team', 'add', PNPM_GVS_CONFIG_ARG, 'github:Hilbert-beinghappy/seektty#v9.9.9'],
+      ['dsh', 'plugin', '--profile', 'team', 'add', PNPM_GVS_CONFIG_ARG, 'seektty@9.9.9'],
     ])
   })
 
@@ -439,7 +446,7 @@ describe('launcher update flow', () => {
       () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatestTag: 'v9.9.9' }),
     )
     expect(calls).toEqual([
-      ['dsh', 'plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'github:Hilbert-beinghappy/seektty#v9.9.9'],
+      ['dsh', 'plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'seektty@9.9.9'],
     ])
     calls.length = 0
     await maybeAutoUpdate(
@@ -494,7 +501,7 @@ describe('launcher update flow', () => {
     expect(execute).toHaveBeenCalledTimes(1)
     expect(execute).toHaveBeenCalledWith(
       'dsh',
-      ['plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'github:Hilbert-beinghappy/seektty#v9.9.9'],
+      ['plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'seektty@9.9.9'],
     )
   })
 

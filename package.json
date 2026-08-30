@@ -1,7 +1,6 @@
 {
   "name": "seektty",
   "version": "1.2.5",
-  "private": true,
   "description": "SeekTTY, a pluggable DeepSeek-colored terminal surface for DeepSeek Harness",
   "keywords": [
     "deepseek",
@@ -19,6 +18,10 @@
   },
   "homepage": "https://github.com/Hilbert-beinghappy/seektty#readme",
   "bugs": "https://github.com/Hilbert-beinghappy/seektty/issues",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": "^22.19.0 || >=24"
