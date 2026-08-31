@@ -9,6 +9,7 @@ import { emptyHitMap, finalizeHitMap, HitMapBuilder, type CellPoint, type HitReg
 import { tuiFrameApi } from '../src/client/pi-tui-adapters.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 import { interaction, setTheme } from '../src/client/theme.ts'
+import type { ContextActionNode } from '../src/client/context-actions.ts'
 
 class VirtualTerminal implements Terminal {
   columns = 100
@@ -35,7 +36,7 @@ class VirtualTerminal implements Terminal {
 }
 
 /** Real renderer, input framing, SGR gestures and modal ownership; clipboard writes are recorded, not executed. */
-function harness(choices?: readonly OverlayChoice[]) {
+function harness(entries?: readonly OverlayChoice[] | readonly ContextActionNode[]) {
   vi.useFakeTimers()
   const terminal = new VirtualTerminal()
   const tui = new TUI(terminal, false)
@@ -77,7 +78,7 @@ function harness(choices?: readonly OverlayChoice[]) {
       ? { overlayId: overlays.activeOverlayId()!, children: overlays.hitChildren() }
       : undefined), geometry)
   }
-  const opened: { point: CellPoint; target: HitRegion; result: Promise<OverlayChoice | undefined> }[] = []
+  const opened: { point: CellPoint; target: HitRegion; result: Promise<{ readonly id: string } | undefined> }[] = []
   const selected = vi.fn()
   const openFor = (point: CellPoint, region: HitRegion | undefined) => {
     if (region === undefined || !overlays.allowsContextMenu() || region.action.kind === 'context-menu') return
@@ -87,13 +88,14 @@ function harness(choices?: readonly OverlayChoice[]) {
     const generation = overlays.activeGeneration()
     const originOwner = owner
     const valid = () => originOwner === owner && generation === overlays.activeGeneration() && (target?.valid() ?? true)
-    const result = menu.open({
-      point, valid,
-      choices: choices ?? mouseContextChoices({
+    const fallback = mouseContextChoices({
         target: inOverlay ? target?.editable ? 'overlay-input' : 'overlay' : region.role === 'input' ? 'composer' : 'transcript',
         hasSelection: (target?.text ?? '') !== '', pasteSupported: true,
-      }),
-    })
+      })
+    const nodes = entries?.[0] !== undefined && 'kind' in entries[0] ? entries as readonly ContextActionNode[] : undefined
+    const result: Promise<{ readonly id: string } | undefined> = nodes === undefined
+      ? menu.open({ point, valid, choices: entries as readonly OverlayChoice[] | undefined ?? fallback })
+      : menu.open({ point, valid, title: 'Actions', nodes })
     opened.push({ point, target: region, result })
     void result.then(choice => {
       if (choice === undefined || !valid()) return
@@ -248,7 +250,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 5, row: 5 }, 2)
-      await h.click(h.center(h.region('cancel')), 2)
+      await h.click(h.center(h.region('close')), 2)
       expect(h.opened).toHaveLength(1)
       expect(h.geometry().overlays).toHaveLength(1)
       expect(h.selected).not.toHaveBeenCalled()
@@ -337,9 +339,9 @@ describe('transient context menu / real frames and SGR', () => {
       expect(rect.col + rect.width).toBeLessThanOrEqual(99)
       expect(rect.row + rect.height).toBeLessThanOrEqual(29)
       expect(rect.col).toBeLessThan(99)
-      await h.click(h.center(h.region('cancel')))
+      await h.click(h.center(h.region('close')))
       expect(h.menu.hasActive()).toBe(false)
-      expect(h.selected).toHaveBeenCalledExactlyOnceWith('cancel', '')
+      expect(h.selected).toHaveBeenCalledExactlyOnceWith('close', '')
     } finally { h.close() }
   })
 
@@ -348,7 +350,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 3, row: 3 }, 2)
-      const point = where === 'inside' ? h.center(h.region('cancel')) : { col: 80, row: 20 }
+      const point = where === 'inside' ? h.center(h.region('close')) : { col: 80, row: 20 }
       h.send(point, 64)
       h.send(point, 64)
       expect(h.menu.hasActive()).toBe(false)
@@ -365,7 +367,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 3, row: 3 }, 2)
-      h.send(h.center(h.region('cancel')), 66)
+      h.send(h.center(h.region('close')), 66)
       await h.frame()
       expect(h.menu.hasActive()).toBe(false)
       expect(h.rootScroll).not.toHaveBeenCalled()
@@ -410,7 +412,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 3, row: 3 }, 2)
-      const origin = where === 'inside' ? h.center(h.region('cancel')) : { col: 50, row: 15 }
+      const origin = where === 'inside' ? h.center(h.region('close')) : { col: 50, row: 15 }
       const point = { col: 70, row: 16 }
       h.send(origin, 0)
       h.send(point, 32)
@@ -473,7 +475,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       if (existing) await h.click({ col: 3, row: 3 }, 2)
-      const origin = existing ? h.center(h.region('cancel')) : { col: 50, row: 15 }
+      const origin = existing ? h.center(h.region('close')) : { col: 50, row: 15 }
       const point = { col: 70, row: 28 }
       h.send(origin, 2)
       h.send({ col: 65, row: 20 }, 34)
@@ -497,7 +499,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 3, row: 3 }, 2)
-      h.send(h.center(h.region('cancel')), 2)
+      h.send(h.center(h.region('close')), 2)
       const point = { col: 80, row: 20 }
       h.send(point, 2, true)
       await h.frame()
@@ -549,7 +551,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 3, row: 3 }, 2)
-      h.send(h.center(h.region('cancel')), 2)
+      h.send(h.center(h.region('close')), 2)
       h.send({ col: 50, row: 20 }, 34)
       await h.frame()
       if (reason === 'Escape') await h.key('\u001B')
@@ -593,7 +595,7 @@ describe('transient context menu / real frames and SGR', () => {
     try {
       await h.frame()
       await h.click({ col: 3, row: 3 }, 2)
-      const point = h.center(h.region('cancel'))
+      const point = h.center(h.region('close'))
       h.send(point, 0)
       h.menu.close()
       await h.frame()
@@ -647,13 +649,81 @@ describe('transient context menu / real frames and SGR', () => {
       const fullRedraws = h.tui.fullRedraws
       await h.click({ col: 3, row: 3 }, 2)
       h.terminal.writes = []
-      h.send(h.center(h.region('cancel')), 35)
+      h.send(h.center(h.region('close')), 35)
       await h.frame()
       const color = interaction.hover('probe').match(/\u001B\[38;2;\d+;\d+;\d+m/u)?.[0]
       expect(color).toBeDefined()
       expect(h.terminal.writes.join('')).toContain(color)
       await h.click({ col: 80, row: 20 })
       expect(h.tui.fullRedraws).toBe(fullRedraws)
+    } finally { h.close() }
+  })
+
+  it('opens one child submenu by keyboard and returns its leaf action', async () => {
+    const h = harness([
+      { kind: 'submenu', id: 'export', label: 'Export', children: [
+        { kind: 'action', id: 'markdown', label: 'Markdown' },
+        { kind: 'action', id: 'zip', label: 'ZIP' },
+      ] },
+      { kind: 'action', id: 'close', label: 'Close' },
+    ])
+    try {
+      await h.frame()
+      await h.click({ col: 3, row: 3 }, 2)
+      await h.key('\u001B[C')
+      expect(h.geometry().overlays).toHaveLength(2)
+      await h.key('\r')
+      expect(h.selected).toHaveBeenCalledExactlyOnceWith('markdown', '')
+      expect(h.menu.hasActive()).toBe(false)
+    } finally { h.close() }
+  })
+
+  it('flips a child submenu to the left when the right edge has no room', async () => {
+    const h = harness([
+      { kind: 'submenu', id: 'export', label: 'Export a session archive', children: [
+        { kind: 'action', id: 'markdown', label: 'Export as Markdown' },
+        { kind: 'action', id: 'descendants', label: 'Export descendants as ZIP' },
+      ] },
+      { kind: 'action', id: 'close', label: 'Close' },
+    ])
+    try {
+      h.terminal.columns = 58
+      h.tui.requestRender(true)
+      await h.frame()
+      await h.click({ col: 57, row: 10 }, 2)
+      await h.key('\u001B[C')
+      const [rootMenu, childMenu] = h.geometry().overlays
+      expect(rootMenu).toBeDefined()
+      expect(childMenu).toBeDefined()
+      expect(childMenu!.col).toBeLessThan(rootMenu!.col)
+      expect(childMenu!.col).toBeGreaterThanOrEqual(0)
+      expect(childMenu!.col + childMenu!.width).toBeLessThanOrEqual(h.terminal.columns)
+      expect(childMenu!.row).toBeGreaterThanOrEqual(0)
+      expect(childMenu!.row + childMenu!.height).toBeLessThanOrEqual(h.terminal.rows)
+    } finally { h.close() }
+  })
+
+  it('opens a submenu only after the 250 ms hover delay and Esc returns one level', async () => {
+    const h = harness([
+      { kind: 'submenu', id: 'move', label: 'Move', children: [
+        { kind: 'action', id: 'up', label: 'Up' },
+      ] },
+      { kind: 'action', id: 'close', label: 'Close' },
+    ])
+    try {
+      await h.frame()
+      await h.click({ col: 3, row: 3 }, 2)
+      h.send(h.center(h.region('move')), 35)
+      await vi.advanceTimersByTimeAsync(249)
+      expect(h.geometry().overlays).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await h.frame()
+      expect(h.geometry().overlays).toHaveLength(2)
+      await h.key('\u001B')
+      expect(h.geometry().overlays).toHaveLength(1)
+      expect(h.menu.hasActive()).toBe(true)
+      await h.key('\u001B')
+      expect(h.menu.hasActive()).toBe(false)
     } finally { h.close() }
   })
 })

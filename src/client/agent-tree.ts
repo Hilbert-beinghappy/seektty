@@ -657,6 +657,14 @@ export class AgentTreeDock implements Component, Focusable {
     return count >= 2 ? { consumed: true, openedSessionId: sessionId } : { consumed: true }
   }
 
+  /** Toggle one exact node from a context action without moving keyboard focus or selection. */
+  contextToggle(sessionId: SessionId): boolean {
+    const node = this.node(sessionId)
+    if (node === undefined || !node.hasChildren) return false
+    this.toggle(sessionId)
+    return true
+  }
+
   handleInput(data: string): AgentTreeInputResult {
     if (!this.open || !this.focused) return { consumed: false }
     if (matchesKey(data, Key.escape)) {
