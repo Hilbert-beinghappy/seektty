@@ -43,7 +43,7 @@ export interface ManagedTui {
 export interface TerminalSession {
   enter(): void
   restore(): void
-  setBackgroundColor(color: string, mode?: TuiBackgroundMode): void
+  setBackgroundColor(color: string, mode?: TuiBackgroundMode, force?: boolean): void
   startBackgroundSync(): void
   consumeInput(data: string): boolean
   setMouseReporting(mode: MouseReportingMode, hoverFeedback?: boolean): void
@@ -94,7 +94,7 @@ export function createTerminalSession(
         }
       }
     },
-    setBackgroundColor: (color, mode) => { background.setColor(color, mode) },
+    setBackgroundColor: (color, mode, force) => { background.setColor(color, mode, force) },
     // Must run after terminal.start() has installed its raw-mode input listener.
     startBackgroundSync: () => { if (active) background.start() },
     consumeInput: data => background.consumeInput(data),

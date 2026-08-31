@@ -199,6 +199,17 @@ describe('background ownership', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('reapplies the same color only when a finalized theme requests it', () => {
+    const { background, writes } = controller()
+    background.start()
+    background.consumeInput(reply())
+    background.setColor('#282C34')
+    expect(writes).toEqual([BACKGROUND_QUERY, desired])
+    background.setColor('#282C34', 'theme', true)
+    expect(writes).toEqual([BACKGROUND_QUERY, desired, desired])
+    background.restore()
+  })
+
   it.each([ST, '\u0007'])('accepts the standard %j terminator and 1–4 digit RGB channels', end => {
     const { background, writes } = controller()
     background.start()

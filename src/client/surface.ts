@@ -349,8 +349,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       message => { reportWelcomeNotice(message) },
     )
+    const agentTree = new AgentTreeDock({
+      presentation: capabilities.subagentPresentation(),
+      requestRender: () => { if (stopping === undefined) tui.requestRender() },
+      mouseMode: () => liveBehavior.get().mouseMode,
+    })
     transcript = new Transcript(
-      () => transcriptViewportRows(terminal.rows, hideComposer ? 0 : editor.render(terminal.columns).length),
+      () => transcriptViewportRows(
+        terminal.rows,
+        hideComposer ? 0 : editor.render(terminal.columns).length,
+        agentTree.renderedHeight(),
+      ),
       () => { if (stopping === undefined) tui.requestRender() },
       () => {
         const current = active
@@ -402,11 +411,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       /* first frame already shown; highlighting stays off */
     })
     const status = new StatusBar()
-    const agentTree = new AgentTreeDock({
-      presentation: capabilities.subagentPresentation(),
-      requestRender: () => { if (stopping === undefined) tui.requestRender() },
-      mouseMode: () => liveBehavior.get().mouseMode,
-    })
     const childView = new ChildSessionView()
     const canvas = new Box(0, 0, background.canvas)
     const renderCanvas = canvas.render.bind(canvas)
@@ -453,6 +457,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const builder = new HitMapBuilder(hitMap.generation + 1)
       const slots = layout.lastContentGeometry()
       if (slots !== undefined) {
+        const agentTreeSlot = agentTree.dockedGeometry(slots.composer)
         builder.add({
           id: 'chrome:context',
           rect: slots.context,
@@ -473,7 +478,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           hover: 'none',
           action: { kind: 'transcript', command: 'select' },
         })
-        for (const region of agentTree.hitRegions(slots.agentTree, liveBehavior.get().mouseMode)) {
+        for (const region of agentTree.hitRegions(agentTreeSlot, liveBehavior.get().mouseMode)) {
           builder.add(region)
         }
         for (const region of transcript.scrollbarHitRegions(slots.transcript)) {
@@ -951,15 +956,19 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return stopping
     }
 
-    const applyRenderedAppearance = (theme: ResolvedTuiTheme, mode: TuiBackgroundMode): void => {
+    const applyRenderedAppearance = (
+      theme: ResolvedTuiTheme,
+      mode: TuiBackgroundMode,
+      forceThemeRefresh = false,
+    ): void => {
       const themeChanged = JSON.stringify(theme) !== JSON.stringify(liveTheme)
       liveTheme = theme
       liveBackgroundMode = mode
       setTheme(theme)
       setBackgroundMode(mode)
-      terminalSession.setBackgroundColor(theme.colors.canvas, mode)
+      terminalSession.setBackgroundColor(theme.colors.canvas, mode, forceThemeRefresh)
       // Background-only changes must not rebuild transcript nodes or disturb selection/anchors.
-      if (themeChanged) {
+      if (themeChanged || forceThemeRefresh) {
         syntax?.setTheme(theme)
         transcript.refreshPresentation()
       }
@@ -976,8 +985,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       applyTheme: (theme) => {
         applyRenderedAppearance(theme, liveBackgroundMode)
       },
-      applyAppearance: (appearance) => {
-        applyRenderedAppearance(resolveAppearanceTheme(appearance), appearance.backgroundMode)
+      applyAppearance: (appearance, options) => {
+        applyRenderedAppearance(
+          resolveAppearanceTheme(appearance),
+          appearance.backgroundMode,
+          options?.forceThemeRefresh === true,
+        )
       },
       applyLocale: (locale) => {
         setUiLocale(locale)
@@ -1756,8 +1769,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         applyOverlayPointer(semantic.point, semantic.origin, semantic.region.role === 'input', 1, semantic.ended === true)
       } else if (semantic.region?.action.kind === 'agent-tree') {
         clearTranscriptPointerGesture()
-        const origin = layout.lastContentGeometry()?.agentTree
-        if (origin !== undefined && semantic.origin !== undefined) agentTree.selectText(origin, semantic.origin, semantic.point)
+        const composer = layout.lastContentGeometry()?.composer
+        if (composer !== undefined && semantic.origin !== undefined) {
+          agentTree.selectText(agentTree.dockedGeometry(composer), semantic.origin, semantic.point)
+        }
       } else if (semantic.region?.role === 'input' || semantic.region?.action.kind === 'composer') {
         clearTranscriptPointerGesture()
         applyComposerPointer(semantic.point, semantic.origin, true)

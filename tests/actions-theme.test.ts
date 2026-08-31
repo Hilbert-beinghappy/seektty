@@ -277,7 +277,10 @@ describe('/theme commands', () => {
       0,
     )
     expect(host.applyTheme).toHaveBeenCalledTimes(1)
-    expect(host.applyAppearance).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ theme: 'custom:ocean', backgroundMode: 'theme' }))
+    expect(host.applyAppearance).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ theme: 'custom:ocean', backgroundMode: 'theme' }),
+      { forceThemeRefresh: true },
+    )
   })
 
   it('restores the original theme when a palette preview is cancelled', async () => {
@@ -310,7 +313,7 @@ describe('/theme commands', () => {
     expect(host.notice).toHaveBeenCalledWith(expect.stringContaining('save failed'), 'error')
   })
 
-  it('imports a local VS Code JSONC theme and saves it through Harness Settings', async () => {
+  it('imports a local VS Code JSONC theme and activates it for interface and code', async () => {
     const root = await mkdtemp(join(tmpdir(), 'seektty-theme-action-'))
     try {
       const themeDirectory = join(root, 'themes with spaces')
@@ -331,7 +334,7 @@ describe('/theme commands', () => {
       await actions.execute('theme', `import "${path}"`)
 
       const appearance = state.current().value as TuiAppearanceSettings
-      expect(appearance.theme).toBe('light')
+      expect(appearance.theme).toBe('custom:ocean-imported')
       expect(appearance.codeTheme).toBe('custom:ocean-imported')
       expect(appearance.customThemes[0]).toMatchObject({
         name: 'Ocean Imported',
@@ -339,9 +342,12 @@ describe('/theme commands', () => {
         tokenColors: [{ scope: ['keyword'], foreground: '#91A7FF', fontStyle: ['bold'] }],
       })
       expect(host.applyTheme).toHaveBeenCalledTimes(1)
-      expect(host.applyAppearance).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ theme: 'light', codeTheme: 'custom:ocean-imported', backgroundMode: 'theme' }))
+      expect(host.applyAppearance).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ theme: 'custom:ocean-imported', codeTheme: 'custom:ocean-imported', backgroundMode: 'theme' }),
+        { forceThemeRefresh: true },
+      )
       expect(host.applyTheme).toHaveBeenLastCalledWith(expect.objectContaining({
-        id: 'light',
+        id: 'custom:ocean-imported',
         syntaxTone: 'dark',
       }))
     } finally {

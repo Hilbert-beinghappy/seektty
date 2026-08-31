@@ -329,6 +329,69 @@ describe('AgentTreeDock', () => {
     dock.dispose()
   })
 
+  it('maps pointer rows to the visible slice when the tree top is clipped', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', [
+        { id: 'first' },
+        { id: 'second' },
+        { id: 'third' },
+      ]) }),
+      requestRender: vi.fn(),
+    })
+    dock.openOrFocus(id('root'))
+    await settle()
+    const rendered = dock.render(80)
+    const visible = {
+      col: 0,
+      row: 0,
+      width: 80,
+      height: rendered.length - 3,
+      contentRowOffset: 3,
+    }
+    const hits = dock.hitRegions(visible, 'full')
+
+    expect(hits.some(region => region.id === 'agent-tree:entry:root')).toBe(false)
+    expect(hits.some(region => region.id === 'agent:first')).toBe(false)
+    expect(hits.find(region => region.id === 'agent:second')?.rect.row).toBe(0)
+    expect(hits.find(region => region.id === 'agent:third')?.rect.row).toBe(1)
+    expect(hits.find(region => region.id === 'agent-tree:footer-open')?.rect.row).toBe(2)
+
+    dock.selectText(visible, { row: 0 }, { row: 1 })
+    expect(dock.copySelectionText()).toContain('second')
+    expect(dock.copySelectionText()).toContain('third')
+    expect(dock.copySelectionText()).not.toContain('first')
+    dock.dispose()
+  })
+
+  it('anchors collapsed and expanded pointer geometry above the composer', async () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const dock = new AgentTreeDock({
+      presentation: presentation({ root: catalog('root', [{ id: 'child' }, { id: 'second' }]) }),
+      requestRender: vi.fn(),
+    })
+    const composer = { col: 0, row: 20, width: 80, height: 3 }
+
+    dock.showCollapsedRoot(id('root'))
+    await settle()
+    expect(dock.render(80)).toHaveLength(2)
+    expect(dock.dockedGeometry(composer)).toEqual({
+      col: 0, row: 18, width: 80, height: 2, contentRowOffset: 0,
+    })
+    expect(dock.hitRegions(dock.dockedGeometry(composer), 'full')
+      .find(region => region.id === 'agent-tree:entry:root')?.rect.row).toBe(19)
+
+    dock.openOrFocus(id('root'))
+    await settle()
+    const expandedHeight = dock.render(80).length
+    expect(expandedHeight).toBeGreaterThan(2)
+    const expanded = dock.dockedGeometry(composer)
+    expect(expanded.row).toBe(composer.row - expandedHeight)
+    expect(dock.hitRegions(expanded, 'full').find(region => region.id === 'agent:child')?.rect.row)
+      .toBe(expanded.row + 2)
+    dock.dispose()
+  })
+
   it('renders stable hover states for every agent-tree pointer target', async () => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('TERM', 'xterm-256color')
