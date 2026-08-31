@@ -548,12 +548,26 @@ export class AgentTreeDock implements Component, Focusable {
     return rendered
   }
 
+  /** Rows painted by the latest layout pass, including divider, bar and footer. */
+  renderedHeight(): number {
+    return this.paintedText.length
+  }
+
   /** Full-mode hit regions only. Native mode deliberately returns none. */
-  hitRegions(rect: CellRect, mouseMode: 'full' | 'native'): readonly HitRegion[] {
+  hitRegions(
+    rect: CellRect & { readonly contentRowOffset?: number },
+    mouseMode: 'full' | 'native',
+  ): readonly HitRegion[] {
     if (mouseMode === 'native' || this.suspended || rect.height <= 0 || rect.width <= 0 || this.rootId === undefined) return []
-    const regions: HitRegion[] = rect.height <= 1 ? [] : [{
+    const contentRowOffset = rect.contentRowOffset ?? 0
+    const visibleRow = (contentRow: number): number | undefined => {
+      const localRow = contentRow - contentRowOffset
+      return localRow >= 0 && localRow < rect.height ? rect.row + localRow : undefined
+    }
+    const barRow = visibleRow(1)
+    const regions: HitRegion[] = barRow === undefined ? [] : [{
       id: `agent-tree:entry:${this.rootId}`,
-      rect: { col: rect.col, row: rect.row + 1, width: rect.width, height: 1 },
+      rect: { col: rect.col, row: barRow, width: rect.width, height: 1 },
       zIndex: 30,
       role: 'button',
       enabled: true,
@@ -562,10 +576,11 @@ export class AgentTreeDock implements Component, Focusable {
       action: { kind: 'agent-tree', command: 'bar', sessionId: this.rootId },
     }]
     for (const painted of this.paintedRows) {
-      if (painted.row >= rect.height) continue
+      const row = visibleRow(painted.row)
+      if (row === undefined) continue
       regions.push({
         id: `agent:${painted.sessionId}`,
-        rect: { col: rect.col, row: rect.row + painted.row, width: rect.width, height: 1 },
+        rect: { col: rect.col, row, width: rect.width, height: 1 },
         zIndex: 30,
         role: 'option',
         enabled: true,
@@ -579,7 +594,7 @@ export class AgentTreeDock implements Component, Focusable {
         id: `agent:${painted.sessionId}:chevron`,
         rect: {
           col: rect.col + painted.chevronCol,
-          row: rect.row + painted.row,
+          row,
           width: 1,
           height: 1,
         },
@@ -591,15 +606,37 @@ export class AgentTreeDock implements Component, Focusable {
         action: { kind: 'agent-tree', command: 'chevron', sessionId: painted.sessionId },
       })
     }
-    regions.push(...this.paintedFooterHits.map(hit => ({
-      ...hit,
-      rect: {
-        ...hit.rect,
-        col: rect.col + hit.rect.col,
-        row: rect.row + hit.rect.row,
-      },
-    })))
+    for (const hit of this.paintedFooterHits) {
+      const row = visibleRow(hit.rect.row)
+      if (row === undefined) continue
+      regions.push({
+        ...hit,
+        rect: {
+          ...hit.rect,
+          col: rect.col + hit.rect.col,
+          row,
+        },
+      })
+    }
     return regions
+  }
+
+  /**
+   * Resolve the dock from its stable lower sibling instead of a possibly stale
+   * pre-tree layout slot. The tree grows upward while composer/status chrome
+   * stays bottom-anchored, so its current painted height is authoritative.
+   */
+  dockedGeometry(composer: CellRect): CellRect & { readonly contentRowOffset: number } {
+    const paintedHeight = this.paintedText.length
+    const availableHeight = Math.max(0, composer.row)
+    const height = Math.min(paintedHeight, availableHeight)
+    return {
+      col: composer.col,
+      row: composer.row - height,
+      width: composer.width,
+      height,
+      contentRowOffset: paintedHeight - height,
+    }
   }
 
   handleClick(command: AgentTreeMouseCommand, sessionId: SessionId | undefined, count: number): AgentTreeInputResult {
@@ -698,9 +735,16 @@ export class AgentTreeDock implements Component, Focusable {
     return { consumed: true, collapsed: true }
   }
 
-  selectText(rect: CellRect, origin: { readonly row: number }, focus: { readonly row: number }): void {
+  selectText(
+    rect: CellRect & { readonly contentRowOffset?: number },
+    origin: { readonly row: number },
+    focus: { readonly row: number },
+  ): void {
     if (!this.open || this.paintedText.length === 0) return
-    const local = (row: number): number => Math.max(0, Math.min(this.paintedText.length - 1, row - rect.row))
+    const local = (row: number): number => Math.max(0, Math.min(
+      this.paintedText.length - 1,
+      (rect.contentRowOffset ?? 0) + row - rect.row,
+    ))
     const first = local(origin.row)
     const last = local(focus.row)
     this.textSelection = { startRow: Math.min(first, last), endRow: Math.max(first, last) }

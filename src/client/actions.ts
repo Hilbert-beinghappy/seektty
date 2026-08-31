@@ -149,7 +149,10 @@ export interface TuiActionHost {
   refresh(): void
   refreshHeader(): void
   applyTheme(theme: ResolvedTuiTheme): void
-  applyAppearance(appearance: TuiAppearanceSettings): void
+  applyAppearance(
+    appearance: TuiAppearanceSettings,
+    options?: { readonly forceThemeRefresh?: boolean },
+  ): void
   applyLocale(locale: LocaleId): void
   applyBehavior?(behavior: TuiBehaviorSettings): void
   applyWelcome?(settings: TuiWelcomeSettings): void
@@ -1419,7 +1422,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         },
         { id: '__edit__', label: ui('自定义颜色与代码高亮', "Custom colors and syntax highlighting"), description: ui('修改背景、文字和语法颜色', "Edit backgrounds, text, and syntax colors") },
         { id: '__palette__', label: ui('用颜色组合自动配置', "Generate automatically from a color palette"), description: ui('输入 3–16 个 HEX/RGB 颜色代码', "Enter 3–16 HEX/RGB colors") },
-        { id: '__import__', label: ui('导入 VS Code 主题', "Import VS Code theme"), description: ui('本地 JSON/JSONC · 支持相对 include', "Local JSON/JSONC · relative includes supported") },
+        { id: '__import__', label: ui('导入 VS Code 主题', "Import VS Code theme"), description: ui('本地 JSON/JSONC · 同时应用到界面与代码', "Local JSON/JSONC · apply to interface and code") },
         { id: '__export__', label: ui('导出主题 JSON', "Export theme JSON"), description: ui('写出可分享的 SeekTTY 主题文件', "Write a shareable SeekTTY theme file") },
         { id: '__delete__', label: ui('删除主题', "Delete theme"), description: ui('管理命名自定义主题', "Manage named custom themes") },
       )
@@ -1638,7 +1641,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     const suppliedPath = (looksLikePath ? [first, ...rest] : rest).join(' ')
     const path = suppliedPath !== '' ? suppliedPath : await overlays.input({
       title: ui('导入 VS Code 主题', "Import VS Code theme"),
-      detail: ui('读取本地 JSON/JSONC；相对 include 会从主题文件目录递归解析。', "Reads local JSON/JSONC; relative includes are resolved recursively from the theme directory."),
+      detail: ui('读取本地 JSON/JSONC；保存后同时应用到界面与代码，相对 include 会从主题文件目录递归解析。', "Reads local JSON/JSONC and applies it to both interface and code after saving; relative includes are resolved recursively from the theme directory."),
       placeholder: '~/.vscode/extensions/.../themes/theme.json',
       options: { width: '95%', maxHeight: '80%', anchor: 'center', margin: 1 },
     })
@@ -1651,7 +1654,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       document,
       convertVsCodeTheme(loaded, identity.id, identity.name),
       undefined,
-      'code',
+      'both',
       overlays,
     )
   }
@@ -1877,7 +1880,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           normalizeCustomTheme(candidate),
           activation,
         )
-        await this.settingsChanged(updated, `${activation === 'code' ? ui('代码主题 ', "Code theme ") : ''}${candidate.name}`)
+        await this.settingsChanged(
+          updated,
+          `${activation === 'code' ? ui('代码主题 ', "Code theme ") : ''}${candidate.name}`,
+          overlays,
+          { forceThemeRefresh: true },
+        )
       } catch (error) {
         this.host.applyTheme(original)
         throw error
@@ -2895,10 +2903,12 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
     document: TuiSettingsDocument,
     label: string,
     overlays: OverlayPrompts = this.host.overlays,
+    appearanceOptions?: { readonly forceThemeRefresh?: boolean },
   ): Promise<void> {
     if (document.applies === 'live') {
       if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) {
-        this.host.applyAppearance(appearanceFromSettings(document))
+        if (appearanceOptions === undefined) this.host.applyAppearance(appearanceFromSettings(document))
+        else this.host.applyAppearance(appearanceFromSettings(document), appearanceOptions)
       }
       if (document.namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
         this.host.applyBehavior?.(behaviorFromSettings(document))

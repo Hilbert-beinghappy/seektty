@@ -27,6 +27,7 @@ export class TerminalBackground {
   private desired: string | undefined
   private applied: string | undefined
   private changed = false
+  private forceApply = false
   private timer: ReturnType<typeof setTimeout> | undefined
   private reportedColor: string | undefined
 
@@ -38,11 +39,12 @@ export class TerminalBackground {
   ) {}
 
   /** Set color and policy atomically, without writing an intermediate theme. */
-  setColor(color: string, mode: TuiBackgroundMode = this.mode): void {
+  setColor(color: string, mode: TuiBackgroundMode = this.mode, force = false): void {
     // Only validated theme RGB values may become terminal commands.
     if (!/^#[\da-f]{6}$/iu.test(color)) return
     this.desired = `rgb:${color.slice(1, 3)}/${color.slice(3, 5)}/${color.slice(5, 7)}`.toLowerCase()
     this.mode = mode
+    if (force && mode !== 'terminal') this.forceApply = true
     if (mode === 'terminal') this.restoreOriginal()
     else this.sync()
     this.reportColor()
@@ -110,6 +112,7 @@ export class TerminalBackground {
     this.original = undefined
     this.applied = undefined
     this.changed = false
+    this.forceApply = false
     this.reportColor()
   }
 
@@ -129,7 +132,9 @@ export class TerminalBackground {
   }
 
   private apply(): void {
-    if (!this.active || this.original === undefined || this.desired === undefined || this.applied === this.desired) return
+    if (!this.active || this.original === undefined || this.desired === undefined
+      || this.applied === this.desired && !this.forceApply) return
+    this.forceApply = false
     this.changed = true
     this.applied = this.desired
     try { this.terminal.write(`${OSC}11;${this.desired}${ST}`) } catch {

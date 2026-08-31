@@ -111,6 +111,46 @@ describe('composer chrome', () => {
     expect(transcriptViewportRows(24, 3)).toBe(17)
   })
 
+  it('reserves the live agent-tree height before transcript pointer maps are built', () => {
+    const order: string[] = []
+    let dockHeight = 0
+    const agentTree: Component = {
+      render: () => {
+        order.push('agent-tree')
+        dockHeight = 6
+        return ['divider', 'bar', 'first', 'second', 'third', 'footer']
+      },
+      invalidate: () => undefined,
+    }
+    const transcript: Component = {
+      render: () => {
+        order.push('transcript')
+        return Array.from(
+          { length: transcriptViewportRows(14, 2, dockHeight) },
+          (_, index) => `transcript-${index + 1}`,
+        )
+      },
+      invalidate: () => undefined,
+    }
+    const layout = new BottomAnchoredLayout(
+      () => 14,
+      rows('context'),
+      transcript,
+      rows('composer top', 'composer body'),
+      rows('status'),
+      () => false,
+      agentTree,
+    )
+
+    const rendered = layout.render(80)
+
+    expect(order).toEqual(['agent-tree', 'transcript'])
+    expect(transcriptViewportRows(14, 2, 6)).toBe(2)
+    expect(rendered).toContain('transcript-1')
+    expect(rendered).toContain('transcript-2')
+    expect(layout.lastContentGeometry()?.transcript.height).toBe(2)
+  })
+
   it('hides the composer only for a read-only child view and keeps the breadcrumb', () => {
     vi.stubEnv('NO_COLOR', '1')
     const context = new ContextBar('tui', '/workspace')
@@ -137,6 +177,34 @@ describe('composer chrome', () => {
 
     showComposer = true
     expect(layout.render(80)).toContain('composer body')
+  })
+
+  it('records the clipped content offset for a tall agent tree', () => {
+    const layout = new BottomAnchoredLayout(
+      () => 6,
+      rows('context'),
+      rows('transcript'),
+      rows('composer top', 'composer body'),
+      rows('status'),
+      () => false,
+      rows('divider', 'bar', 'first', 'second', 'third', 'footer'),
+    )
+
+    expect(layout.render(80)).toEqual([
+      'second',
+      'third',
+      'footer',
+      'composer top',
+      'composer body',
+      'status',
+    ])
+    expect(layout.lastContentGeometry()?.agentTree).toEqual({
+      col: 0,
+      row: 0,
+      width: 80,
+      height: 3,
+      contentRowOffset: 3,
+    })
   })
 
   it('uses open horizontal rules without side borders or corner glyphs', () => {

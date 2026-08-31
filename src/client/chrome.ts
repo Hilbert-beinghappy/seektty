@@ -157,11 +157,12 @@ function isBlankMultiline(text: string): boolean {
  *
  * @param terminalRows - Total rows currently available in the terminal.
  * @param editorRows - Rows occupied by the framed editor and autocomplete list.
+ * @param dockRows - Rows reserved by transient chrome between transcript and composer.
  * @returns Rows that remain available for the transcript viewport.
  */
-export function transcriptViewportRows(terminalRows: number, editorRows: number): number {
+export function transcriptViewportRows(terminalRows: number, editorRows: number, dockRows = 0): number {
   // Context (1) + top/bottom breathing room (2) + permission status (1).
-  return Math.max(1, terminalRows - 4 - editorRows)
+  return Math.max(1, terminalRows - 4 - editorRows - Math.max(0, dockRows))
 }
 
 function slot(row: number, width: number, height: number): CellRect {
@@ -173,7 +174,7 @@ export interface LayoutContentGeometry {
   readonly height: number
   readonly context: CellRect
   readonly transcript: CellRect
-  readonly agentTree: CellRect
+  readonly agentTree: CellRect & { readonly contentRowOffset: number }
   readonly composer: CellRect
   readonly status: CellRect
 }
@@ -231,8 +232,11 @@ export class BottomAnchoredLayout implements Component {
    */
   render(width: number): string[] {
     const contextRows = this.context.render(width)
-    const transcriptRows = this.transcript.render(width)
+    // Paint the dynamic dock first. Transcript height can depend on the dock's
+    // current expanded/collapsed height, and all transcript-local geometry
+    // (selection, controls, scrollbar) must be built for that final viewport.
     const agentTreeRows = this.agentTree?.render(width) ?? []
+    const transcriptRows = this.transcript.render(width)
     const composerRows = this.showComposer() ? this.composer.render(width) : []
     const statusRows = this.status.render(width)
     const requestedRows = Math.floor(this.viewportRows())
@@ -273,11 +277,11 @@ export class BottomAnchoredLayout implements Component {
     const agentTreeRow = transcriptRow + visibleTranscript.length + flexibleAfter + 1
     const composerRow = agentTreeRow + agentTreeRows.length
     const statusRow = composerRow + composerRows.length
-    const shift = (row: number, height: number): CellRect => {
+    const shift = (row: number, height: number): CellRect & { readonly contentRowOffset: number } => {
       const next = row - sliceOffset
-      if (next + height <= 0) return slot(0, width, 0)
-      if (next < 0) return slot(0, width, height + next)
-      return slot(next, width, height)
+      if (next + height <= 0) return { ...slot(0, width, 0), contentRowOffset: height }
+      if (next < 0) return { ...slot(0, width, height + next), contentRowOffset: -next }
+      return { ...slot(next, width, height), contentRowOffset: 0 }
     }
     this.geometry = {
       width,
