@@ -10,6 +10,7 @@ import {
   type TuiWelcomeSettings,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { OverlayChoice, OverlayNavigation, SelectOverlayRequest } from './overlays.ts'
+import type { ContextActionNode } from './context-actions.ts'
 import { ui } from './locale.ts'
 import {
   defaultWelcomeSettings,
@@ -161,23 +162,78 @@ async function editRows(
 ): Promise<TuiWelcomeSettings> {
   let current = settings
   let initialChoiceId: string | undefined
+  let rowSequence = 0
+  let rowIds = current.customRows.map(() => `welcome-row-${String(++rowSequence)}`)
+  const rowActions = (index: number): readonly ContextActionNode[] => [
+    { kind: 'action', id: 'edit', label: ui('修改', 'Edit') },
+    { kind: 'submenu', id: 'move', label: ui('移动', 'Move'), children: [
+      { kind: 'action', id: 'move-top', label: ui('移到顶部', 'Move to top'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
+      { kind: 'action', id: 'move-up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
+      { kind: 'action', id: 'move-down', label: ui('下移', 'Move down'), ...(index === current.customRows.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
+      { kind: 'action', id: 'move-bottom', label: ui('移到底部', 'Move to bottom'), ...(index === current.customRows.length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
+    ] },
+    { kind: 'action', id: 'delete', label: ui('删除', 'Delete'), danger: true },
+  ]
+  const applyRowAction = async (index: number, actionId: string): Promise<void> => {
+    const row = current.customRows[index]
+    if (row === undefined) return
+    const rows = [...current.customRows]
+    const ids = [...rowIds]
+    if (actionId === 'edit') {
+      const updated = await promptRow(navigation, row)
+      if (updated !== undefined) rows[index] = updated
+    } else if (actionId === 'delete') {
+      rows.splice(index, 1)
+      ids.splice(index, 1)
+      initialChoiceId = rows.length === 0 ? '__add__' : `row:${String(Math.min(index, rows.length - 1))}`
+    } else {
+      const target = actionId === 'move-top' ? 0
+        : actionId === 'move-bottom' ? rows.length - 1
+          : actionId === 'move-up' ? index - 1 : index + 1
+      if (target >= 0 && target < rows.length && target !== index) {
+        const [moved] = rows.splice(index, 1)
+        const [movedId] = ids.splice(index, 1)
+        if (moved !== undefined && movedId !== undefined) {
+          rows.splice(target, 0, moved)
+          ids.splice(target, 0, movedId)
+          initialChoiceId = `row:${String(target)}`
+        }
+      }
+    }
+    current = { ...current, customRows: rows }
+    rowIds = ids
+  }
+  const choices = (): readonly OverlayChoice[] => [
+    { id: '__add__', label: ui('新增一行…', 'Add a row…'), ...(current.customRows.length >= MAX_WELCOME_ROWS ? { disabledReason: ui('已达到上限', 'Limit reached') } : {}) },
+    { id: '__defaults__', label: ui('恢复默认信息行', 'Restore default rows') },
+    ...current.customRows.map((row, index) => {
+      const rowId = rowIds[index]!
+      return {
+        id: `row:${String(index)}`,
+        label: `${String(index + 1)}. ${rowSummary(row)}`,
+        contextTarget: { kind: 'welcome-row' as const, rowId },
+        contextTitle: rowSummary(row),
+        contextActions: rowActions(index),
+        onContextAction: async (actionId: string) => {
+          const liveIndex = rowIds.indexOf(rowId)
+          if (liveIndex < 0) return
+          await applyRowAction(liveIndex, actionId)
+          navigation.updateChoices(choices())
+        },
+      }
+    }),
+  ]
   while (!navigation.signal.aborted) {
     const selected = await navigation.select({
       title: ui('自定义信息行', 'Custom information rows'),
       detail: ui(`最多 ${String(MAX_WELCOME_ROWS)} 行；可连续编辑，按 Esc 返回欢迎页设置。`, `Up to ${String(MAX_WELCOME_ROWS)} rows; continue editing here and press Esc to return to Welcome settings.`),
       ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
-      choices: [
-        { id: '__add__', label: ui('新增一行…', 'Add a row…'), ...(current.customRows.length >= MAX_WELCOME_ROWS ? { disabledReason: ui('已达到上限', 'Limit reached') } : {}) },
-        { id: '__defaults__', label: ui('恢复默认信息行', 'Restore default rows') },
-        ...current.customRows.map((row, index) => ({
-          id: `row:${String(index)}`,
-          label: `${String(index + 1)}. ${rowSummary(row)}`,
-        })),
-      ],
+      choices: choices(),
     })
     if (selected === undefined) return current
     if (selected.id === '__defaults__') {
       current = { ...current, customRows: cloneSettings(defaultWelcomeSettings()).customRows }
+      rowIds = current.customRows.map(() => `welcome-row-${String(++rowSequence)}`)
       initialChoiceId = '__defaults__'
       continue
     }
@@ -185,6 +241,7 @@ async function editRows(
       const row = await promptRow(navigation)
       if (row !== undefined) {
         current = { ...current, customRows: [...current.customRows, row] }
+        rowIds = [...rowIds, `welcome-row-${String(++rowSequence)}`]
         initialChoiceId = `row:${String(current.customRows.length - 1)}`
       } else initialChoiceId = '__add__'
       continue
@@ -209,28 +266,7 @@ async function editRows(
     })
     initialChoiceId = selected.id
     if (action === undefined) continue
-    const rows = [...current.customRows]
-    if (action.id === 'edit') {
-      const updated = await promptRow(navigation, row)
-      if (updated !== undefined) rows[index] = updated
-    } else if (action.id === 'delete') {
-      rows.splice(index, 1)
-      initialChoiceId = rows.length === 0 ? '__add__' : `row:${String(Math.min(index, rows.length - 1))}`
-    } else if (action.id === 'top' || action.id === 'bottom') {
-      const [moved] = rows.splice(index, 1)
-      if (moved !== undefined) {
-        const target = action.id === 'top' ? 0 : rows.length
-        rows.splice(target, 0, moved)
-        initialChoiceId = `row:${String(target)}`
-      }
-    } else {
-      const other = action.id === 'up' ? index - 1 : index + 1
-      if (other >= 0 && other < rows.length) {
-        [rows[index], rows[other]] = [rows[other]!, rows[index]!]
-        initialChoiceId = `row:${String(other)}`
-      }
-    }
-    current = { ...current, customRows: rows }
+    await applyRowAction(index, action.id === 'top' ? 'move-top' : action.id === 'bottom' ? 'move-bottom' : action.id === 'up' ? 'move-up' : action.id === 'down' ? 'move-down' : action.id)
   }
   return current
 }
@@ -322,17 +358,54 @@ async function editModules(
 ): Promise<TuiWelcomeSettings> {
   let current = settings
   let initialChoiceId: string | undefined
+  const moduleActions = (index: number, length: number): readonly ContextActionNode[] => [
+    { kind: 'submenu', id: 'move', label: ui('移动', 'Move'), children: [
+      { kind: 'action', id: 'move-up', label: ui('上移', 'Move up'), ...(index === 0 ? { disabledReason: ui('已经在顶部', 'Already first') } : {}) },
+      { kind: 'action', id: 'move-down', label: ui('下移', 'Move down'), ...(index === length - 1 ? { disabledReason: ui('已经在底部', 'Already last') } : {}) },
+    ] },
+    { kind: 'action', id: 'remove', label: ui('移除', 'Remove'), danger: true },
+  ]
+  const applyModuleAction = (module: TuiSafeFastfetchModule, actionId: string): void => {
+    const modules = [...current.fastfetch.modules]
+    const index = modules.indexOf(module)
+    if (index < 0) return
+    if (actionId === 'remove') {
+      modules.splice(index, 1)
+      initialChoiceId = modules.length === 0 ? '__add__' : `module:${String(Math.min(index, modules.length - 1))}`
+    } else {
+      const other = actionId === 'move-up' ? index - 1 : index + 1
+      if (other >= 0 && other < modules.length) {
+        [modules[index], modules[other]] = [modules[other]!, modules[index]!]
+        initialChoiceId = `module:${String(other)}`
+      }
+    }
+    current = { ...current, fastfetch: { ...current.fastfetch, modules } }
+  }
+  const choices = (): readonly OverlayChoice[] => {
+    const modules = [...current.fastfetch.modules]
+    return [
+      { id: '__add__', label: ui('添加模块…', 'Add modules…'), ...(modules.length === SAFE_FASTFETCH_MODULES.length ? { disabledReason: ui('已全部添加', 'All modules added') } : {}) },
+      { id: '__defaults__', label: ui('恢复默认模块', 'Restore default modules') },
+      ...modules.map((module, index) => ({
+        id: `module:${String(index)}`,
+        label: `${String(index + 1)}. ${moduleLabel(module)}`,
+        contextTarget: { kind: 'fastfetch-module' as const, moduleId: module },
+        contextTitle: moduleLabel(module),
+        contextActions: moduleActions(index, modules.length),
+        onContextAction: (actionId: string) => {
+          applyModuleAction(module, actionId)
+          navigation.updateChoices(choices())
+        },
+      })),
+    ]
+  }
   while (!navigation.signal.aborted) {
     const modules = [...current.fastfetch.modules]
     const selected = await navigation.select({
       title: ui('Fastfetch 安全模块', 'Safe Fastfetch modules'),
       detail: ui('可连续添加、移动或删除；按 Esc 返回 Fastfetch 设置。', 'Continue adding, moving, or removing modules; press Esc to return to Fastfetch settings.'),
       ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
-      choices: [
-        { id: '__add__', label: ui('添加模块…', 'Add modules…'), ...(modules.length === SAFE_FASTFETCH_MODULES.length ? { disabledReason: ui('已全部添加', 'All modules added') } : {}) },
-        { id: '__defaults__', label: ui('恢复默认模块', 'Restore default modules') },
-        ...modules.map((module, index) => ({ id: `module:${String(index)}`, label: `${String(index + 1)}. ${moduleLabel(module)}` })),
-      ],
+      choices: choices(),
     })
     if (selected === undefined) return current
     if (selected.id === '__defaults__') {
@@ -371,17 +444,7 @@ async function editModules(
     })
     initialChoiceId = selected.id
     if (action === undefined) continue
-    if (action.id === 'remove') {
-      modules.splice(index, 1)
-      initialChoiceId = modules.length === 0 ? '__add__' : `module:${String(Math.min(index, modules.length - 1))}`
-    } else {
-      const other = action.id === 'up' ? index - 1 : index + 1
-      if (other >= 0 && other < modules.length) {
-        [modules[index], modules[other]] = [modules[other]!, modules[index]!]
-        initialChoiceId = `module:${String(other)}`
-      }
-    }
-    current = { ...current, fastfetch: { ...current.fastfetch, modules } }
+    applyModuleAction(module, action.id === 'up' ? 'move-up' : action.id === 'down' ? 'move-down' : action.id)
   }
   return current
 }
