@@ -285,7 +285,11 @@ Full mouse mode also provides a resident scrollbar, in-app selection, copy-on-se
 
 Modal pages support dragging over visible text to select and copy it. Search fields and non-secret inputs also support replacing a selection by typing, Backspace, or Delete; Ctrl+X cuts it. Their right-click menu provides Copy, Cut, Delete selection, Paste, and Select all. Ctrl+Shift+C copies the active page's selection; Ctrl+C keeps its interrupt behavior. Masked secrets are never exposed through clipboard actions.
 
-Context menus float above the current page without joining its navigation stack. Left-click outside or press Esc to dismiss only the menu; an outside right-click reopens it for the new target. Menu actions take one left-click, while the covered page keeps its draft and selection.
+Context menus float above the current page without joining its navigation stack. They resolve the object under the pointer instead of moving the list cursor or keyboard focus: Sessions, workspaces, Profiles, themes, welcome rows, Fastfetch modules, queued messages, plugins, files, jobs, subagents, cards, the Agent tree, MCP entries, Skills, status controls, and editable text expose their existing actions where applicable. Every root menu keeps Copy selected text and Close; Copy is disabled when no selection exists. Native selection remains available through F3 or `/mouse`, not as a context-menu action.
+
+Object menus support one submenu level. Hovering a parent for 250 ms opens it; click, Enter, or Right opens immediately, while Left or Esc returns to the root. Targets and capabilities are revalidated before execution, stale rows cannot run actions, and Session rename, Fork, export, and archive operate on the right-clicked Session without temporarily switching the active Session. Destructive actions keep their existing confirmation flow and cannot bypass Enter-only confirmation pages.
+
+Left-click outside or press Esc to dismiss only the menu; an outside right-click reopens it for the new target. Menu actions take one left-click, while the covered page keeps its draft and selection.
 
 Wheel scrolling or a left-button drag dismisses the menu and immediately continues scrolling or selecting on the underlying page. A right-button drag opens the menu at the release position. An outside single-click only dismisses; it never activates a control underneath. Parent dialogs still capture input.
 
