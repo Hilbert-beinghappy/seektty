@@ -73,7 +73,7 @@ export function isUpdateRequest(args: readonly string[]): boolean {
   return args.includes('--update')
 }
 
-/** How the launcher follows official dsh `latest` and SeekTTY GitHub Releases. */
+/** How the launcher follows the npm `latest` dist-tags for official dsh and SeekTTY. */
 export type UpdateMode = 'auto' | 'check' | 'off'
 
 /**
@@ -429,10 +429,10 @@ export async function runUpdate(
   write(launcherCopy('正在检查 dsh 与 SeekTTY 的最新版本…\n', 'Checking the latest dsh and SeekTTY versions…\n', english))
   const facts = installedFacts(environment, profile)
   const result = await scan()
-  if (result.dshLatest === undefined && result.seekttyLatestTag === undefined) {
+  if (result.dshLatest === undefined && result.seekttyLatest === undefined) {
     write(launcherCopy(
-      '无法访问 npm Registry 或 GitHub Releases，请检查网络后重试。\n',
-      'Could not reach the npm Registry or GitHub Releases. Check the network and retry.\n',
+      '无法访问 npm Registry，请检查网络后重试。\n',
+      'Could not reach the npm Registry. Check the network and retry.\n',
       english,
     ))
     return 1
@@ -449,8 +449,8 @@ export async function runUpdate(
 }
 
 /**
- * Default launch policy: fetch official dsh `latest` and the SeekTTY GitHub
- * Release, then apply them. Offline and install failures never block boot.
+ * Default launch policy: fetch the npm `latest` dist-tags for official dsh and
+ * SeekTTY, then apply them. Offline and install failures never block boot.
  */
 export async function maybeAutoUpdate(
   args: readonly string[],

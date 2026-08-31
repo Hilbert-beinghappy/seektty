@@ -1,7 +1,7 @@
 /**
- * Live version scan against the official dsh npm `latest` dist-tag and the
- * SeekTTY GitHub releases. npm `next` and harness GitHub pre-releases are
- * ignored: those channels are not the stable line this Bundle follows.
+ * Live version scan against the npm `latest` dist-tags for official dsh and
+ * SeekTTY. npm `next` is ignored: that channel is not the stable line this
+ * Bundle follows.
  * Network failures degrade silently. Must not import locale.ts.
  */
 
@@ -13,7 +13,7 @@ import {
 } from './dsh-compat.ts'
 
 export const DSH_DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/@deepseek-ai/dsh/dist-tags'
-export const SEEKTTY_LATEST_RELEASE_URL = 'https://api.github.com/repos/Hilbert-beinghappy/seektty/releases/latest'
+export const SEEKTTY_DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/seektty/dist-tags'
 export const DEFAULT_SCAN_TIMEOUT_MS = 3_000
 
 /** Peer-aligned auto-install floor for the rc.6–rc.8 Host line. */
@@ -27,8 +27,8 @@ export const AUTO_PERMITTED_DSH_EXACT = DSH_COMPATIBILITY.tested
 export interface VersionScan {
   /** npm `latest` dist-tag of `@deepseek-ai/dsh`. */
   readonly dshLatest?: string | undefined
-  /** Tag name of the newest SeekTTY GitHub release, e.g. `v1.1.0`. */
-  readonly seekttyLatestTag?: string | undefined
+  /** npm `latest` dist-tag of `seektty`. */
+  readonly seekttyLatest?: string | undefined
 }
 
 /** Local facts the scan is compared against. */
@@ -78,7 +78,7 @@ function cleanVersion(value: unknown): string | undefined {
 }
 
 /**
- * Query npm `latest` and the SeekTTY GitHub `releases/latest` tag.
+ * Query the npm `latest` dist-tags for dsh and SeekTTY.
  * Each source fails independently and silently; the result never rejects.
  * @param fetchImpl - injectable fetch used by tests.
  * @param timeoutMs - per-request abort timeout.
@@ -87,21 +87,16 @@ export async function scanLatestVersions(
   fetchImpl: FetchLike = fetch as unknown as FetchLike,
   timeoutMs: number = DEFAULT_SCAN_TIMEOUT_MS,
 ): Promise<VersionScan> {
-  const [distTags, release] = await Promise.all([
+  const [dshDistTags, seekttyDistTags] = await Promise.all([
     fetchJson(fetchImpl, DSH_DIST_TAGS_URL, timeoutMs).catch(() => undefined),
-    fetchJson(fetchImpl, SEEKTTY_LATEST_RELEASE_URL, timeoutMs).catch(() => undefined),
+    fetchJson(fetchImpl, SEEKTTY_DIST_TAGS_URL, timeoutMs).catch(() => undefined),
   ])
-  const tags = distTags as { latest?: unknown } | undefined
-  const rel = release as { tag_name?: unknown } | undefined
+  const dshTags = dshDistTags as { latest?: unknown } | undefined
+  const seekttyTags = seekttyDistTags as { latest?: unknown } | undefined
   return {
-    dshLatest: cleanVersion(tags?.latest),
-    seekttyLatestTag: cleanVersion(rel?.tag_name),
+    dshLatest: cleanVersion(dshTags?.latest),
+    seekttyLatest: cleanVersion(seekttyTags?.latest),
   }
-}
-
-/** Strip a single leading `v` so release tags compare as versions. */
-export function tagToVersion(tag: string): string {
-  return tag.startsWith('v') ? tag.slice(1) : tag
 }
 
 const DSH_CLI_VERSION_LINE = /^(?:dsh\s+)?v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?)$/u
@@ -141,8 +136,8 @@ export function isAutoPermittedDshVersion(version: string): boolean {
 }
 
 function seekttyIsNewer(scan: VersionScan, facts: InstalledFacts): boolean {
-  if (scan.seekttyLatestTag === undefined) return false
-  const order = compareDshVersion(tagToVersion(scan.seekttyLatestTag), facts.seekttyVersion)
+  if (scan.seekttyLatest === undefined) return false
+  const order = compareDshVersion(scan.seekttyLatest, facts.seekttyVersion)
   return order !== undefined && order > 0
 }
 
@@ -174,11 +169,10 @@ export function exclusiveUpdatePlan(plan: UpdatePlan): UpdatePlan {
  * peer-aligned auto range and newer than the actually installed Host.
  */
 export function updatePlan(scan: VersionScan, facts: InstalledFacts): UpdatePlan {
-  const seekttyVersion = scan.seekttyLatestTag === undefined ? undefined : tagToVersion(scan.seekttyLatestTag)
-  if (!facts.seekttyPinned && seekttyVersion !== undefined && seekttyIsNewer(scan, facts)) {
+  if (!facts.seekttyPinned && scan.seekttyLatest !== undefined && seekttyIsNewer(scan, facts)) {
     return exclusiveUpdatePlan({
       dshSpec: undefined,
-      seekttySpec: `seektty@${seekttyVersion}`,
+      seekttySpec: `seektty@${scan.seekttyLatest}`,
     })
   }
   return exclusiveUpdatePlan({
@@ -222,8 +216,8 @@ export function updateAdvice(scan: VersionScan, facts: InstalledFacts, english: 
   }
   if (!facts.seekttyPinned && seekttyIsNewer(scan, facts)) {
     lines.push(launcherCopy(
-      `SeekTTY 有新版本 ${scan.seekttyLatestTag}（当前 ${facts.seekttyVersion}）。`,
-      `A newer SeekTTY ${scan.seekttyLatestTag} is available (running ${facts.seekttyVersion}).`,
+      `SeekTTY 有新版本 ${scan.seekttyLatest}（当前 ${facts.seekttyVersion}）。`,
+      `A newer SeekTTY ${scan.seekttyLatest} is available (running ${facts.seekttyVersion}).`,
       english,
     ))
   }
