@@ -243,6 +243,15 @@ function reasoningHeaderRow(key: string, expanded: boolean): TranscriptRow {
   }
 }
 
+/** Highlight only the reasoning disclosure glyph while retaining the row's muted foreground and selection background. */
+function hoverReasoningChevron(content: string): string {
+  const collapsed = content.indexOf('▸')
+  const expanded = content.indexOf('▾')
+  const index = collapsed < 0 ? expanded : expanded < 0 ? collapsed : Math.min(collapsed, expanded)
+  if (index < 0) return interaction.hover(content)
+  return `${content.slice(0, index)}${interaction.hoverThenMuted(content[index] ?? '', content.slice(index + 1))}`
+}
+
 class PulsingRow implements Component {
   constructor(
     private readonly text: string,
@@ -2358,7 +2367,7 @@ export class Transcript implements Component, Focusable {
       const control = this.lastPointerControls.find(candidate => candidate.row === row)
       const controlId = control === undefined ? undefined : `transcript:${control.kind}:${control.id}`
       return controlId !== undefined && controlId === this.hoveredRegionId
-        ? interaction.hover(content)
+        ? control?.kind === 'reasoning' ? hoverReasoningChevron(content) : interaction.hover(content)
         : content
     })
     const withSearch = this.search === undefined

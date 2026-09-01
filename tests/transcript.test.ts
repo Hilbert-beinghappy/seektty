@@ -6,7 +6,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/node-client'
 import { Transcript } from '../src/client/transcript.ts'
 import { setUiLocale } from '../src/client/locale.ts'
-import { setCodeHighlighter, setTheme } from '../src/client/theme.ts'
+import { color, interaction, setCodeHighlighter, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 
 function chatNode(key: string, data: unknown): ChatConversationViewNode {
@@ -310,6 +310,34 @@ describe('conversation viewport', () => {
 
     expect(transcript.pointerToggleReasoning('a1')).toBe(true)
     expect(transcript.render(60).join('\n')).toContain('完成后的推理')
+    transcript.dispose()
+  })
+
+  it('uses the theme hover color only on the reasoning disclosure triangle', () => {
+    vi.stubEnv('NO_COLOR', undefined)
+    vi.stubEnv('TERM', 'xterm-256color')
+    vi.stubEnv('COLORTERM', 'truecolor')
+    const transcript = new Transcript(() => 12)
+    transcript.update(snapshot([
+      assistantStep('a1', 'settled', [
+        { kind: 'reasoning', text: '完成后的推理' },
+        { kind: 'text', text: '结论' },
+      ]),
+    ]))
+    const idle = transcript.render(60).find(line => stripAnsi(line).includes('思考（已折叠）')) ?? ''
+    expect(transcript.setHoveredRegion('transcript:reasoning:a1')).toBe(true)
+    const collapsed = transcript.render(60).find(line => stripAnsi(line).includes('思考（已折叠）')) ?? ''
+    const hoverPrefix = interaction.hover('▸').slice(0, interaction.hover('▸').indexOf('▸'))
+    const mutedPrefix = color.muted('x').slice(0, color.muted('x').indexOf('x'))
+    expect(collapsed).not.toBe(idle)
+    expect(collapsed).toContain(`${hoverPrefix}▸${mutedPrefix} `)
+    expect(visibleWidth(collapsed)).toBe(visibleWidth(idle))
+
+    expect(transcript.pointerToggleReasoning('a1')).toBe(true)
+    const expanded = transcript.render(60).find(line => stripAnsi(line).includes('▾ 思考')) ?? ''
+    const expandedPrefix = interaction.hover('▾').slice(0, interaction.hover('▾').indexOf('▾'))
+    expect(expanded).toContain(`${expandedPrefix}▾`)
+    expect(stripAnsi(expanded)).toContain('▾ 思考')
     transcript.dispose()
   })
 
