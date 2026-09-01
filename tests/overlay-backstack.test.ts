@@ -32,6 +32,7 @@ function settingsDocument(namespace: string, value: unknown): TuiSettingsDocumen
 
 function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
   readonly actions: TuiActions
+  readonly overlays: OverlayQueue
   readonly hide: ReturnType<typeof vi.fn>
   component(): Component & { handleInput(data: string): void }
 } {
@@ -142,6 +143,7 @@ function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
       { ...defaults, ...capabilities } as unknown as HarnessTuiCapabilities,
       host,
     ),
+    overlays,
     hide,
     component: () => {
       if (mounted === undefined) throw new Error('overlay has not mounted')
@@ -160,6 +162,47 @@ async function expectPage(
 }
 
 describe('nested overlay back stack', () => {
+  it('opens a Session context child above its owning list and returns to that list', async () => {
+    const renameSession = vi.fn(async (_id, title: string) => title)
+    const target = {
+      id: 's2',
+      displayTitle: 'Target Session',
+      title: 'Target Session',
+      updatedAt: Date.now(),
+      running: false,
+    }
+    const harness = actionHarness({
+      listSessions: () => [target],
+      sessionTarget: (id: string) => id === 's2' ? {
+        sessionId: 's2',
+        summary: target,
+      } : undefined,
+      renameSession,
+    } as unknown as Partial<HarnessTuiCapabilities>)
+    const execution = harness.actions.execute('sessions', '')
+
+    await expectPage(harness, /会话|Session/)
+    const generation = harness.overlays.activeGeneration()
+    const prompts = harness.overlays.contextPrompts(generation)
+    expect(prompts).toBeDefined()
+    const rename = harness.actions.executeContext({
+      target: { kind: 'session', sessionId: 's2' },
+      actionId: 'rename',
+    }, prompts)
+
+    await expectPage(harness, /重命名会话|Rename session/)
+    expect(harness.hide).not.toHaveBeenCalled()
+    harness.component().handleInput(ESCAPE)
+    await rename
+    await expectPage(harness, /Target Session/)
+    expect(renameSession).not.toHaveBeenCalled()
+    expect(harness.hide).not.toHaveBeenCalled()
+
+    harness.component().handleInput(ESCAPE)
+    await execution
+    expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
   it('returns from a help section to the help root on Escape', async () => {
     const harness = actionHarness()
     const execution = harness.actions.execute('help', '')

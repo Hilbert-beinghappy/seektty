@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
@@ -43,7 +44,7 @@ function harness() {
     setEditor: vi.fn(), copy: vi.fn(), close: vi.fn(), restart: vi.fn(), requireRestart: vi.fn(),
     canChangeSession: () => true,
   } as unknown as TuiActionHost
-  return { actions: new TuiActions(capabilities, host), target, current, renameSession, forkSession, archiveSession, exportSession, exportMarkdown, notice }
+  return { actions: new TuiActions(capabilities, host), target, current, renameSession, forkSession, archiveSession, exportSession, exportMarkdown, notice, overlays }
 }
 
 describe('targeted Session context actions', () => {
@@ -71,5 +72,29 @@ describe('targeted Session context actions', () => {
     await h.actions.executeContext({ target: { kind: 'session', sessionId: 'gone' }, actionId: 'archive' })
     expect(h.archiveSession).not.toHaveBeenCalled()
     expect(h.notice).toHaveBeenCalledWith(expect.stringMatching(/不可用/u), 'error')
+  })
+
+  it('uses the owning navigation prompts instead of the global overlay queue', async () => {
+    const h = harness()
+    const nested = {
+      ...h.overlays,
+      input: vi.fn(async () => 'nested rename'),
+    }
+    await h.actions.executeContext(
+      { target: { kind: 'session', sessionId: h.target }, actionId: 'rename' },
+      nested as unknown as TuiActionHost['overlays'],
+    )
+    expect(nested.input).toHaveBeenCalledOnce()
+    expect(h.overlays.input).not.toHaveBeenCalled()
+    expect(h.renameSession).toHaveBeenCalledWith(h.target, 'nested rename')
+  })
+
+  it('keeps the context dispatcher free of direct global overlay calls', () => {
+    const source = readFileSync(new URL('../src/client/actions.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('private async executeContextUnsafe(')
+    const end = source.indexOf('private async settingsConflict(', start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    expect(source.slice(start, end)).not.toContain('this.host.overlays')
   })
 })

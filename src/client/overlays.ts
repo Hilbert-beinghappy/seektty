@@ -1632,6 +1632,20 @@ export class OverlayQueue implements OverlayPrompts {
     return component instanceof NavigationOverlay ? component.contextMenu(optionId) : undefined
   }
 
+  /**
+   * Reuse the currently visible navigation stack for an action launched from
+   * that exact page. This prevents a context action from being queued behind
+   * the page that owns its target.
+   */
+  contextPrompts(generation: number): OverlayPrompts | undefined {
+    const component = this.active?.component
+    return generation === this.generation
+      && component instanceof NavigationOverlay
+      && component.allowsContextMenu()
+      ? component
+      : undefined
+  }
+
   executeContextAction(optionId: string, actionId: string, generation: number): Promise<boolean> {
     const component = this.active?.component
     return generation === this.generation && component instanceof NavigationOverlay

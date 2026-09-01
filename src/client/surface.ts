@@ -1390,7 +1390,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           if (selected.id === 'toggle') agentTree.contextToggle(sessionId)
           else if (selected.id === 'open' && agentTree.node(sessionId) !== undefined) openAgentChild(sessionId)
         } else if (optionId === undefined || !await overlays.executeContextAction(optionId, selected.id, pageGeneration)) {
-          await actions.executeContext({ target: contextTarget, actionId: selected.id })
+          const prompts = inOverlay ? overlays.contextPrompts(pageGeneration) : undefined
+          if (inOverlay && prompts === undefined) return
+          await actions.executeContext({ target: contextTarget, actionId: selected.id }, prompts)
         }
         renderWhileOpen()
         return
