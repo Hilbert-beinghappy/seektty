@@ -1,6 +1,6 @@
 /** Duck-typed public adapters over the pinned pi-tui geometry and Editor APIs. */
 
-import type { Editor, TUI } from '@mariozechner/pi-tui'
+import type { Component, Editor, TUI } from '@mariozechner/pi-tui'
 import type { OverlayScreenRect, TuiFrameGeometry } from './mouse-hit-map.ts'
 
 export interface EditorPoint {
@@ -60,6 +60,16 @@ interface PatchedTui {
   onAfterRender?: () => void
 }
 
+export interface ComponentSelectionLine {
+  readonly text: string
+  readonly displayStartCell: number
+  readonly joinerAfter: string
+}
+
+interface SelectionProjectingComponent {
+  getSelectionLines?(): readonly ComponentSelectionLine[]
+}
+
 export function editorMouseApi(editor: Editor): PatchedEditor {
   return editor as unknown as PatchedEditor
 }
@@ -71,6 +81,22 @@ export function autocompleteTargetId(generation: number, absoluteIndex: number):
 
 export function tuiFrameApi(tui: TUI): PatchedTui {
   return tui as unknown as PatchedTui
+}
+
+/**
+ * Read the narrow, optional projection added to Markdown by SeekTTY's patch for
+ * official dsh 0.1.1-rc.2 and @mariozechner/pi-tui 0.73.1. Components without
+ * the additive API safely keep the legacy visual-line copy path.
+ */
+export function componentSelectionLines(component: Component): readonly ComponentSelectionLine[] | undefined {
+  const lines = (component as unknown as SelectionProjectingComponent).getSelectionLines?.()
+  if (!Array.isArray(lines)) return undefined
+  return lines.every(line => typeof line?.text === 'string'
+    && Number.isSafeInteger(line.displayStartCell)
+    && line.displayStartCell >= 0
+    && typeof line.joinerAfter === 'string')
+    ? lines
+    : undefined
 }
 
 export function emptyFrameGeometry(width: number, height: number): TuiFrameGeometry {

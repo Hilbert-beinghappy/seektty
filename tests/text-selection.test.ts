@@ -7,6 +7,8 @@ import {
   invertLineCells,
   lineRangeAt,
   mapCopyableLine,
+  mapSelectionProjectionLine,
+  ownerTextFromProjections,
   ownerTextFromRenderedLines,
   paintSelection,
   selectionClearedForOwner,
@@ -90,6 +92,30 @@ describe('text selection coordinates', () => {
     expect(anchorAtCell(viewport, 1, 'before')?.textOffset).toBe(0)
     expect(anchorAtCell(viewport, 1, 'after')?.textOffset).toBe(1)
     expect(anchorAtCell(viewport, 2, 'after')?.textOffset).toBe(2)
+  })
+
+  it('maps semantic text after decorative columns without selecting padding', () => {
+    const projection = { text: '  你x', displayStartCell: 4, joinerAfter: '\n' }
+    const mapped = mapSelectionProjectionLine(projection, 10, 16)
+    expect(mapped.cellOffsets.slice(0, 4)).toEqual([undefined, undefined, undefined, undefined])
+    expect(mapped.cellOffsets[4]).toBe(10)
+    expect(mapped.cellOffsets[6]).toBe(12)
+    expect(mapped.cellOffsets[7]).toBe(12)
+    expect(mapped.cellOffsets[8]).toBe(13)
+    expect(mapped.cellOffsets.slice(9)).toEqual(Array.from({ length: 7 }, () => undefined))
+    expect(mapped.endOffset).toBe(14)
+  })
+
+  it('joins soft-wrap whitespace and hard newlines without global trimming', () => {
+    const ownerText = ownerTextFromProjections([
+      { text: '  hello', displayStartCell: 2, joinerAfter: '  ' },
+      { text: 'world  ', displayStartCell: 0, joinerAfter: '\n' },
+      { text: 'next', displayStartCell: 0, joinerAfter: '' },
+    ])
+    expect(ownerText).toEqual({
+      text: '  hello  world  \nnext',
+      lineStarts: [0, 9, 17],
+    })
   })
 
   it('inverts already generated cells without changing owner text', () => {

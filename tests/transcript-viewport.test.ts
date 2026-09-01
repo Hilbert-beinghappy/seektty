@@ -360,10 +360,73 @@ describe('transcript block viewport', () => {
         { surface: 'transcript', ownerKey: 'framed', textOffset: last.startOffset + '中文第二行'.length, affinity: 'before' },
         'character',
       )
-      // Keep the existing Text component's padding while preserving the hard newline.
-      expect(transcript.copySelectionText()).toBe(`${'> 123456789012345678'.padEnd(width - 4)}\n中文第二行`)
+      expect(transcript.copySelectionText()).toBe('> 123456789012345678\n中文第二行')
       expect(transcript.hitViewportEdgeAnchor(3, width, 'older')?.ownerKey).toBe('framed')
       expect(transcript.hitViewportEdgeAnchor(3, width, 'newer')?.ownerKey).toBe('framed')
+    }
+    transcript.dispose()
+  })
+
+  it('copies fenced Python as semantic source without code presentation padding', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const source = [
+      '@lru_cache(maxsize=256)',
+      'def tokenize(text: str) -> list[str]:',
+      '    return [w for w in text.lower().split() if w]',
+      '',
+      'def fetch(url: str, *, retries: int = RETRY) -> dict | None:',
+      '    for attempt in range(retries):',
+      '        try:',
+      '            resp = requests.get(url, timeout=5)',
+      '            return resp.json() if resp.status_code == 200 else None',
+      '        except requests.Timeout as exc:',
+      '            raise ValueError(f"timeout after {attempt}") from exc',
+      '    return None',
+    ].join('\n')
+    const transcript = new Transcript(() => 40)
+    transcript.update(snapshot([assistant('python-copy', `\`\`\`python\n${source}\n\`\`\``)]))
+
+    let selected = false
+    for (const width of [48, 96]) {
+      transcript.render(width)
+      const maps = transcript.viewportMaps().filter(map => map.ownerKey === 'python-copy'
+        && map.cellOffsets.some(offset => offset !== undefined))
+      const first = maps[0]!
+      const last = maps[maps.length - 1]!
+      if (!selected) {
+        transcript.applyPointerSelection(
+          { surface: 'transcript', ownerKey: 'python-copy', textOffset: first.startOffset, affinity: 'before' },
+          { surface: 'transcript', ownerKey: 'python-copy', textOffset: last.endOffset, affinity: 'before' },
+          'character',
+        )
+        selected = true
+      } else expect(transcript.currentSelection()).toBeDefined()
+      expect(transcript.copySelectionText()).toBe(source)
+    }
+    transcript.update(snapshot([assistant('python-copy', `\`\`\`python\n${source}\n# changed\n\`\`\``)]))
+    transcript.render(96)
+    expect(transcript.currentSelection()).toBeUndefined()
+    transcript.dispose()
+  })
+
+  it('rejoins visual Markdown wraps with the omitted source whitespace', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const source = 'A paragraph with  two spaces, 中文 and 👨‍👩‍👧‍👦 that wraps without changing its logical text.'
+    const transcript = new Transcript(() => 20)
+    transcript.update(snapshot([assistant('markdown-copy', source)]))
+
+    for (const width of [24, 40]) {
+      transcript.render(width)
+      const maps = transcript.viewportMaps().filter(map => map.ownerKey === 'markdown-copy'
+        && map.cellOffsets.some(offset => offset !== undefined))
+      const first = maps[0]!
+      const last = maps[maps.length - 1]!
+      transcript.applyPointerSelection(
+        { surface: 'transcript', ownerKey: 'markdown-copy', textOffset: first.startOffset, affinity: 'before' },
+        { surface: 'transcript', ownerKey: 'markdown-copy', textOffset: last.endOffset, affinity: 'before' },
+        'character',
+      )
+      expect(transcript.copySelectionText()).toBe(source)
     }
     transcript.dispose()
   })
