@@ -819,40 +819,55 @@ export class TuiActions {
   }
 
   private async sessions(query: string): Promise<void> {
-    const current = this.capabilities.active()?.sessionId
+    let sessionHitsHaveMore = false
+    const readChoices = async (): Promise<OverlayChoice[]> => {
+      const current = this.capabilities.active()?.sessionId
+      const rootProjection = await this.capabilities.listRootSessions?.()
+      const rows = sortSessionsByUpdatedAt(rootProjection?.roots ?? this.capabilities.listSessions())
+      const hits = query === ''
+        ? undefined
+        : await this.capabilities.searchSessions(query, new AbortController().signal)
+      sessionHitsHaveMore = hits?.hasMore === true
+      return hits === undefined
+        ? rows.map(row => ({
+          id: row.id,
+          label: `${row.id === current ? '● ' : ''}${row.displayTitle}`,
+          description: `${row.cwd ?? ui('无工作区', "No workspace")} · ${relativeTime(row.updatedAt)} · ${row.running ? ui('运行中', "Running") : row.pendingInteraction ?? ui('空闲', "Idle")}`,
+          contextTarget: { kind: 'session' as const, sessionId: row.id },
+        }))
+        : hits.items.filter(hit => rows.some(row => row.id === hit.sessionId)).map((hit) => {
+          const row = rows.find(candidate => candidate.id === hit.sessionId)
+          return {
+            id: hit.sessionId,
+            label: `${hit.sessionId === current ? '● ' : ''}${row?.displayTitle ?? hit.sessionId}`,
+            description: hit.snippet,
+            contextTarget: { kind: 'session' as const, sessionId: hit.sessionId },
+          }
+        })
+    }
     const rootProjection = await this.capabilities.listRootSessions?.()
-    const rows = sortSessionsByUpdatedAt(rootProjection?.roots ?? this.capabilities.listSessions())
-    if (rows.length === 0) throw new Error(ui('没有可恢复的会话', "No resumable sessions"))
-    const hits = query === ''
-      ? undefined
-      : await this.capabilities.searchSessions(query, new AbortController().signal)
-    const choices = hits === undefined
-      ? rows.map(row => ({
-        id: row.id,
-        label: `${row.id === current ? '● ' : ''}${row.displayTitle}`,
-        description: `${row.cwd ?? ui('无工作区', "No workspace")} · ${relativeTime(row.updatedAt)} · ${row.running ? ui('运行中', "Running") : row.pendingInteraction ?? ui('空闲', "Idle")}`,
-        contextTarget: { kind: 'session' as const, sessionId: row.id },
-      }))
-      : hits.items.filter(hit => rows.some(row => row.id === hit.sessionId)).map((hit) => {
-        const row = rows.find(candidate => candidate.id === hit.sessionId)
-        return {
-          id: hit.sessionId,
-          label: `${hit.sessionId === current ? '● ' : ''}${row?.displayTitle ?? hit.sessionId}`,
-          description: hit.snippet,
-          contextTarget: { kind: 'session' as const, sessionId: hit.sessionId },
-        }
-      })
-    if (choices.length === 0) throw new Error(ui(`没有匹配 ${JSON.stringify(query)} 的会话`, `No session matches ${JSON.stringify(query)}`))
+    const choices = await readChoices()
+    if (choices.length === 0) throw new Error(query === ''
+      ? ui('没有可恢复的会话', "No resumable sessions")
+      : ui(`没有匹配 ${JSON.stringify(query)} 的会话`, `No session matches ${JSON.stringify(query)}`))
     const selected = await this.host.overlays.select({
       title: query === '' ? ui('会话', "Session") : ui(`搜索会话 · ${query}`, `Search sessions · ${query}`),
       detail: ui(
-        `归档会话不会出现在这里${rootProjection?.support === 'unsupported' ? ' · 当前 Host 未提供可靠层级，保留兼容列表' : rootProjection?.support === 'partial' ? ' · 部分层级无法确认，未隐藏相关会话' : ''}${hits?.hasMore === true ? ' · 结果已达到上限' : ''}`,
-        `Archived sessions do not appear here${rootProjection?.support === 'unsupported' ? ' · the current Host has no reliable lineage, so the compatibility list is retained' : rootProjection?.support === 'partial' ? ' · some lineage is unresolved, so affected sessions remain visible' : ''}${hits?.hasMore === true ? ' · results reached the limit' : ''}`,
+        `归档会话不会出现在这里${rootProjection?.support === 'unsupported' ? ' · 当前 Host 未提供可靠层级，保留兼容列表' : rootProjection?.support === 'partial' ? ' · 部分层级无法确认，未隐藏相关会话' : ''}${sessionHitsHaveMore ? ' · 结果已达到上限' : ''}`,
+        `Archived sessions do not appear here${rootProjection?.support === 'unsupported' ? ' · the current Host has no reliable lineage, so the compatibility list is retained' : rootProjection?.support === 'partial' ? ' · some lineage is unresolved, so affected sessions remain visible' : ''}${sessionHitsHaveMore ? ' · results reached the limit' : ''}`,
       ),
       choices,
+      refreshChoices: async () => {
+        const refreshed = await readChoices()
+        return {
+          choices: refreshed.length === 0
+            ? [{ id: '__empty__', label: ui('没有可恢复的会话', 'No resumable sessions'), disabledReason: ui('会话列表已发生变化', 'The Session list changed') }]
+            : refreshed,
+        }
+      },
       options: { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 },
     })
-    if (selected === undefined) return
+    if (selected === undefined || selected.id === '__empty__') return
     this.capabilities.openSession(idOf(selected.id))
     this.host.notice(ui(`已打开 ${selected.label}`, `Opened ${selected.label}`), 'success')
   }
@@ -1070,20 +1085,23 @@ export class TuiActions {
   }
 
   private async workspaceCenter(): Promise<void> {
-    const workspaces = this.capabilities.listWorkspaces()
-    const current = this.capabilities.active()?.workspaceId
+    const readChoices = (): OverlayChoice[] => {
+      const current = this.capabilities.active()?.workspaceId
+      return [
+        ...this.capabilities.listWorkspaces().map(workspace => ({
+          id: workspace.workspaceId,
+          label: `${workspace.workspaceId === current ? '● ' : ''}${workspace.title}`,
+          description: workspace.path,
+          contextTarget: { kind: 'workspace' as const, workspaceId: workspace.workspaceId },
+        })),
+        { id: '__add__', label: ui('添加目录…', "Add directory…"), description: ui('注册现有目录并打开空白会话', "Register an existing directory and open a blank session") },
+      ]
+    }
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('工作区', "Workspace"),
-        choices: [
-          ...workspaces.map(workspace => ({
-            id: workspace.workspaceId,
-            label: `${workspace.workspaceId === current ? '● ' : ''}${workspace.title}`,
-            description: workspace.path,
-            contextTarget: { kind: 'workspace' as const, workspaceId: workspace.workspaceId },
-          })),
-          { id: '__add__', label: ui('添加目录…', "Add directory…"), description: ui('注册现有目录并打开空白会话', "Register an existing directory and open a blank session") },
-        ],
+        choices: readChoices(),
+        refreshChoices: async () => ({ choices: readChoices() }),
       }, async (selected) => {
         if (selected.id === '__add__') {
           const path = await navigation.input({ title: ui('添加工作区', "Add workspace"), placeholder: ui('输入目录路径', "Enter a directory path") })
@@ -1093,7 +1111,7 @@ export class TuiActions {
           this.host.notice(ui('已打开工作区会话', "Opened a workspace session"), 'success')
           return
         }
-        const workspace = workspaces.find(candidate => candidate.workspaceId === selected.id)
+        const workspace = this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === selected.id)
         if (workspace === undefined) return
         const action = await navigation.select({
           title: workspace.title,
@@ -1139,17 +1157,24 @@ ${workspace.sessionIds.length} registered session(s)`),
     title: string,
     overlays: OverlayPrompts = this.host.overlays,
   ): Promise<WorkspaceView | undefined> {
-    const workspaces = this.capabilities.listWorkspaces()
     const selected = await overlays.select({
       title,
-      choices: workspaces.map(workspace => ({
+      choices: this.capabilities.listWorkspaces().map(workspace => ({
         id: workspace.workspaceId,
         label: workspace.title,
         description: workspace.path,
         contextTarget: { kind: 'workspace' as const, workspaceId: workspace.workspaceId },
       })),
+      refreshChoices: async () => ({
+        choices: this.capabilities.listWorkspaces().map(workspace => ({
+          id: workspace.workspaceId,
+          label: workspace.title,
+          description: workspace.path,
+          contextTarget: { kind: 'workspace' as const, workspaceId: workspace.workspaceId },
+        })),
+      }),
     })
-    return workspaces.find(candidate => candidate.workspaceId === selected?.id)
+    return this.capabilities.listWorkspaces().find(candidate => candidate.workspaceId === selected?.id)
   }
 
   private async renameWorkspace(
@@ -1256,29 +1281,32 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       throw new Error(ui('用法：/profile [list|switch <名称>|create <名称>|copy <源> <新名称>]', "Usage: /profile [list|switch <name>|create <name>|copy <source> <new-name>]"))
     }
 
-    const profiles = await management.profiles.list()
-    const current = this.capabilities.currentProfile()
-    const orderedProfiles = [...profiles].sort((left, right) => {
-      if (left.name === current) return -1
-      if (right.name === current) return 1
-      return 0
-    })
+    const readProfiles = async (): Promise<readonly TuiProfileSummary[]> => {
+      const current = this.capabilities.currentProfile()
+      return [...await management.profiles.list()].sort((left, right) => {
+        if (left.name === current) return -1
+        if (right.name === current) return 1
+        return 0
+      })
+    }
+    const profileChoices = async (): Promise<OverlayChoice[]> => [
+      ...(await readProfiles()).map(profile => ({
+        id: `profile:${profile.name}`,
+        label: `${profile.name === this.capabilities.currentProfile() ? '● ' : ''}${profile.name}`,
+        description: this.profileDescription(profile),
+        contextTarget: { kind: 'profile' as const, profile: profile.name },
+        ...(profile.compatible ? {} : { disabledReason: ui('不能直接用于终端；可复制为新的终端 Profile', "Cannot be used directly in the terminal; copy it to a new terminal Profile") }),
+      })),
+      { id: '__create__', label: ui('创建 Profile…', "Create Profile…"), description: ui('创建新的终端运行配置', "Create a new terminal runtime configuration") },
+      { id: '__copy__', label: ui('复制 Profile…', "Copy Profile…"), description: ui('基于现有 Profile 创建终端版本', "Create a terminal version from an existing Profile") },
+    ]
     const options = { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
         title: 'Profile',
         detail: ui('切换后会重启，并恢复当前工作区、会话、草稿和附件', "Switching restarts DeepSeek and restores the workspace, session, draft, and attachments"),
-        choices: [
-          ...orderedProfiles.map(profile => ({
-            id: `profile:${profile.name}`,
-            label: `${profile.name === current ? '● ' : ''}${profile.name}`,
-            description: this.profileDescription(profile),
-            contextTarget: { kind: 'profile' as const, profile: profile.name },
-            ...(profile.compatible ? {} : { disabledReason: ui('不能直接用于终端；可复制为新的终端 Profile', "Cannot be used directly in the terminal; copy it to a new terminal Profile") }),
-          })),
-          { id: '__create__', label: ui('创建 Profile…', "Create Profile…"), description: ui('创建新的终端运行配置', "Create a new terminal runtime configuration") },
-          { id: '__copy__', label: ui('复制 Profile…', "Copy Profile…"), description: ui('基于现有 Profile 创建终端版本', "Create a terminal version from an existing Profile") },
-        ],
+        choices: await profileChoices(),
+        refreshChoices: async () => ({ choices: await profileChoices() }),
         options,
       }, async (selected) => {
         if (selected.id === '__create__') {
@@ -1288,14 +1316,16 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           return
         }
         if (selected.id === '__copy__') {
+          const sourceChoices = async (): Promise<OverlayChoice[]> => (await readProfiles()).map(profile => ({
+            id: profile.name,
+            label: profile.name,
+            description: `${this.profileDescription(profile)}${profile.compatible ? '' : ui(' · 将转换为终端版本', " · will be converted to a terminal version")}`,
+            contextTarget: { kind: 'profile' as const, profile: profile.name },
+          }))
           const source = await navigation.select({
             title: ui('选择源 Profile', "Choose source Profile"),
-            choices: profiles.map(profile => ({
-              id: profile.name,
-              label: profile.name,
-              description: `${this.profileDescription(profile)}${profile.compatible ? '' : ui(' · 将转换为终端版本', " · will be converted to a terminal version")}`,
-              contextTarget: { kind: 'profile' as const, profile: profile.name },
-            })),
+            choices: await sourceChoices(),
+            refreshChoices: async () => ({ choices: await sourceChoices() }),
           })
           if (source === undefined) return
           const name = await navigation.input({ title: ui('复制 Profile', "Copy Profile"), placeholder: ui('输入新 Profile 名称', "Enter the new Profile name") })
@@ -1650,6 +1680,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         title: ui('主题', "Theme"),
         detail: ui('手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC', "Edit colors, generate from a palette, or import VS Code JSON/JSONC"),
         choices: await readChoices(),
+        refreshChoices: async () => ({ choices: await readChoices() }),
         options,
       }, async (selected) => {
         let notice: string | undefined
@@ -2293,6 +2324,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
             ...(row.placement === 'queued' ? {} : { disabledReason: ui('当前状态不接受队列修改', "The queue cannot be changed in the current state") }),
           }
         }),
+      refreshChoices: async () => ({ choices: this.queueListRequest().choices }),
       searchable: rows.length > 8,
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },
     }
@@ -3194,30 +3226,36 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
   }
 
   private async pluginCenter(): Promise<void> {
-    const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
+    const bridge = this.capabilities.managementBridge().plugins
+    const snapshot = await bridge.snapshot()
+    const readChoices = async (): Promise<OverlayChoice[]> => {
+      const latest = await bridge.snapshot()
+      return [
+        ...latest.plugins.map(plugin => ({
+          id: `plugin:${plugin.name}`,
+          label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
+          description: pluginDescription(plugin),
+          contextTarget: { kind: 'plugin' as const, pluginId: plugin.name },
+        })),
+        { id: '__search__', label: ui('搜索插件…', "Search plugins…"), description: ui('从已启用的插件目录中搜索', "Search enabled plugin catalogs") },
+        { id: '__install__', label: ui('安装插件…', "Install plugin…"), description: ui('支持 npm、Git、压缩包和本地目录；安装前确认', "Supports npm, Git, archives, and local directories; confirmation is required") },
+        { id: '__update__', label: ui('更新插件…', "Update plugin…"), description: ui('更新当前 Profile 的插件', "Update plugins in the current Profile") },
+        { id: '__reorder__', label: ui('调整插件顺序…', "Reorder plugins…"), description: ui(`${latest.bundles.length} 个活动插件`, `${latest.bundles.length} active plugin(s)`) },
+        { id: '__sources__', label: ui('插件目录…', "Plugin catalogs…"), description: ui('查看或添加插件目录', "View or add plugin catalogs") },
+        { id: '__doctor__', label: ui('运行诊断', "Run diagnostics"), description: ui('检查插件加载和运行环境', "Check plugin loading and the runtime environment") },
+      ]
+    }
     const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
     await this.overlayFlow(this.host.overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui(`插件中心 · ${snapshot.profile}`, `Plugin center · ${snapshot.profile}`),
         detail: ui('查看已安装插件、启用状态和加载顺序', "View installed plugins, enabled state, and load order"),
-        choices: [
-          ...snapshot.plugins.map(plugin => ({
-            id: `plugin:${plugin.name}`,
-            label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
-            description: pluginDescription(plugin),
-            contextTarget: { kind: 'plugin' as const, pluginId: plugin.name },
-          })),
-          { id: '__search__', label: ui('搜索插件…', "Search plugins…"), description: ui('从已启用的插件目录中搜索', "Search enabled plugin catalogs") },
-          { id: '__install__', label: ui('安装插件…', "Install plugin…"), description: ui('支持 npm、Git、压缩包和本地目录；安装前确认', "Supports npm, Git, archives, and local directories; confirmation is required") },
-          { id: '__update__', label: ui('更新插件…', "Update plugin…"), description: ui('更新当前 Profile 的插件', "Update plugins in the current Profile") },
-          { id: '__reorder__', label: ui('调整插件顺序…', "Reorder plugins…"), description: ui(`${snapshot.bundles.length} 个活动插件`, `${snapshot.bundles.length} active plugin(s)`) },
-          { id: '__sources__', label: ui('插件目录…', "Plugin catalogs…"), description: ui('查看或添加插件目录', "View or add plugin catalogs") },
-          { id: '__doctor__', label: ui('运行诊断', "Run diagnostics"), description: ui('检查插件加载和运行环境', "Check plugin loading and the runtime environment") },
-        ],
+        choices: await readChoices(),
+        refreshChoices: async () => ({ choices: await readChoices() }),
         options,
       }, async (selected) => {
         if (selected.id.startsWith('plugin:')) {
-          const plugin = snapshot.plugins.find(candidate => candidate.name === selected.id.slice('plugin:'.length))
+          const plugin = (await bridge.snapshot()).plugins.find(candidate => candidate.name === selected.id.slice('plugin:'.length))
           if (plugin !== undefined) await this.installedPlugin(plugin, navigation)
           return
         }
@@ -3232,24 +3270,27 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
   }
 
   private async pluginList(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
-    const snapshot = await this.capabilities.managementBridge().plugins.snapshot()
+    const bridge = this.capabilities.managementBridge().plugins
+    const snapshot = await bridge.snapshot()
     if (snapshot.plugins.length === 0) {
       this.host.notice(ui(`Profile ${snapshot.profile} 没有已安装插件依赖`, `Profile ${snapshot.profile} has no installed plugin dependencies`), 'info')
       return
     }
     const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
+    const readChoices = async (): Promise<OverlayChoice[]> => (await bridge.snapshot()).plugins.map(plugin => ({
+      id: plugin.name,
+      label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
+      description: pluginDescription(plugin),
+      contextTarget: { kind: 'plugin' as const, pluginId: plugin.name },
+    }))
     await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui(`已安装插件 · ${snapshot.profile}`, `Installed plugins · ${snapshot.profile}`),
-        choices: snapshot.plugins.map(plugin => ({
-          id: plugin.name,
-          label: `${plugin.active ? '● ' : ''}${pluginIdentity(plugin)}`,
-          description: pluginDescription(plugin),
-          contextTarget: { kind: 'plugin' as const, pluginId: plugin.name },
-        })),
+        choices: await readChoices(),
+        refreshChoices: async () => ({ choices: await readChoices() }),
         options,
       }, async (selected) => {
-        const plugin = snapshot.plugins.find(candidate => candidate.name === selected.id)
+        const plugin = (await bridge.snapshot()).plugins.find(candidate => candidate.name === selected.id)
         if (plugin !== undefined) await this.installedPlugin(plugin, navigation)
       })
     }, options)
@@ -3551,29 +3592,33 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
       this.host.notice(ui('当前插件少于 2 个，无需调整顺序', "Fewer than two plugins are installed; no reordering is needed"), 'info')
       return
     }
+    const readChoices = async (): Promise<OverlayChoice[]> => (await bridge.snapshot()).bundles.map((bundle, index) => ({
+      id: bundle,
+      label: `${index + 1}. ${bundle}`,
+      contextTarget: { kind: 'plugin-bundle' as const, pluginId: bundle },
+    }))
     await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('Bundle 顺序', "Bundle order"),
         detail: ui('顺序直接对应 dsh.profile.bundles；不会增删 Bundle', "Order maps directly to dsh.profile.bundles; no Bundle is added or removed"),
-        choices: snapshot.bundles.map((bundle, index) => ({
-          id: bundle,
-          label: `${index + 1}. ${bundle}`,
-          contextTarget: { kind: 'plugin-bundle' as const, pluginId: bundle },
-        })),
+        choices: await readChoices(),
+        refreshChoices: async () => ({ choices: await readChoices() }),
       }, async (selected) => {
-        const index = snapshot.bundles.indexOf(selected.id)
+        const bundlesBefore = [...(await bridge.snapshot()).bundles]
+        const index = bundlesBefore.indexOf(selected.id)
+        if (index < 0) return
         const direction = await navigation.select({
           title: ui(`移动 ${selected.id}`, `Move ${selected.id}`),
           choices: [
             { id: 'top', label: ui('移到最前', "Move to first"), ...(index === 0 ? { disabledReason: ui('已在最前', "Already first") } : {}) },
             { id: 'up', label: ui('上移一位', "Move up"), ...(index === 0 ? { disabledReason: ui('已在最前', "Already first") } : {}) },
-            { id: 'down', label: ui('下移一位', "Move down"), ...(index === snapshot.bundles.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
-            { id: 'bottom', label: ui('移到最后', "Move to last"), ...(index === snapshot.bundles.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
+            { id: 'down', label: ui('下移一位', "Move down"), ...(index === bundlesBefore.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
+            { id: 'bottom', label: ui('移到最后', "Move to last"), ...(index === bundlesBefore.length - 1 ? { disabledReason: ui('已在最后', "Already last") } : {}) },
           ],
           searchable: false,
         })
         if (direction === undefined) return
-        const bundles = [...snapshot.bundles]
+        const bundles = [...bundlesBefore]
         bundles.splice(index, 1)
         const target = direction.id === 'top'
           ? 0
@@ -3690,30 +3735,36 @@ pnpm may run the package scripts listed above; a Git package can be revalidated 
     if (parsed.command !== '' && parsed.command !== 'list') {
       throw new Error(ui('用法：/plugin source [list|add <id> <URL>|remove|enable|disable]', "Usage: /plugin source [list|add <id> <URL>|remove|enable|disable]"))
     }
-    const snapshot = await bridge.sources()
+    const sourceChoices = async (): Promise<OverlayChoice[]> => {
+      const latest = await bridge.sources()
+      return [
+        ...latest.sources.map(source => ({
+          id: `source:${marketplaceSourceKey(source)}`,
+          label: `${source.enabled ? '● ' : '○ '}${source.label}`,
+          description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ui(' · 内置', " · built-in") : ''}${source.diagnostic === undefined ? '' : ` · ${source.diagnostic}`}`,
+          contextTarget: { kind: 'plugin-catalog' as const, catalogId: marketplaceSourceKey(source) },
+        })),
+        { id: '__add__', label: ui('添加插件目录…', "Add plugin catalog…") },
+      ]
+    }
     const options = { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
     await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('插件市场来源', "Plugin marketplace sources"),
         detail: ui('npm 与插件提供的目录为只读；你添加的插件目录可在这里管理', "npm and provider-owned catalogs are read-only; catalogs you add can be managed here"),
-        choices: [
-          ...snapshot.sources.map(source => ({
-            id: `source:${marketplaceSourceKey(source)}`,
-            label: `${source.enabled ? '● ' : '○ '}${source.label}`,
-            description: `${source.kind} · ${source.url}${source.credentialRef === undefined ? '' : ` · Credential ${source.credentialRef}`}${source.builtIn ? ui(' · 内置', " · built-in") : ''}${source.diagnostic === undefined ? '' : ` · ${source.diagnostic}`}`,
-            contextTarget: { kind: 'plugin-catalog' as const, catalogId: marketplaceSourceKey(source) },
-          })),
-          { id: '__add__', label: ui('添加插件目录…', "Add plugin catalog…") },
-        ],
+        choices: await sourceChoices(),
+        refreshChoices: async () => ({ choices: await sourceChoices() }),
         options,
       }, async (selected) => {
         if (selected.id === '__add__') {
-          await this.addPluginSource(navigation, snapshot.sources, snapshot.revision)
+          const latest = await bridge.sources()
+          await this.addPluginSource(navigation, latest.sources, latest.revision)
           return
         }
-        const source = findMarketplaceSource(snapshot.sources, selected.id.slice('source:'.length))
+        const latest = await bridge.sources()
+        const source = findMarketplaceSource(latest.sources, selected.id.slice('source:'.length))
         if (source === undefined) return
-        await this.editPluginSource(navigation, source, snapshot.sources, snapshot.revision)
+        await this.editPluginSource(navigation, source, latest.sources, latest.revision)
       })
     }, options)
   }
@@ -4157,6 +4208,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           description: `${jobDetailLabel(job.detail) ?? ui('无详情', "No details")} · ${elapsedLabel(jobElapsedMs(job, now))}`,
           contextTarget: { kind: 'job' as const, jobId: job.id },
         })),
+      refreshChoices: async () => ({ choices: this.jobListRequest(initialChoiceId).choices }),
       ...(initialChoiceId === undefined ? {} : { initialChoiceId }),
       searchable: jobs.length > 8,
       options: { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 },

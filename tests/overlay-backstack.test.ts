@@ -163,7 +163,6 @@ async function expectPage(
 
 describe('nested overlay back stack', () => {
   it('opens a Session context child above its owning list and returns to that list', async () => {
-    const renameSession = vi.fn(async (_id, title: string) => title)
     const target = {
       id: 's2',
       displayTitle: 'Target Session',
@@ -171,6 +170,11 @@ describe('nested overlay back stack', () => {
       updatedAt: Date.now(),
       running: false,
     }
+    const renameSession = vi.fn(async (_id, title: string) => {
+      target.displayTitle = title
+      target.title = title
+      return title
+    })
     const harness = actionHarness({
       listSessions: () => [target],
       sessionTarget: (id: string) => id === 's2' ? {
@@ -192,15 +196,53 @@ describe('nested overlay back stack', () => {
 
     await expectPage(harness, /重命名会话|Rename session/)
     expect(harness.hide).not.toHaveBeenCalled()
-    harness.component().handleInput(ESCAPE)
+    harness.component().handleInput(' refreshed')
+    harness.component().handleInput(ENTER)
     await rename
-    await expectPage(harness, /Target Session/)
-    expect(renameSession).not.toHaveBeenCalled()
+    await harness.overlays.refreshContextPrompts(prompts!)
+    await expectPage(harness, /refreshedTarget Session/)
+    expect(renameSession).toHaveBeenCalledWith('s2', ' refreshedTarget Session')
     expect(harness.hide).not.toHaveBeenCalled()
 
     harness.component().handleInput(ESCAPE)
     await execution
     expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
+  it('removes an archived Session from the still-open owner list immediately', async () => {
+    const archived = new Set<string>()
+    const sessions = [
+      { id: 's2', displayTitle: 'Archive Me', title: 'Archive Me', updatedAt: Date.now(), running: false },
+      { id: 's3', displayTitle: 'Keep Me', title: 'Keep Me', updatedAt: Date.now() - 1, running: false },
+    ]
+    const harness = actionHarness({
+      listSessions: () => sessions.filter(session => !archived.has(session.id)),
+      sessionTarget: (id: string) => {
+        const summary = sessions.find(session => session.id === id && !archived.has(id))
+        return summary === undefined ? undefined : { sessionId: id, summary }
+      },
+      archiveSession: async (id: string) => { archived.add(id) },
+    } as unknown as Partial<HarnessTuiCapabilities>)
+    const execution = harness.actions.execute('sessions', '')
+
+    await expectPage(harness, /Archive Me/)
+    const prompts = harness.overlays.contextPrompts(harness.overlays.activeGeneration())
+    expect(prompts).toBeDefined()
+    const archive = harness.actions.executeContext({
+      target: { kind: 'session', sessionId: 's2' },
+      actionId: 'archive',
+    }, prompts)
+    await expectPage(harness, /归档当前会话|Archive the current session/)
+    harness.component().handleInput(DOWN)
+    harness.component().handleInput(ENTER)
+    await archive
+    await harness.overlays.refreshContextPrompts(prompts!)
+
+    const refreshed = plain(harness.component().render(90))
+    expect(refreshed).toContain('Keep Me')
+    expect(refreshed).not.toContain('Archive Me')
+    harness.component().handleInput(ESCAPE)
+    await execution
   })
 
   it('returns from a help section to the help root on Escape', async () => {

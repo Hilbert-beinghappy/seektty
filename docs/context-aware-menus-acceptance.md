@@ -19,7 +19,7 @@ Session rename, Fork, ZIP/descendant ZIP/Markdown export, and archive use explic
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| `pnpm test` | Passed | 135 files; 1,200 passed; 1 unrelated conditional skip |
+| `pnpm test` | Passed | 135 files; 1,203 passed; 1 unrelated conditional skip |
 | `pnpm run typecheck` | Passed | TypeScript no-emit check |
 | `pnpm run build` | Passed | Distribution bundles rebuilt from this worktree |
 | `pnpm run pack:check` | Passed | 25 allowlisted package entries; no AppleDouble files |
@@ -48,6 +48,13 @@ selection, progress, Settings, plugin, MCP, and status pages therefore appear
 above the originating list and return to it with Esc instead of waiting behind
 it in the global FIFO queue.
 
+Dynamic owner pages now re-read authoritative Harness state after both a
+context action and an ordinary list action. Session, Workspace, Profile, Theme,
+Queue, installed-plugin, Bundle-order, plugin-catalog, and Job pages update in
+place while preserving the current search query, stable selected id, and scroll
+offset. Tests cover Session rename and archive specifically, including removal
+of an archived row without closing and reopening `/sessions`.
+
 macOS and Linux GUI terminals were not available for this implementation run and are not claimed as manually verified.
 
 ## 中文摘要
@@ -56,4 +63,4 @@ macOS and Linux GUI terminals were not available for this implementation run and
 
 根菜单固定包含“复制所选文本”和“关闭”，无选区时复制置灰。对象动作根据当前命中区解析，并在执行前重新校验；一级子菜单支持悬停 250ms、单击、Enter、左右方向键和 Esc。会话重命名、Fork、三种导出与归档都通过显式目标会话接口执行，不会临时切换当前会话。破坏性动作仍进入原有确认页。
 
-自动化结果为 135 个测试文件、1,200 项通过、1 项无关条件跳过；类型检查、构建、25 项包白名单、官方 dsh `0.1.1-rc.2` 隔离安装／启动／移除／重装和一轮 Windows ConPTY 鼠标流程均通过。补充测试确认右键动作产生的输入、确认、详情、选择、进度、设置、插件、MCP 与状态页面会进入目标所在的导航栈，显示在原列表上方，并可用 Esc 返回。ConPTY 不等价于 Windows Terminal 实机视觉与鼠标验收；macOS/Linux 本轮未实测。
+自动化结果为 135 个测试文件、1,203 项通过、1 项无关条件跳过；类型检查、构建、25 项包白名单、官方 dsh `0.1.1-rc.2` 隔离安装／启动／移除／重装和一轮 Windows ConPTY 鼠标流程均通过。补充测试确认右键动作产生的输入、确认、详情、选择、进度、设置、插件、MCP 与状态页面会进入目标所在的导航栈，显示在原列表上方，并可用 Esc 返回。Session、工作区、Profile、主题、Queue、插件、Bundle 顺序、插件目录和 Job 等动态列表会在右键或普通操作完成后原位重新读取 Harness 状态，并保留搜索词、稳定选中项和滚动位置；归档的 Session 会立即从旧列表移除。ConPTY 不等价于 Windows Terminal 实机视觉与鼠标验收；macOS/Linux 本轮未实测。

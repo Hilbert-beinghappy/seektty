@@ -1393,6 +1393,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           const prompts = inOverlay ? overlays.contextPrompts(pageGeneration) : undefined
           if (inOverlay && prompts === undefined) return
           await actions.executeContext({ target: contextTarget, actionId: selected.id }, prompts)
+          if (prompts !== undefined) await overlays.refreshContextPrompts(prompts)
         }
         renderWhileOpen()
         return

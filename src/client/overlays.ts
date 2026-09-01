@@ -75,6 +75,12 @@ export interface OverlayChoice {
   readonly onContextAction?: (actionId: string) => void | Promise<void>
 }
 
+/** Latest rows for a select page whose backing Harness state may change. */
+export interface OverlayChoiceRefresh {
+  readonly choices: readonly OverlayChoice[]
+  readonly notice?: string
+}
+
 /** Searchable selector request. */
 export interface SelectOverlayRequest {
   readonly title: string
@@ -91,6 +97,8 @@ export interface SelectOverlayRequest {
   readonly requireSelection?: boolean
   /** Mouse never executes danger/permission confirmations; Enter remains required. */
   readonly mouseExecute?: 'activate' | 'focus-only'
+  /** Re-read authoritative rows after a contextual mutation without rebuilding the page. */
+  readonly refreshChoices?: () => Promise<OverlayChoiceRefresh>
 }
 
 /** Text input request. */
@@ -375,6 +383,7 @@ export class SearchSelectOverlay implements Component {
   private lastHits: readonly HitRegion[] = []
   private armedOptionId: string | undefined
   private hoveredOptionId: string | undefined
+  private choicesRevision = 0
 
   constructor(
     private request: SelectOverlayRequest,
@@ -399,7 +408,14 @@ export class SearchSelectOverlay implements Component {
     if (this.list.getSelectedItem()?.value === selectedId) this.list.setScrollOffset(scrollOffset)
     this.resetMouseState()
     this.notice = notice
+    this.choicesRevision += 1
   }
+
+  refreshReader(): SelectOverlayRequest['refreshChoices'] { return this.request.refreshChoices }
+
+  revision(): number { return this.choicesRevision }
+
+  setNotice(notice: string): void { this.notice = notice }
 
   invalidate(): void {
     this.input.invalidate()
@@ -1355,6 +1371,13 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     this.pageChanged()
   }
 
+  /** Refresh the current select page in place while preserving query, selection and scroll. */
+  async refreshContextPage(): Promise<boolean> {
+    if (this.closed) return false
+    const entry = this.current()
+    return entry === undefined ? false : this.refreshSelectEntry(entry, true)
+  }
+
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined> {
     return this.prompt(submit => new SearchSelectOverlay(request, submit), request.onEscape)
   }
@@ -1511,8 +1534,15 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   private dispatch(entry: NavigationEntry, action: () => void | Promise<void>): void {
     if (this.closed || this.current() !== entry || entry.busy) return
+    const selectPage = entry.component instanceof SearchSelectOverlay ? entry.component : undefined
+    const choicesRevision = selectPage?.revision()
     entry.busy = true
-    void Promise.resolve().then(action).catch(error => {
+    void Promise.resolve().then(action).then(async () => {
+      if (selectPage !== undefined && choicesRevision === selectPage.revision()
+        && entry.active && this.current() === entry) {
+        await this.refreshSelectEntry(entry, false)
+      }
+    }).catch(error => {
       if (this.signal.aborted) return
       this.fail(error)
     }).finally(() => {
@@ -1523,6 +1553,32 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       }
       this.requestRender()
     })
+  }
+
+  private async refreshSelectEntry(entry: NavigationEntry, ownBusyState: boolean): Promise<boolean> {
+    const selectPage = entry.component instanceof SearchSelectOverlay ? entry.component : undefined
+    const refresh = selectPage?.refreshReader()
+    if (selectPage === undefined || refresh === undefined || !entry.active
+      || this.current() !== entry || (ownBusyState && entry.busy)) return false
+    if (ownBusyState) {
+      entry.busy = true
+      this.requestRender()
+    }
+    try {
+      const result = await refresh()
+      if (!this.closed && entry.active && this.current() === entry) {
+        selectPage.updateChoices(result.choices, result.notice ?? '')
+      }
+    } catch (error) {
+      if (!this.closed && entry.active && this.current() === entry) {
+        const detail = error instanceof Error ? error.message : String(error)
+        selectPage.setNotice(ui(`刷新失败：${detail}`, `Refresh failed: ${detail}`))
+      }
+    } finally {
+      if (ownBusyState && entry.active) entry.busy = false
+      if (!this.closed && entry.active && this.current() === entry) this.pageChanged()
+    }
+    return true
   }
 
   private current(): NavigationEntry | undefined { return this.stack.at(-1) }
@@ -1644,6 +1700,14 @@ export class OverlayQueue implements OverlayPrompts {
       && component.allowsContextMenu()
       ? component
       : undefined
+  }
+
+  /** Refresh only the page that supplied these exact contextual prompts. */
+  refreshContextPrompts(prompts: OverlayPrompts): Promise<boolean> {
+    const component = this.active?.component
+    return component instanceof NavigationOverlay && component === prompts
+      ? component.refreshContextPage()
+      : Promise.resolve(false)
   }
 
   executeContextAction(optionId: string, actionId: string, generation: number): Promise<boolean> {

@@ -327,6 +327,61 @@ describe('overlay navigation', () => {
     expect(actions).toMatch(/\.catch\(/u)
   })
 
+  it('refreshes the contextual owner page in place and preserves its query and selected id', async () => {
+    const harness = overlayHarness()
+    let choices = [
+      { id: 'alpha', label: 'alpha job' },
+      { id: 'bravo', label: 'bravo job' },
+      { id: 'other', label: 'unrelated' },
+    ]
+    const selected = harness.overlays.select({
+      title: 'refreshable jobs',
+      choices,
+      refreshChoices: async () => ({ choices }),
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('alpha job')
+    })
+    harness.component().handleInput('job')
+    harness.component().handleInput('\u001B[B')
+    const prompts = harness.overlays.contextPrompts(harness.overlays.activeGeneration())
+    expect(prompts).toBeDefined()
+    choices = [
+      { id: 'alpha', label: 'alpha job · running' },
+      { id: 'bravo', label: 'bravo job · renamed' },
+      { id: 'other', label: 'unrelated · changed' },
+    ]
+    await expect(harness.overlays.refreshContextPrompts(prompts!)).resolves.toBe(true)
+    const rendered = plain(harness.component().render(80))
+    expect(rendered).toContain('bravo job · renamed')
+    expect(rendered).toContain('alpha job · running')
+    expect(rendered).not.toContain('unrelated · changed')
+    harness.component().handleInput(ENTER)
+    await expect(selected).resolves.toMatchObject({ id: 'bravo' })
+  })
+
+  it('refreshes a dynamic owner page after its ordinary keyboard action returns', async () => {
+    const harness = overlayHarness()
+    let label = 'workspace before rename'
+    const session = harness.overlays.navigate(async (navigation) => {
+      await navigation.selectPage({
+        title: 'workspaces',
+        choices: [{ id: 'workspace', label }],
+        refreshChoices: async () => ({ choices: [{ id: 'workspace', label }] }),
+      }, () => { label = 'workspace after rename' })
+    })
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('workspace before rename')
+    })
+    harness.component().handleInput(ENTER)
+    await vi.waitFor(() => {
+      expect(plain(harness.component().render(80))).toContain('workspace after rename')
+    })
+    expect(harness.hide).not.toHaveBeenCalled()
+    harness.component().handleInput(ESCAPE)
+    await expect(session).resolves.toBeUndefined()
+  })
+
   it('submits multiline overlay text only on Kitty Ctrl+Enter, not raw LF', async () => {
     const harness = overlayHarness()
     const submitted = harness.overlays.multilineInput({
