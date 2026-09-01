@@ -435,6 +435,14 @@ export const statusColor = {
 /** Foreground-only interaction states; never introduce a background or text decoration. */
 export const interaction = {
   hover: (text: string): string => paint(palette.brand, text),
+  /** Paint one control glyph, then restore muted foreground without resetting its surrounding background. */
+  hoverThenMuted: (text: string, remainder: string): string => {
+    const safeText = escapeTerminalText(text)
+    const safeRemainder = escapeTerminalText(remainder)
+    const level = terminalColorLevel()
+    if (level === 0) return `${safeText}${safeRemainder}`
+    return `${foregroundSequence(palette.brand, level)}${safeText}${foregroundSequence(palette.muted, level)}${safeRemainder}`
+  },
 } as const
 
 /** Background layers shared by the full frame, panels, and selected rows. */

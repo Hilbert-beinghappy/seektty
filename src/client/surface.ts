@@ -106,7 +106,8 @@ import {
   type MouseArmedActivation,
   type MouseArmedKind,
 } from './mouse-activation.ts'
-import { ContextMenuController, mouseContextChoices } from './mouse-context-menu.ts'
+import { ContextMenuController, mouseContextActions } from './mouse-context-menu.ts'
+import type { ContextActionNode, ContextTarget } from './context-actions.ts'
 import { emptyHitMap, finalizeHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
 import {
   autocompleteTargetId,
@@ -1320,7 +1321,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (region === undefined || region.action.kind === 'context-menu' || !overlays.allowsContextMenu()) return
       const inOverlay = region?.action.kind === 'overlay'
       if (inOverlay && region.role === 'passive') return
-      restoreMouseFocus(region)
       const overlayTarget = inOverlay ? overlays.textTarget(region.role === 'input' ? 'input' : 'body') : undefined
       const composer = region?.role === 'input' || region?.action.kind === 'composer'
       const selectionText = inOverlay
@@ -1329,17 +1329,46 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           ? composerSelectionText()
           : region.action.kind === 'agent-tree' ? agentTree.copySelectionText() : transcript.copySelectionText()
       const pasteSupported = (inOverlay ? overlayTarget?.editable === true : composer) && canReadClipboardText(process.platform)
-      const choices = mouseContextChoices({
+      const commonNodes = mouseContextActions({
         target: inOverlay ? overlayTarget?.editable === true ? 'overlay-input' : 'overlay' : composer ? 'composer' : 'transcript',
         hasSelection: selectionText !== '',
         pasteSupported,
       })
+      const optionId = region.action.kind === 'overlay' ? region.action.optionId : undefined
+      const contextTarget: ContextTarget | undefined = region.action.kind === 'overlay' && region.action.optionId !== undefined
+        ? overlays.contextTarget(region.action.optionId)
+        : region.action.kind === 'transcript' && region.action.command === 'toggle' && region.action.targetKey !== undefined
+          ? { kind: 'tool-card', targetKey: region.action.targetKey }
+          : region.action.kind === 'transcript' && region.action.command === 'toggle-reasoning' && region.action.targetKey !== undefined
+            ? { kind: 'reasoning', targetKey: region.action.targetKey }
+            : region.action.kind === 'agent-tree' && region.action.sessionId !== undefined
+              && (region.action.command === 'row' || region.action.command === 'chevron')
+              ? { kind: 'agent-tree', sessionId: region.action.sessionId, part: region.action.command }
+              : region.action.kind === 'chrome' && ['model', 'reasoning', 'mode', 'permission', 'detail'].includes(region.action.commandId)
+                ? { kind: 'chrome', commandId: region.action.commandId }
+                : undefined
+      const localMenu = optionId === undefined ? undefined : overlays.contextMenu(optionId)
+      const objectMenu = localMenu ?? (contextTarget === undefined ? undefined : actions.contextMenuFor(contextTarget))
+      const objectMenuSnapshot = JSON.stringify(objectMenu)
+      const safeObjectNodes = objectMenu?.nodes.filter(node => node.kind !== 'action' || node.danger !== true) ?? []
+      const dangerousObjectNodes = objectMenu?.nodes.filter(node => node.kind === 'action' && node.danger === true) ?? []
+      const nodes: readonly ContextActionNode[] = objectMenu === undefined
+        ? commonNodes
+        : [
+          ...safeObjectNodes,
+          { kind: 'separator', id: 'persistent-actions' },
+          ...commonNodes,
+          ...(dangerousObjectNodes.length === 0 ? [] : [{ kind: 'separator' as const, id: 'danger-actions' }, ...dangerousObjectNodes]),
+        ]
       const owner = active?.session
       const pageGeneration = overlays.activeGeneration()
       const composerText = editor.getText()
       const composerCursor = editorMouseApi(editor).getCursor()
       const valid = (): boolean => stopping === undefined && active?.session === owner
         && overlays.activeGeneration() === pageGeneration && overlays.allowsContextMenu()
+        && (optionId === undefined || JSON.stringify(overlays.contextTarget(optionId)) === JSON.stringify(contextTarget))
+        && (contextTarget?.kind !== 'agent-tree' || agentTree.node(contextTarget.sessionId as SessionId) !== undefined)
+        && (localMenu !== undefined || contextTarget === undefined || JSON.stringify(actions.contextMenuFor(contextTarget)) === objectMenuSnapshot)
         && (inOverlay ? overlayTarget?.valid() === true : !composer || (
           editor.getText() === composerText && composerSelectionText() === selectionText
           && editorMouseApi(editor).getCursor().line === composerCursor.line
@@ -1347,25 +1376,58 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         ))
       const selected = await contextMenu.open({
         point: semantic.point,
-        choices,
+        title: objectMenu?.title ?? ui('文本操作', 'Text actions'),
+        nodes,
         valid,
       })
-      if (selected === undefined || selected.id === 'cancel' || !valid()) return
+      if (selected === undefined || selected.id === 'close' || !valid()) return
+      const textAction = ['copy', 'undo', 'cut', 'delete', 'select-all', 'paste'].includes(selected.id)
+      if (!textAction && contextTarget !== undefined) {
+        if (contextTarget.kind === 'tool-card') transcript.pointerToggleTool(contextTarget.targetKey)
+        else if (contextTarget.kind === 'reasoning') transcript.pointerToggleReasoning(contextTarget.targetKey)
+        else if (contextTarget.kind === 'agent-tree') {
+          const sessionId = contextTarget.sessionId as SessionId
+          if (selected.id === 'toggle') agentTree.contextToggle(sessionId)
+          else if (selected.id === 'open' && agentTree.node(sessionId) !== undefined) openAgentChild(sessionId)
+        } else if (optionId === undefined || !await overlays.executeContextAction(optionId, selected.id, pageGeneration)) {
+          const prompts = inOverlay ? overlays.contextPrompts(pageGeneration) : undefined
+          if (inOverlay && prompts === undefined) return
+          await actions.executeContext({ target: contextTarget, actionId: selected.id }, prompts)
+          if (prompts !== undefined) await overlays.refreshContextPrompts(prompts)
+        }
+        renderWhileOpen()
+        return
+      }
       if (selected.id === 'copy') {
         copyText(selectionText)
         return
       }
-      if (selected.id === 'cut' && overlayTarget?.editable === true) {
-        if (await writeSelectedText(selectionText) && valid()) overlayTarget.replace('')
+      if (selected.id === 'undo') {
+        if (overlayTarget?.editable === true) overlayTarget.undo()
+        else if (composer) editor.handleInput('\u001A')
         return
       }
-      if (selected.id === 'delete' && overlayTarget?.editable === true) {
-        overlayTarget.replace('')
+      if (selected.id === 'cut') {
+        if (!await writeSelectedText(selectionText) || !valid()) return
+        if (overlayTarget?.editable === true) overlayTarget.replace('')
+        else if (composer) editorMouseApi(editor).replaceSelection?.('')
         return
       }
-      if (selected.id === 'select-all') { overlayTarget?.selectAll(); return }
-      if (selected.id === 'native') {
-        await actions.execute('mouse', 'native')
+      if (selected.id === 'delete') {
+        if (overlayTarget?.editable === true) overlayTarget.replace('')
+        else if (composer) editorMouseApi(editor).replaceSelection?.('')
+        return
+      }
+      if (selected.id === 'select-all') {
+        if (overlayTarget?.editable === true) overlayTarget.selectAll()
+        else if (composer) {
+          const lines = editor.getLines()
+          const focus = { line: Math.max(0, lines.length - 1), col: lines.at(-1)?.length ?? 0 }
+          const api = editorMouseApi(editor)
+          api.setSelection?.({ line: 0, col: 0 }, focus)
+          api.setCursor?.(focus.line, focus.col)
+          renderWhileOpen()
+        }
         return
       }
       if (selected.id !== 'paste') return
@@ -1620,11 +1682,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (target !== undefined) void openMouseContextMenu({ ...semantic, point, region: target })
       })) return
       if (region?.action.kind === 'context-menu') return // A removed menu's last-painted hits are inert.
-      restoreMouseFocus(region)
       if (semantic.button === 'right') {
         void openMouseContextMenu(semantic)
         return
       }
+      restoreMouseFocus(region)
       const isArmedTarget = region?.action.kind === 'overlay' && region.action.optionId !== undefined
         || region?.action.kind === 'transcript' && region.action.command === 'example'
         || region?.action.kind === 'composer' && region.action.command === 'autocomplete'

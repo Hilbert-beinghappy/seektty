@@ -13,6 +13,7 @@ export interface OverlayEditable {
   cursor(offset: number): void
   select(anchor: number, focus: number): void
   replace(text: string): void
+  undo(): void
 }
 
 /** A captured target must still own the current page when an async clipboard read ends. */
@@ -22,6 +23,7 @@ export interface OverlayTextTarget {
   valid(): boolean
   replace(text: string): boolean
   selectAll(): void
+  undo(): void
 }
 
 export function inputEditable(input: Input, rect: CellRect, changed: () => void): OverlayEditable {
@@ -38,6 +40,7 @@ export function inputEditable(input: Input, rect: CellRect, changed: () => void)
       input.handleInput(`\u001B[200~${text}\u001B[201~`)
       changed()
     },
+    undo: () => { input.handleInput('\u001A'); changed() },
   }
 }
 
@@ -72,6 +75,7 @@ export function editorEditable(editor: Editor, origin: CellPoint, width: number,
     cursor: offset => { const point = pointOf(offset); api.clearSelection?.(); api.setCursor?.(point.line, point.col) },
     select: (anchor, focus) => { api.setSelection?.(pointOf(anchor), pointOf(focus)); const point = pointOf(focus); api.setCursor?.(point.line, point.col) },
     replace: text => { api.replaceSelection?.(text) },
+    undo: () => { editor.handleInput('\u001A') },
   }
 }
 

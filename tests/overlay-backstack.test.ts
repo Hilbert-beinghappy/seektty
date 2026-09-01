@@ -32,6 +32,7 @@ function settingsDocument(namespace: string, value: unknown): TuiSettingsDocumen
 
 function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
   readonly actions: TuiActions
+  readonly overlays: OverlayQueue
   readonly hide: ReturnType<typeof vi.fn>
   component(): Component & { handleInput(data: string): void }
 } {
@@ -142,6 +143,7 @@ function actionHarness(capabilities: Partial<HarnessTuiCapabilities> = {}): {
       { ...defaults, ...capabilities } as unknown as HarnessTuiCapabilities,
       host,
     ),
+    overlays,
     hide,
     component: () => {
       if (mounted === undefined) throw new Error('overlay has not mounted')
@@ -160,6 +162,89 @@ async function expectPage(
 }
 
 describe('nested overlay back stack', () => {
+  it('opens a Session context child above its owning list and returns to that list', async () => {
+    const target = {
+      id: 's2',
+      displayTitle: 'Target Session',
+      title: 'Target Session',
+      updatedAt: Date.now(),
+      running: false,
+    }
+    const renameSession = vi.fn(async (_id, title: string) => {
+      target.displayTitle = title
+      target.title = title
+      return title
+    })
+    const harness = actionHarness({
+      listSessions: () => [target],
+      sessionTarget: (id: string) => id === 's2' ? {
+        sessionId: 's2',
+        summary: target,
+      } : undefined,
+      renameSession,
+    } as unknown as Partial<HarnessTuiCapabilities>)
+    const execution = harness.actions.execute('sessions', '')
+
+    await expectPage(harness, /会话|Session/)
+    const generation = harness.overlays.activeGeneration()
+    const prompts = harness.overlays.contextPrompts(generation)
+    expect(prompts).toBeDefined()
+    const rename = harness.actions.executeContext({
+      target: { kind: 'session', sessionId: 's2' },
+      actionId: 'rename',
+    }, prompts)
+
+    await expectPage(harness, /重命名会话|Rename session/)
+    expect(harness.hide).not.toHaveBeenCalled()
+    harness.component().handleInput(' refreshed')
+    harness.component().handleInput(ENTER)
+    await rename
+    await harness.overlays.refreshContextPrompts(prompts!)
+    await expectPage(harness, /refreshedTarget Session/)
+    expect(renameSession).toHaveBeenCalledWith('s2', ' refreshedTarget Session')
+    expect(harness.hide).not.toHaveBeenCalled()
+
+    harness.component().handleInput(ESCAPE)
+    await execution
+    expect(harness.hide).toHaveBeenCalledOnce()
+  })
+
+  it('removes an archived Session from the still-open owner list immediately', async () => {
+    const archived = new Set<string>()
+    const sessions = [
+      { id: 's2', displayTitle: 'Archive Me', title: 'Archive Me', updatedAt: Date.now(), running: false },
+      { id: 's3', displayTitle: 'Keep Me', title: 'Keep Me', updatedAt: Date.now() - 1, running: false },
+    ]
+    const harness = actionHarness({
+      listSessions: () => sessions.filter(session => !archived.has(session.id)),
+      sessionTarget: (id: string) => {
+        const summary = sessions.find(session => session.id === id && !archived.has(id))
+        return summary === undefined ? undefined : { sessionId: id, summary }
+      },
+      archiveSession: async (id: string) => { archived.add(id) },
+    } as unknown as Partial<HarnessTuiCapabilities>)
+    const execution = harness.actions.execute('sessions', '')
+
+    await expectPage(harness, /Archive Me/)
+    const prompts = harness.overlays.contextPrompts(harness.overlays.activeGeneration())
+    expect(prompts).toBeDefined()
+    const archive = harness.actions.executeContext({
+      target: { kind: 'session', sessionId: 's2' },
+      actionId: 'archive',
+    }, prompts)
+    await expectPage(harness, /归档当前会话|Archive the current session/)
+    harness.component().handleInput(DOWN)
+    harness.component().handleInput(ENTER)
+    await archive
+    await harness.overlays.refreshContextPrompts(prompts!)
+
+    const refreshed = plain(harness.component().render(90))
+    expect(refreshed).toContain('Keep Me')
+    expect(refreshed).not.toContain('Archive Me')
+    harness.component().handleInput(ESCAPE)
+    await execution
+  })
+
   it('returns from a help section to the help root on Escape', async () => {
     const harness = actionHarness()
     const execution = harness.actions.execute('help', '')

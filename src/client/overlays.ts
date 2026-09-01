@@ -22,6 +22,7 @@ import { formatBusyFooter, lastOutputLines } from './busy-status.ts'
 import { background, color, editorTheme, escapeTerminalText, interaction, surfaceRow } from './theme.ts'
 import type { TuiDangerConfirmDefault } from '@deepseek-ai/dsh-tui-protocol'
 import type { CellPoint, HitRegion } from './mouse-hit-map.ts'
+import type { ContextActionMenu, ContextActionNode, ContextTarget } from './context-actions.ts'
 import { editorEditable, inputEditable, OverlayTextSelection, type OverlayEditable, type OverlayTextTarget } from './overlay-text.ts'
 import { renderOverlayFooter, type OverlayFooterAction, type OverlayFooterCommand, type OverlayPrimaryAction } from './overlay-footer.ts'
 
@@ -66,6 +67,18 @@ export interface OverlayChoice {
   readonly description?: string
   readonly active?: boolean
   readonly disabledReason?: string
+  /** Optional semantic owner used only by application-owned context menus. */
+  readonly contextTarget?: ContextTarget
+  /** Draft-local actions whose state is owned by the active page transaction. */
+  readonly contextActions?: readonly ContextActionNode[]
+  readonly contextTitle?: string
+  readonly onContextAction?: (actionId: string) => void | Promise<void>
+}
+
+/** Latest rows for a select page whose backing Harness state may change. */
+export interface OverlayChoiceRefresh {
+  readonly choices: readonly OverlayChoice[]
+  readonly notice?: string
 }
 
 /** Searchable selector request. */
@@ -84,6 +97,8 @@ export interface SelectOverlayRequest {
   readonly requireSelection?: boolean
   /** Mouse never executes danger/permission confirmations; Enter remains required. */
   readonly mouseExecute?: 'activate' | 'focus-only'
+  /** Re-read authoritative rows after a contextual mutation without rebuilding the page. */
+  readonly refreshChoices?: () => Promise<OverlayChoiceRefresh>
 }
 
 /** Text input request. */
@@ -306,6 +321,9 @@ interface OverlayMouseTarget {
   handleOptionClick(optionId: string): OverlayMouseClickResult
   activateArmedOption(): OverlayMouseClickResult
   resetMouseState(): void
+  contextTarget(optionId: string): ContextTarget | undefined
+  contextMenu(optionId: string): ContextActionMenu | undefined
+  executeContextAction(optionId: string, actionId: string): Promise<boolean>
 }
 
 interface OverlayWheelTarget {
@@ -365,6 +383,7 @@ export class SearchSelectOverlay implements Component {
   private lastHits: readonly HitRegion[] = []
   private armedOptionId: string | undefined
   private hoveredOptionId: string | undefined
+  private choicesRevision = 0
 
   constructor(
     private request: SelectOverlayRequest,
@@ -389,7 +408,14 @@ export class SearchSelectOverlay implements Component {
     if (this.list.getSelectedItem()?.value === selectedId) this.list.setScrollOffset(scrollOffset)
     this.resetMouseState()
     this.notice = notice
+    this.choicesRevision += 1
   }
+
+  refreshReader(): SelectOverlayRequest['refreshChoices'] { return this.request.refreshChoices }
+
+  revision(): number { return this.choicesRevision }
+
+  setNotice(notice: string): void { this.notice = notice }
 
   invalidate(): void {
     this.input.invalidate()
@@ -430,6 +456,28 @@ export class SearchSelectOverlay implements Component {
     if (this.hoveredOptionId === optionId) return false
     this.hoveredOptionId = optionId
     return true
+  }
+
+  contextTarget(optionId: string): ContextTarget | undefined {
+    return this.filtered.find(choice => choice.id === optionId)?.contextTarget
+  }
+
+  contextMenu(optionId: string): ContextActionMenu | undefined {
+    const choice = this.filtered.find(candidate => candidate.id === optionId)
+    return choice?.contextTarget === undefined || choice.contextActions === undefined
+      ? undefined
+      : { title: choice.contextTitle ?? choice.label, target: choice.contextTarget, nodes: choice.contextActions }
+  }
+
+  async executeContextAction(optionId: string, actionId: string): Promise<boolean> {
+    const choice = this.filtered.find(candidate => candidate.id === optionId)
+    if (choice?.onContextAction === undefined) return false
+    await choice.onContextAction(actionId)
+    return true
+  }
+
+  selectedChoiceId(): string | undefined {
+    return this.list.getSelectedItem()?.value
   }
 
   handleOptionClick(optionId: string): OverlayMouseClickResult {
@@ -744,6 +792,24 @@ class MultiSelectOverlay implements Component {
   handleHover(optionId?: string): boolean {
     if (this.hoveredOptionId === optionId) return false
     this.hoveredOptionId = optionId
+    return true
+  }
+
+  contextTarget(optionId: string): ContextTarget | undefined {
+    return this.filtered.find(choice => choice.id === optionId)?.contextTarget
+  }
+
+  contextMenu(optionId: string): ContextActionMenu | undefined {
+    const choice = this.filtered.find(candidate => candidate.id === optionId)
+    return choice?.contextTarget === undefined || choice.contextActions === undefined
+      ? undefined
+      : { title: choice.contextTitle ?? choice.label, target: choice.contextTarget, nodes: choice.contextActions }
+  }
+
+  async executeContextAction(optionId: string, actionId: string): Promise<boolean> {
+    const choice = this.filtered.find(candidate => candidate.id === optionId)
+    if (choice?.onContextAction === undefined) return false
+    await choice.onContextAction(actionId)
     return true
   }
 
@@ -1094,7 +1160,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     const active = () => !this.closed && this.current() === entry
     const input = this.editable()
     if (preference === 'body' || (preference !== 'input' && selected !== '') || input === undefined) return {
-      text: selected, editable: false, valid: active, replace: () => false, selectAll: () => undefined,
+      text: selected, editable: false, valid: active, replace: () => false, selectAll: () => undefined, undo: () => undefined,
     }
     const value = input.text()
     const selection = input.selection()
@@ -1115,10 +1181,39 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
         input.select(0, value.length)
         this.requestRender()
       },
+      undo: () => {
+        if (!valid()) return
+        input.undo()
+        this.requestRender()
+      },
     }
   }
 
   allowsContextMenu(): boolean { return this.current()?.busy === false }
+
+  contextTarget(optionId: string): ContextTarget | undefined {
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
+    return component !== undefined && isOverlayMouseTarget(component)
+      ? component.contextTarget(optionId)
+      : undefined
+  }
+
+  contextMenu(optionId: string): ContextActionMenu | undefined {
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
+    return component !== undefined && isOverlayMouseTarget(component)
+      ? component.contextMenu(optionId)
+      : undefined
+  }
+
+  executeContextAction(optionId: string, actionId: string): Promise<boolean> {
+    const entry = this.current()
+    const component = entry?.busy === true ? undefined : entry?.component
+    return component !== undefined && isOverlayMouseTarget(component)
+      ? component.executeContextAction(optionId, actionId)
+      : Promise.resolve(false)
+  }
 
   handleOptionClick(optionId: string): OverlayMouseClickResult {
     const entry = this.current()
@@ -1274,6 +1369,13 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
     }
     entry.component.updateChoices(choices, notice ?? '')
     this.pageChanged()
+  }
+
+  /** Refresh the current select page in place while preserving query, selection and scroll. */
+  async refreshContextPage(): Promise<boolean> {
+    if (this.closed) return false
+    const entry = this.current()
+    return entry === undefined ? false : this.refreshSelectEntry(entry, true)
   }
 
   select(request: SelectOverlayRequest): Promise<OverlayChoice | undefined> {
@@ -1432,8 +1534,15 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
 
   private dispatch(entry: NavigationEntry, action: () => void | Promise<void>): void {
     if (this.closed || this.current() !== entry || entry.busy) return
+    const selectPage = entry.component instanceof SearchSelectOverlay ? entry.component : undefined
+    const choicesRevision = selectPage?.revision()
     entry.busy = true
-    void Promise.resolve().then(action).catch(error => {
+    void Promise.resolve().then(action).then(async () => {
+      if (selectPage !== undefined && choicesRevision === selectPage.revision()
+        && entry.active && this.current() === entry) {
+        await this.refreshSelectEntry(entry, false)
+      }
+    }).catch(error => {
       if (this.signal.aborted) return
       this.fail(error)
     }).finally(() => {
@@ -1444,6 +1553,32 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       }
       this.requestRender()
     })
+  }
+
+  private async refreshSelectEntry(entry: NavigationEntry, ownBusyState: boolean): Promise<boolean> {
+    const selectPage = entry.component instanceof SearchSelectOverlay ? entry.component : undefined
+    const refresh = selectPage?.refreshReader()
+    if (selectPage === undefined || refresh === undefined || !entry.active
+      || this.current() !== entry || (ownBusyState && entry.busy)) return false
+    if (ownBusyState) {
+      entry.busy = true
+      this.requestRender()
+    }
+    try {
+      const result = await refresh()
+      if (!this.closed && entry.active && this.current() === entry) {
+        selectPage.updateChoices(result.choices, result.notice ?? '')
+      }
+    } catch (error) {
+      if (!this.closed && entry.active && this.current() === entry) {
+        const detail = error instanceof Error ? error.message : String(error)
+        selectPage.setNotice(ui(`刷新失败：${detail}`, `Refresh failed: ${detail}`))
+      }
+    } finally {
+      if (ownBusyState && entry.active) entry.busy = false
+      if (!this.closed && entry.active && this.current() === entry) this.pageChanged()
+    }
+    return true
   }
 
   private current(): NavigationEntry | undefined { return this.stack.at(-1) }
@@ -1541,6 +1676,45 @@ export class OverlayQueue implements OverlayPrompts {
   allowsContextMenu(): boolean {
     const component = this.active?.component
     return this.active === undefined || (component instanceof NavigationOverlay && component.allowsContextMenu())
+  }
+
+  contextTarget(optionId: string): ContextTarget | undefined {
+    const component = this.active?.component
+    return component instanceof NavigationOverlay ? component.contextTarget(optionId) : undefined
+  }
+
+  contextMenu(optionId: string): ContextActionMenu | undefined {
+    const component = this.active?.component
+    return component instanceof NavigationOverlay ? component.contextMenu(optionId) : undefined
+  }
+
+  /**
+   * Reuse the currently visible navigation stack for an action launched from
+   * that exact page. This prevents a context action from being queued behind
+   * the page that owns its target.
+   */
+  contextPrompts(generation: number): OverlayPrompts | undefined {
+    const component = this.active?.component
+    return generation === this.generation
+      && component instanceof NavigationOverlay
+      && component.allowsContextMenu()
+      ? component
+      : undefined
+  }
+
+  /** Refresh only the page that supplied these exact contextual prompts. */
+  refreshContextPrompts(prompts: OverlayPrompts): Promise<boolean> {
+    const component = this.active?.component
+    return component instanceof NavigationOverlay && component === prompts
+      ? component.refreshContextPage()
+      : Promise.resolve(false)
+  }
+
+  executeContextAction(optionId: string, actionId: string, generation: number): Promise<boolean> {
+    const component = this.active?.component
+    return generation === this.generation && component instanceof NavigationOverlay
+      ? component.executeContextAction(optionId, actionId)
+      : Promise.resolve(false)
   }
 
   /** Single-click the current page's typed action; never inject synthetic Enter/Escape. */

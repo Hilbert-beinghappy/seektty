@@ -6,14 +6,14 @@ afterEach(() => { setUiLocale('zh') })
 
 describe('application-owned mouse context actions', () => {
   it.each([
-    ['transcript', true, ['copy', 'native', 'cancel']],
-    ['transcript', false, ['native', 'cancel']],
-    ['composer', true, ['copy', 'paste', 'cancel']],
-    ['composer', false, ['paste', 'native', 'cancel']],
-    ['overlay', true, ['copy', 'cancel']],
-    ['overlay', false, ['cancel']],
-    ['overlay-input', true, ['copy', 'cut', 'delete', 'paste', 'select-all', 'cancel']],
-    ['overlay-input', false, ['paste', 'select-all', 'cancel']],
+    ['transcript', true, ['copy', 'close']],
+    ['transcript', false, ['copy', 'close']],
+    ['composer', true, ['undo', 'cut', 'paste', 'delete', 'select-all', 'copy', 'close']],
+    ['composer', false, ['undo', 'cut', 'paste', 'delete', 'select-all', 'copy', 'close']],
+    ['overlay', true, ['copy', 'close']],
+    ['overlay', false, ['copy', 'close']],
+    ['overlay-input', true, ['undo', 'cut', 'paste', 'delete', 'select-all', 'copy', 'close']],
+    ['overlay-input', false, ['undo', 'cut', 'paste', 'delete', 'select-all', 'copy', 'close']],
   ] as const)('uses the target-specific action matrix for %s selection=%s', (target, hasSelection, ids) => {
     const choices = mouseContextChoices({ target, hasSelection, pasteSupported: true })
     expect(choices.map(choice => choice.id)).toEqual(ids)

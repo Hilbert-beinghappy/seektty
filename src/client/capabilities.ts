@@ -574,6 +574,28 @@ export class HarnessTuiCapabilities {
     }
   }
 
+  /** Resolve one stable Session face without changing the Runtime's current selection. */
+  sessionTarget(sessionId: SessionId): TuiActiveSession | undefined {
+    const summary = this.ctx.sessions.list.getSnapshot().byId[sessionId]
+    const binding = this.ctx.sessions.binding(sessionId)
+    if (summary === undefined || binding === undefined) return undefined
+    const workspacePath = summary.cwd ?? this.initialWorkspacePath
+    const workspace = workspaceFor(sessionId, workspacePath, this.ctx.workspaces.list.getSnapshot().items)
+    return {
+      sessionId,
+      session: binding.session,
+      summary,
+      workspacePath,
+      ...(workspace === undefined ? {} : { workspaceId: workspace.workspaceId }),
+    }
+  }
+
+  private requireSessionTarget(sessionId: SessionId): TuiActiveSession {
+    const target = this.sessionTarget(sessionId)
+    if (target === undefined) throw new Error(ui(`找不到会话 ${sessionId}`, `Session ${sessionId} was not found`))
+    return target
+  }
+
   /**
    * Follow selection changes and the currently selected Session snapshot.
    * @param listener - receives the active binding and snapshot, or two undefined values after selection clears.
@@ -1033,8 +1055,9 @@ export class HarnessTuiCapabilities {
    * Fork the current session at its latest completed turn and open the child.
    * @returns the opened child Session identifier.
    */
-  async forkSession(): Promise<SessionId> {
-    const sessionId = await this.ctx.sessions.fork({ sessionId: this.requireActive().sessionId, increaseTitle: true })
+  async forkSession(targetSessionId = this.requireActive().sessionId): Promise<SessionId> {
+    this.requireSessionTarget(targetSessionId)
+    const sessionId = await this.ctx.sessions.fork({ sessionId: targetSessionId, increaseTitle: true })
     this.ctx.sessions.open(sessionId)
     return sessionId
   }
@@ -1044,8 +1067,8 @@ export class HarnessTuiCapabilities {
    * @param title - requested Session title.
    * @returns the title accepted by the Host.
    */
-  async renameSession(title: string): Promise<string> {
-    const result = await this.requireActive().session.rename(title)
+  async renameSession(targetSessionId: SessionId, title: string): Promise<string> {
+    const result = await this.requireSessionTarget(targetSessionId).session.rename(title)
     if (!result.ok) {
       throw new Error(ui(`重命名失败：${result.error.message}`, `Rename failed: ${result.error.message}`))
     }
@@ -1053,8 +1076,9 @@ export class HarnessTuiCapabilities {
   }
 
   /** Archive the current session through Workspace Runtime. */
-  async archiveSession(): Promise<void> {
-    await this.ctx.workspaces.archiveSession(this.requireActive().sessionId)
+  async archiveSession(targetSessionId = this.requireActive().sessionId): Promise<void> {
+    this.requireSessionTarget(targetSessionId)
+    await this.ctx.workspaces.archiveSession(targetSessionId)
   }
 
   /**
@@ -1681,11 +1705,12 @@ export class HarnessTuiCapabilities {
    * @returns saved path, byte count, media type, and scope.
    */
   async exportSession(
+    targetSessionId: SessionId,
     requestedPath?: string,
     includeDescendants = false,
     signal?: AbortSignal,
   ): Promise<TuiExportResult> {
-    const active = this.requireActive()
+    const active = this.requireSessionTarget(targetSessionId)
     const payload = await this.managementBridge().sessionExport.download(
       active.sessionId,
       includeDescendants,
@@ -1701,8 +1726,8 @@ export class HarnessTuiCapabilities {
    * @param requestedPath - absolute or Workspace-relative destination.
    * @returns saved path, byte count, and Markdown media type.
    */
-  async exportMarkdown(requestedPath?: string, signal?: AbortSignal): Promise<TuiExportResult> {
-    const active = this.requireActive()
+  async exportMarkdown(targetSessionId: SessionId, requestedPath?: string, signal?: AbortSignal): Promise<TuiExportResult> {
+    const active = this.requireSessionTarget(targetSessionId)
     const payload = await this.managementBridge().sessionExport.markdown(active.sessionId, signal)
     const path = resolve(
       active.workspacePath,
