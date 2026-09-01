@@ -30,6 +30,12 @@ export interface ViewportCellMap {
   readonly hardBreakAfter: boolean
 }
 
+export interface SelectionLineProjection {
+  readonly text: string
+  readonly displayStartCell: number
+  readonly joinerAfter: string
+}
+
 const OSC = /\u001B\][\s\S]*?(?:\u0007|\u001B\\)/gu
 const CSI = /\u001B\[[0-9;:]*[ -/]*[@-~]/gu
 const C1_OSC = /\u009D[\s\S]*?(?:\u0007|\u001B\\|\u009C)/gu
@@ -154,6 +160,46 @@ export interface CopyableLine {
   readonly endOffset: number
   readonly cellOffsets: readonly (number | undefined)[]
   readonly hardBreakAfter: boolean
+}
+
+/** Map only semantic text cells; presentation columns and renderer padding stay inert. */
+export function mapSelectionProjectionLine(
+  projection: SelectionLineProjection,
+  startOffset: number,
+  contentWidth: number,
+): CopyableLine {
+  const cellOffsets: Array<number | undefined> = Array.from({ length: contentWidth }, () => undefined)
+  let offset = startOffset
+  let col = Math.max(0, projection.displayStartCell)
+  for (const segment of graphemesOf(projection.text).segment(projection.text)) {
+    const grapheme = segment.segment
+    const width = Math.max(1, visibleWidth(grapheme))
+    for (let cell = 0; cell < width && col + cell < contentWidth; cell += 1) {
+      cellOffsets[col + cell] = offset
+    }
+    col += width
+    offset += grapheme.length
+  }
+  return {
+    text: projection.text + projection.joinerAfter,
+    endOffset: offset,
+    cellOffsets,
+    hardBreakAfter: projection.joinerAfter === '\n',
+  }
+}
+
+/** Build one stable owner string from semantic visual-line projections. */
+export function ownerTextFromProjections(
+  projections: readonly SelectionLineProjection[],
+): { readonly text: string; readonly lineStarts: readonly number[] } {
+  let text = ''
+  const lineStarts: number[] = []
+  for (const projection of projections) {
+    lineStarts.push(text.length)
+    text += projection.text
+    text += projection.joinerAfter
+  }
+  return { text, lineStarts }
 }
 
 /**

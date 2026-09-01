@@ -74,13 +74,17 @@ import {
   expandSelection,
   extractSelectedText,
   mapCopyableLine,
-  ownerTextFromRenderedLines,
+  mapSelectionProjectionLine,
+  ownerTextFromProjections,
   paintSelection,
   selectionClearedForOwner,
+  stripCopyDecorations,
   type SelectionAnchor,
+  type SelectionLineProjection,
   type TextSelection,
   type ViewportCellMap,
 } from './text-selection.ts'
+import { componentSelectionLines } from './pi-tui-adapters.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -275,8 +279,79 @@ class PulsingRow implements Component {
   invalidate(): void {}
 }
 
+function wrappedSourceProjections(
+  source: string,
+  visualLines: readonly string[],
+  displayStartCell: number,
+  finalJoiner: string,
+): SelectionLineProjection[] {
+  const semanticSource = stripCopyDecorations(source)
+  const projections: SelectionLineProjection[] = []
+  let cursor = 0
+  for (const visualLine of visualLines) {
+    const visibleText = stripCopyDecorations(visualLine).trimEnd()
+    const found = visibleText === '' ? cursor : semanticSource.indexOf(visibleText, cursor)
+    const start = found >= cursor ? found : cursor
+    if (projections.length > 0) {
+      const previous = projections[projections.length - 1]
+      if (previous !== undefined) {
+        projections[projections.length - 1] = {
+          ...previous,
+          joinerAfter: semanticSource.slice(cursor, start),
+        }
+      }
+    }
+    projections.push({ text: visibleText, displayStartCell, joinerAfter: '' })
+    cursor = start + visibleText.length
+  }
+  const last = projections[projections.length - 1]
+  if (last !== undefined) {
+    const trailing = semanticSource.slice(cursor)
+    projections[projections.length - 1] = {
+      ...last,
+      text: last.text + trailing,
+      joinerAfter: finalJoiner,
+    }
+  }
+  return projections
+}
+
+function plainSelectionLines(text: string, width: number): SelectionLineProjection[] {
+  const normalized = escapeTerminalText(text).replace(/\t/gu, '   ')
+  const logicalLines = normalized.split('\n')
+  return logicalLines.flatMap((logicalLine, index) => {
+    const visualLines = wrapTextWithAnsi(logicalLine, Math.max(1, width))
+    return wrappedSourceProjections(
+      logicalLine,
+      visualLines.length === 0 ? [''] : visualLines,
+      0,
+      index < logicalLines.length - 1 ? '\n' : '',
+    )
+  })
+}
+
+function fallbackSelectionLines(
+  lines: readonly string[],
+  width: number,
+): SelectionLineProjection[] {
+  return lines.map((line, index) => {
+    const text = stripCopyDecorations(line).trimEnd()
+    return {
+      text,
+      displayStartCell: 0,
+      joinerAfter: index < lines.length - 1 && visibleWidth(text) < Math.max(1, width) ? '\n' : '',
+    }
+  })
+}
+
 class CodeRow implements Component {
+  private selectionLines: readonly SelectionLineProjection[] = []
+
   constructor(private readonly row: Extract<TranscriptRow, { readonly format: 'code' }>) {}
+
+  getSelectionLines(): readonly SelectionLineProjection[] {
+    return this.selectionLines
+  }
 
   render(width: number): string[] {
     const safeWidth = Math.max(1, width)
@@ -291,12 +366,36 @@ class CodeRow implements Component {
     const codeWidth = Math.max(1, safeWidth - prefixWidth - numberWidth)
     const highlighted = highlightCodeLines(this.row.text, this.row.language)
     const rows: string[] = []
+    const projections: SelectionLineProjection[] = []
     if (this.row.caption !== undefined) {
-      rows.push(...new Text(`${color.muted(prefix)}${color.muted(escapeTerminalText(this.row.caption))}`, 0, 0).render(safeWidth))
+      const safeCaption = escapeTerminalText(this.row.caption)
+      const captionRows = new Text(`${color.muted(prefix)}${color.muted(safeCaption)}`, 0, 0).render(safeWidth)
+      rows.push(...captionRows)
+      const captionProjections = wrappedSourceProjections(
+        `${requestedPrefix}${safeCaption}`,
+        captionRows,
+        0,
+        highlighted.length > 0 ? '\n' : '',
+      )
+      const firstCaption = captionProjections[0]
+      if (firstCaption !== undefined && firstCaption.text.startsWith(requestedPrefix)) {
+        captionProjections[0] = {
+          ...firstCaption,
+          text: firstCaption.text.slice(requestedPrefix.length),
+          displayStartCell: prefixWidth,
+        }
+      }
+      projections.push(...captionProjections)
     }
     for (const [index, sourceLine] of highlighted.entries()) {
       const wrapped = wrapTextWithAnsi(sourceLine, codeWidth)
       const parts = wrapped.length === 0 ? [''] : wrapped
+      projections.push(...wrappedSourceProjections(
+        sourceLine,
+        parts,
+        prefixWidth + numberWidth,
+        index < highlighted.length - 1 ? '\n' : '',
+      ))
       for (const [partIndex, part] of parts.entries()) {
         const number = numbers?.[index]
         const gutter = numberWidth === 0
@@ -313,6 +412,7 @@ class CodeRow implements Component {
         rows.push(`${connector}${gutter}${background.code(padded)}`)
       }
     }
+    this.selectionLines = projections
     return rows
   }
 
@@ -1289,6 +1389,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
 
 interface TranscriptBlockLines {
   readonly lines: readonly string[]
+  readonly projections: readonly SelectionLineProjection[]
   readonly borderLines: readonly number[]
   readonly hardBreaks: readonly (boolean | undefined)[]
   readonly turnAnchors: readonly number[]
@@ -1423,6 +1524,7 @@ export class Transcript implements Component, Focusable {
   private readonly ownerCopy = new Map<string, {
     readonly text: string
     readonly lineStarts: readonly number[]
+    readonly projections: readonly SelectionLineProjection[]
     readonly borderLines: readonly number[]
   }>()
   private lastViewportMaps: readonly ViewportCellMap[] = []
@@ -2088,7 +2190,7 @@ export class Transcript implements Component, Focusable {
 
   private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
     const block = this.blocks[blockIndex]
-    if (block === undefined) return { lines: [], borderLines: [], hardBreaks: [], turnAnchors: [], controls: [] }
+    if (block === undefined) return { lines: [], projections: [], borderLines: [], hardBreaks: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
     const cacheKey = blockIndex === 0 ? -contentWidth : contentWidth
     if (block.dirty) {
@@ -2098,12 +2200,13 @@ export class Transcript implements Component, Focusable {
     const cachedBlock = block.metadata.dynamic ? undefined : block.linesByWidth.get(cacheKey)
     if (cachedBlock !== undefined) {
       this.heightIndex.setExact(block.key, cachedBlock.lines.length)
-      this.rememberOwnerCopy(block.key, cachedBlock, contentWidth)
+      this.rememberOwnerCopy(block.key, cachedBlock)
       this.lineControls.set(block.key, cachedBlock.controls)
       this.syncHeightIndexCounters()
       return cachedBlock
     }
     const lines: string[] = []
+    const projections: SelectionLineProjection[] = []
     const borderLines: number[] = []
     const hardBreaks: Array<boolean | undefined> = []
     const turnAnchors: number[] = []
@@ -2112,6 +2215,7 @@ export class Transcript implements Component, Focusable {
       const row = block.rows[index]
       if ((blockIndex > 0 || lines.length > 0) && row?.gapBefore === true) {
         lines.push('')
+        projections.push({ text: '', displayStartCell: 0, joinerAfter: '\n' })
         hardBreaks.push(true)
         controls.push(undefined)
       }
@@ -2142,6 +2246,14 @@ export class Transcript implements Component, Focusable {
           lines.push(escapeTerminalText(line))
         }
       }
+      const projected = row?.format === 'rule' || row?.format === 'image'
+        ? rendered.map(() => ({ text: '', displayStartCell: 0, joinerAfter: '' }))
+        : row?.format === 'plain' && row.pulse === undefined && row.welcome !== true
+          ? plainSelectionLines(row.text, contentWidth)
+          : componentSelectionLines(component) ?? fallbackSelectionLines(rendered, contentWidth)
+      projections.push(...(projected.length === rendered.length
+        ? projected
+        : fallbackSelectionLines(rendered, contentWidth)))
       for (const hardBreakIndex of explicitHardBreakIndexes(row, contentWidth)) {
         const target = start + hardBreakIndex
         if (target >= start && target < lines.length) hardBreaks[target] = true
@@ -2159,7 +2271,15 @@ export class Transcript implements Component, Focusable {
         controls[lineIndex] = control
       }
     }
-    const result = { lines, borderLines, hardBreaks, turnAnchors, controls }
+    const resolvedProjections = projections.map((projection, index) => ({
+      ...projection,
+      ...(hardBreaks[index] === true
+        ? { joinerAfter: '\n' }
+        : hardBreaks[index] === false
+          ? { joinerAfter: '' }
+          : {}),
+    }))
+    const result = { lines, projections: resolvedProjections, borderLines, hardBreaks, turnAnchors, controls }
     if (!block.metadata.dynamic) {
       block.linesByWidth.set(cacheKey, result)
       while (block.linesByWidth.size > 4) {
@@ -2169,7 +2289,7 @@ export class Transcript implements Component, Focusable {
       }
     }
     this.heightIndex.setExact(block.key, result.lines.length)
-    this.rememberOwnerCopy(block.key, result, contentWidth)
+    this.rememberOwnerCopy(block.key, result)
     this.lineControls.set(block.key, result.controls)
     this.syncHeightIndexCounters()
     return result
@@ -2178,15 +2298,21 @@ export class Transcript implements Component, Focusable {
   private rememberOwnerCopy(
     key: string,
     block: TranscriptBlockLines,
-    contentWidth: number,
   ): void {
-    const lines = block.borderLines.length === 0
-      ? block.lines
-      : block.lines.map((line, index) => block.borderLines.includes(index) ? '' : line)
-    this.ownerCopy.set(key, {
-      ...ownerTextFromRenderedLines(lines, Math.abs(contentWidth), block.hardBreaks),
+    const projections = block.projections.map((projection, index) => block.borderLines.includes(index)
+      ? { text: '', displayStartCell: 0, joinerAfter: projection.joinerAfter }
+      : projection)
+    const next = {
+      ...ownerTextFromProjections(projections),
+      projections,
       borderLines: block.borderLines,
-    })
+    }
+    const previous = this.ownerCopy.get(key)
+    if (previous !== undefined && previous.text !== next.text
+      && (this.selection?.anchor.ownerKey === key || this.selection?.focus.ownerKey === key)) {
+      this.selection = undefined
+    }
+    this.ownerCopy.set(key, next)
   }
 
   private fillFrom(
@@ -2421,7 +2547,10 @@ export class Transcript implements Component, Focusable {
       const copy = this.ownerCopy.get(block.key)
       if (copy?.borderLines.includes(lineOffset) !== true) {
         const startOffset = copy?.lineStarts[lineOffset] ?? 0
-        const mapped = mapCopyableLine(lines[row] ?? '', startOffset, contentWidth)
+        const projection = copy?.projections[lineOffset]
+        const mapped = projection === undefined
+          ? mapCopyableLine(lines[row] ?? '', startOffset, contentWidth)
+          : mapSelectionProjectionLine(projection, startOffset, contentWidth)
         maps.push({
           row,
           ownerKey: block.key,

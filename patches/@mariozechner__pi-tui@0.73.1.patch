@@ -836,11 +836,217 @@ index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..73a9e73bd15bdb38478c2661ca1b463f
          // Calculate visual width
          const visualLength = visibleWidth(textWithCursor);
          const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
+diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
+index e836b2e5f739a19864e166905c4dc66d7446313a..1fa0ae70114ab93cb9528025f9bec2f1d183f4a1 100644
+--- a/dist/components/markdown.d.ts
++++ b/dist/components/markdown.d.ts
+@@ -40,6 +40,15 @@ export interface MarkdownTheme {
+     /** Prefix applied to each rendered code block line (default: "  ") */
+     codeBlockIndent?: string;
+ }
++/**
++ * Read-only copy projection for the most recently rendered Markdown width.
++ * Added by SeekTTY for official dsh 0.1.1-rc.2 / pi-tui 0.73.1 only.
++ */
++export interface MarkdownSelectionLine {
++    readonly text: string;
++    readonly displayStartCell: number;
++    readonly joinerAfter: string;
++}
+ export declare class Markdown implements Component {
+     private text;
+     private paddingX;
+@@ -50,9 +59,11 @@ export declare class Markdown implements Component {
+     private cachedText?;
+     private cachedWidth?;
+     private cachedLines?;
++    private cachedSelectionLines?;
+     constructor(text: string, paddingX: number, paddingY: number, theme: MarkdownTheme, defaultTextStyle?: DefaultTextStyle);
+     setText(text: string): void;
+     invalidate(): void;
++    getSelectionLines(): readonly MarkdownSelectionLine[];
+     render(width: number): string[];
+     /**
+      * Apply default text style to a string.
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9734a2654 100644
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..47f12cdb9e6969a368ac84f00848aaa680a60e60 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
-@@ -231,28 +231,35 @@ export class Markdown {
+@@ -1,6 +1,101 @@
+ import { Marked, Tokenizer } from "marked";
+ import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.js";
+-import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.js";
++import { applyBackgroundToLine, extractAnsiCode, visibleWidth, wrapTextWithAnsi, wrapTextWithAnsiDetailed, } from "../utils.js";
++const COPY_START = "\x1b_seektty-copy:start\x07";
++const COPY_END = "\x1b_seektty-copy:end\x07";
++const COPY_SKIP = "\x1b_seektty-copy:skip\x07";
++const COPY_JOIN_PREFIX = "\x1b_seektty-copy:join:";
++const COPY_MARKER_SUFFIX = "\x07";
++function copyJoinMarker(joiner) {
++    if (joiner === "\n") {
++        return `${COPY_JOIN_PREFIX}hard${COPY_MARKER_SUFFIX}`;
++    }
++    if (joiner === "") {
++        return `${COPY_JOIN_PREFIX}none${COPY_MARKER_SUFFIX}`;
++    }
++    return `${COPY_JOIN_PREFIX}spaces:${joiner.length}${COPY_MARKER_SUFFIX}`;
++}
++function markCopyText(text) {
++    return `${COPY_START}${text}${COPY_END}`;
++}
++function stripProjectionMarkers(text) {
++    return text.replace(/\x1b_seektty-copy:[^\x07]*\x07/g, "");
++}
++function stripAnsi(text) {
++    let result = "";
++    let index = 0;
++    while (index < text.length) {
++        const ansi = extractAnsiCode(text, index);
++        if (ansi) {
++            index += ansi.length;
++            continue;
++        }
++        result += text[index];
++        index += 1;
++    }
++    return result;
++}
++function selectionProjection(line, displayPadding, defaultJoiner) {
++    let before = "";
++    let selected = "";
++    let mode = "before";
++    let marked = false;
++    let skipped = false;
++    let joinerAfter = defaultJoiner;
++    let index = 0;
++    while (index < line.length) {
++        const ansi = extractAnsiCode(line, index);
++        if (ansi) {
++            if (ansi.code === COPY_START) {
++                marked = true;
++                mode = "selected";
++            }
++            else if (ansi.code === COPY_END) {
++                mode = "after";
++            }
++            else if (ansi.code === COPY_SKIP) {
++                skipped = true;
++            }
++            else if (ansi.code.startsWith(COPY_JOIN_PREFIX)) {
++                const encoded = ansi.code.slice(COPY_JOIN_PREFIX.length, -COPY_MARKER_SUFFIX.length);
++                if (encoded === "hard") {
++                    joinerAfter = "\n";
++                }
++                else if (encoded === "none") {
++                    joinerAfter = "";
++                }
++                else if (encoded.startsWith("spaces:")) {
++                    const count = Number.parseInt(encoded.slice("spaces:".length), 10);
++                    joinerAfter = " ".repeat(Number.isFinite(count) ? Math.max(0, count) : 0);
++                }
++            }
++            else if (mode === "selected") {
++                selected += ansi.code;
++            }
++            else if (mode === "before") {
++                before += ansi.code;
++            }
++            index += ansi.length;
++            continue;
++        }
++        if (mode === "selected") {
++            selected += line[index];
++        }
++        else if (mode === "before") {
++            before += line[index];
++        }
++        index += 1;
++    }
++    if (skipped) {
++        return { text: "", displayStartCell: displayPadding, joinerAfter };
++    }
++    const text = marked ? stripAnsi(selected) : stripAnsi(line).trimEnd();
++    return {
++        text,
++        displayStartCell: displayPadding + (marked ? visibleWidth(before) : 0),
++        joinerAfter,
++    };
++}
+ const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
+ class StrictStrikethroughTokenizer extends Tokenizer {
+     del(src) {
+@@ -32,6 +127,7 @@ export class Markdown {
+     cachedText;
+     cachedWidth;
+     cachedLines;
++    cachedSelectionLines;
+     constructor(text, paddingX, paddingY, theme, defaultTextStyle) {
+         this.text = text;
+         this.paddingX = paddingX;
+@@ -47,6 +143,10 @@ export class Markdown {
+         this.cachedText = undefined;
+         this.cachedWidth = undefined;
+         this.cachedLines = undefined;
++        this.cachedSelectionLines = undefined;
++    }
++    getSelectionLines() {
++        return this.cachedSelectionLines ?? [];
+     }
+     render(width) {
+         // Check cache
+@@ -62,6 +162,7 @@ export class Markdown {
+             this.cachedText = this.text;
+             this.cachedWidth = width;
+             this.cachedLines = result;
++            this.cachedSelectionLines = [];
+             return result;
+         }
+         // Replace tabs with 3 spaces for consistent rendering
+@@ -78,12 +179,23 @@ export class Markdown {
+         }
+         // Wrap lines (NO padding, NO background yet)
+         const wrappedLines = [];
+-        for (const line of renderedLines) {
++        const selectionLines = [];
++        for (let renderedLineIndex = 0; renderedLineIndex < renderedLines.length; renderedLineIndex++) {
++            const line = renderedLines[renderedLineIndex];
+             if (isImageLine(line)) {
+                 wrappedLines.push(line);
++                selectionLines.push({ text: "", displayStartCell: this.paddingX, joinerAfter: "" });
+             }
+             else {
+-                wrappedLines.push(...wrapTextWithAnsi(line, contentWidth));
++                const wrapped = wrapTextWithAnsiDetailed(line, contentWidth);
++                for (let wrappedIndex = 0; wrappedIndex < wrapped.length; wrappedIndex++) {
++                    const part = wrapped[wrappedIndex];
++                    const isLastPart = wrappedIndex === wrapped.length - 1;
++                    const hasFollowingLogicalLine = renderedLineIndex < renderedLines.length - 1;
++                    const defaultJoiner = part.separator ?? (isLastPart && hasFollowingLogicalLine ? "\n" : "");
++                    wrappedLines.push(stripProjectionMarkers(part.text));
++                    selectionLines.push(selectionProjection(part.text, this.paddingX, defaultJoiner));
++                }
+             }
+         }
+         // Add margins and background to each wrapped line
+@@ -116,10 +228,17 @@ export class Markdown {
+         }
+         // Combine top padding, content, and bottom padding
+         const result = [...emptyLines, ...contentLines, ...emptyLines];
++        const paddingProjection = { text: "", displayStartCell: this.paddingX, joinerAfter: "" };
++        const resultSelectionLines = [
++            ...new Array(this.paddingY).fill(paddingProjection),
++            ...selectionLines,
++            ...new Array(this.paddingY).fill(paddingProjection),
++        ];
+         // Update cache
+         this.cachedText = this.text;
+         this.cachedWidth = width;
+         this.cachedLines = result;
++        this.cachedSelectionLines = resultSelectionLines;
+         return result.length > 0 ? result : [""];
+     }
+     /**
+@@ -231,28 +350,35 @@ export class Markdown {
              }
              case "code": {
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -850,10 +1056,10 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                      const highlightedLines = this.theme.highlightCode(token.text, token.lang);
                      for (const hlLine of highlightedLines) {
 -                        lines.push(`${indent}${hlLine}`);
-+                        const wrapped = wrapTextWithAnsi(hlLine, codeWidth);
++                        const wrapped = wrapTextWithAnsiDetailed(hlLine, codeWidth);
 +                        for (const part of wrapped) {
-+                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part)));
-+                            lines.push(`${indent}${this.theme.codeBlock(part + padding)}`);
++                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part.text)));
++                            lines.push(`${indent}${this.theme.codeBlock(markCopyText(part.text) + padding)}${part.separator !== undefined ? copyJoinMarker(part.separator) : ""}`);
 +                        }
                      }
                  }
@@ -862,10 +1068,10 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                      const codeLines = token.text.split("\n");
                      for (const codeLine of codeLines) {
 -                        lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
-+                        const wrapped = wrapTextWithAnsi(codeLine, codeWidth);
++                        const wrapped = wrapTextWithAnsiDetailed(codeLine, codeWidth);
 +                        for (const part of wrapped) {
-+                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part)));
-+                            lines.push(`${indent}${this.theme.codeBlock(part + padding)}`);
++                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part.text)));
++                            lines.push(`${indent}${this.theme.codeBlock(markCopyText(part.text) + padding)}${part.separator !== undefined ? copyJoinMarker(part.separator) : ""}`);
 +                        }
                      }
                  }
@@ -881,7 +1087,30 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                  lines.push(...listLines);
                  // Don't add spacing after lists if a space token follows
                  // (the space token will handle it)
-@@ -417,7 +424,7 @@ export class Markdown {
+@@ -295,9 +421,11 @@ export class Markdown {
+                 }
+                 for (const quoteLine of renderedQuoteLines) {
+                     const styledLine = applyQuoteStyle(quoteLine);
+-                    const wrappedLines = wrapTextWithAnsi(styledLine, quoteContentWidth);
++                    const wrappedLines = wrapTextWithAnsiDetailed(styledLine, quoteContentWidth);
+                     for (const wrappedLine of wrappedLines) {
+-                        lines.push(this.theme.quoteBorder("│ ") + wrappedLine);
++                        const content = styledLine.includes(COPY_START) ? wrappedLine.text : markCopyText(wrappedLine.text);
++                        lines.push(this.theme.quoteBorder("│ ") + content +
++                            (wrappedLine.separator !== undefined ? copyJoinMarker(wrappedLine.separator) : ""));
+                     }
+                 }
+                 if (nextTokenType && nextTokenType !== "space") {
+@@ -306,7 +434,7 @@ export class Markdown {
+                 break;
+             }
+             case "hr":
+-                lines.push(this.theme.hr("─".repeat(Math.min(width, 80))));
++                lines.push(`${COPY_SKIP}${this.theme.hr("─".repeat(Math.min(width, 80)))}`);
+                 if (nextTokenType && nextTokenType !== "space") {
+                     lines.push(""); // Add spacing after horizontal rules (unless space token follows)
+                 }
+@@ -417,7 +545,7 @@ export class Markdown {
      /**
       * Render a list with proper nesting support
       */
@@ -890,7 +1119,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
          const lines = [];
          const indent = "  ".repeat(depth);
          // Use the list's start property (defaults to 1 for ordered lists)
-@@ -426,7 +433,8 @@ export class Markdown {
+@@ -426,7 +554,8 @@ export class Markdown {
              const item = token.items[i];
              const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
              // Process item tokens to handle nested lists
@@ -900,7 +1129,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
              if (itemLines.length > 0) {
                  // First line - check if it's a nested list
                  // A nested list will start with indent (spaces) followed by cyan bullet
-@@ -449,8 +457,8 @@ export class Markdown {
+@@ -449,8 +578,8 @@ export class Markdown {
                          lines.push(line);
                      }
                      else {
@@ -911,7 +1140,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                      }
                  }
              }
-@@ -464,13 +472,13 @@ export class Markdown {
+@@ -464,13 +593,13 @@ export class Markdown {
       * Render list item tokens, handling nested lists
       * Returns lines WITHOUT the parent indent (renderList will add it)
       */
@@ -927,7 +1156,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                  lines.push(...nestedLines);
              }
              else if (token.type === "text") {
-@@ -488,20 +496,27 @@ export class Markdown {
+@@ -488,20 +617,27 @@ export class Markdown {
              else if (token.type === "code") {
                  // Code block in list item
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -937,10 +1166,10 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                      const highlightedLines = this.theme.highlightCode(token.text, token.lang);
                      for (const hlLine of highlightedLines) {
 -                        lines.push(`${indent}${hlLine}`);
-+                        const wrapped = wrapTextWithAnsi(hlLine, codeWidth);
++                        const wrapped = wrapTextWithAnsiDetailed(hlLine, codeWidth);
 +                        for (const part of wrapped) {
-+                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part)));
-+                            lines.push(`${indent}${this.theme.codeBlock(part + padding)}`);
++                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part.text)));
++                            lines.push(`${indent}${this.theme.codeBlock(markCopyText(part.text) + padding)}${part.separator !== undefined ? copyJoinMarker(part.separator) : ""}`);
 +                        }
                      }
                  }
@@ -948,10 +1177,10 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
                      const codeLines = token.text.split("\n");
                      for (const codeLine of codeLines) {
 -                        lines.push(`${indent}${this.theme.codeBlock(codeLine)}`);
-+                        const wrapped = wrapTextWithAnsi(codeLine, codeWidth);
++                        const wrapped = wrapTextWithAnsiDetailed(codeLine, codeWidth);
 +                        for (const part of wrapped) {
-+                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part)));
-+                            lines.push(`${indent}${this.theme.codeBlock(part + padding)}`);
++                            const padding = " ".repeat(Math.max(0, codeWidth - visibleWidth(part.text)));
++                            lines.push(`${indent}${this.theme.codeBlock(markCopyText(part.text) + padding)}${part.separator !== undefined ? copyJoinMarker(part.separator) : ""}`);
 +                        }
                      }
                  }
@@ -960,15 +1189,16 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..ab0e6eec23ab76aacf8c71b5e58d0ea9
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
-index 9db54d907f801e43208a462bca925f2905787b7a..9c7d8757112767552afb732df006c2858610c101 100644
+index 9db54d907f801e43208a462bca925f2905787b7a..e0573b4ed3ed299a31b28fd40075901d5d7a33d3 100644
 --- a/dist/components/select-list.d.ts
 +++ b/dist/components/select-list.d.ts
-@@ -23,6 +23,17 @@ export interface SelectListLayoutOptions {
+@@ -22,6 +22,17 @@ export interface SelectListLayoutOptions {
+     minPrimaryColumnWidth?: number;
      maxPrimaryColumnWidth?: number;
      truncatePrimary?: (context: SelectListTruncatePrimaryContext) => string;
 +    /** Opt-in marker at the final description budget; other lists retain their default. */
 +    descriptionEllipsis?: string;
- }
++}
 +export interface SelectListRenderSnapshot {
 +    selectedIndex: number;
 +    startIndex: number;
@@ -977,10 +1207,9 @@ index 9db54d907f801e43208a462bca925f2905787b7a..9c7d8757112767552afb732df006c285
 +        absoluteIndex: number;
 +        item: SelectItem;
 +    }>;
-+}
+ }
  export declare class SelectList implements Component {
      private items;
-     private filteredItems;
 @@ -35,7 +46,14 @@ export declare class SelectList implements Component {
      onSelectionChange?: (item: SelectItem) => void;
      constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout?: SelectListLayoutOptions);
@@ -997,7 +1226,7 @@ index 9db54d907f801e43208a462bca925f2905787b7a..9c7d8757112767552afb732df006c285
      render(width: number): string[];
      handleInput(keyData: string): void;
 diff --git a/dist/components/select-list.js b/dist/components/select-list.js
-index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..8c1ff1a67dd3718129f81bf93a46f7243d0692f9 100644
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..d12792cfcbe09dd7d90765346ea8edef523dbed6 100644
 --- a/dist/components/select-list.js
 +++ b/dist/components/select-list.js
 @@ -10,6 +10,8 @@ export class SelectList {
@@ -1137,7 +1366,7 @@ index 60d400872183f1f6b754b61d3ccbf6708219215d..c0161b806238f2bd05995136dd7fcacf
      "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
      "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
 diff --git a/dist/stdin-buffer.js b/dist/stdin-buffer.js
-index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..dd1dacc511b9ff5aec86b2354eacfc89e40624db 100644
+index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..6ed3ca60dadad5c0fc24d3fcadcb0e44afaaf65c 100644
 --- a/dist/stdin-buffer.js
 +++ b/dist/stdin-buffer.js
 @@ -18,6 +18,10 @@
@@ -1557,3 +1786,144 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4fe46eccedba2d9e76eb0865c7217b90
              const isImage = isImageLine(line);
              if (!isImage && visibleWidth(line) > width) {
                  // Log all lines to crash file for debugging
+diff --git a/dist/utils.d.ts b/dist/utils.d.ts
+index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..98636ddc038b5597b298df4482def6b899769871 100644
+--- a/dist/utils.d.ts
++++ b/dist/utils.d.ts
+@@ -26,6 +26,13 @@ export declare function extractAnsiCode(str: string, pos: number): {
+  * @returns Array of wrapped lines (NOT padded to width)
+  */
+ export declare function wrapTextWithAnsi(text: string, width: number): string[];
++export interface WrappedTextLine {
++    text: string;
++    /** Exact whitespace omitted before the next visual fragment; undefined at a logical line end. */
++    separator?: string;
++}
++/** Wrap text and retain exact soft-wrap separator metadata. */
++export declare function wrapTextWithAnsiDetailed(text: string, width: number): WrappedTextLine[];
+ /**
+  * Check if a character is whitespace.
+  */
+diff --git a/dist/utils.js b/dist/utils.js
+index 9d00544d0858681339bb780057bda825f8054ca5..9947a62a52455fa98c31eb49905d9249e7eb6016 100644
+--- a/dist/utils.js
++++ b/dist/utils.js
+@@ -586,30 +586,44 @@ function splitIntoTokensWithAnsi(text) {
+  * @returns Array of wrapped lines (NOT padded to width)
+  */
+ export function wrapTextWithAnsi(text, width) {
++    return wrapTextWithAnsiDetailed(text, width).map((line) => line.text);
++}
++/**
++ * Wrap text while retaining the exact whitespace omitted at visual wrap boundaries.
++ * The additional metadata is consumed by application-owned selection serializers;
++ * ordinary render callers continue to use wrapTextWithAnsi().
++ */
++export function wrapTextWithAnsiDetailed(text, width) {
+     if (!text) {
+-        return [""];
++        return [{ text: "" }];
+     }
+     // Handle newlines by processing each line separately
+     // Track ANSI state across lines so styles carry over after literal newlines
+     const inputLines = text.split("\n");
+     const result = [];
+     const tracker = new AnsiCodeTracker();
+-    for (const inputLine of inputLines) {
++    for (let inputLineIndex = 0; inputLineIndex < inputLines.length; inputLineIndex++) {
++        const inputLine = inputLines[inputLineIndex];
+         // Prepend active ANSI codes from previous lines (except for first line)
+         const prefix = result.length > 0 ? tracker.getActiveCodes() : "";
+-        result.push(...wrapSingleLine(prefix + inputLine, width));
++        const wrappedInputLine = wrapSingleLine(prefix + inputLine, width);
++        if (inputLineIndex < inputLines.length - 1) {
++            const last = wrappedInputLine.length - 1;
++            wrappedInputLine[last] = { ...wrappedInputLine[last], separator: "\n" };
++        }
++        result.push(...wrappedInputLine);
+         // Update tracker with codes from this line for next iteration
+         updateTrackerFromText(inputLine, tracker);
+     }
+-    return result.length > 0 ? result : [""];
++    return result.length > 0 ? result : [{ text: "" }];
+ }
+ function wrapSingleLine(line, width) {
+     if (!line) {
+-        return [""];
++        return [{ text: "" }];
+     }
+     const visibleLength = visibleWidth(line);
+     if (visibleLength <= width) {
+-        return [line];
++        return [{ text: line }];
+     }
+     const wrapped = [];
+     const tracker = new AnsiCodeTracker();
+@@ -622,18 +636,19 @@ function wrapSingleLine(line, width) {
+         // Token itself is too long - break it character by character
+         if (tokenVisibleLength > width && !isWhitespace) {
+             if (currentLine) {
++                const separator = stripAnsiForWrap(currentLine).match(/ +$/)?.[0] ?? "";
+                 // Add specific reset for underline only (preserves background)
+                 const lineEndReset = tracker.getLineEndReset();
+                 if (lineEndReset) {
+                     currentLine += lineEndReset;
+                 }
+-                wrapped.push(currentLine);
++                wrapped.push({ text: currentLine, separator });
+                 currentLine = "";
+                 currentVisibleLength = 0;
+             }
+             // Break long token - breakLongWord handles its own resets
+             const broken = breakLongWord(token, width, tracker);
+-            wrapped.push(...broken.slice(0, -1));
++            wrapped.push(...broken.slice(0, -1).map((text) => ({ text, separator: "" })));
+             currentLine = broken[broken.length - 1];
+             currentVisibleLength = visibleWidth(currentLine);
+             continue;
+@@ -642,12 +657,15 @@ function wrapSingleLine(line, width) {
+         const totalNeeded = currentVisibleLength + tokenVisibleLength;
+         if (totalNeeded > width && currentVisibleLength > 0) {
+             // Trim trailing whitespace, then add underline reset (not full reset, to preserve background)
++            const separator = isWhitespace
++                ? " ".repeat(visibleWidth(token))
++                : (stripAnsiForWrap(currentLine).match(/ +$/)?.[0] ?? "");
+             let lineToWrap = currentLine.trimEnd();
+             const lineEndReset = tracker.getLineEndReset();
+             if (lineEndReset) {
+                 lineToWrap += lineEndReset;
+             }
+-            wrapped.push(lineToWrap);
++            wrapped.push({ text: lineToWrap, separator });
+             if (isWhitespace) {
+                 // Don't start new line with whitespace
+                 currentLine = tracker.getActiveCodes();
+@@ -667,10 +685,26 @@ function wrapSingleLine(line, width) {
+     }
+     if (currentLine) {
+         // No reset at end of final line - let caller handle it
+-        wrapped.push(currentLine);
++        wrapped.push({ text: currentLine });
+     }
+     // Trailing whitespace can cause lines to exceed the requested width
+-    return wrapped.length > 0 ? wrapped.map((line) => line.trimEnd()) : [""];
++    return wrapped.length > 0
++        ? wrapped.map((line) => ({ ...line, text: line.text.trimEnd() }))
++        : [{ text: "" }];
++}
++function stripAnsiForWrap(text) {
++    let result = "";
++    let index = 0;
++    while (index < text.length) {
++        const ansi = extractAnsiCode(text, index);
++        if (ansi) {
++            index += ansi.length;
++            continue;
++        }
++        result += text[index];
++        index += 1;
++    }
++    return result;
+ }
+ const PUNCTUATION_REGEX = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/;
+ /**
