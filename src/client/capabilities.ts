@@ -43,6 +43,7 @@ import { flattenProducedFiles, type ProducedFileGroup } from './produced-files.t
 import { explainFailure, withRunningRetry } from './error-advice.ts'
 import { ui, uiLocale } from './locale.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
+import type { ProviderApi } from './provider-config.ts'
 import { mergeClarifyCatalog } from './clarify-shell.ts'
 import { probeClarifyRemote } from './clarify-remote.ts'
 import {
@@ -498,6 +499,7 @@ export class HarnessTuiCapabilities {
   private readonly subagentPresentationAdapter: SubagentPresentationCapabilities
   private readonly rootSessionCatalogProjector = new RootSessionCatalogProjector()
   private modelGeneration = 0
+  private providerGeneration = 0
 
   /**
    * @param ctx - isolated Harness Client Context.
@@ -518,11 +520,18 @@ export class HarnessTuiCapabilities {
       this.dropCommandCatalog(sessionId)
       this.invalidateModels()
     })
-    ctx.remote.$on('llm/adapters-updated', () => { this.invalidateModels() })
-    ctx.remote.$on('settings/document-updated', () => { this.invalidateModels() })
+    ctx.remote.$on('llm/adapters-updated', () => {
+      this.invalidateModels()
+      this.invalidateProviders()
+    })
+    ctx.remote.$on('settings/document-updated', () => {
+      this.invalidateModels()
+      this.invalidateProviders()
+    })
     ctx.on('connection/reset', () => {
       this.commandCatalogs.clear()
       this.invalidateModels()
+      this.invalidateProviders()
       this.rootSessionCatalogProjector.clear()
     })
   }
@@ -545,6 +554,15 @@ export class HarnessTuiCapabilities {
     }
     return this.management
   }
+
+  /** Official configuration faces used by the shared Provider manager. */
+  providerApi(): ProviderApi { return this.api }
+
+  /** Generation invalidated by official Provider/Settings events and connection resets. */
+  providerStateGeneration(): number { return this.providerGeneration }
+
+  /** Drop cached Session model directories after an explicit Provider write. */
+  invalidateModelDirectory(): void { this.invalidateModels() }
 
   /**
    * Read the Profile selected by the launcher.
@@ -1826,6 +1844,10 @@ export class HarnessTuiCapabilities {
     this.modelGeneration += 1
     this.modelCatalogs.clear()
     this.modelLoads.clear()
+  }
+
+  private invalidateProviders(): void {
+    this.providerGeneration += 1
   }
 
   private async readCommandCatalog(

@@ -7,13 +7,13 @@ import type {
   SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { getPath } from '@deepseek-ai/dsh-client-schema-form'
-import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import { ui } from './locale.ts'
 import type { InputOverlayRequest, OverlayPrompts } from './overlays.ts'
+import { normalizeProviderApiKey } from './provider-config.ts'
+import { manageProviders } from './provider-manager.ts'
 
 const DEEPSEEK_PROVIDER = 'deepseek-official'
 const DEEPSEEK_SETTINGS_NAMESPACE = 'llm-deepseek'
-const ENV_ASSIGNMENT = /^[A-Z][A-Z0-9_]*=[^=]/u
 
 type OnboardingApi = Pick<IApiClient, 'credentials' | 'llm' | 'settings'>
 
@@ -24,6 +24,7 @@ export type ProviderOnboardingUnavailableReason =
   | 'credentials-unavailable'
   | 'load-failed'
   | 'provider-inactive'
+  | 'provider-no-models'
 
 /** Current ability to make model requests or repair the official DeepSeek route. */
 export type ProviderReadiness =
@@ -49,7 +50,7 @@ interface ProviderRow {
 }
 
 /** Minimal write-only prompt surface needed by the onboarding controller. */
-export type ProviderOnboardingOverlays = Pick<OverlayPrompts, 'secretTransaction'>
+export type ProviderOnboardingOverlays = OverlayPrompts
 
 function apiKeyEnvOf(namespace: SettingsNamespaceView | undefined, path: readonly string[]): string | undefined {
   if (namespace === undefined) return undefined
@@ -59,8 +60,8 @@ function apiKeyEnvOf(namespace: SettingsNamespaceView | undefined, path: readonl
   return typeof ref === 'string' && ref.trim() !== '' ? ref.trim() : undefined
 }
 
-function providerUsable(row: ProviderRow): boolean {
-  if (!row.entry.active) return false
+function providerUsable(row: ProviderRow, providersWithModels: ReadonlySet<string>): boolean {
+  if (!row.entry.active || !providersWithModels.has(row.entry.provider)) return false
   if (row.entry.provider === DEEPSEEK_PROVIDER
     && row.entry.settingsNs === DEEPSEEK_SETTINGS_NAMESPACE
     && row.entry.settingsPath.length === 0
@@ -77,16 +78,21 @@ function providerUsable(row: ProviderRow): boolean {
 export async function inspectProviderReadiness(api: OnboardingApi): Promise<ProviderReadiness> {
   let providers: ConfigurableProviderView[]
   let namespaces: SettingsNamespaceView[]
+  let providersWithModels: Set<string>
   try {
-    const [providersResponse, settingsResponse] = await Promise.all([
+    const [providersResponse, modelsResponse, settingsResponse] = await Promise.all([
       api.llm.providers({}),
+      api.llm.models({}),
       api.settings.describe({}),
     ])
-    if (!providersResponse.result.ok || !settingsResponse.result.ok) {
+    if (!providersResponse.result.ok || !modelsResponse.result.ok || !settingsResponse.result.ok) {
       return { kind: 'unavailable', reason: 'load-failed' }
     }
     providers = providersResponse.result.value.providers
     namespaces = settingsResponse.result.value.namespaces
+    providersWithModels = new Set(modelsResponse.result.value.groups
+      .filter(group => group.models.length > 0)
+      .map(group => group.id))
   } catch {
     return { kind: 'unavailable', reason: 'load-failed' }
   }
@@ -113,7 +119,7 @@ export async function inspectProviderReadiness(api: OnboardingApi): Promise<Prov
     ...row,
     credential: row.apiKeyEnv === undefined ? undefined : credentials[row.apiKeyEnv],
   }))
-  if (joined.some(providerUsable)) return { kind: 'ready' }
+  if (joined.some(row => providerUsable(row, providersWithModels))) return { kind: 'ready' }
 
   const deepseek = joined.find(row =>
     row.entry.provider === DEEPSEEK_PROVIDER
@@ -121,6 +127,7 @@ export async function inspectProviderReadiness(api: OnboardingApi): Promise<Prov
     && row.entry.settingsPath.length === 0)
   if (deepseek === undefined) return { kind: 'unavailable', reason: 'adapter-absent' }
   if (!deepseek.entry.active) return { kind: 'unavailable', reason: 'provider-inactive' }
+  if (!providersWithModels.has(deepseek.entry.provider)) return { kind: 'unavailable', reason: 'provider-no-models' }
   if (!credentialsAvailable || deepseek.apiKeyEnv === undefined || deepseek.credential === undefined) {
     return { kind: 'unavailable', reason: 'credentials-unavailable' }
   }
@@ -141,31 +148,7 @@ export async function inspectProviderReadiness(api: OnboardingApi): Promise<Prov
 export function normalizeOnboardingApiKey(raw: string):
   | { readonly ok: true; readonly value: string }
   | { readonly ok: false; readonly message: string } {
-  const value = raw.trim()
-  const first = value[0]
-  const quoted = (first === '"' || first === '\'' || first === '`')
-    && value.length > 1
-    && value.endsWith(first)
-  if (ENV_ASSIGNMENT.test(value) || quoted) {
-    return {
-      ok: false,
-      message: ui(
-        '请只粘贴 API Key，不要包含变量名、等号或包裹引号。',
-        'Paste only the API key, without a variable name, equals sign, or wrapping quotes.',
-      ),
-    }
-  }
-  const checked = normalizeApiKey(raw)
-  if (checked.ok) return checked
-  return {
-    ok: false,
-    message: checked.reason === 'empty'
-      ? ui('API Key 不能为空。', 'The API key cannot be empty.')
-      : ui(
-        'API Key 包含不能用于 Provider 请求的字符，请重新粘贴。',
-        'The API key contains characters that cannot be used in a Provider request. Paste it again.',
-      ),
-  }
+  return normalizeProviderApiKey(raw)
 }
 
 /** Human guidance when the native readiness join cannot offer a useful form. */
@@ -177,7 +160,8 @@ export function providerUnavailableNotice(reason: ProviderOnboardingUnavailableR
       'Could not confirm model credential state; use /doctor to inspect Harness.',
     )
     case 'adapter-absent':
-    case 'provider-inactive': return ui(
+    case 'provider-inactive':
+    case 'provider-no-models': return ui(
       '当前没有可用的模型 Provider；请使用 /settings 或 /doctor 检查配置。',
       'No model Provider is currently available; inspect /settings or /doctor.',
     )
@@ -237,6 +221,7 @@ export class ProviderOnboardingGate {
     private readonly overlays: ProviderOnboardingOverlays,
     private readonly notice: (message: string, tone: 'success' | 'warning') => void,
     initial?: ProviderReadiness,
+    private readonly selectCurrentModel?: () => Promise<boolean>,
   ) {
     this.initial = initial
   }
@@ -263,7 +248,54 @@ export class ProviderOnboardingGate {
   private async run(initial?: ProviderReadiness): Promise<ProviderOnboardingResult> {
     const readiness = initial ?? await inspectProviderReadiness(this.api)
     if (readiness.kind === 'ready') return 'ready'
-    if (readiness.kind === 'unavailable') {
+    if (readiness.kind === 'unavailable' && readiness.reason === 'load-failed') {
+      this.notice(providerUnavailableNotice(readiness.reason), 'warning')
+      return 'unavailable'
+    }
+
+    const choice = await this.overlays.select({
+      title: ui('配置模型 Provider', 'Configure a model Provider'),
+      detail: ui('可以使用 DeepSeek 快捷配置，也可以配置其他 catalog 或自定义 Provider。', 'Use the DeepSeek quick setup, or configure another catalog or custom Provider.'),
+      choices: [
+        ...(readiness.kind === 'needs-credential' ? [{
+          id: 'deepseek',
+          label: ui('DeepSeek 官方 API Key…', 'Official DeepSeek API key…'),
+          description: ui('最快开始使用；密钥只写入 Harness Credentials', 'Fastest setup; the key is written only to Harness Credentials'),
+        }] : []),
+        {
+          id: 'providers',
+          label: ui('选择或添加其他 Provider…', 'Choose or add another Provider…'),
+          description: ui('配置 endpoint、协议、凭据和模型', 'Configure endpoint, protocol, credential, and models'),
+        },
+        {
+          id: 'later',
+          label: ui('稍后配置', 'Configure later'),
+          description: ui('保留当前消息，下次发送时再提示', 'Keep the message and ask again on the next send'),
+        },
+      ],
+    })
+    if (choice === undefined || choice.id === 'later') {
+      this.notice(onboardingDeferredNotice(), 'warning')
+      return 'deferred'
+    }
+    if (choice.id === 'providers') {
+      await manageProviders(this.overlays, this.api, {
+        notice: (message, tone) => { this.notice(message, tone === 'success' ? 'success' : 'warning') },
+        allowDelete: false,
+      })
+      const refreshed = await inspectProviderReadiness(this.api)
+      if (refreshed.kind === 'ready') {
+        if (this.selectCurrentModel !== undefined && !await this.selectCurrentModel()) {
+          this.notice(onboardingDeferredNotice(), 'warning')
+          return 'deferred'
+        }
+        this.notice(ui('Provider 已可用，可以开始发送消息。', 'A Provider is ready; you can send messages.'), 'success')
+        return 'ready'
+      }
+      this.notice(onboardingDeferredNotice(), 'warning')
+      return 'deferred'
+    }
+    if (readiness.kind !== 'needs-credential') {
       this.notice(providerUnavailableNotice(readiness.reason), 'warning')
       return 'unavailable'
     }

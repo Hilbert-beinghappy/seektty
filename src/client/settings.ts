@@ -350,6 +350,7 @@ export function hasDedicatedSettingsEditor(namespace: string, path: readonly str
   if (namespace === 'agent-default-model') {
     return samePath(path, ['provider']) || samePath(path, ['model']) || samePath(path, ['reasoningEffort'])
   }
+  if (namespace === 'llm-pi-ai' && samePath(path, ['providers'])) return true
   if (namespace === 'permission' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
   if (namespace === 'agent-presets' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (
