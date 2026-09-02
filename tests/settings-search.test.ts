@@ -107,6 +107,8 @@ describe('settings field index', () => {
     expect(fieldIds).not.toContain(`field:${LOCALE_SETTINGS_NAMESPACE}:${JSON.stringify([LOCALE_PREFERENCE_FIELD])}`)
     expect(fieldIds).not.toContain(`field:tui-plugin-marketplace:${JSON.stringify(['sources'])}`)
     expect(fieldIds).not.toContain(`field:${TUI_APPEARANCE_SETTINGS_NAMESPACE}:${JSON.stringify(['customThemes'])}`)
+    expect(hasDedicatedSettingsEditor('llm-pi-ai', ['providers'])).toBe(true)
+    expect(hasDedicatedSettingsEditor('llm-pi-ai', ['unrelated'])).toBe(false)
 
     expect(fieldIds).toContain(`field:${TUI_BEHAVIOR_SETTINGS_NAMESPACE}:${JSON.stringify(['toolCards'])}`)
     expect(fieldIds).toContain(`field:tui-plugin-marketplace:${JSON.stringify(['extra'])}`)

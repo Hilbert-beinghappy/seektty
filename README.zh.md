@@ -166,11 +166,21 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 | --- | --- |
 | ![SeekTTY 暗色首次 API Key 引导](assets/seektty-onboarding-dark.png) | ![SeekTTY 亮色首次 API Key 引导](assets/seektty-onboarding-light.png) |
 
-当前 Profile 没有可用模型 Provider，且 DeepSeek 官方 Provider 暴露了可写但缺失的凭据时，SeekTTY 会打开居中的只写输入框。环境凭据、Harness 已存凭据，以及环境认证或无 Key Provider 都会跳过该引导。
+当前 Profile 没有可用模型 Provider 时，SeekTTY 会提供 DeepSeek 官方快捷配置、共用 Provider 管理器和**稍后配置**。环境凭据、Harness 已存凭据，以及活跃的环境认证或无 Key Provider 都会跳过该引导。通用 Provider 保存后，必须明确选定当前 Session 模型，待发送请求才会继续。
 
 输入内容始终显示为掩码，并直接交给 Harness `credentials.set`。SeekTTY 不会读回密钥，也不会把它放入 Settings、日志、截图或 Session 数据。保存时不会发起可能计费的验证请求；认证错误由第一次真实请求通过正常 Provider 路径报告。
 
-按 Escape 可稍后配置，同时继续使用 `/settings`、`/plugin` 等本地界面。待发送文字和附件都会保留，保存成功后自动继续原请求。如果凭据无法检查或写入，SeekTTY 会提示使用 `/settings` 与 `/doctor`，而不是显示无法使用的表单。
+按 Escape 可稍后配置，同时继续使用 `/settings`、`/plugin` 等本地界面。待发送文字和附件都会保留，配置完成后自动继续原请求。如果 Provider 状态无法检查，SeekTTY 会提示使用 `/settings` 与 `/doctor`，而不是显示无法使用的表单。
+
+## Provider 管理
+
+可从 `/model` 的**管理 Provider…**进入，也可从 `/settings` 的**模型与 Agent**进入。两个入口与首次引导共用同一套 Harness 流程：合并 `llm.providers`、`settings.describe` 和不含凭据值的 `credentials.describe`；先执行带 revision 保护的 Settings mutation，再可选调用 `credentials.set`；最后重新读取 Settings、Credential 元数据、`llm.providers` 与 `llm.models`，全部匹配后才报告完整成功。传输结果若无法通过回读确认，只会标记为状态未知，不会盲目重试。仅保存配置不会暗中修改当前 Session 或新 Session 默认模型。
+
+自定义 Provider 仅使用已安装 `llm-pi-ai` adapter 在 schema 中明确描述的 `providers` 字典；路由 ID 遵循该字典 schema。本界面会去除首尾空白，并额外排除空 ID、终端控制字符和 SeekTTY 内部菜单 ID。在官方 dsh `0.1.1-rc.2` 中，它公开的协议选项是 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages。所有协议都可手工录入模型；adapter 支持时可通过 `llm.discoverModels` 发现。获取到模型列表只证明配置发现成功，第一次真实请求才是认证和推理检查。
+
+API Key 始终通过掩码控件收集，且只交给 Harness Credentials。Credential Ref 使用官方 `[A-Za-z_][A-Za-z0-9_]*` 语法。来自环境或文件的只读凭据只显示为外部管理；凭据元数据不可读时，Key 更新按 fail-closed 禁用。任何新接入且需要写入新 Key 的 Ref，都必须在 Settings 变更前再次确认为“尚未配置且可写”。已配置 Ref 只能在界面明确展示 endpoint 与 Ref 后由用户确认复用，且不会读取或覆盖其中的值；更新当前已绑定 Ref 内的 Key 必须单独保存，不能与其他 Settings 变化合并。同时修改 endpoint 与 Key 时始终使用不同、未配置且可写的新 Ref，因此 Settings 先切换到不可能含有旧 Key 的 Ref，再写入新 Key。Settings 与 Credentials 是两次独立的官方调用，不是原子事务。模型编辑保留 schema 描述的完整模型项，包括输入模态、推理强度和协议兼容字段。
+
+删除仅适用于既非权威当前 Session 路由、也非默认路由的用户层自定义 Provider；即使当前路由未出现在模型目录中也会受到保护。确认后会重新读取引用与所有权，mutation 后还会再次读取已删除 profile 及当前／默认引用。删除前检查与 Settings mutation 并非原子操作：并发选择仍可能在两者之间建立新引用，此时 SeekTTY 会报告竞态，而不会声称删除已完整核实。Credential 会有意保留，历史 Session 也不会改写。已保存的 Provider ID 不支持原地重命名。Catalog Provider 和专有认证仍受已安装 Harness adapter 实际公开能力限制；该界面不是协议转换器，也不代表所有厂商专有 API 均已认证。
 
 ## 斜杠命令
 
@@ -199,6 +209,8 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 ## 设置中心
 
 `/settings` 不再平铺技术命名空间和字段，而是按产品用途组织为：**外观**、**欢迎页**、**鼠标与滚动**、**输入与快捷键**、**模型与 Agent**、**权限与安全**、**插件与扩展**、**语言与系统**。现有 Harness 命名空间和持久化值保持不变；兼容场景仍可使用 `/settings <namespace>` 直接打开技术命名空间。
+
+**模型与 Agent**分类包含共用 Provider 管理器和现有的默认模型选择器。未知的非 Secret Settings 字段仍可从通用 schema 编辑器访问；Provider 管理不会替换或隐藏无关的 `llm-pi-ai` 字段。
 
 专用编辑器遵循同一返回规则：列表操作后留在列表，叶子字段完成后返回一层，Esc 每次只退一层，只有保存／取消才退出草稿事务；新增、删除和移动后保持最合理的焦点。欢迎页的 Logo、Fastfetch、自定义信息行与安全模块排序均采用该规则。
 

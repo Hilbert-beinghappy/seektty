@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setUiLocale } from '../src/client/locale.ts'
-import type { InputOverlayRequest, SecretTransactionRequest } from '../src/client/overlays.ts'
+import type { InputOverlayRequest, SecretTransactionRequest, SelectOverlayRequest } from '../src/client/overlays.ts'
 import {
   dispatchAfterProviderOnboarding,
   inspectProviderReadiness,
   normalizeOnboardingApiKey,
   ProviderOnboardingGate,
   type ProviderOnboardingResult,
+  type ProviderOnboardingOverlays,
   type ProviderReadiness,
 } from '../src/client/provider-onboarding.ts'
 
@@ -43,6 +44,16 @@ function transactionHarness(
   }
 }
 
+function gateOverlays(
+  secretInput: (request: InputOverlayRequest) => Promise<string | undefined>,
+  selection = 'deepseek',
+): ProviderOnboardingOverlays {
+  return {
+    select: async (request: SelectOverlayRequest) => request.choices.find(choice => choice.id === selection),
+    secretTransaction: transactionHarness(secretInput),
+  } as unknown as ProviderOnboardingOverlays
+}
+
 const provider = {
   provider: 'deepseek-official',
   displayName: 'DeepSeek',
@@ -71,6 +82,7 @@ interface ApiOptions {
   readonly credentialSource?: string
   readonly credentialsFail?: boolean
   readonly providerLoadFail?: boolean
+  readonly modelProviders?: readonly string[]
   readonly setResponses?: readonly ('ok' | 'fail')[]
   readonly setErrorMessage?: string
 }
@@ -103,6 +115,14 @@ function apiHarness(options: ApiOptions = {}): {
         if (options.providerLoadFail === true) throw new Error('provider directory down')
         return ok({ providers: [...(options.providers ?? [provider])] })
       }),
+      models: vi.fn(async () => ok({
+        groups: (options.modelProviders ?? ['deepseek-official']).map(id => ({
+          id,
+          name: id,
+          models: [{ id: 'model', name: 'Model' }],
+        })),
+        failures: [],
+      })),
     },
     settings: {
       describe: vi.fn(async () => ok({
@@ -165,6 +185,7 @@ describe('Provider readiness', () => {
           active: true,
         },
       ],
+      modelProviders: ['bedrock'],
     })
     await expect(inspectProviderReadiness(api)).resolves.toEqual({ kind: 'ready' })
   })
@@ -172,6 +193,7 @@ describe('Provider readiness', () => {
   it.each([
     ['adapter-absent', { providers: [] }],
     ['provider-inactive', { providers: [{ ...provider, active: false }] }],
+    ['provider-no-models', { modelProviders: [] }],
     ['credentials-unavailable', { namespaceValue: {} }],
     ['credential-read-only', { credentialWritable: false }],
     ['credentials-unavailable', { credentialsFail: true }],
@@ -222,7 +244,7 @@ describe('Provider onboarding gate', () => {
     const notices: string[] = []
     const gate = new ProviderOnboardingGate(
       api,
-      { secretTransaction: transactionHarness(secretInput) },
+      gateOverlays(secretInput),
       message => { notices.push(message) },
       missing,
     )
@@ -254,7 +276,7 @@ describe('Provider onboarding gate', () => {
         requests.push(request)
         return 'sk-second-valid'
       })
-    const gate = new ProviderOnboardingGate(api, { secretTransaction: transactionHarness(secretInput) }, () => undefined, missing)
+    const gate = new ProviderOnboardingGate(api, gateOverlays(secretInput), () => undefined, missing)
 
     await expect(gate.ensure()).resolves.toBe('ready')
     expect(secretInput).toHaveBeenCalledTimes(3)
@@ -268,15 +290,58 @@ describe('Provider onboarding gate', () => {
     const { api, set } = apiHarness()
     let settle: ((value: string | undefined) => void) | undefined
     const secretInput = vi.fn(() => new Promise<string | undefined>((resolve) => { settle = resolve }))
-    const gate = new ProviderOnboardingGate(api, { secretTransaction: transactionHarness(secretInput) }, () => undefined, missing)
+    const gate = new ProviderOnboardingGate(api, gateOverlays(secretInput), () => undefined, missing)
 
     const first = gate.ensure()
     const second = gate.ensure()
     expect(second).toBe(first)
+    await Promise.resolve()
     expect(secretInput).toHaveBeenCalledOnce()
     settle?.(undefined)
     await expect(Promise.all([first, second])).resolves.toEqual(['deferred', 'deferred'])
     expect(set).not.toHaveBeenCalled()
+  })
+
+  it('offers configure-later before collecting a DeepSeek key', async () => {
+    const { api, set } = apiHarness()
+    const secretInput = vi.fn(async () => 'never-read')
+    const gate = new ProviderOnboardingGate(api, gateOverlays(secretInput, 'later'), () => undefined, missing)
+    await expect(gate.ensure()).resolves.toBe('deferred')
+    expect(secretInput).not.toHaveBeenCalled()
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [true, 'ready'],
+    [false, 'deferred'],
+  ] as const)('requires an explicit current model after generic Provider setup: %s', async (selected, result) => {
+    const { api } = apiHarness()
+    const anotherProvider = {
+      provider: 'opencode-go',
+      displayName: 'OpenCode Go',
+      settingsNs: 'llm-pi-ai',
+      settingsPath: ['providers', 'opencode-go'],
+      active: true,
+    }
+    vi.mocked(api.llm.providers)
+      .mockResolvedValueOnce(ok({ providers: [provider] }))
+      .mockResolvedValueOnce(ok({ providers: [provider, anotherProvider] }))
+    vi.mocked(api.llm.models).mockResolvedValueOnce(ok({
+      groups: [{ id: 'opencode-go', name: 'OpenCode Go', models: [{ id: 'model', name: 'Model' }] }],
+      failures: [],
+    }))
+    const select = vi.fn(async (request: SelectOverlayRequest) => request.title.includes('配置模型')
+      ? request.choices.find(choice => choice.id === 'providers')
+      : undefined)
+    const overlays = {
+      ...gateOverlays(async () => undefined),
+      select,
+    }
+    const selectCurrentModel = vi.fn(async () => selected)
+    const gate = new ProviderOnboardingGate(api, overlays, () => undefined, missing, selectCurrentModel)
+
+    await expect(gate.ensure()).resolves.toBe(result)
+    expect(selectCurrentModel).toHaveBeenCalledOnce()
   })
 })
 

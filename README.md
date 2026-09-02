@@ -166,11 +166,21 @@ Permission changes use the native Host command and its execution result. The men
 | --- | --- |
 | ![SeekTTY dark first-run API key prompt](assets/seektty-onboarding-dark.png) | ![SeekTTY light first-run API key prompt](assets/seektty-onboarding-light.png) |
 
-When the active Profile has no usable model Provider and the official DeepSeek Provider exposes a writable missing credential, SeekTTY opens a centered, write-only prompt. Existing environment credentials, stored Harness credentials, and ambient or keyless Providers skip it.
+When the active Profile has no usable model Provider, SeekTTY offers the official DeepSeek quick setup, the shared Provider manager, or **Configure later**. Existing environment credentials, stored Harness credentials, and active ambient or keyless Providers skip it. After a generic Provider is saved, you explicitly choose the current Session model before the pending request continues.
 
 Input is masked and passed directly to Harness `credentials.set`. SeekTTY does not read it back or put it in Settings, logs, screenshots, or Session data. Saving does not make a paid validation request; authentication errors follow the normal Provider path on the first real request.
 
-Escape defers setup without blocking local surfaces such as `/settings` or `/plugin`. Pending text and attachments are preserved, and the request continues automatically after a successful save. If credentials cannot be inspected or written, SeekTTY points to `/settings` and `/doctor` instead of showing an unusable form.
+Escape defers setup without blocking local surfaces such as `/settings` or `/plugin`. Pending text and attachments are preserved, and the request continues automatically after successful setup. If Provider state cannot be inspected, SeekTTY points to `/settings` and `/doctor` instead of showing an unusable form.
+
+## Provider management
+
+Open **Manage Providers…** from `/model`, or from **Models and Agent** in `/settings`. Both entries and first-run setup use the same Harness-backed flow. It joins `llm.providers`, `settings.describe`, and value-free `credentials.describe` results; writes a revision-protected Settings mutation before an optional `credentials.set`; then re-reads Settings, credential metadata, `llm.providers`, and `llm.models` before reporting full success. A transport result that cannot be confirmed by readback is reported as unknown and is not blindly retried. Saving configuration never silently changes the current Session or the default for new Sessions.
+
+The custom Provider path is the installed `llm-pi-ai` adapter's schema-described `providers` dictionary; route IDs follow that dictionary schema. This UI trims surrounding whitespace and excludes blank IDs, terminal-control characters, and SeekTTY's reserved menu ID. With official dsh `0.1.1-rc.2`, its exposed protocol choices are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages. Add models manually for any protocol, or use `llm.discoverModels` where the installed adapter supports discovery. A successful model listing proves configuration discovery only; the first real request remains the authentication and inference check.
+
+API keys are collected with a masked control and stored only through Harness Credentials. Credential Refs use the official `[A-Za-z_][A-Za-z0-9_]*` grammar. Read-only environment/file credentials are shown as externally managed, and key updates fail closed when metadata cannot be read. Any newly attached Ref receiving a new key must still be unconfigured and writable immediately before Settings is changed. A configured Ref can only be explicitly reused after its endpoint and Ref are shown; its value is neither read nor overwritten. Updating the key in the currently attached configured Ref is a key-only save and cannot be combined with other Settings changes. Changing an endpoint and key together always uses a different, unconfigured, writable Ref, so the Settings mutation switches to a Ref that cannot contain the old key before the new key is written. Settings and Credentials remain separate official calls, not an atomic transaction. Model edits preserve the complete schema-described model entry, including modalities, reasoning efforts, and compatibility switches.
+
+Provider deletion is limited to a user-owned custom Settings entry that is neither the authoritative current Session route nor the default route, even when that current route is absent from the displayed model directory. References and ownership are re-read after confirmation, then the removed profile and current/default references are read again after mutation. The precheck and Settings mutation are not atomic: a concurrent selection can still create a reference in between, in which case SeekTTY reports the race instead of claiming fully verified deletion. Credentials are deliberately retained, and historical Sessions remain untouched. Saved Provider IDs cannot be renamed in place. Catalog Providers and proprietary authentication remain limited to capabilities actually described by the installed Harness adapter—this UI is not a protocol translator or a claim that every vendor-specific API has been certified.
 
 ## Slash commands
 
@@ -199,6 +209,8 @@ Full-mode clipboard copy encodes text once as UTF-8. Windows uses a fixed PowerS
 ## Settings center
 
 `/settings` is organized by product intent instead of exposing a flat namespace/field index: **Appearance**, **Welcome page**, **Mouse and scrolling**, **Input and shortcuts**, **Models and Agent**, **Permissions and security**, **Plugins and extensions**, and **Language and system**. Existing Harness namespaces and persisted values are unchanged; `/settings <namespace>` remains available for direct compatibility access.
+
+The **Models and Agent** category includes the shared Provider manager and the existing default-model selector. Unknown non-secret Settings fields remain available through the universal schema-backed editor; Provider management does not replace or hide unrelated `llm-pi-ai` fields.
 
 Navigation follows one rule across the dedicated editors: list operations stay in their list, leaf changes return one level, Escape goes back exactly one level, and only Save/Cancel exits a draft transaction. Add, delete, and move operations retain the nearest useful focus. The Welcome Logo, Fastfetch settings, custom rows, and safe-module ordering all follow this rule.
 

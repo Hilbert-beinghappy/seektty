@@ -704,6 +704,34 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       overlays,
       (message, tone) => { setNotice(message, tone) },
       initialProviderReadiness,
+      async () => {
+        capabilities.invalidateModelDirectory()
+        const directory = await capabilities.listModels()
+        const selected = await overlays.select({
+          title: ui('选择当前会话模型', 'Choose the current session model'),
+          detail: ui(
+            'Provider 已保存。选择一个模型后，待发送消息才会继续。',
+            'The Provider is saved. Choose a model before the pending message continues.',
+          ),
+          choices: [
+            ...directory.options.map(option => ({
+              id: option.id,
+              label: option.label,
+              description: option.description,
+            })),
+            ...directory.failures.map((failure, index) => ({
+              id: `__failure_${String(index)}`,
+              label: ui('Provider 目录不可用', 'Provider catalog unavailable'),
+              disabledReason: failure,
+            })),
+          ],
+        })
+        if (selected === undefined) return false
+        const option = directory.options.find(candidate => candidate.id === selected.id)
+        if (option === undefined) return false
+        if (!option.current) await capabilities.selectModel(option.selection)
+        return true
+      },
     )
 
     const applyTerminalTitle = (): void => {

@@ -120,6 +120,7 @@ import {
 } from './welcome-settings.ts'
 import { editWelcomeSettings } from './welcome-editor.ts'
 import { normalizeOnboardingApiKey } from './provider-onboarding.ts'
+import { manageProviders, type ProviderManagerResult } from './provider-manager.ts'
 import {
   captureClipboardImage,
   cleanupClipboardImageWorkspace,
@@ -1416,28 +1417,46 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async model(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
-    const directory = await this.capabilities.listModels()
-    const choices: OverlayChoice[] = directory.options.map(option => ({
-      id: option.id,
-      label: `${currentMark(option.current)}${option.label}`,
-      description: option.description,
-    }))
-    choices.push(...directory.failures.map((failure, index) => ({
-      id: `__failure_${String(index)}`,
-      label: ui('Provider 目录不可用', "Provider catalog unavailable"),
-      disabledReason: failure,
-    })))
+    let directory = await this.capabilities.listModels()
     if (!directory.routable) {
       this.host.notice(ui('当前模型路由不可用；请选择一个已加载 Provider 的模型', "The current model route is unavailable; choose a model from a loaded Provider"), 'warning')
     }
     const options = { width: '90%', maxHeight: '90%', anchor: 'center', margin: 1 } as const
     await this.overlayFlow(overlays, async (navigation) => {
-      await navigation.selectPage({
+      const choices = (): OverlayChoice[] => [
+        {
+          id: '__manage_providers__',
+          label: ui('管理 Provider…', 'Manage Providers…'),
+          description: ui('添加、编辑、发现模型或删除用户 Provider', 'Add, edit, discover models, or delete a user Provider'),
+        },
+        ...directory.options.map(option => ({
+          id: option.id,
+          label: `${currentMark(option.current)}${option.label}`,
+          description: option.description,
+        })),
+        ...directory.failures.map((failure, index) => ({
+          id: `__failure_${String(index)}`,
+          label: ui('Provider 目录不可用', "Provider catalog unavailable"),
+          disabledReason: failure,
+        })),
+      ]
+      const request = (): SelectOverlayRequest => ({
         title: ui('模型', "Model"),
         detail: ui('选择当前会话使用的 Provider 和模型；推理强度由右侧独立入口调整', "Choose the Provider and model for the current session; adjust reasoning separately from the adjacent control"),
-        choices,
+        choices: choices(),
         options,
-      }, async (selected) => {
+      })
+      const handle = async (selected: OverlayChoice): Promise<void> => {
+        if (selected.id === '__manage_providers__') {
+          const changed = await this.providerManager(navigation)
+          if (changed === 'changed') {
+            this.capabilities.invalidateModelDirectory()
+            directory = await this.capabilities.listModels()
+            this.host.refreshHeader()
+          }
+          if (!navigation.signal.aborted) navigation.replaceSelectPage(request(), handle)
+          return
+        }
         const option = directory.options.find(candidate => candidate.id === selected.id)
         if (option === undefined) return
         if (option.current) {
@@ -1447,8 +1466,36 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         await this.capabilities.selectModel(option.selection)
         this.host.refreshHeader()
         this.host.notice(ui(`模型已切换为 ${option.selection.provider}/${option.selection.model}`, `Model changed to ${option.selection.provider}/${option.selection.model}`), 'success')
-      })
+      }
+      await navigation.selectPage(request(), handle)
     }, options)
+  }
+
+  private async providerManager(overlays: OverlayPrompts): Promise<ProviderManagerResult> {
+    const reloadProtectedProviders = async (): Promise<readonly string[] | undefined> => {
+      const [currentResult, defaultResult] = await Promise.all([
+        this.capabilities.loadModels()
+          .then(directory => ({ known: true as const, provider: directory.current.provider }), () => ({ known: false as const })),
+        this.capabilities.managementBridge().settings
+          .describe('agent-default-model')
+          .then(documents => ({ known: true as const, document: documents[0] }), () => ({ known: false as const })),
+      ])
+      if (!currentResult.known || !defaultResult.known) return undefined
+      const defaultDocument = defaultResult.document
+      const defaultProvider = typeof defaultDocument?.value === 'object' && defaultDocument.value !== null
+        && typeof (defaultDocument.value as { provider?: unknown }).provider === 'string'
+        ? (defaultDocument.value as { provider: string }).provider
+        : undefined
+      return [...new Set([currentResult.provider, defaultProvider].filter((value): value is string => value !== undefined))]
+    }
+    const protectedProviders = await reloadProtectedProviders()
+    return manageProviders(overlays, this.capabilities.providerApi(), {
+      notice: (message, tone) => { this.host.notice(message, tone) },
+      allowDelete: protectedProviders !== undefined,
+      ...(protectedProviders === undefined ? {} : { protectedProviders }),
+      reloadProtectedProviders,
+      stateGeneration: () => this.capabilities.providerStateGeneration(),
+    })
   }
 
   /** Change only the current model route's reasoning effort. */
@@ -2803,6 +2850,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           label: ui('选择新会话默认模型…', "Choose default model for new sessions…"),
           description: ui('动态 Provider、模型与推理强度；不会修改当前会话', "Dynamic Provider, model, and reasoning effort; does not change the current session"),
         }]
+      case 'llm-pi-ai':
+        return [{
+          id: '__settings_providers__',
+          label: ui('管理 Provider…', 'Manage Providers…'),
+          description: ui('添加、编辑、发现模型或删除用户 Provider', 'Add, edit, discover models, or delete a user Provider'),
+        }]
       case 'permission':
         return [{
           id: '__settings_default_permission__',
@@ -2848,6 +2901,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       }
       case '__settings_language__': await this.language('', overlays, document); return
       case '__settings_default_model__': await this.editDefaultModel(overlays, document); return
+      case '__settings_providers__': await this.providerManager(overlays); return
       case '__settings_default_permission__': await this.editDefaultPermission(overlays, document); return
       case '__settings_default_mode__': await this.editDefaultMode(overlays, document); return
       case '__settings_plugin_sources__': await this.pluginSources('', overlays); return

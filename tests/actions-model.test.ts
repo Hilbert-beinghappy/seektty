@@ -59,6 +59,160 @@ function option(overrides: Partial<TuiModelOption> = {}): TuiModelOption {
 }
 
 describe('separate model and reasoning controls', () => {
+  it('opens Provider management from /model without selecting a model', async () => {
+    const target = option({ current: true })
+    let modelRequest: SelectOverlayRequest | undefined
+    const select = vi.fn(async () => undefined)
+    const navigation = {
+      ...prompts(select),
+      signal: new AbortController().signal,
+      selectPage: vi.fn(async (request: SelectOverlayRequest, onSelect: (choice: OverlayChoice) => void | Promise<void>) => {
+        modelRequest = request
+        const choice = request.choices.find(candidate => candidate.id === '__manage_providers__')
+        if (choice !== undefined) await onSelect(choice)
+      }),
+      replaceSelectPage: vi.fn(),
+      updateChoices: vi.fn(),
+      back: vi.fn(),
+      finish: vi.fn(),
+    } satisfies OverlayNavigation
+    const selectModel = vi.fn(async () => undefined)
+    const providerApi = {
+      llm: { providers: vi.fn(async () => ({ result: { ok: true, value: { providers: [] } } })) },
+      settings: { describe: vi.fn(async () => ({ result: { ok: true, value: { writable: true, namespaces: [] } } })) },
+      credentials: {},
+    }
+    const capabilities = {
+      listModels: async () => ({ options: [target], failures: [], routable: true }),
+      loadModels: async () => ({
+        current: target.selection, routable: true, groups: [], failures: [],
+      }),
+      selectModel,
+      managementBridge: () => ({ settings: { describe: async () => [] } }),
+      providerApi: () => providerApi,
+      providerStateGeneration: () => 0,
+    } as unknown as HarnessTuiCapabilities
+    const host = actionHost(navigation)
+
+    await new TuiActions(capabilities, host).execute('model', '')
+
+    expect(modelRequest?.choices[0]?.id).toBe('__manage_providers__')
+    expect(select).toHaveBeenCalledOnce()
+    expect(selectModel).not.toHaveBeenCalled()
+  })
+
+  it('hides Provider deletion when the current-route protection lookup fails', async () => {
+    const target = option({ current: true })
+    let editChoices: readonly OverlayChoice[] = []
+    let selectCount = 0
+    const select = vi.fn(async (request: SelectOverlayRequest) => {
+      selectCount += 1
+      if (selectCount === 1) return request.choices.find(choice => choice.id === 'acme')
+      if (selectCount === 2) {
+        editChoices = request.choices
+        return undefined
+      }
+      return undefined
+    })
+    const navigation = {
+      ...prompts(select),
+      signal: new AbortController().signal,
+      selectPage: vi.fn(async (request: SelectOverlayRequest, onSelect: (choice: OverlayChoice) => void | Promise<void>) => {
+        const choice = request.choices.find(candidate => candidate.id === '__manage_providers__')
+        if (choice !== undefined) await onSelect(choice)
+      }),
+      replaceSelectPage: vi.fn(),
+      updateChoices: vi.fn(),
+      back: vi.fn(),
+      finish: vi.fn(),
+    } satisfies OverlayNavigation
+    const listModels = vi.fn().mockResolvedValue({ options: [target], failures: [], routable: true })
+    const namespace = {
+      ns: 'llm-pi-ai',
+      schema: {},
+      value: { providers: { acme: { models: [{ id: 'model' }] } } },
+      user: { providers: { acme: { models: [{ id: 'model' }] } } },
+      base: {},
+      applies: 'live',
+      secrets: [],
+      revision: 1,
+    }
+    const capabilities = {
+      listModels,
+      loadModels: vi.fn(async () => { throw new Error('route state unavailable') }),
+      managementBridge: () => ({ settings: { describe: async () => [] } }),
+      providerApi: () => ({
+        llm: { providers: async () => ({ result: { ok: true, value: { providers: [{
+          provider: 'acme', displayName: 'Acme', settingsNs: 'llm-pi-ai',
+          settingsPath: ['providers', 'acme'], active: true, declared: true,
+        }] } } }) },
+        settings: { describe: async () => ({ result: { ok: true, value: { writable: true, namespaces: [namespace] } } }) },
+        credentials: { describe: async () => ({ result: { ok: true, value: { credentials: {} } } }) },
+      }),
+      providerStateGeneration: () => 0,
+    } as unknown as HarnessTuiCapabilities
+
+    await new TuiActions(capabilities, actionHost(navigation)).execute('model', '')
+
+    expect(editChoices.some(choice => choice.id === 'delete')).toBe(false)
+  })
+
+  it('protects a current Provider even when its route is absent from the model directory', async () => {
+    const target = option({ current: false })
+    let editChoices: readonly OverlayChoice[] = []
+    let selectCount = 0
+    const select = vi.fn(async (request: SelectOverlayRequest) => {
+      selectCount += 1
+      if (selectCount === 1) return request.choices.find(choice => choice.id === 'acme')
+      if (selectCount === 2) {
+        editChoices = request.choices
+        return undefined
+      }
+      return undefined
+    })
+    const navigation = {
+      ...prompts(select),
+      signal: new AbortController().signal,
+      selectPage: vi.fn(async (request: SelectOverlayRequest, onSelect: (choice: OverlayChoice) => void | Promise<void>) => {
+        const choice = request.choices.find(candidate => candidate.id === '__manage_providers__')
+        if (choice !== undefined) await onSelect(choice)
+      }),
+      replaceSelectPage: vi.fn(),
+      updateChoices: vi.fn(),
+      back: vi.fn(),
+      finish: vi.fn(),
+    } satisfies OverlayNavigation
+    const namespace = {
+      ns: 'llm-pi-ai', schema: {},
+      value: { providers: { acme: { models: [{ id: 'missing-model' }] } } },
+      user: { providers: { acme: { models: [{ id: 'missing-model' }] } } },
+      base: {}, applies: 'live', secrets: [], revision: 1,
+    }
+    const capabilities = {
+      listModels: async () => ({ options: [target], failures: [], routable: false }),
+      loadModels: async () => ({
+        current: { provider: 'acme', model: 'missing-model' },
+        routable: false,
+        groups: [{ id: 'deepseek', name: 'DeepSeek', models: [] }],
+        failures: [{ id: 'acme', name: 'Acme', message: 'route unavailable' }],
+      }),
+      managementBridge: () => ({ settings: { describe: async () => [] } }),
+      providerApi: () => ({
+        llm: { providers: async () => ({ result: { ok: true, value: { providers: [{
+          provider: 'acme', displayName: 'Acme', settingsNs: 'llm-pi-ai',
+          settingsPath: ['providers', 'acme'], active: false, declared: true,
+        }] } } }) },
+        settings: { describe: async () => ({ result: { ok: true, value: { writable: true, namespaces: [namespace] } } }) },
+        credentials: { describe: async () => ({ result: { ok: true, value: { credentials: {} } } }) },
+      }),
+      providerStateGeneration: () => 0,
+    } as unknown as HarnessTuiCapabilities
+
+    await new TuiActions(capabilities, actionHost(navigation)).execute('model', '')
+
+    expect(editChoices.find(choice => choice.id === 'delete')?.disabledReason).toContain('当前或默认')
+  })
+
   it('changes the model without opening or writing a reasoning selection', async () => {
     const target = option()
     const select = vi.fn(async () => undefined)
