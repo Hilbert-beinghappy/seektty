@@ -18,11 +18,13 @@ import {
   saveProviderConfig,
   validProviderCredentialRef,
   validProviderId,
+  verifyProviderWrite,
   type ProviderApi,
   type ProviderConfigRow,
   type ProviderModelDraft,
   type ProviderSaveResult,
 } from './provider-config.ts'
+import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 
 export type ProviderManagerResult = 'changed' | 'unchanged'
 
@@ -315,21 +317,29 @@ async function credentialMetadata(
   }
 }
 
-async function freshCredentialRef(
+type CredentialIntent =
+  | { readonly kind: 'reuse'; readonly ref: string; readonly confirmedEndpoint: string | undefined }
+  | { readonly kind: 'write'; readonly ref: string; readonly value: string; readonly requireUnconfigured: boolean }
+
+async function chooseCredentialRef(
   overlays: OverlayPrompts,
   api: ProviderApi,
   provider: string,
-  currentRef: string,
+  endpoint: string | undefined,
+  currentRef: string | undefined,
+  allowReuse: boolean,
   notice: ProviderManagerOptions['notice'],
-): Promise<string | undefined> {
+): Promise<CredentialIntent | undefined> {
   const conventional = deriveProviderKeyRef(provider)
-  const initialValue = conventional === currentRef ? `${conventional}_NEXT` : conventional
+  const initialValue = currentRef === undefined || conventional !== currentRef
+    ? conventional
+    : `${conventional}_NEXT`
   while (true) {
     const entered = await overlays.input({
-      title: ui('新的 Credential Ref', 'New Credential Ref'),
+      title: currentRef === undefined ? 'Credential Ref' : ui('新的 Credential Ref', 'New Credential Ref'),
       detail: ui(
-        '同时修改地址和 Key 时，必须先切换到一个不同、未配置且可写的 Ref，避免旧 Key 被发送到新地址。',
-        'Changing the endpoint and key together requires a different, unconfigured, writable Ref so the old key cannot be sent to the new endpoint.',
+        'Ref 是 Harness 凭据引用名。写入新 Key 必须使用尚未配置且可写的 Ref；已配置 Ref 只能明确复用且不会读取或覆盖其值。',
+        'A Ref names a Harness credential. A new key requires an unconfigured, writable Ref; a configured Ref can only be explicitly reused without reading or overwriting its value.',
       ),
       initialValue,
       requireText: true,
@@ -342,44 +352,138 @@ async function freshCredentialRef(
     }
     const metadata = await credentialMetadata(api, ref)
     if (metadata === undefined) {
-      notice(ui('无法确认该 Credential Ref 的状态；为安全起见不允许切换。', 'The Credential Ref state could not be confirmed, so the switch is disabled for safety.'), 'error')
+      notice(ui('无法确认该 Credential Ref 的状态；为安全起见不允许继续。', 'The Credential Ref state could not be confirmed, so this operation is disabled for safety.'), 'error')
       return undefined
     }
-    if (metadata.configured || !metadata.writable) {
-      notice(ui('新的 Credential Ref 必须尚未配置且可写。', 'The new Credential Ref must be unconfigured and writable.'), 'warning')
+    if (metadata.configured) {
+      if (!allowReuse) {
+        notice(ui('写入新 Key 必须选择尚未配置且可写的 Ref。', 'Writing a new key requires an unconfigured, writable Ref.'), 'warning')
+        continue
+      }
+      const reuse = await overlays.confirm(
+        ui('复用已配置的 Credential Ref？', 'Reuse configured Credential Ref?'),
+        ui(
+          `目标地址：${safeUrlPreview(endpoint)}\nCredential Ref：${ref}\n不会读取或覆盖现有 Key。`,
+          `Endpoint: ${safeUrlPreview(endpoint)}\nCredential Ref: ${ref}\nThe existing key will not be read or overwritten.`,
+        ),
+        ui('确认复用', 'Confirm reuse'),
+      )
+      if (reuse) return { kind: 'reuse', ref, confirmedEndpoint: endpoint }
       continue
     }
-    return ref
+    if (!metadata.writable) {
+      notice(ui('该 Ref 尚未配置且不可写，不能用于此 Provider。', 'This Ref is unconfigured and read-only, so it cannot be used for this Provider.'), 'warning')
+      continue
+    }
+    const value = await credentialDraft(overlays, true, notice)
+    if (value === 'cancelled') return undefined
+    if (value === undefined) {
+      notice(ui('新的 Credential Ref 需要 API Key；如无需凭据，请返回并留空 Ref。', 'A new Credential Ref needs an API key. Go back and leave the Ref empty for keyless authentication.'), 'warning')
+      continue
+    }
+    return { kind: 'write', ref, value, requireUnconfigured: true }
   }
+}
+
+interface ProviderSavePlan {
+  readonly provider: string
+  readonly ns: string
+  readonly ops: readonly SettingsPathOpView[]
+  readonly credential?: { readonly ref: string; readonly value: string }
+  readonly credentialMustBeUnconfigured?: boolean
+  readonly expectedCredentialRef?: string
+}
+
+async function reportSaveReadback(
+  api: ProviderApi,
+  plan: ProviderSavePlan,
+  notice: ProviderManagerOptions['notice'],
+): Promise<void> {
+  const verified = await verifyProviderWrite(api, {
+    provider: plan.provider,
+    ns: plan.ns,
+    ops: plan.ops,
+    ...(plan.expectedCredentialRef === undefined ? {} : { credentialRef: plan.expectedCredentialRef }),
+    verifyRoute: true,
+  })
+  if (verified.settings === 'confirmed'
+    && (verified.credential === 'confirmed' || verified.credential === 'not-requested')
+    && verified.route === 'confirmed') {
+    notice(ui('Provider 配置已保存，并通过官方目录回读核实。', 'Provider configuration was saved and verified through the official directories.'), 'success')
+    return
+  }
+  if (verified.settings === 'confirmed'
+    && (verified.credential === 'confirmed' || verified.credential === 'not-requested')
+    && verified.route === 'failed') {
+    notice(ui('Settings 与 Credential 已回读核实，但 Provider 路由或模型目录尚不可用。', 'Settings and Credential were verified, but the Provider route or model catalog is not yet available.'), 'warning')
+    return
+  }
+  notice(ui('保存请求已返回，但无法从官方 Settings、Credential 与模型目录完整核实最终状态；请重新读取后确认。', 'The save request returned, but final state could not be fully verified from official Settings, Credential, and model directories. Reload before continuing.'), 'warning')
 }
 
 async function finishSave(
   overlays: OverlayPrompts,
   api: ProviderApi,
   result: ProviderSaveResult,
-  credential: { readonly ref: string; readonly value: string } | undefined,
-  ns: string,
+  plan: ProviderSavePlan,
   notice: ProviderManagerOptions['notice'],
 ): Promise<boolean> {
   if (result.ok) {
-    notice(ui('Provider 配置已保存并重新读取。', 'Provider configuration was saved and reloaded.'), 'success')
+    await reportSaveReadback(api, plan, notice)
     return true
   }
+  if (result.stage === 'settings' && result.code === 'transport') {
+    const readback = await verifyProviderWrite(api, {
+      provider: plan.provider,
+      ns: plan.ns,
+      ops: plan.ops,
+    })
+    if (readback.settings !== 'confirmed') {
+      notice(ui('Settings 请求结果未知，且无法确认目标值；为避免重复写入，本次不会自动重试。', 'The Settings result is unknown and the target value could not be confirmed. It will not be retried automatically.'), 'warning')
+      return true
+    }
+    if (plan.credential === undefined) {
+      await reportSaveReadback(api, plan, notice)
+      return true
+    }
+    const metadata = await credentialMetadata(api, plan.credential.ref)
+    if (metadata === undefined || !metadata.writable
+      || (plan.credentialMustBeUnconfigured === true && metadata.configured)) {
+      notice(ui('Settings 已回读确认，但 Credential Ref 已不再满足安全写入条件；未写入 Key。', 'Settings were confirmed by readback, but the Credential Ref no longer permits a safe key write. The key was not written.'), 'warning')
+      return true
+    }
+    const credentialResult = await saveProviderConfig(api, {
+      ns: plan.ns,
+      ops: [],
+      expectedRevision: 0,
+      credential: plan.credential,
+    })
+    return finishSave(overlays, api, credentialResult.ok ? credentialResult : {
+      ...credentialResult,
+      settingsCommitted: true,
+    }, plan, notice)
+  }
   notice(providerFailureMessage(result.stage, result.code), result.settingsCommitted ? 'warning' : 'error')
-  if (result.stage !== 'credential' || credential === undefined || !result.settingsCommitted) return result.settingsCommitted
+  const settingsKnown = result.settingsCommitted || plan.ops.length === 0
+  if (result.stage !== 'credential' || plan.credential === undefined || !settingsKnown) return result.settingsCommitted
   const retry = await overlays.confirm(
     ui('只重试 API Key？', 'Retry only the API key?'),
-    ui('Settings 已经保存；重试不会再次提交 Provider 配置。', 'Settings are already saved; retrying will not submit Provider configuration again.'),
+    ui('重试只会向同一个 Ref 再写入同一个值，不会再次提交 Provider Settings。', 'The retry writes the same value to the same Ref and does not resubmit Provider Settings.'),
     ui('重试凭据', 'Retry credential'),
   )
   if (!retry) return true
+  const retryMetadata = await credentialMetadata(api, plan.credential.ref)
+  if (retryMetadata === undefined || !retryMetadata.writable) {
+    notice(ui('无法重新确认该 Credential Ref 可写；未重试 Key。', 'The Credential Ref could not be reconfirmed as writable, so the key was not retried.'), 'warning')
+    return true
+  }
   const retried = await saveProviderConfig(api, {
-    ns,
+    ns: plan.ns,
     ops: [],
     expectedRevision: result.namespace?.revision ?? 0,
-    credential,
+    credential: plan.credential,
   })
-  if (retried.ok) notice(ui('API Key 已保存。', 'API key saved.'), 'success')
+  if (retried.ok) await reportSaveReadback(api, plan, notice)
   else notice(providerFailureMessage(retried.stage, retried.code), 'error')
   return true
 }
@@ -403,8 +507,7 @@ async function editProvider(
   const draft: Record<string, unknown> = { ...(row.profile ?? {}) }
   const dirty = new Set<string>()
   let models = modelsOf(row.profile)
-  let keyValue: string | undefined
-  let keyRef = row.apiKeyEnv ?? deriveProviderKeyRef(row.entry.provider)
+  let credentialIntent: CredentialIntent | undefined
   const credentialUnavailable = credentialState === 'unavailable'
     || (row.apiKeyEnv !== undefined && row.credential === undefined)
   const protocols = providerProtocolChoices(row.namespace)
@@ -467,15 +570,32 @@ async function editProvider(
         options.notice(ui('无法确认 Credential 元数据；Key 更新已禁用。', 'Credential metadata is unavailable; key updates are disabled.'), 'warning')
         continue
       }
-      let targetRef = keyRef
       const endpointChanged = dirty.has('baseURL')
         && stringOf(draft, 'baseURL') !== stringOf(row.profile, 'baseURL')
       if (endpointChanged && row.apiKeyEnv !== undefined) {
-        const freshRef = await freshCredentialRef(overlays, api, row.entry.provider, row.apiKeyEnv, options.notice)
-        if (freshRef === undefined) continue
-        targetRef = freshRef
+        const intent = await chooseCredentialRef(
+          overlays,
+          api,
+          row.entry.provider,
+          stringOf(draft, 'baseURL'),
+          row.apiKeyEnv,
+          false,
+          options.notice,
+        )
+        if (intent !== undefined) credentialIntent = intent
+      } else if (row.apiKeyEnv === undefined) {
+        const intent = await chooseCredentialRef(
+          overlays,
+          api,
+          row.entry.provider,
+          stringOf(draft, 'baseURL'),
+          undefined,
+          true,
+          options.notice,
+        )
+        if (intent !== undefined) credentialIntent = intent
       } else {
-        const metadata = await credentialMetadata(api, targetRef)
+        const metadata = await credentialMetadata(api, row.apiKeyEnv)
         if (metadata === undefined) {
           options.notice(ui('无法确认 Credential Ref 的状态；Key 更新已禁用。', 'The Credential Ref state could not be confirmed; key updates are disabled.'), 'warning')
           continue
@@ -484,11 +604,16 @@ async function editProvider(
           options.notice(ui('该 Credential Ref 由外部只读来源管理。', 'This Credential Ref is managed by a read-only external source.'), 'warning')
           continue
         }
-      }
-      const entered = await credentialDraft(overlays, row.credential?.writable !== false, options.notice)
-      if (entered !== 'cancelled') {
-        keyValue = entered
-        if (entered !== undefined) keyRef = targetRef
+        const entered = await credentialDraft(overlays, true, options.notice)
+        if (entered === undefined) credentialIntent = undefined
+        else if (entered !== 'cancelled') {
+          credentialIntent = {
+            kind: 'write',
+            ref: row.apiKeyEnv,
+            value: entered,
+            requireUnconfigured: false,
+          }
+        }
       }
       continue
     }
@@ -529,7 +654,7 @@ async function editProvider(
           ...dirty.has('baseURL') || dirty.has('api') ? {} : { provider: row.entry.provider },
           ...(baseURL === undefined ? {} : { baseURL }),
           ...(protocol === undefined ? {} : { api: protocol }),
-          ...(keyValue === undefined ? {} : { apiKey: keyValue }),
+          ...(credentialIntent?.kind !== 'write' ? {} : { apiKey: credentialIntent.value }),
         }
       }, options.notice)
       if (edited !== undefined) {
@@ -580,6 +705,15 @@ async function editProvider(
           options.notice(ui('删除请求已返回，但无法核实最终状态。', 'The delete request returned, but its final state could not be verified.'), 'warning')
           return true
         }
+        const finalProtectedProviders = await options.reloadProtectedProviders?.()
+        if (finalProtectedProviders === undefined) {
+          options.notice(ui('Provider 配置已移除，但无法再次核实当前与默认路由；最终状态未知，凭据已保留。', 'The Provider profile was removed, but current and default routes could not be rechecked. Final state is unknown and the credential was retained.'), 'warning')
+          return true
+        }
+        if (finalProtectedProviders.includes(row.entry.provider)) {
+          options.notice(ui('Provider 配置已移除，但并发变更使当前或默认路由仍引用它；请立即重新选择模型。凭据已保留。', 'The Provider profile was removed, but a concurrent change still references it from the current or default route. Select another model immediately. The credential was retained.'), 'warning')
+          return true
+        }
         options.notice(ui('Provider 配置已删除并核实；凭据已保留。', 'Provider configuration deletion was verified; credential retained.'), 'success')
       }
       else options.notice(providerFailureMessage(result.stage, result.code), 'error')
@@ -594,32 +728,67 @@ async function editProvider(
       }
       const endpointChanged = dirty.has('baseURL')
         && stringOf(draft, 'baseURL') !== stringOf(row.profile, 'baseURL')
-      if (keyValue !== undefined && endpointChanged && row.apiKeyEnv !== undefined && keyRef === row.apiKeyEnv) {
-        const freshRef = await freshCredentialRef(overlays, api, row.entry.provider, row.apiKeyEnv, options.notice)
-        if (freshRef === undefined) continue
-        keyRef = freshRef
+      if (credentialIntent?.kind === 'write' && endpointChanged
+        && row.apiKeyEnv !== undefined && credentialIntent.ref === row.apiKeyEnv) {
+        const replacement = await chooseCredentialRef(
+          overlays,
+          api,
+          row.entry.provider,
+          stringOf(draft, 'baseURL'),
+          row.apiKeyEnv,
+          false,
+          options.notice,
+        )
+        if (replacement === undefined) continue
+        credentialIntent = replacement
       }
-      if (keyValue === undefined && endpointChanged && row.apiKeyEnv !== undefined) {
+      if (credentialIntent === undefined && endpointChanged && row.apiKeyEnv !== undefined) {
         const reuse = await overlays.confirm(
           ui('在新地址继续使用现有凭据？', 'Reuse the existing credential at the new endpoint?'),
           ui(
-            `目标地址将改为 ${safeUrlPreview(stringOf(draft, 'baseURL'))}；只有确认信任该地址后才能继续。`,
-            `The endpoint will change to ${safeUrlPreview(stringOf(draft, 'baseURL'))}. Continue only if you trust this endpoint.`,
+            `目标地址：${safeUrlPreview(stringOf(draft, 'baseURL'))}\nCredential Ref：${row.apiKeyEnv}\n只有确认信任该地址后才能继续。`,
+            `Endpoint: ${safeUrlPreview(stringOf(draft, 'baseURL'))}\nCredential Ref: ${row.apiKeyEnv}\nContinue only if you trust this endpoint.`,
           ),
           ui('确认复用', 'Confirm reuse'),
         )
         if (!reuse) continue
       }
-      if (keyValue !== undefined) {
-        const metadata = await credentialMetadata(api, keyRef)
-        if (metadata === undefined || !metadata.writable
-          || (endpointChanged && row.apiKeyEnv !== undefined && keyRef !== row.apiKeyEnv && metadata.configured)) {
+      if (credentialIntent?.kind === 'reuse'
+        && credentialIntent.confirmedEndpoint !== stringOf(draft, 'baseURL')) {
+        const reuse = await overlays.confirm(
+          ui('在变更后的地址复用 Credential Ref？', 'Reuse Credential Ref at the changed endpoint?'),
+          ui(
+            `目标地址：${safeUrlPreview(stringOf(draft, 'baseURL'))}\nCredential Ref：${credentialIntent.ref}\n不会读取或覆盖现有 Key。`,
+            `Endpoint: ${safeUrlPreview(stringOf(draft, 'baseURL'))}\nCredential Ref: ${credentialIntent.ref}\nThe existing key will not be read or overwritten.`,
+          ),
+          ui('确认复用', 'Confirm reuse'),
+        )
+        if (!reuse) continue
+        credentialIntent = {
+          ...credentialIntent,
+          confirmedEndpoint: stringOf(draft, 'baseURL'),
+        }
+      }
+      if (credentialIntent !== undefined) {
+        const metadata = await credentialMetadata(api, credentialIntent.ref)
+        const valid = metadata !== undefined && (credentialIntent.kind === 'reuse'
+          ? metadata.configured
+          : metadata.writable && (!credentialIntent.requireUnconfigured || !metadata.configured))
+        if (!valid) {
           options.notice(ui('Credential Ref 的最新状态不再满足安全写入条件；未保存。', 'The latest Credential Ref state no longer permits a safe write; nothing was saved.'), 'warning')
+          continue
+        }
+        if (credentialIntent.kind === 'write' && !credentialIntent.requireUnconfigured
+          && metadata.configured && dirty.size > 0) {
+          options.notice(ui('已配置 Ref 的 Key 更新必须单独保存；请先保存其他 Provider 字段，再重新打开只更新 Key。', 'A key update for a configured Ref must be saved separately. Save the other Provider fields first, then reopen and update only the key.'), 'warning')
           continue
         }
       }
       if (providerStateChanged(options, openedGeneration)) return false
-      if (keyValue !== undefined && (row.apiKeyEnv === undefined || keyRef !== row.apiKeyEnv)) setField('apiKeyEnv', keyRef)
+      if (credentialIntent !== undefined
+        && (row.apiKeyEnv === undefined || credentialIntent.ref !== row.apiKeyEnv)) {
+        setField('apiKeyEnv', credentialIntent.ref)
+      }
       const dirtyFields = [...dirty].sort((left, right) => {
         if (left === 'apiKeyEnv' && right !== 'apiKeyEnv') return -1
         if (right === 'apiKeyEnv' && left !== 'apiKeyEnv') return 1
@@ -633,14 +802,26 @@ async function editProvider(
       if (ops.length === 0 && !row.configured && row.entry.settingsPath.length > 0) {
         ops = [{ op: 'set', path: [...row.entry.settingsPath], value: {} }]
       }
-      const credential = keyValue === undefined ? undefined : { ref: keyRef, value: keyValue }
+      const credential = credentialIntent?.kind === 'write'
+        ? { ref: credentialIntent.ref, value: credentialIntent.value }
+        : undefined
       const result = await saveProviderConfig(api, {
         ns: row.namespace.ns,
         ops,
         expectedRevision: row.namespace.revision,
         ...(credential === undefined ? {} : { credential }),
       })
-      return finishSave(overlays, api, result, credential, row.namespace.ns, options.notice)
+      const expectedCredentialRef = credentialIntent?.ref ?? row.apiKeyEnv
+      return finishSave(overlays, api, result, {
+        provider: row.entry.provider,
+        ns: row.namespace.ns,
+        ops,
+        ...(credential === undefined ? {} : { credential }),
+        ...(credentialIntent?.kind === 'write' && credentialIntent.requireUnconfigured
+          ? { credentialMustBeUnconfigured: true }
+          : {}),
+        ...(expectedCredentialRef === undefined ? {} : { expectedCredentialRef }),
+      }, options.notice)
     }
   }
 }
@@ -670,7 +851,7 @@ async function createCustomProvider(
     if (value === undefined) return false
     provider = value.trim()
     if (validProviderId(provider) && !existing.has(provider)) break
-    options.notice(ui('ID 必须以小写字母开头，只能包含小写字母、数字和单个短横线，且不能重复。', 'The ID must start with a lowercase letter, contain only lowercase letters, digits, and single dashes, and be unique.'), 'warning')
+    options.notice(ui('ID 不能为空、不能包含控制字符、不能占用内部菜单 ID，且不能重复。', 'The ID cannot be empty, contain control characters, use the internal menu ID, or duplicate an existing route.'), 'warning')
   }
   const displayName = await overlays.input({ title: ui('显示名称（可选）', 'Display name (optional)'), placeholder: provider })
   if (displayName === undefined) return false
@@ -694,6 +875,7 @@ async function createCustomProvider(
     choices: protocols.map(protocol => ({ id: protocol, label: protocol })),
   })
   if (selectedProtocol === undefined) return false
+  let credentialIntent: CredentialIntent | undefined
   let keyRef: string | undefined
   while (true) {
     const entered = await overlays.input({
@@ -706,45 +888,55 @@ async function createCustomProvider(
     })
     if (entered === undefined) return false
     const normalized = entered.trim()
-    if (normalized === '' || validProviderCredentialRef(normalized)) {
-      keyRef = normalized === '' ? undefined : normalized
+    if (normalized === '') {
+      keyRef = undefined
       break
     }
-    options.notice(ui(
-      'Credential Ref 必须以大写字母开头，且只能包含大写字母、数字和下划线。',
-      'The Credential Ref must start with an uppercase letter and contain only uppercase letters, digits, and underscores.',
-    ), 'warning')
-  }
-  let keyDraft: string | undefined
-  if (keyRef !== undefined) {
-    let credential
-    try {
-      const response = await api.credentials.describe({ refs: [keyRef] })
-      if (!response.result.ok) {
-        options.notice(providerFailureMessage('load', 'credential-describe-failed'), 'error')
-        return false
-      }
-      credential = response.result.value.credentials[keyRef]
-    } catch {
-      options.notice(providerFailureMessage('load', 'credential-describe-failed'), 'error')
+    if (!validProviderCredentialRef(normalized)) {
+      options.notice(ui(
+        'Credential Ref 必须以下划线或字母开头，且只能包含字母、数字和下划线。',
+        'The Credential Ref must start with a letter or underscore and contain only letters, digits, and underscores.',
+      ), 'warning')
+      continue
+    }
+    const metadata = await credentialMetadata(api, normalized)
+    if (metadata === undefined) {
+      options.notice(ui('无法确认 Credential Ref 的状态；为安全起见不允许继续。', 'The Credential Ref state could not be confirmed, so this operation is disabled for safety.'), 'error')
       return false
     }
-    if (credential?.writable === false) {
-      options.notice(ui(
-        `Credential ${keyRef} 由外部来源管理；将保留该 Ref，不写入 Key。`,
-        `Credential ${keyRef} is externally managed. Its Ref will be saved without writing a key.`,
-      ), 'info')
-    } else {
-      const entered = await credentialDraft(overlays, true, options.notice)
-      if (entered === 'cancelled') return false
-      keyDraft = entered
+    if (metadata.configured) {
+      const reuse = await overlays.confirm(
+        ui('复用已配置的 Credential Ref？', 'Reuse configured Credential Ref?'),
+        ui(
+          `目标地址：${safeUrlPreview(baseURL)}\nCredential Ref：${normalized}\n不会读取或覆盖现有 Key。`,
+          `Endpoint: ${safeUrlPreview(baseURL)}\nCredential Ref: ${normalized}\nThe existing key will not be read or overwritten.`,
+        ),
+        ui('确认复用', 'Confirm reuse'),
+      )
+      if (!reuse) continue
+      keyRef = normalized
+      credentialIntent = { kind: 'reuse', ref: normalized, confirmedEndpoint: baseURL }
+      break
     }
+    if (!metadata.writable) {
+      options.notice(ui('该 Ref 尚未配置且不可写，不能用于此 Provider。', 'This Ref is unconfigured and read-only, so it cannot be used for this Provider.'), 'warning')
+      continue
+    }
+    const key = await credentialDraft(overlays, true, options.notice)
+    if (key === 'cancelled') return false
+    if (key === undefined) {
+      options.notice(ui('新的 Credential Ref 需要 API Key；如无需凭据，请留空 Ref。', 'A new Credential Ref needs an API key. Leave the Ref empty for keyless authentication.'), 'warning')
+      continue
+    }
+    keyRef = normalized
+    credentialIntent = { kind: 'write', ref: normalized, value: key, requireUnconfigured: true }
+    break
   }
   const models = await editModels(overlays, api, [], () => ({
     settingsNs: namespace.ns,
     baseURL,
     api: selectedProtocol.id,
-    ...(keyDraft === undefined ? {} : { apiKey: keyDraft }),
+    ...(credentialIntent?.kind !== 'write' ? {} : { apiKey: credentialIntent.value }),
   }), options.notice)
   if (models === undefined) return false
   const issue = models.length === 0
@@ -773,14 +965,34 @@ async function createCustomProvider(
   )
   if (!confirmed) return false
   if (providerStateChanged(options, openedGeneration)) return false
-  const credential = keyDraft === undefined || keyRef === undefined ? undefined : { ref: keyRef, value: keyDraft }
+  if (credentialIntent !== undefined) {
+    const metadata = await credentialMetadata(api, credentialIntent.ref)
+    const valid = metadata !== undefined && (credentialIntent.kind === 'reuse'
+      ? metadata.configured
+      : metadata.writable && !metadata.configured)
+    if (!valid) {
+      options.notice(ui('Credential Ref 的状态在确认后发生变化；未创建 Provider。', 'The Credential Ref state changed after confirmation; the Provider was not created.'), 'warning')
+      return false
+    }
+  }
+  const credential = credentialIntent?.kind === 'write'
+    ? { ref: credentialIntent.ref, value: credentialIntent.value }
+    : undefined
+  const ops = [{ op: 'set' as const, path: targetPath, value: profile }]
   const result = await saveProviderConfig(api, {
     ns: namespace.ns,
-    ops: [{ op: 'set', path: targetPath, value: profile }],
+    ops,
     expectedRevision: namespace.revision,
     ...(credential === undefined ? {} : { credential }),
   })
-  return finishSave(overlays, api, result, credential, namespace.ns, options.notice)
+  return finishSave(overlays, api, result, {
+    provider,
+    ns: namespace.ns,
+    ops,
+    ...(credential === undefined ? {} : { credential }),
+    ...(credentialIntent?.kind === 'write' ? { credentialMustBeUnconfigured: true } : {}),
+    ...(keyRef === undefined ? {} : { expectedCredentialRef: keyRef }),
+  }, options.notice)
 }
 
 /** Open one shared Provider flow. Each loop re-reads Harness state; no local cache survives it. */

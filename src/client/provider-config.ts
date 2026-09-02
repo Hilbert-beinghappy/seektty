@@ -17,10 +17,11 @@ import {
 import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import { ui } from './locale.ts'
 
-const ENV_ASSIGNMENT = /^[A-Z][A-Z0-9_]*=[^=]/u
-const PROVIDER_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u
-const CREDENTIAL_REF = /^[A-Z][A-Z0-9_]*$/u
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=[^=]/u
+// Exact dsh-credentials 0.1.1-rc.2 Ref grammar.
+const CREDENTIAL_REF = /^[A-Za-z_][A-Za-z0-9_]*$/u
 const PROTOCOL_PROBE_ROUTE = '\0seektty-probe'
+const ADD_PROVIDER_ACTION = '__add__'
 
 export type ProviderApi = Pick<IApiClient, 'credentials' | 'llm' | 'settings'>
 
@@ -69,6 +70,12 @@ export type ProviderSaveResult =
     readonly namespace?: SettingsNamespaceView
   }
 
+export interface ProviderWriteVerification {
+  readonly settings: 'confirmed' | 'mismatch' | 'unavailable'
+  readonly credential: 'not-requested' | 'confirmed' | 'mismatch' | 'unavailable'
+  readonly route: 'not-requested' | 'confirmed' | 'failed' | 'unavailable'
+}
+
 function recordOf(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   return value as Record<string, unknown>
@@ -77,8 +84,7 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 function credentialRefOf(profile: Readonly<Record<string, unknown>> | undefined): string | undefined {
   const value = profile?.apiKeyEnv
   if (typeof value !== 'string') return undefined
-  const ref = value.trim()
-  return CREDENTIAL_REF.test(ref) ? ref : undefined
+  return CREDENTIAL_REF.test(value) ? value : undefined
 }
 
 function failureCode(error: unknown): string {
@@ -178,15 +184,20 @@ export async function loadProviderConfig(api: ProviderApi): Promise<ProviderConf
 
 /** Conventional writable credential reference used by the official Models surface. */
 export function deriveProviderKeyRef(provider: string): string {
-  return `${provider.toUpperCase().replace(/[^A-Z0-9]+/gu, '_')}_API_KEY`
+  const normalized = provider.toUpperCase().replace(/[^A-Z0-9]+/gu, '_').replace(/^_+|_+$/gu, '')
+  const stem = normalized === '' ? 'PROVIDER' : /^[A-Z_]/u.test(normalized) ? normalized : `_${normalized}`
+  return `${stem}_API_KEY`
 }
 
-/** Provider IDs accepted by the official custom pi-ai route surface. */
+/** Non-empty official dictionary key, narrowed only for safe terminal interaction. */
 export function validProviderId(provider: string): boolean {
-  return PROVIDER_ID.test(provider)
+  const normalized = provider.trim()
+  return normalized !== ''
+    && normalized !== ADD_PROVIDER_ACTION
+    && !/[\u0000-\u001f\u007f]/u.test(provider)
 }
 
-/** Environment-style reference accepted by the official pi-ai apiKeyEnv field. */
+/** Credential Ref accepted by the tested official dsh-credentials release. */
 export function validProviderCredentialRef(ref: string): boolean {
   return CREDENTIAL_REF.test(ref)
 }
@@ -410,6 +421,65 @@ export async function saveProviderConfig(
     ...(namespace === undefined ? {} : { namespace }),
     credentialWritten: request.credential !== undefined,
   }
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+/** Re-read official Settings, Credentials, Provider, and model catalog state after a write. */
+export async function verifyProviderWrite(
+  api: ProviderApi,
+  request: {
+    readonly provider: string
+    readonly ns: string
+    readonly ops: readonly SettingsPathOpView[]
+    readonly credentialRef?: string
+    readonly verifyRoute?: boolean
+  },
+): Promise<ProviderWriteVerification> {
+  const [snapshotResult, modelsResult] = await Promise.allSettled([
+    loadProviderConfig(api),
+    request.verifyRoute === true ? api.llm.models({}) : Promise.resolve(undefined),
+  ])
+  if (snapshotResult.status === 'rejected') {
+    return {
+      settings: 'unavailable',
+      credential: request.credentialRef === undefined ? 'not-requested' : 'unavailable',
+      route: request.verifyRoute === true ? 'unavailable' : 'not-requested',
+    }
+  }
+
+  const snapshot = snapshotResult.value
+  const namespace = snapshot.namespaces.get(request.ns)
+  const settings = namespace !== undefined && request.ops.every((op) => {
+    if (op.op === 'set') return hasPath(namespace.value, op.path)
+      && sameJson(getPath(namespace.value, op.path), op.value)
+    return !hasPath(namespace.value, op.path)
+  }) ? 'confirmed' : 'mismatch'
+  const row = snapshot.rows.find(candidate => candidate.entry.provider === request.provider)
+
+  let credential: ProviderWriteVerification['credential'] = 'not-requested'
+  if (request.credentialRef !== undefined) {
+    credential = snapshot.credentialState === 'unavailable'
+      ? 'unavailable'
+      : row?.apiKeyEnv === request.credentialRef && row.credential?.configured === true
+        ? 'confirmed'
+        : 'mismatch'
+  }
+
+  let route: ProviderWriteVerification['route'] = 'not-requested'
+  if (request.verifyRoute === true) {
+    if (modelsResult.status === 'rejected' || modelsResult.value === undefined
+      || !modelsResult.value.result.ok) route = 'unavailable'
+    else {
+      const catalog = modelsResult.value.result.value
+      const hasModels = catalog.groups.some(group => group.id === request.provider && group.models.length > 0)
+      const failed = catalog.failures.some(failure => failure.id === request.provider)
+      route = row?.entry.active === true && hasModels && !failed ? 'confirmed' : 'failed'
+    }
+  }
+  return { settings, credential, route }
 }
 
 /** Remove only one revision-protected user-owned profile; credentials are retained. */

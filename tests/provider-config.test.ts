@@ -152,13 +152,21 @@ describe('Provider draft validation', () => {
     expect(validProviderId(id)).toBe(true)
   })
 
-  it.each(['OpenAI', '1provider', 'provider_name', 'provider--name'])('rejects an unsafe route id: %s', (id) => {
+  it.each(['OpenAI', '1provider', 'provider_name', 'provider--name', '供应商/一'])('accepts an official dictionary route id: %s', (id) => {
+    expect(validProviderId(id)).toBe(true)
+  })
+
+  it.each(['', '   ', '__add__', 'provider\nname'])('rejects a route id unsafe for this terminal surface: %j', (id) => {
     expect(validProviderId(id)).toBe(false)
   })
 
   it('derives the same credential reference vocabulary as the official Models surface', () => {
     expect(deriveProviderKeyRef('opencode-go')).toBe('OPENCODE_GO_API_KEY')
+    expect(deriveProviderKeyRef('1provider')).toBe('_1PROVIDER_API_KEY')
+    expect(deriveProviderKeyRef('供应商')).toBe('PROVIDER_API_KEY')
     expect(validProviderCredentialRef('OPENCODE_GO_API_KEY')).toBe(true)
+    expect(validProviderCredentialRef('opencode_go_api_key')).toBe(true)
+    expect(validProviderCredentialRef('_sharedKey')).toBe(true)
     expect(validProviderCredentialRef('opencode-key')).toBe(false)
   })
 

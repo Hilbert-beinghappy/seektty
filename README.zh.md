@@ -174,13 +174,13 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 ## Provider 管理
 
-可从 `/model` 的**管理 Provider…**进入，也可从 `/settings` 的**模型与 Agent**进入。两个入口与首次引导共用同一套 Harness 流程：合并 `llm.providers`、`settings.describe` 和不含凭据值的 `credentials.describe`；先执行带 revision 保护的 Settings mutation，再可选调用 `credentials.set`；修改后重新读取官方模型目录。仅保存配置不会暗中修改当前 Session 或新 Session 默认模型。
+可从 `/model` 的**管理 Provider…**进入，也可从 `/settings` 的**模型与 Agent**进入。两个入口与首次引导共用同一套 Harness 流程：合并 `llm.providers`、`settings.describe` 和不含凭据值的 `credentials.describe`；先执行带 revision 保护的 Settings mutation，再可选调用 `credentials.set`；最后重新读取 Settings、Credential 元数据、`llm.providers` 与 `llm.models`，全部匹配后才报告完整成功。传输结果若无法通过回读确认，只会标记为状态未知，不会盲目重试。仅保存配置不会暗中修改当前 Session 或新 Session 默认模型。
 
-自定义 Provider 仅使用已安装 `llm-pi-ai` adapter 在 schema 中明确描述的 `providers` 字典。在官方 dsh `0.1.1-rc.2` 中，它公开的协议选项是 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages。所有协议都可手工录入模型；adapter 支持时可通过 `llm.discoverModels` 发现。获取到模型列表只证明配置发现成功，第一次真实请求才是认证和推理检查。
+自定义 Provider 仅使用已安装 `llm-pi-ai` adapter 在 schema 中明确描述的 `providers` 字典；路由 ID 遵循该字典 schema。本界面会去除首尾空白，并额外排除空 ID、终端控制字符和 SeekTTY 内部菜单 ID。在官方 dsh `0.1.1-rc.2` 中，它公开的协议选项是 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages。所有协议都可手工录入模型；adapter 支持时可通过 `llm.discoverModels` 发现。获取到模型列表只证明配置发现成功，第一次真实请求才是认证和推理检查。
 
-API Key 始终通过掩码控件收集，且只交给 Harness Credentials。来自环境或文件的只读凭据只显示为外部管理；凭据元数据不可读时，Key 更新按 fail-closed 禁用。同时修改 endpoint 与 Key 时，必须使用不同、未配置且可写的新 Credential Ref；Settings 会在同一次 mutation 中切换地址与 Ref，随后才写入新 Key，因此旧 Key 不会被路由到新地址。模型编辑保留 schema 描述的完整模型项，包括输入模态、推理强度和协议兼容字段。
+API Key 始终通过掩码控件收集，且只交给 Harness Credentials。Credential Ref 使用官方 `[A-Za-z_][A-Za-z0-9_]*` 语法。来自环境或文件的只读凭据只显示为外部管理；凭据元数据不可读时，Key 更新按 fail-closed 禁用。任何新接入且需要写入新 Key 的 Ref，都必须在 Settings 变更前再次确认为“尚未配置且可写”。已配置 Ref 只能在界面明确展示 endpoint 与 Ref 后由用户确认复用，且不会读取或覆盖其中的值；更新当前已绑定 Ref 内的 Key 必须单独保存，不能与其他 Settings 变化合并。同时修改 endpoint 与 Key 时始终使用不同、未配置且可写的新 Ref，因此 Settings 先切换到不可能含有旧 Key 的 Ref，再写入新 Key。Settings 与 Credentials 是两次独立的官方调用，不是原子事务。模型编辑保留 schema 描述的完整模型项，包括输入模态、推理强度和协议兼容字段。
 
-删除仅适用于既非权威当前 Session 路由、也非默认路由的用户层自定义 Provider；即使当前路由未出现在模型目录中也会受到保护。确认后会重新读取引用与所有权，并核实删除结果；凭据与历史 Session 均不改动。已保存的 Provider ID 不支持原地重命名。Catalog Provider 和专有认证仍受已安装 Harness adapter 实际公开能力限制；该界面不是协议转换器，也不代表所有厂商专有 API 均已认证。
+删除仅适用于既非权威当前 Session 路由、也非默认路由的用户层自定义 Provider；即使当前路由未出现在模型目录中也会受到保护。确认后会重新读取引用与所有权，mutation 后还会再次读取已删除 profile 及当前／默认引用。删除前检查与 Settings mutation 并非原子操作：并发选择仍可能在两者之间建立新引用，此时 SeekTTY 会报告竞态，而不会声称删除已完整核实。Credential 会有意保留，历史 Session 也不会改写。已保存的 Provider ID 不支持原地重命名。Catalog Provider 和专有认证仍受已安装 Harness adapter 实际公开能力限制；该界面不是协议转换器，也不代表所有厂商专有 API 均已认证。
 
 ## 斜杠命令
 
