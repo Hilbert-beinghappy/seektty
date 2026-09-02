@@ -84,6 +84,9 @@ describe('separate model and reasoning controls', () => {
     }
     const capabilities = {
       listModels: async () => ({ options: [target], failures: [], routable: true }),
+      loadModels: async () => ({
+        current: target.selection, routable: true, groups: [], failures: [],
+      }),
       selectModel,
       managementBridge: () => ({ settings: { describe: async () => [] } }),
       providerApi: () => providerApi,
@@ -123,9 +126,7 @@ describe('separate model and reasoning controls', () => {
       back: vi.fn(),
       finish: vi.fn(),
     } satisfies OverlayNavigation
-    const listModels = vi.fn()
-      .mockResolvedValueOnce({ options: [target], failures: [], routable: true })
-      .mockRejectedValueOnce(new Error('route state unavailable'))
+    const listModels = vi.fn().mockResolvedValue({ options: [target], failures: [], routable: true })
     const namespace = {
       ns: 'llm-pi-ai',
       schema: {},
@@ -138,6 +139,7 @@ describe('separate model and reasoning controls', () => {
     }
     const capabilities = {
       listModels,
+      loadModels: vi.fn(async () => { throw new Error('route state unavailable') }),
       managementBridge: () => ({ settings: { describe: async () => [] } }),
       providerApi: () => ({
         llm: { providers: async () => ({ result: { ok: true, value: { providers: [{
@@ -153,6 +155,62 @@ describe('separate model and reasoning controls', () => {
     await new TuiActions(capabilities, actionHost(navigation)).execute('model', '')
 
     expect(editChoices.some(choice => choice.id === 'delete')).toBe(false)
+  })
+
+  it('protects a current Provider even when its route is absent from the model directory', async () => {
+    const target = option({ current: false })
+    let editChoices: readonly OverlayChoice[] = []
+    let selectCount = 0
+    const select = vi.fn(async (request: SelectOverlayRequest) => {
+      selectCount += 1
+      if (selectCount === 1) return request.choices.find(choice => choice.id === 'acme')
+      if (selectCount === 2) {
+        editChoices = request.choices
+        return undefined
+      }
+      return undefined
+    })
+    const navigation = {
+      ...prompts(select),
+      signal: new AbortController().signal,
+      selectPage: vi.fn(async (request: SelectOverlayRequest, onSelect: (choice: OverlayChoice) => void | Promise<void>) => {
+        const choice = request.choices.find(candidate => candidate.id === '__manage_providers__')
+        if (choice !== undefined) await onSelect(choice)
+      }),
+      replaceSelectPage: vi.fn(),
+      updateChoices: vi.fn(),
+      back: vi.fn(),
+      finish: vi.fn(),
+    } satisfies OverlayNavigation
+    const namespace = {
+      ns: 'llm-pi-ai', schema: {},
+      value: { providers: { acme: { models: [{ id: 'missing-model' }] } } },
+      user: { providers: { acme: { models: [{ id: 'missing-model' }] } } },
+      base: {}, applies: 'live', secrets: [], revision: 1,
+    }
+    const capabilities = {
+      listModels: async () => ({ options: [target], failures: [], routable: false }),
+      loadModels: async () => ({
+        current: { provider: 'acme', model: 'missing-model' },
+        routable: false,
+        groups: [{ id: 'deepseek', name: 'DeepSeek', models: [] }],
+        failures: [{ id: 'acme', name: 'Acme', message: 'route unavailable' }],
+      }),
+      managementBridge: () => ({ settings: { describe: async () => [] } }),
+      providerApi: () => ({
+        llm: { providers: async () => ({ result: { ok: true, value: { providers: [{
+          provider: 'acme', displayName: 'Acme', settingsNs: 'llm-pi-ai',
+          settingsPath: ['providers', 'acme'], active: false, declared: true,
+        }] } } }) },
+        settings: { describe: async () => ({ result: { ok: true, value: { writable: true, namespaces: [namespace] } } }) },
+        credentials: { describe: async () => ({ result: { ok: true, value: { credentials: {} } } }) },
+      }),
+      providerStateGeneration: () => 0,
+    } as unknown as HarnessTuiCapabilities
+
+    await new TuiActions(capabilities, actionHost(navigation)).execute('model', '')
+
+    expect(editChoices.find(choice => choice.id === 'delete')?.disabledReason).toContain('当前或默认')
   })
 
   it('changes the model without opening or writing a reasoning selection', async () => {

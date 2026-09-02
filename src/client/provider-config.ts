@@ -24,12 +24,16 @@ const PROTOCOL_PROBE_ROUTE = '\0seektty-probe'
 
 export type ProviderApi = Pick<IApiClient, 'credentials' | 'llm' | 'settings'>
 
-/** Curated model fields supported by the official pi-ai profile schema. */
+/** Editable model fields plus lossless storage for the complete official pi-ai profile. */
 export interface ProviderModelDraft {
+  readonly [key: string]: unknown
   readonly id: string
   readonly name?: string
   readonly contextWindow?: number
   readonly maxTokens?: number
+  readonly input?: readonly string[]
+  readonly reasoningEfforts?: false | Readonly<Record<string, string | null>>
+  readonly compat?: Readonly<Record<string, unknown>>
 }
 
 /** One official directory row joined with redacted Settings and Credential metadata. */

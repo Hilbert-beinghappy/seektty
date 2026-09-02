@@ -178,7 +178,9 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 自定义 Provider 仅使用已安装 `llm-pi-ai` adapter 在 schema 中明确描述的 `providers` 字典。在官方 dsh `0.1.1-rc.2` 中，它公开的协议选项是 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages。所有协议都可手工录入模型；adapter 支持时可通过 `llm.discoverModels` 发现。获取到模型列表只证明配置发现成功，第一次真实请求才是认证和推理检查。
 
-API Key 始终通过掩码控件收集，且只交给 Harness Credentials。来自环境或文件的只读凭据只显示为外部管理。删除仅适用于既非当前路由、也非默认路由的用户层自定义 Provider；凭据与历史 Session 均保留。已保存的 Provider ID 不支持原地重命名。Catalog Provider 和专有认证仍受已安装 Harness adapter 实际公开能力限制；该界面不是协议转换器，也不代表所有厂商专有 API 均已认证。
+API Key 始终通过掩码控件收集，且只交给 Harness Credentials。来自环境或文件的只读凭据只显示为外部管理；凭据元数据不可读时，Key 更新按 fail-closed 禁用。同时修改 endpoint 与 Key 时，必须使用不同、未配置且可写的新 Credential Ref；Settings 会在同一次 mutation 中切换地址与 Ref，随后才写入新 Key，因此旧 Key 不会被路由到新地址。模型编辑保留 schema 描述的完整模型项，包括输入模态、推理强度和协议兼容字段。
+
+删除仅适用于既非权威当前 Session 路由、也非默认路由的用户层自定义 Provider；即使当前路由未出现在模型目录中也会受到保护。确认后会重新读取引用与所有权，并核实删除结果；凭据与历史 Session 均不改动。已保存的 Provider ID 不支持原地重命名。Catalog Provider 和专有认证仍受已安装 Harness adapter 实际公开能力限制；该界面不是协议转换器，也不代表所有厂商专有 API 均已认证。
 
 ## 斜杠命令
 

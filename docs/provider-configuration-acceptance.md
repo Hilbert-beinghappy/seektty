@@ -1,6 +1,6 @@
 # Provider configuration acceptance — Issue #187
 
-Date: 2026-09-01
+Date: 2026-09-02
 
 ## Scope and environment
 
@@ -11,7 +11,7 @@ Date: 2026-09-01
 - pnpm: 11.7.0
 - Official dsh: 0.1.1-rc.2
 - Candidate: `seektty-1.2.5.tgz`
-- Candidate SHA-256: `54e76ed00869e657b753ef0afa331c579e65d99c215fdf3040f8cb2ffa9167b0`
+- Candidate SHA-256: `2887711b22ba01de6b59b3dbe642ae5f92b8675b3c52ca336760438f0bb42642`
 
 The candidate was built and exercised from an isolated worktree and temporary `HOME`/`DSH_HOME`. No credential value is recorded in this document, repository files, Settings, command output, or screenshots.
 
@@ -19,9 +19,9 @@ The candidate was built and exercised from an isolated worktree and temporary `H
 
 | Check | Observed result |
 | --- | --- |
-| `pnpm run check` | Passed: typecheck, 139 test files, 1245 tests passed, 1 existing skipped test, build, and 25-entry package check |
-| Provider-focused tests | Passed: schema join, model normalization/discovery, leaf mutations, partial retry, external credential refs, deletion guards, onboarding and event invalidation |
-| `env -i PATH=<node-and-system-path> TMPDIR=/tmp DSH_BIN=<official-package>/lib/bin.js SEEKTTY_SPEC=<candidate> pnpm run test:stock` | Passed separately against official dsh 0.1.0-rc.6, rc.7, rc.8, and 0.1.1-rc.2: credential-free isolated install, full boot boundary, remove, reinstall, module identity, launcher, Profile and Bundle reconciliation |
+| `pnpm run check` | Passed: typecheck, 139 test files, 1251 tests passed, 1 existing skipped test, build, and 25-entry package check |
+| Provider-focused tests | Passed: schema join, model normalization/discovery, lossless full-model edits, endpoint/key Ref rotation, Credential describe fail-closed behavior, authoritative current-route deletion guards, deletion reread/verification, onboarding and event invalidation |
+| `env -i PATH=<node-and-system-path> TMPDIR=/tmp DSH_BIN=<official-package>/lib/bin.js SEEKTTY_SPEC=<candidate> pnpm run test:stock` | Final post-review candidate passed against unmodified official dsh 0.1.1-rc.2: credential-free isolated install, full boot boundary, remove, reinstall, module identity, launcher, Profile and Bundle reconciliation. Earlier rc.6–rc.8 stock results remain historical evidence for the pre-review candidate. |
 
 Vite printed non-failing warnings for missing source maps in the vendored client runtime. No test or build failed because of them.
 
@@ -61,9 +61,11 @@ A fresh official dsh 0.1.1-rc.2 Profile installed the candidate and launched See
 ## Security and compatibility conclusions
 
 - Secrets use Harness Credentials only. Settings stores a reference, not a value.
-- External environment/file credentials remain read-only and are not overwritten.
+- External environment/file credentials remain read-only and are not overwritten. Credential metadata failure disables uncertain key updates.
+- An endpoint and key change uses a different, confirmed-unconfigured writable Ref. The revision-protected Settings mutation switches the Ref and endpoint together before `credentials.set`, so the old key is never routed to the new endpoint.
 - Provider Settings writes use Harness revisions and leaf operations. Credential failure can be retried without repeating a successful Settings mutation.
-- Provider deletion is limited to user-owned custom profiles and is disabled unless both current-route and default-route protection state are known. Credentials and historical Sessions are retained.
+- Model edits preserve the complete official `llm-pi-ai` model object, including `input`, `reasoningEfforts`, and `compat`.
+- Provider deletion is limited to user-owned custom profiles and is disabled unless both authoritative current-Session and default-route protection state are known. References and ownership are re-read after confirmation, and removal is verified. Credentials and historical Sessions are retained.
 - Model discovery is an explicit action, supports cancellation, and does not imply authentication or inference success.
 - The implementation has no client-side Provider cache. Official Provider/Settings/connection events invalidate the model directory.
 

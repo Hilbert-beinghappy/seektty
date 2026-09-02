@@ -1472,23 +1472,28 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async providerManager(overlays: OverlayPrompts): Promise<ProviderManagerResult> {
-    const directoryResult = await this.capabilities.listModels()
-      .then(directory => ({ known: true as const, directory }), () => ({ known: false as const }))
-    const currentProvider = directoryResult.known
-      ? directoryResult.directory.options.find(option => option.current)?.selection.provider
-      : undefined
-    const defaultResult = await this.capabilities.managementBridge().settings
-      .describe('agent-default-model')
-      .then(documents => ({ known: true as const, document: documents[0] }), () => ({ known: false as const }))
-    const defaultDocument = defaultResult.known ? defaultResult.document : undefined
-    const defaultProvider = typeof defaultDocument?.value === 'object' && defaultDocument.value !== null
-      && typeof (defaultDocument.value as { provider?: unknown }).provider === 'string'
-      ? (defaultDocument.value as { provider: string }).provider
-      : undefined
+    const reloadProtectedProviders = async (): Promise<readonly string[] | undefined> => {
+      const [currentResult, defaultResult] = await Promise.all([
+        this.capabilities.loadModels()
+          .then(directory => ({ known: true as const, provider: directory.current.provider }), () => ({ known: false as const })),
+        this.capabilities.managementBridge().settings
+          .describe('agent-default-model')
+          .then(documents => ({ known: true as const, document: documents[0] }), () => ({ known: false as const })),
+      ])
+      if (!currentResult.known || !defaultResult.known) return undefined
+      const defaultDocument = defaultResult.document
+      const defaultProvider = typeof defaultDocument?.value === 'object' && defaultDocument.value !== null
+        && typeof (defaultDocument.value as { provider?: unknown }).provider === 'string'
+        ? (defaultDocument.value as { provider: string }).provider
+        : undefined
+      return [...new Set([currentResult.provider, defaultProvider].filter((value): value is string => value !== undefined))]
+    }
+    const protectedProviders = await reloadProtectedProviders()
     return manageProviders(overlays, this.capabilities.providerApi(), {
       notice: (message, tone) => { this.host.notice(message, tone) },
-      allowDelete: directoryResult.known && defaultResult.known,
-      protectedProviders: [...new Set([currentProvider, defaultProvider].filter((value): value is string => value !== undefined))],
+      allowDelete: protectedProviders !== undefined,
+      ...(protectedProviders === undefined ? {} : { protectedProviders }),
+      reloadProtectedProviders,
       stateGeneration: () => this.capabilities.providerStateGeneration(),
     })
   }

@@ -30,6 +30,7 @@ export interface ProviderManagerOptions {
   readonly notice: (message: string, tone: 'info' | 'success' | 'warning' | 'error') => void
   readonly protectedProviders?: readonly string[]
   readonly allowDelete?: boolean
+  readonly reloadProtectedProviders?: () => Promise<readonly string[] | undefined>
   readonly stateGeneration?: () => number
 }
 
@@ -51,17 +52,28 @@ function stringOf(source: Readonly<Record<string, unknown>> | undefined, key: st
 function modelsOf(profile: Readonly<Record<string, unknown>> | undefined): ProviderModelDraft[] {
   const value = profile?.models
   if (!Array.isArray(value)) return []
-  return normalizeProviderModels(value.flatMap((entry) => {
+  return value.flatMap((entry) => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return []
     const model = entry as Record<string, unknown>
     if (typeof model.id !== 'string') return []
-    return [{
+    const normalized = normalizeProviderModels([{
       id: model.id,
       ...(typeof model.name === 'string' ? { name: model.name } : {}),
       ...(typeof model.contextWindow === 'number' ? { contextWindow: model.contextWindow } : {}),
       ...(typeof model.maxTokens === 'number' ? { maxTokens: model.maxTokens } : {}),
-    }]
-  })).map(model => ({ ...model }))
+    }])[0]
+    if (normalized === undefined) return []
+    const preserved = { ...model }
+    delete preserved.id
+    delete preserved.name
+    delete preserved.contextWindow
+    delete preserved.maxTokens
+    return [{ ...preserved, ...normalized }]
+  })
+}
+
+function sameModels(left: readonly ProviderModelDraft[], right: readonly ProviderModelDraft[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 function safeDisplayText(value: string): string {
@@ -156,12 +168,17 @@ async function editModel(
     current?.maxTokens,
   )
   if (maxTokens === 'cancelled') return undefined
-  return {
+  const edited: Record<string, unknown> = {
+    ...(current ?? {}),
     id: normalizedId,
-    ...(name.trim() === '' ? {} : { name: name.trim() }),
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
   }
+  delete edited.name
+  delete edited.contextWindow
+  delete edited.maxTokens
+  if (name.trim() !== '') edited.name = name.trim()
+  if (contextWindow !== undefined) edited.contextWindow = contextWindow
+  if (maxTokens !== undefined) edited.maxTokens = maxTokens
+  return edited as ProviderModelDraft
 }
 
 async function editModels(
@@ -285,6 +302,57 @@ async function credentialDraft(
   }
 }
 
+async function credentialMetadata(
+  api: ProviderApi,
+  ref: string,
+): Promise<{ readonly configured: boolean; readonly writable: boolean } | undefined> {
+  try {
+    const response = await api.credentials.describe({ refs: [ref] })
+    if (!response.result.ok) return undefined
+    return response.result.value.credentials[ref]
+  } catch {
+    return undefined
+  }
+}
+
+async function freshCredentialRef(
+  overlays: OverlayPrompts,
+  api: ProviderApi,
+  provider: string,
+  currentRef: string,
+  notice: ProviderManagerOptions['notice'],
+): Promise<string | undefined> {
+  const conventional = deriveProviderKeyRef(provider)
+  const initialValue = conventional === currentRef ? `${conventional}_NEXT` : conventional
+  while (true) {
+    const entered = await overlays.input({
+      title: ui('新的 Credential Ref', 'New Credential Ref'),
+      detail: ui(
+        '同时修改地址和 Key 时，必须先切换到一个不同、未配置且可写的 Ref，避免旧 Key 被发送到新地址。',
+        'Changing the endpoint and key together requires a different, unconfigured, writable Ref so the old key cannot be sent to the new endpoint.',
+      ),
+      initialValue,
+      requireText: true,
+    })
+    if (entered === undefined) return undefined
+    const ref = entered.trim()
+    if (!validProviderCredentialRef(ref) || ref === currentRef) {
+      notice(ui('请输入不同于当前值的有效 Credential Ref。', 'Enter a valid Credential Ref different from the current one.'), 'warning')
+      continue
+    }
+    const metadata = await credentialMetadata(api, ref)
+    if (metadata === undefined) {
+      notice(ui('无法确认该 Credential Ref 的状态；为安全起见不允许切换。', 'The Credential Ref state could not be confirmed, so the switch is disabled for safety.'), 'error')
+      return undefined
+    }
+    if (metadata.configured || !metadata.writable) {
+      notice(ui('新的 Credential Ref 必须尚未配置且可写。', 'The new Credential Ref must be unconfigured and writable.'), 'warning')
+      continue
+    }
+    return ref
+  }
+}
+
 async function finishSave(
   overlays: OverlayPrompts,
   api: ProviderApi,
@@ -320,6 +388,7 @@ async function editProvider(
   overlays: OverlayPrompts,
   api: ProviderApi,
   row: ProviderConfigRow,
+  credentialState: 'ready' | 'unavailable',
   options: ProviderManagerOptions,
   openedGeneration?: number,
 ): Promise<boolean> {
@@ -335,7 +404,9 @@ async function editProvider(
   const dirty = new Set<string>()
   let models = modelsOf(row.profile)
   let keyValue: string | undefined
-  const keyRef = row.apiKeyEnv ?? deriveProviderKeyRef(row.entry.provider)
+  let keyRef = row.apiKeyEnv ?? deriveProviderKeyRef(row.entry.provider)
+  const credentialUnavailable = credentialState === 'unavailable'
+    || (row.apiKeyEnv !== undefined && row.credential === undefined)
   const protocols = providerProtocolChoices(row.namespace)
   const custom = row.entry.declared === true && row.namespace.ns === 'llm-pi-ai'
   const setField = (key: string, value: unknown): void => {
@@ -354,7 +425,11 @@ async function editProvider(
           description: row.apiKeyEnv === undefined
             ? ui('当前使用 Provider 原生认证；输入 Key 后将建立 Credential Ref', 'Provider-native authentication; entering a key creates a credential reference')
             : row.credential?.configured === true ? ui('已配置；留空保持现状', 'Configured; leave blank to keep it') : ui('未配置', 'Not configured'),
-          ...(row.credential?.writable === false ? { disabledReason: ui('凭据由外部只读来源管理', 'Credential is managed by a read-only external source') } : {}),
+          ...(credentialUnavailable
+            ? { disabledReason: ui('无法确认凭据来源与可写性', 'Credential source and writability could not be confirmed') }
+            : row.credential?.writable === false
+              ? { disabledReason: ui('凭据由外部只读来源管理', 'Credential is managed by a read-only external source') }
+              : {}),
         },
         {
           id: 'baseURL',
@@ -388,8 +463,33 @@ async function editProvider(
     })
     if (selected === undefined) return false
     if (selected.id === 'credential') {
+      if (credentialUnavailable) {
+        options.notice(ui('无法确认 Credential 元数据；Key 更新已禁用。', 'Credential metadata is unavailable; key updates are disabled.'), 'warning')
+        continue
+      }
+      let targetRef = keyRef
+      const endpointChanged = dirty.has('baseURL')
+        && stringOf(draft, 'baseURL') !== stringOf(row.profile, 'baseURL')
+      if (endpointChanged && row.apiKeyEnv !== undefined) {
+        const freshRef = await freshCredentialRef(overlays, api, row.entry.provider, row.apiKeyEnv, options.notice)
+        if (freshRef === undefined) continue
+        targetRef = freshRef
+      } else {
+        const metadata = await credentialMetadata(api, targetRef)
+        if (metadata === undefined) {
+          options.notice(ui('无法确认 Credential Ref 的状态；Key 更新已禁用。', 'The Credential Ref state could not be confirmed; key updates are disabled.'), 'warning')
+          continue
+        }
+        if (!metadata.writable) {
+          options.notice(ui('该 Credential Ref 由外部只读来源管理。', 'This Credential Ref is managed by a read-only external source.'), 'warning')
+          continue
+        }
+      }
       const entered = await credentialDraft(overlays, row.credential?.writable !== false, options.notice)
-      if (entered !== 'cancelled') keyValue = entered
+      if (entered !== 'cancelled') {
+        keyValue = entered
+        if (entered !== undefined) keyRef = targetRef
+      }
       continue
     }
     if (selected.id === 'baseURL') {
@@ -433,8 +533,10 @@ async function editProvider(
         }
       }, options.notice)
       if (edited !== undefined) {
-        models = [...edited]
-        setField('models', models)
+        if (!sameModels(edited, models)) {
+          models = [...edited]
+          setField('models', models)
+        }
       }
       continue
     }
@@ -446,8 +548,40 @@ async function editProvider(
         ui('删除 Provider', 'Delete Provider'),
       )
       if (!confirmed) continue
-      const result = await removeProviderConfig(api, row)
-      if (result.ok) options.notice(ui('Provider 配置已删除；凭据已保留。', 'Provider configuration deleted; credential retained.'), 'success')
+      const protectedProviders = await options.reloadProtectedProviders?.()
+      if (protectedProviders === undefined) {
+        options.notice(ui('无法重新确认当前与默认路由；未删除 Provider。', 'Current and default routes could not be rechecked; the Provider was not deleted.'), 'warning')
+        continue
+      }
+      if (protectedProviders.includes(row.entry.provider)) {
+        options.notice(ui('该 Provider 仍被当前 Session 或默认路由引用；未删除。', 'This Provider is still referenced by the current session or default route and was not deleted.'), 'warning')
+        continue
+      }
+      let latestRow: ProviderConfigRow | undefined
+      try {
+        latestRow = (await loadProviderConfig(api)).rows.find(candidate => candidate.entry.provider === row.entry.provider)
+      } catch {
+        options.notice(ui('无法重新确认 Provider 所有权；未删除。', 'Provider ownership could not be rechecked; the Provider was not deleted.'), 'warning')
+        continue
+      }
+      if (latestRow?.removable !== true) {
+        options.notice(ui('该 Provider 已不再满足用户层删除条件；未删除。', 'This Provider no longer meets the user-owned deletion requirements and was not deleted.'), 'warning')
+        continue
+      }
+      const result = await removeProviderConfig(api, latestRow)
+      if (result.ok) {
+        try {
+          const verified = (await loadProviderConfig(api)).rows.find(candidate => candidate.entry.provider === row.entry.provider)
+          if (verified?.configured === true) {
+            options.notice(ui('删除请求已返回，但 Provider 仍存在；请重新读取后再处理。', 'The delete request returned, but the Provider is still present; reload before continuing.'), 'warning')
+            return false
+          }
+        } catch {
+          options.notice(ui('删除请求已返回，但无法核实最终状态。', 'The delete request returned, but its final state could not be verified.'), 'warning')
+          return true
+        }
+        options.notice(ui('Provider 配置已删除并核实；凭据已保留。', 'Provider configuration deletion was verified; credential retained.'), 'success')
+      }
       else options.notice(providerFailureMessage(result.stage, result.code), 'error')
       return result.ok
     }
@@ -458,11 +592,43 @@ async function editProvider(
         options.notice(issue, 'warning')
         continue
       }
-      if (keyValue !== undefined && row.apiKeyEnv === undefined) setField('apiKeyEnv', keyRef)
+      const endpointChanged = dirty.has('baseURL')
+        && stringOf(draft, 'baseURL') !== stringOf(row.profile, 'baseURL')
+      if (keyValue !== undefined && endpointChanged && row.apiKeyEnv !== undefined && keyRef === row.apiKeyEnv) {
+        const freshRef = await freshCredentialRef(overlays, api, row.entry.provider, row.apiKeyEnv, options.notice)
+        if (freshRef === undefined) continue
+        keyRef = freshRef
+      }
+      if (keyValue === undefined && endpointChanged && row.apiKeyEnv !== undefined) {
+        const reuse = await overlays.confirm(
+          ui('在新地址继续使用现有凭据？', 'Reuse the existing credential at the new endpoint?'),
+          ui(
+            `目标地址将改为 ${safeUrlPreview(stringOf(draft, 'baseURL'))}；只有确认信任该地址后才能继续。`,
+            `The endpoint will change to ${safeUrlPreview(stringOf(draft, 'baseURL'))}. Continue only if you trust this endpoint.`,
+          ),
+          ui('确认复用', 'Confirm reuse'),
+        )
+        if (!reuse) continue
+      }
+      if (keyValue !== undefined) {
+        const metadata = await credentialMetadata(api, keyRef)
+        if (metadata === undefined || !metadata.writable
+          || (endpointChanged && row.apiKeyEnv !== undefined && keyRef !== row.apiKeyEnv && metadata.configured)) {
+          options.notice(ui('Credential Ref 的最新状态不再满足安全写入条件；未保存。', 'The latest Credential Ref state no longer permits a safe write; nothing was saved.'), 'warning')
+          continue
+        }
+      }
+      if (providerStateChanged(options, openedGeneration)) return false
+      if (keyValue !== undefined && (row.apiKeyEnv === undefined || keyRef !== row.apiKeyEnv)) setField('apiKeyEnv', keyRef)
+      const dirtyFields = [...dirty].sort((left, right) => {
+        if (left === 'apiKeyEnv' && right !== 'apiKeyEnv') return -1
+        if (right === 'apiKeyEnv' && left !== 'apiKeyEnv') return 1
+        return 0
+      })
       let ops = providerProfileOps(
         row.entry.settingsPath,
-        Object.fromEntries([...dirty].filter(key => draft[key] !== undefined).map(key => [key, draft[key]])),
-        [...dirty].filter(key => draft[key] === undefined),
+        Object.fromEntries(dirtyFields.filter(key => draft[key] !== undefined).map(key => [key, draft[key]])),
+        dirtyFields.filter(key => draft[key] === undefined),
       )
       if (ops.length === 0 && !row.configured && row.entry.settingsPath.length > 0) {
         ops = [{ op: 'set', path: [...row.entry.settingsPath], value: {} }]
@@ -654,6 +820,6 @@ export async function manageProviders(
     }
     const row = snapshot.rows.find(candidate => candidate.entry.provider === selected.id)
     if (row === undefined) continue
-    changed = await editProvider(overlays, api, row, options, openedGeneration) || changed
+    changed = await editProvider(overlays, api, row, snapshot.credentialState, options, openedGeneration) || changed
   }
 }
