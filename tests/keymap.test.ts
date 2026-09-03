@@ -148,4 +148,48 @@ describe('/mouse', () => {
       0,
     )
   })
+
+  it('checks the live Session before persisting a mode change', async () => {
+    const { actions, host, mutate } = actionHarness()
+    host.interactionModeBlockReason = vi.fn(() => 'Current Session is running')
+
+    await actions.execute('mouse', 'native')
+
+    expect(mutate).not.toHaveBeenCalled()
+    expect(host.applyBehavior).not.toHaveBeenCalled()
+    expect(host.notice).toHaveBeenCalledWith('Current Session is running', 'warning')
+  })
+
+  it('rejects invalid mode names without mutating Settings', async () => {
+    const { actions, host, mutate } = actionHarness()
+
+    await actions.execute('mouse', 'twenty')
+
+    expect(mutate).not.toHaveBeenCalled()
+    expect(host.notice).toHaveBeenCalledWith(expect.stringMatching(/Usage|用法/u), 'error')
+  })
+
+  it('rolls back only its own Settings revision when renderer activation fails', async () => {
+    const { actions, host, mutate } = actionHarness()
+    host.applyBehavior = vi.fn()
+      .mockRejectedValueOnce(new Error('renderer failed'))
+      .mockResolvedValueOnce(undefined)
+
+    await actions.execute('mouse', 'native')
+
+    expect(mutate).toHaveBeenNthCalledWith(
+      1,
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['mouseMode'], value: 'native' }],
+      0,
+    )
+    expect(mutate).toHaveBeenNthCalledWith(
+      2,
+      TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+      [{ op: 'set', path: ['mouseMode'], value: 'full' }],
+      1,
+    )
+    expect(host.applyBehavior).toHaveBeenLastCalledWith(expect.objectContaining({ mouseMode: 'full' }))
+    expect(host.notice).toHaveBeenCalledWith('renderer failed', 'error')
+  })
 })

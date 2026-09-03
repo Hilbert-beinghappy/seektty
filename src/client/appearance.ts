@@ -8,10 +8,12 @@ import {
   type TuiCodeThemeId,
   type TuiCustomTheme,
   type TuiManagementBridge,
+  type TuiRenderingSettings,
   type TuiSettingsDocument,
   type TuiThemeId,
 } from '@deepseek-ai/dsh-tui-protocol'
 import { ui } from './locale.ts'
+import { resolveRendering, renderingOverrides } from './appearance-rendering.ts'
 import {
   normalizeAppearance,
   normalizeBackgroundMode,
@@ -125,13 +127,32 @@ export async function saveBackgroundMode(
   mode: TuiBackgroundMode,
 ): Promise<TuiSettingsDocument> {
   const value = normalizeBackgroundMode(mode)
+  const old = appearanceFromSettings(document)
+  const reset = Object.keys(renderingOverrides(old)).length > 0 ? resolveRendering({ backgroundMode: value }) : undefined
   const updated = await settings.mutate(
     TUI_APPEARANCE_SETTINGS_NAMESPACE,
-    [{ op: 'set', path: ['backgroundMode'], value }],
+    [{ op: 'set', path: ['backgroundMode'], value },
+      ...Object.entries(reset ?? {}).map(([key, entry]) => ({ op: 'set' as const, path: [key], value: entry }))],
     document.revision,
   )
-  if (appearanceFromSettings(updated).backgroundMode !== value) {
+  if (appearanceFromSettings(updated).backgroundMode !== value
+    || JSON.stringify(resolveRendering(appearanceFromSettings(updated))) !== JSON.stringify(resolveRendering({ backgroundMode: value }))) {
     throw new Error(ui('Harness 未保存所选背景模式', 'Harness did not save the selected background mode'))
+  }
+  return updated
+}
+
+/** Atomically freeze the effective legacy baseline, changing only the requested dimensions. */
+export async function saveRendering(
+  settings: TuiManagementBridge['settings'],
+  document: TuiSettingsDocument,
+  change: Partial<TuiRenderingSettings>,
+): Promise<TuiSettingsDocument> {
+  const value = { ...resolveRendering(appearanceFromSettings(document)), ...renderingOverrides(change) }
+  const updated = await settings.mutate(TUI_APPEARANCE_SETTINGS_NAMESPACE,
+    Object.entries(value).map(([key, entry]) => ({ op: 'set' as const, path: [key], value: entry })), document.revision)
+  if (JSON.stringify(resolveRendering(appearanceFromSettings(updated))) !== JSON.stringify(value)) {
+    throw new Error(ui('Harness 未完整保存显色与背景设置', 'Harness did not fully save rendering settings'))
   }
   return updated
 }

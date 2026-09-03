@@ -53,7 +53,7 @@ describe('settings schema locale metadata (review #57)', () => {
   it('defaults the Harness schema for old profiles and rejects unknown background modes', () => {
     expect(AppearanceSettingsSchema({}).backgroundMode).toBe('theme')
     expect(AppearanceSettingsSchema({ theme: 'light' }).backgroundMode).toBe('theme')
-    for (const backgroundMode of ['theme', 'terminal', 'explicit'] as const) {
+    for (const backgroundMode of ['theme', 'terminal', 'explicit', 'foreground'] as const) {
       expect(AppearanceSettingsSchema({ backgroundMode }).backgroundMode).toBe(backgroundMode)
     }
     // @ts-expect-error external persisted settings can contain invalid values

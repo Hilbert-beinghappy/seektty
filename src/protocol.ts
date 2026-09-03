@@ -86,14 +86,20 @@ export interface TuiCustomTheme {
   readonly tokenColors: readonly TuiTextMateRule[]
 }
 
-/** How the main canvas uses the terminal's default background. */
-export type TuiBackgroundMode = 'theme' | 'terminal' | 'explicit'
+/** Legacy appearance presets, retained for settings and command compatibility. */
+export type TuiBackgroundMode = 'theme' | 'terminal' | 'explicit' | 'foreground'
 
 /** Keep theme colors while inheriting the terminal's background effects. */
 export const DEFAULT_TUI_BACKGROUND_MODE: TuiBackgroundMode = 'theme'
 
 /** Complete appearance value owned by the SeekTTY Settings namespace. */
-export interface TuiAppearanceSettings {
+export interface TuiRenderingSettings {
+  readonly colorMode: 'auto' | 'rgb'
+  readonly backgroundFill: 'terminal' | 'theme'
+  readonly terminalBackgroundSync: 'off' | 'theme'
+}
+
+export interface TuiAppearanceSettings extends Partial<TuiRenderingSettings> {
   readonly theme: TuiThemeId
   readonly codeTheme: TuiCodeThemeId
   readonly backgroundMode: TuiBackgroundMode
@@ -274,7 +280,7 @@ export type TuiClipboardFallback = 'auto' | 'osc52' | 'off'
 /** Which confirm-dialog choice is focused when a dangerous action opens. */
 export type TuiDangerConfirmDefault = 'cancel' | 'confirm'
 
-/** Application-owned mouse reporting versus emulator-native selection. */
+/** Fullscreen application interaction versus terminal-native scrollback. */
 export type TuiMouseMode = 'full' | 'native'
 
 /** Whether the transcript always reserves a scrollbar column. */

@@ -64,6 +64,34 @@ describe('managed terminal session', () => {
     )
   })
 
+  it('runs native mode on the main screen and switches buffers without restarting input', () => {
+    const terminal = new RecordingTerminal()
+    const session = createTerminalSession(terminal, true)
+
+    session.enter('native')
+    expect(session.displayMode()).toBe('native')
+    expect(terminal.__seekttyManagedAlternateScreen).toBe(false)
+    expect(terminal.writes.join('')).toContain('\u001B[?1004l')
+    expect(terminal.writes.join('')).not.toContain('\u001B[?1049h')
+
+    terminal.writes = []
+    session.setMouseReporting('full')
+    expect(terminal.writes).toEqual([])
+    session.setDisplayMode('full')
+    expect(terminal.writes.join('')).toContain('\u001B[?1049h\u001B[H')
+    expect(terminal.writes.join('')).toContain('\u001B[?1003h')
+    expect(terminal.__seekttyManagedAlternateScreen).toBe(true)
+
+    terminal.writes = []
+    session.setDisplayMode('native')
+    expect(terminal.writes.join('')).toContain('\u001B[?25h\u001B[?1049l')
+    expect(terminal.__seekttyManagedAlternateScreen).toBe(false)
+
+    terminal.writes = []
+    session.restore()
+    expect(terminal.writes.join('')).not.toContain('\u001B[?1049l')
+  })
+
   it('leaves alternate screen even when protocol restoration fails', () => {
     const terminal = new RecordingTerminal()
     terminal.restoreProtocolsSync = () => { throw new Error('protocol restore failed') }

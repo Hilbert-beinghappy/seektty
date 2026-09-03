@@ -6,7 +6,8 @@ import {
   type MarkdownTheme,
 } from '@mariozechner/pi-tui'
 import { BUILT_IN_THEMES, type ResolvedTuiTheme } from './theme-config.ts'
-import { DEFAULT_TUI_BACKGROUND_MODE, type TuiBackgroundMode } from '@deepseek-ai/dsh-tui-protocol'
+import type { TuiBackgroundMode, TuiRenderingSettings } from '@deepseek-ai/dsh-tui-protocol'
+import { resolveRendering } from './appearance-rendering.ts'
 import { ui } from './locale.ts'
 import { readableCanvas } from './canvas-foreground.ts'
 
@@ -116,7 +117,7 @@ function runtimePalette(theme: ResolvedTuiTheme): ThemePalette {
 }
 
 let selectedTheme: ResolvedTuiTheme = BUILT_IN_THEMES.dark
-let backgroundMode: TuiBackgroundMode = DEFAULT_TUI_BACKGROUND_MODE
+let rendering = resolveRendering({})
 let palette = runtimePalette(selectedTheme)
 
 /** Whether syntax rendering should emit the theme's default code background. */
@@ -215,6 +216,12 @@ export function terminalColorLevel(env: Readonly<NodeJS.ProcessEnv> = process.en
   return 1
 }
 
+/** Rendering policy is independent of capability detection (notably OSC 11 support). */
+export function renderingColorLevel(env: Readonly<NodeJS.ProcessEnv> = process.env): TerminalColorLevel {
+  const detected = terminalColorLevel(env)
+  return detected === 0 || rendering.colorMode !== 'rgb' ? detected : 3
+}
+
 function rgb(red: number, green: number, blue: number): SemanticColor {
   return { rgb: [red, green, blue] }
 }
@@ -282,13 +289,13 @@ function backgroundSequence(entry: SemanticColor, level: TerminalColorLevel): st
 
 function paint(entry: SemanticColor, text: string): string {
   const safeText = escapeTerminalText(text)
-  const level = terminalColorLevel()
+  const level = renderingColorLevel()
   if (level === 0) return safeText
   return `${foregroundSequence(entry, level)}${safeText}${RESET}`
 }
 
 function layer(background: SemanticColor | undefined, text: string, foreground = palette.text): string {
-  const level = terminalColorLevel()
+  const level = renderingColorLevel()
   if (level === 0) return text
   const prefix = `${background === undefined ? '\u001B[49m' : backgroundSequence(background, level)}${foregroundSequence(foreground, level)}`
   const restored = text.replace(/\u001B\[(?:0)?m/gu, `${RESET}${prefix}`)
@@ -318,7 +325,7 @@ export interface TerminalTextStyle {
  */
 export function styleTerminalText(text: string, style: TerminalTextStyle): string {
   const safeText = escapeTerminalText(text)
-  const level = terminalColorLevel()
+  const level = renderingColorLevel()
   if (level === 0 || safeText === '') return safeText
   const sequences: string[] = []
   if (style.foreground !== undefined) sequences.push(foregroundSequence(semanticColor(style.foreground), level))
@@ -343,7 +350,10 @@ export function setTheme(theme: ResolvedTuiTheme): void {
 export function currentTheme(): ResolvedTuiTheme { return selectedTheme }
 
 /** Independent of theme previews/imports; controls which UI surfaces inherit terminal effects. */
-export function setBackgroundMode(mode: TuiBackgroundMode): void { backgroundMode = mode }
+export function setBackgroundMode(mode: TuiBackgroundMode): void { setRendering(resolveRendering({ backgroundMode: mode })) }
+
+/** Encoding and canvas fill are independent of terminal background synchronization. */
+export function setRendering(settings: TuiRenderingSettings): void { rendering = { ...settings } }
 
 let terminalCanvasBackground: string | undefined
 
@@ -367,7 +377,7 @@ export function setCodeHighlighter(
  * @returns one safely styled entry per source line.
  */
 export function highlightCodeLines(code: string, language?: string): string[] {
-  const codeBackground = backgroundMode === 'explicit' ? 'explicit' : 'inherit'
+  const codeBackground = rendering.backgroundFill === 'theme' ? 'explicit' : 'inherit'
   return codeHighlighter?.(code, language, codeBackground)
     ?? code.split('\n').map(line => styleTerminalText(line, {
       foreground: selectedTheme.syntax.foreground,
@@ -419,7 +429,7 @@ export const color = {
       ? undefined
       : slots[Math.max(0, Math.min(8, Math.floor(backgroundSlot) - 1))] ?? palette.brand
     const safeText = escapeTerminalText(text)
-    const level = terminalColorLevel()
+    const level = renderingColorLevel()
     if (level === 0 || safeText === '') return safeText
     return `${foregroundSequence(foreground, level)}${background === undefined ? '' : backgroundSequence(background, level)}${safeText}${RESET}`
   },
@@ -439,7 +449,7 @@ export const interaction = {
   hoverThenMuted: (text: string, remainder: string): string => {
     const safeText = escapeTerminalText(text)
     const safeRemainder = escapeTerminalText(remainder)
-    const level = terminalColorLevel()
+    const level = renderingColorLevel()
     if (level === 0) return `${safeText}${safeRemainder}`
     return `${foregroundSequence(palette.brand, level)}${safeText}${foregroundSequence(palette.muted, level)}${safeRemainder}`
   },
@@ -448,15 +458,15 @@ export const interaction = {
 /** Background layers shared by the full frame, panels, and selected rows. */
 export const background = {
   canvas: (text: string): string => {
-    const row = layer(backgroundMode === 'explicit' ? palette.canvas : undefined, text)
-    if (terminalColorLevel() === 0 || backgroundMode === 'explicit'
+    const row = layer(rendering.backgroundFill === 'theme' ? palette.canvas : undefined, text)
+    if (terminalColorLevel() === 0 || rendering.backgroundFill === 'theme' || rendering.colorMode === 'rgb'
       || terminalCanvasBackground?.toLowerCase() === selectedTheme.colors.canvas.toLowerCase()) return row
     return readableCanvas(row, terminalColorLevel() === 3 ? terminalCanvasBackground : undefined)
   },
-  surface: (text: string): string => layer(backgroundMode === 'explicit' ? palette.surface : undefined, text),
+  surface: (text: string): string => layer(rendering.backgroundFill === 'theme' ? palette.surface : undefined, text),
   selection: (text: string): string => layer(palette.selection, text),
   code: (text: string): string => layer(
-    backgroundMode === 'explicit' ? palette.codeBackground : undefined,
+    rendering.backgroundFill === 'theme' ? palette.codeBackground : undefined,
     text,
     palette.codeForeground,
   ),

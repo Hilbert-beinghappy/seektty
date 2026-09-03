@@ -100,6 +100,71 @@ async function startedTui(): Promise<Harness> {
 }
 
 describe('patched pi-tui render stability', () => {
+  it('keeps a native-mode first frame in terminal scrollback and never homes on height-only resize', async () => {
+    const terminal = new RecordingTerminal()
+    terminal.__seekttyManagedAlternateScreen = false
+    terminal.rows = 5
+    const tui = new TUI(terminal, false)
+    const lines = Array.from({ length: 12 }, (_, index) => `native-${String(index).padStart(2, '0')}`)
+    tui.addChild({ render: () => [...lines], invalidate: () => undefined })
+    tui.start()
+    await nextFrame()
+    expect(terminal.output()).toContain('native-00')
+    expect(terminal.output()).toContain('native-11')
+    expect(terminal.output()).not.toContain('\u001B[H')
+
+    terminal.reset()
+    terminal.rows = 3
+    tui.requestRender()
+    await nextFrame()
+    expect(terminal.output()).not.toContain('\u001B[H')
+    expect(terminal.output()).not.toContain(CLEAR_SCREEN)
+    expect(terminal.output()).not.toContain(CLEAR_SCROLLBACK)
+
+    terminal.reset()
+    lines.push('native-12')
+    tui.requestRender()
+    await nextFrame()
+    expect(terminal.output()).toContain('native-12')
+    expect(terminal.output()).not.toContain('native-00')
+    expect(terminal.output()).not.toContain('\u001B[H')
+    tui.stop()
+  })
+
+  it('restores native-buffer diff state so returning from full mode appends only unseen rows', async () => {
+    const terminal = new RecordingTerminal()
+    terminal.__seekttyManagedAlternateScreen = false
+    terminal.rows = 5
+    const tui = new TUI(terminal, false)
+    const nativeLines = Array.from({ length: 12 }, (_, index) => `native-state-${String(index).padStart(2, '0')}`)
+    const fullLines = Array.from({ length: 5 }, (_, index) => `full-state-${String(index).padStart(2, '0')}`)
+    let mode: 'native' | 'full' = 'native'
+    tui.addChild({ render: () => mode === 'native' ? [...nativeLines] : [...fullLines], invalidate: () => undefined })
+    tui.start()
+    await nextFrame()
+    const nativeState = tui.captureRenderState()
+
+    mode = 'full'
+    terminal.__seekttyManagedAlternateScreen = true
+    tui.resetRenderState()
+    tui.requestRender()
+    await nextFrame()
+    expect(terminal.output()).toContain('full-state-04')
+
+    terminal.reset()
+    mode = 'native'
+    terminal.__seekttyManagedAlternateScreen = false
+    nativeLines.push('native-state-12')
+    tui.restoreRenderState(nativeState)
+    tui.requestRender()
+    await nextFrame()
+    expect(terminal.output()).toContain('native-state-12')
+    expect(terminal.output()).not.toContain('native-state-00')
+    expect(terminal.output()).not.toContain(CLEAR_SCREEN)
+    expect(terminal.output()).not.toContain(CLEAR_SCROLLBACK)
+    tui.stop()
+  })
+
   it('clamps a tall first frame to the physical viewport', async () => {
     const { terminal, tui, initialOutput: output } = await startedTui()
     expect(output).not.toContain('row-00')

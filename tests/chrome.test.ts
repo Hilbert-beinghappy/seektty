@@ -31,6 +31,27 @@ afterEach(() => {
 })
 
 describe('composer chrome', () => {
+  it('renders the complete transcript without viewport padding in terminal-native mode', () => {
+    const layout = new BottomAnchoredLayout(
+      () => 6,
+      rows('context'),
+      rows('one', 'two', 'three', 'four', 'five', 'six'),
+      rows('editor top', 'editor body', 'editor bottom'),
+      rows('status'),
+      () => false,
+      undefined,
+      () => true,
+      () => true,
+    )
+
+    const rendered = layout.render(80)
+    expect(rendered).toEqual([
+      'context', '', 'one', 'two', 'three', 'four', 'five', 'six', '',
+      'editor top', 'editor body', 'editor bottom', 'status',
+    ])
+    expect(layout.lastContentGeometry()?.transcript.height).toBe(6)
+  })
+
   it('uses spare viewport rows above the composer instead of below it', () => {
     const layout = new BottomAnchoredLayout(
       () => 12,

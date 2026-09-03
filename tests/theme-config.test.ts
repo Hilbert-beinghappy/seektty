@@ -92,7 +92,7 @@ describe('durable custom theme validation', () => {
     expect(resolveTheme(appearance).name).toBe('Ocean')
   })
 
-  it.each(['theme', 'terminal', 'explicit'])('accepts the independent %s background mode', backgroundMode => {
+  it.each(['theme', 'terminal', 'explicit', 'foreground'])('accepts the independent %s background mode', backgroundMode => {
     const appearance = normalizeAppearance({ theme: 'dark', backgroundMode })
     expect(appearance.backgroundMode).toBe(backgroundMode)
     expect(resolveAppearanceTheme(appearance)).not.toHaveProperty('backgroundMode')

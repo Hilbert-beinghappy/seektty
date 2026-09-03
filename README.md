@@ -112,7 +112,7 @@ See the bilingual [release notes](docs/release-v1.2.5.md) for changes and the [o
 | --- | --- |
 | ![SeekTTY light TypeScript syntax highlighting](assets/seektty-code-light.png) | ![SeekTTY dark tool and Diff syntax highlighting](assets/seektty-code-dark.png) |
 
-The live view uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Sent user messages use the composer's top and bottom horizontal rules to separate them from unframed assistant replies. Full mouse mode browses history with the wheel, selects text, and clicks existing controls inside SeekTTY. Holding a selection at the transcript edge auto-scrolls across loaded pages while preserving one logical text anchor; only the visible viewport is repainted. F3 or `/mouse` switches to native terminal selection without leaving the alternate screen. Exiting restores the previous main screen and its scrollback. Assistant code, Shell commands, tool parameters, file reads, JSON, and Diff share the active code theme while ordinary conversation text keeps the interface theme.
+Full mode uses a fixed alternate-screen viewport and keeps the composer and status at the bottom. Its mouse support browses history, selects text, and clicks existing controls inside SeekTTY. F3 or `/mouse native` switches while idle to terminal-native mode: SeekTTY leaves the alternate screen, writes the complete loaded conversation to ordinary terminal scrollback, disables mouse reporting, and lets the terminal or tmux own scrolling, search, and selection. Backfill is sequential and reports progress; Esc stops it without stopping the Session, while Ctrl+L refreshes only the active tail. `/transcript` opens transcript browsing and `/transcript replay` explicitly writes the available conversation again. Images use a textual attachment row in native mode. Already-written history is not recolored or reflowed by SeekTTY; the terminal owns that history.
 
 An empty session now opens with a responsive Fastfetch-style welcome page rather than sendable task suggestions. The default uses a packaged, original-color DeepSeek pixel whale plus runtime facts from the current Profile; it does **not** execute Fastfetch. The first-time API-key prompt remains higher priority and finishes before optional Fastfetch collection starts.
 
@@ -291,7 +291,7 @@ Undo is local to each input, including search and masked secret fields. It does 
 | Ctrl+Shift+C | Copy the active in-app selection |
 | Ctrl+X in a non-secret overlay input | Cut the selection |
 | Backspace / Delete in an editable input | Delete the selection |
-| Hold the terminal selection modifier while dragging, then copy | Native selection: hold `Fn` in Terminal.app or `Option` in iTerm2, then press `Command+C`; use the outer terminal/tmux selection modifier elsewhere |
+| Use terminal/tmux scrollback and selection | In terminal-native mode, use the terminal's ordinary scrolling, search, copy mode, and selection controls |
 
 Full mouse mode also provides a resident scrollbar, in-app selection, copy-on-select, hover feedback, and target-aware clicks on cards, examples, candidates, overlays, and model/mode/permission controls. Dangerous confirmations still require Enter.
 
@@ -299,7 +299,7 @@ Transcript copying is semantic rather than a dump of terminal cells. Visual word
 
 Modal pages support dragging over visible text to select and copy it. Search fields and non-secret inputs also support replacing a selection by typing, Backspace, or Delete; Ctrl+X cuts it. Their right-click menu provides Copy, Cut, Delete selection, Paste, and Select all. Ctrl+Shift+C copies the active page's selection; Ctrl+C keeps its interrupt behavior. Masked secrets are never exposed through clipboard actions.
 
-Context menus float above the current page without joining its navigation stack. They resolve the object under the pointer instead of moving the list cursor or keyboard focus: Sessions, workspaces, Profiles, themes, welcome rows, Fastfetch modules, queued messages, plugins, files, jobs, subagents, cards, the Agent tree, MCP entries, Skills, status controls, and editable text expose their existing actions where applicable. Every root menu keeps Copy selected text and Close; Copy is disabled when no selection exists. Native selection remains available through F3 or `/mouse`, not as a context-menu action.
+Context menus float above the current page without joining its navigation stack. They resolve the object under the pointer instead of moving the list cursor or keyboard focus: Sessions, workspaces, Profiles, themes, welcome rows, Fastfetch modules, queued messages, plugins, files, jobs, subagents, cards, the Agent tree, MCP entries, Skills, status controls, and editable text expose their existing actions where applicable. Every root menu keeps Copy selected text and Close; Copy is disabled when no selection exists. Terminal-native mode remains available through F3 or `/mouse`, not as a context-menu action.
 
 Object menus support one submenu level. Hovering a parent for 250 ms opens it; click, Enter, or Right opens immediately, while Left or Esc returns to the root. Targets and capabilities are revalidated before execution, stale rows cannot run actions, and Session rename, Fork, export, and archive operate on the right-clicked Session without temporarily switching the active Session. Destructive actions keep their existing confirmation flow and cannot bypass Enter-only confirmation pages.
 
@@ -314,6 +314,10 @@ SeekTTY starts with its DeepSeek dark theme. `/theme` opens the theme center; di
 ```text
 /theme dark
 /theme light
+/theme background [theme|terminal|explicit|foreground]
+/theme colors [auto|rgb]
+/theme fill [terminal|theme]
+/theme sync [off|theme]
 /theme code [auto|dark|light|<name>]
 /theme use <name>
 /theme edit [name]
@@ -326,17 +330,30 @@ Interface and code themes remain independently selectable. A palette of 3–16 H
 
 Hover is a foreground-only interaction state derived from the active interface theme. It uses the theme's `brand` color without a background fill, underline, bold, reverse video, extra marker, required setting, or saved-palette mutation. Selection remains the stronger filled state; `NO_COLOR` remains respected.
 
-The main canvas now defaults to **theme colors + terminal effects**, instead of an explicit RGB fill. It uses the terminal's default background so the terminal can apply its configured transparency, blur, or background image. Choose **Background mode** in `/theme` or `/settings seektty-appearance`; both open the same editor and apply successful saves immediately.
+Interface/code themes select palettes. **Color rendering**, **Background fill**, and **Terminal background sync (advanced)** are separate controls in `/theme` and `/settings seektty-appearance`, applied immediately after a revision-protected save. Defaults and existing saved appearances are unchanged; merely reading old settings does not migrate them.
+
+| Control | Direct command | Behavior |
+| --- | --- | --- |
+| Color rendering | `/theme colors auto` or `/theme colors rgb` | Detect RGB/256/16-color support, or send original theme RGB without application quantization/contrast adjustment |
+| Background fill | `/theme fill terminal` or `/theme fill theme` | Inherit terminal effects, or paint full canvas/panel/code backgrounds including blank cells |
+| Terminal background sync (advanced) | `/theme sync off` or `/theme sync theme` | Disable OSC 11, or attempt temporary theme synchronization on supported terminals |
+
+For original colors **and** a theme-colored canvas, use `/theme colors rgb` and `/theme fill theme`. Theme fill uses SGR background colors, **not** OSC 11, and works with `/theme sync off`. It does not edit the terminal's configuration; actual colors and opacity still depend on the terminal or multiplexer. Inherit-terminal fill needs manually matched light/dark themes. `NO_COLOR`, `TERM=dumb` and non-interactive boundaries remain respected. Selection, special token backgrounds and logo pixels keep their explicit colors. Switching rendering or fill refreshes existing messages/code/welcome content without resetting the Session, draft, selection, copy content or viewport.
+
+Legacy `/theme background <preset>` commands remain available and reset **all three** controls to their original combination; `/theme background explicit` remains a direct recovery command. With no arguments, `/theme background` opens the new fill editor. New commands without arguments open their respective editors. Legacy settings map as follows until independent overrides are saved:
 
 | `backgroundMode` | Canvas, panels and base code background | Terminal color |
 | --- | --- | --- |
 | `theme` (default, including older settings) | Terminal default background (`SGR 49`) | Temporarily synchronize the interface theme with OSC 11 |
 | `terminal` | Terminal default background (`SGR 49`) | Leave unchanged; restore the captured original if SeekTTY changed it |
 | `explicit` (compatibility) | Explicit canvas, panel and code-theme fills, as before | Keep the previous OSC 11 synchronization behavior |
+| `foreground` (experimental, manual opt-in) | Terminal default background (`SGR 49`), original theme RGB foregrounds | No queries or recoloring; restore only an original color owned by this run |
+
+The `foreground` legacy preset is original RGB + inherited terminal background + sync off. Adding `/theme fill theme` keeps its successful RGB rendering while painting the background. There is no automatic fallback or guarantee of identical colors across terminals.
 
 In `theme` and `terminal`, padded panel rows and the base background of inline, fenced, tool, file and diff code use the same terminal-default background semantics as the canvas. Code layout and syntax foregrounds are unchanged. Selection and explicitly authored TextMate token backgrounds remain colored islands; hover changes foreground only. In `explicit`, the previous canvas, panel and code fills remain available, although the terminal still decides whether explicit colors are opaque. Background mode belongs to Harness `seektty-appearance` settings, not theme files: theme switching, previews, import and export do not overwrite it.
 
-Canvas text adapts to a known background that differs from the theme. If the background is unknown (including unavailable synchronization), it uses the terminal's default foreground instead of guessing black or white; semantic text colors on default-background cells are reduced, while text styles, selection and explicit token backgrounds remain. This also updates existing messages without moving the viewport or clearing selection. The open theme menu refreshes its current marker and code-theme description after saving or returning from a child menu.
+With automatic color rendering and inherited fill, canvas text adapts to a known background that differs from the theme. If the background is unknown, it uses the terminal's default foreground instead of guessing black or white. Original RGB bypasses this adjustment. The theme menu refreshes its palette and independent control summaries after saving or returning from a child menu. These controls belong to Harness settings, never portable theme import/export files.
 
 Color synchronization requires a supported truecolor terminal and a valid reply to one 500 ms asynchronous query. Unsupported or timed-out queries, `NO_COLOR`, limited colors, and tmux/screen do not recolor the terminal. In `theme` mode, an unavailable sync leaves the default background in place with one non-blocking notice, not an automatic RGB fallback. `SEEKTTY_TERMINAL_BACKGROUND=off` disables recoloring only; it does not change the selected mode. Exit restores the captured color. SeekTTY does not read/set opacity, edit terminal configuration, or alter window decorations. See [compatibility](docs/terminal-background-compatibility.md) and [current acceptance results](docs/transparent-surfaces-hover-acceptance.md).
 

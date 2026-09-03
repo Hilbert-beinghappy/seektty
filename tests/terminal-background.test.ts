@@ -54,6 +54,47 @@ describe('terminal background capability policy', () => {
 })
 
 describe('background ownership', () => {
+  it.each([true, false])('never probes or recolors in foreground mode (enabled=%s), including force, resume and exit', enabled => {
+    vi.useFakeTimers()
+    const { background, writes, notice } = controller(enabled)
+    background.setColor('#ffffff', 'foreground', true)
+    background.start()
+    background.consumeInput(reply())
+    vi.advanceTimersByTime(BACKGROUND_QUERY_TIMEOUT_MS * 2)
+    background.setColor('#112233', 'foreground', true)
+    background.restore()
+    background.start()
+    background.restore()
+    expect(writes).toEqual([])
+    expect(notice).not.toHaveBeenCalled()
+  })
+
+  it('abandons a pending query and ignores late replies after entering foreground mode', () => {
+    vi.useFakeTimers()
+    const { background, writes, notice } = controller()
+    background.start()
+    background.setColor('#ffffff', 'foreground', true)
+    expect(background.consumeInput(reply())).toBe(true)
+    vi.advanceTimersByTime(BACKGROUND_QUERY_TIMEOUT_MS * 2)
+    background.restore()
+    expect(writes).toEqual([BACKGROUND_QUERY])
+    expect(notice).not.toHaveBeenCalled()
+  })
+
+  it('restores only the owned original and resumes old sync after leaving foreground mode', () => {
+    const { background, writes } = controller()
+    background.start()
+    background.consumeInput(reply())
+    background.setColor('#ffffff', 'foreground', true)
+    background.setColor('#ffffff', 'foreground', true)
+    background.consumeInput(reply('rgb:ff/ff/ff'))
+    expect(writes).toEqual([BACKGROUND_QUERY, desired, reply()])
+    background.setColor('#ffffff', 'theme')
+    expect(writes.at(-1)).toBe(reply('rgb:ff/ff/ff'))
+    background.restore()
+    expect(writes.at(-1)).toBe(reply())
+  })
+
   it('reports applied, restored and unknown colors without another query or precision loss', () => {
     const writes: string[] = []
     const changed = vi.fn()
@@ -361,7 +402,7 @@ function inputHarness() {
 }
 
 describe('OSC framing and nested input isolation', () => {
-  it.each(['theme', 'terminal', 'explicit'] as const)('keeps OSC replies out of an actual API-key overlay in %s mode', async mode => {
+  it.each(['theme', 'terminal', 'explicit', 'foreground'] as const)('keeps OSC replies out of an actual API-key overlay in %s mode', async mode => {
     vi.useFakeTimers()
     const harness = inputHarness()
     const overlays = new OverlayQueue(harness.tui)

@@ -136,11 +136,26 @@ export const AppearanceSettingsSchema = z.object({
       zh: '代码块独立主题；auto 跟随当前界面主题。',
       en: 'Independent code-block theme; auto follows the current interface theme.',
     })),
-  backgroundMode: z.union(['theme', 'terminal', 'explicit'])
+  backgroundMode: z.union(['theme', 'terminal', 'explicit', 'foreground'])
     .default(DEFAULT_TUI_BACKGROUND_MODE)
     .description(localeDescription({
-      zh: '界面背景模式：主题颜色＋终端效果、完全跟随终端，或显式主题底色（兼容）。不改变终端透明度；默认模式下主画布、弹窗面板和代码基础背景使用终端默认背景。',
-      en: 'Interface background mode: theme colors with terminal effects, terminal background, or explicit theme fill (compatibility). Does not change terminal opacity; default modes use the terminal background for canvas, panels and base code.',
+      zh: '旧版外观组合（兼容读取）：主题颜色＋终端效果、跟随终端、显式铺底或原色 RGB。新设置分别控制显色、铺底与终端背景同步。',
+      en: 'Legacy appearance preset: theme with terminal effects, follow terminal, explicit fill, or original RGB. New settings independently control encoding, fill and terminal background sync.',
+    })),
+  colorMode: z.union(['auto', 'rgb'])
+    .description(localeDescription({
+      zh: '显色方式：auto 自动检测；rgb 直接输出主题原色。未设置时沿用旧组合。禁色优先。',
+      en: 'Color rendering: auto detection or original RGB. When absent, inherit the legacy preset. Color suppression takes priority.',
+    })),
+  backgroundFill: z.union(['terminal', 'theme'])
+    .description(localeDescription({
+      zh: '背景呈现：沿用终端或主题铺底；不改变显色，不依赖 OSC 11。',
+      en: 'Background fill: inherit terminal or paint theme backgrounds. Independent of color rendering and OSC 11.',
+    })),
+  terminalBackgroundSync: z.union(['off', 'theme'])
+    .description(localeDescription({
+      zh: '终端背景同步（高级）：关闭，或在支持时尝试 OSC 11 同步主题底色。',
+      en: 'Terminal background sync (advanced): off, or attempt OSC 11 theme synchronization when supported.',
     })),
   customThemes: z.array(CustomThemeSchema).max(MAX_CUSTOM_THEMES).default([])
     .description(localeDescription({
@@ -287,8 +302,8 @@ export const BehaviorSettingsSchema = z.object({
   mouseMode: z.union(['full', 'native'])
     .default(DEFAULT_TUI_BEHAVIOR.mouseMode)
     .description(localeDescription({
-      zh: '完整鼠标模式提供应用内滚动和点击；原生模式关闭鼠标报告，供终端选择文本。',
-      en: 'Full mouse mode provides in-app scrolling and clicks; native mode turns off mouse reporting so the terminal can select text.',
+      zh: '完整模式使用备用屏幕、应用内滚动和点击；终端原生模式把完整对话交给终端滚动记录。',
+      en: 'Full mode uses the alternate screen with in-app scrolling and clicks; terminal-native mode writes the full conversation to terminal scrollback.',
     })),
   hoverFeedback: z.boolean().default(DEFAULT_TUI_BEHAVIOR.hoverFeedback)
     .description(localeDescription({
