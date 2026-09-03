@@ -7,6 +7,7 @@ import {
   highlightCodeLines,
   interaction,
   setBackgroundMode,
+  setRendering,
   setCodeHighlighter,
   setTerminalCanvasBackground,
   setTheme,
@@ -14,6 +15,7 @@ import {
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
 import { tuiFrameApi } from '../src/client/pi-tui-adapters.ts'
 import type { TuiBackgroundMode } from '../src/protocol.ts'
+import { sgrCells } from './helpers/sgr-colors.ts'
 
 const DEFAULT_BG = '\u001B[49m'
 const RGB_BG = '\u001B[48;2;9;14;27m'
@@ -36,7 +38,7 @@ afterEach(() => {
 })
 
 describe('main canvas background semantics', () => {
-  it.each(['theme', 'terminal', 'explicit'] as const)('restores %s semantics after nested text resets and theme preview cancellation', mode => {
+  it.each(['theme', 'terminal', 'explicit', 'foreground'] as const)('restores %s semantics after nested text resets and theme preview cancellation', mode => {
     truecolor()
     setBackgroundMode(mode)
     const prefix = mode === 'explicit' ? RGB_BG : DEFAULT_BG
@@ -53,7 +55,7 @@ describe('main canvas background semantics', () => {
     const stableLayers = () => [interaction.hover('hover'), background.selection('selected')]
     setBackgroundMode('explicit')
     const original = stableLayers()
-    for (const mode of ['theme', 'terminal', 'explicit'] as const) {
+    for (const mode of ['theme', 'terminal', 'explicit', 'foreground'] as const) {
       setBackgroundMode(mode)
       expect(stableLayers()).toEqual(original)
       const panel = background.surface('panel')
@@ -114,9 +116,10 @@ describe('canvas / layout / overlay frame integration (synthetic terminal)', () 
       { render: () => rows, invalidate: () => undefined }, fixed('composer'), fixed('status')))
     tui.addChild(canvas)
     const frame = async () => { await vi.advanceTimersByTimeAsync(40) }
-    const redraw = async (mode: TuiBackgroundMode) => {
+    const redraw = async (mode: TuiBackgroundMode | 'rgb-fill') => {
       terminal.writes = []
-      setBackgroundMode(mode)
+      if (mode === 'rgb-fill') setRendering({ colorMode: 'rgb', backgroundFill: 'theme', terminalBackgroundSync: 'off' })
+      else setBackgroundMode(mode)
       tui.invalidate()
       tui.requestRender(true)
       await frame()
@@ -124,8 +127,10 @@ describe('canvas / layout / overlay frame integration (synthetic terminal)', () 
       expect(painted).toHaveLength(terminal.rows)
       expect(painted.every(row => visibleWidth(row) === terminal.columns)).toBe(true)
       for (const row of painted) {
-        expect(row).toContain(mode === 'explicit' ? RGB_BG : DEFAULT_BG)
-        if (mode !== 'explicit') expect(row).not.toContain(RGB_BG)
+        const filled = mode === 'explicit' || mode === 'rgb-fill'
+        expect(row).toContain(filled ? RGB_BG : DEFAULT_BG)
+        if (!filled) expect(row).not.toContain(RGB_BG)
+        if (filled) expect(sgrCells(row).every(cell => cell.background !== undefined)).toBe(true)
       }
       expect(terminal.writes.join('')).not.toMatch(/\u001B\[[23]J/u)
       return painted.map(plain)
@@ -135,7 +140,7 @@ describe('canvas / layout / overlay frame integration (synthetic terminal)', () 
       await frame()
       const original = await redraw('explicit')
       const geometry = tuiFrameApi(tui).getLastFrameGeometry?.()
-      for (const mode of ['theme', 'terminal', 'explicit', 'theme'] as const) {
+      for (const mode of ['theme', 'terminal', 'foreground', 'rgb-fill', 'explicit', 'theme'] as const) {
         expect(await redraw(mode)).toEqual(original)
         expect(tuiFrameApi(tui).getLastFrameGeometry?.()).toEqual(geometry)
       }
@@ -147,6 +152,13 @@ describe('canvas / layout / overlay frame integration (synthetic terminal)', () 
       setTerminalCanvasBackground(undefined)
       const overlay = tui.showOverlay({ render: () => [background.surface('overlay')], invalidate: () => undefined }, { width: 20 })
       await frame()
+      const nested = tui.showOverlay({ render: () => [background.surface(color.brand('nested'))], invalidate: () => undefined }, { width: 16 })
+      await redraw('foreground')
+      expect(terminal.writes.join('')).toContain('nested')
+      await redraw('rgb-fill')
+      expect(terminal.writes.join('')).toContain('nested')
+      nested.hide()
+      await frame()
       overlay.hide()
       rows = ['new'] // a shorter/scrolling transcript still fills/cleans the entire canvas
       await redraw('terminal')
@@ -155,7 +167,7 @@ describe('canvas / layout / overlay frame integration (synthetic terminal)', () 
       for (const [columns, height] of [[40, 12], [100, 30]] as const) {
         terminal.columns = columns
         terminal.rows = height
-        await redraw('theme')
+        await redraw('rgb-fill')
         expect(tuiFrameApi(tui).getLastFrameGeometry?.().terminalWidth).toBe(columns)
       }
     } finally { tui.stop() }

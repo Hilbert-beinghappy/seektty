@@ -36,6 +36,8 @@ function harness() {
     progress: vi.fn(async (request: { work: (report: (value: string) => void, signal: AbortSignal) => Promise<unknown> }) => request.work(() => undefined, new AbortController().signal)),
   }
   const notice = vi.fn()
+  const openTranscript = vi.fn()
+  const replayTranscript = vi.fn()
   const host = {
     overlays,
     transcript: {},
@@ -43,11 +45,22 @@ function harness() {
     refresh: vi.fn(), refreshHeader: vi.fn(), applyTheme: vi.fn(), applyAppearance: vi.fn(), applyLocale: vi.fn(),
     setEditor: vi.fn(), copy: vi.fn(), close: vi.fn(), restart: vi.fn(), requireRestart: vi.fn(),
     canChangeSession: () => true,
+    openTranscript,
+    replayTranscript,
   } as unknown as TuiActionHost
-  return { actions: new TuiActions(capabilities, host), target, current, renameSession, forkSession, archiveSession, exportSession, exportMarkdown, notice, overlays }
+  return { actions: new TuiActions(capabilities, host), target, current, renameSession, forkSession, archiveSession, exportSession, exportMarkdown, notice, overlays, openTranscript, replayTranscript }
 }
 
 describe('targeted Session context actions', () => {
+  it('opens and explicitly replays the transcript without touching Harness state', async () => {
+    const h = harness()
+    await h.actions.execute('transcript', '')
+    await h.actions.execute('transcript', 'replay')
+    expect(h.openTranscript).toHaveBeenCalledOnce()
+    expect(h.replayTranscript).toHaveBeenCalledOnce()
+    expect(h.renameSession).not.toHaveBeenCalled()
+  })
+
   it('renames, forks, and archives the right-clicked Session rather than the active Session', async () => {
     const h = harness()
     await h.actions.executeContext({ target: { kind: 'session', sessionId: h.target }, actionId: 'rename' })

@@ -6,26 +6,44 @@ import type {
 import { internals, Transcript } from '../src/client/transcript.ts'
 import type { TranscriptImagePayload } from '../src/client/transcript.ts'
 import { terminalMouseDelta } from '../src/client/terminal-session.ts'
-import { background, setBackgroundMode, setTerminalCanvasBackground } from '../src/client/theme.ts'
+import { background, setBackgroundMode, setRendering, setTerminalCanvasBackground } from '../src/client/theme.ts'
 
-function assistant(key: string, text: string): ChatConversationViewNode {
+function assistant(key: string, text: string, ordinal = 1): ChatConversationViewNode {
   return {
     key,
     kind: 'fixture',
     id: key,
     target: 'chat',
-    anchorSeq: 1,
+    anchorSeq: ordinal,
     location: { kind: 'session' },
     visibility: 'visible',
     data: {
       kind: 'assistant',
-      seq: 2,
-      time: 2,
-      turn: 1,
+      seq: ordinal * 2,
+      time: ordinal * 2,
+      turn: ordinal,
       step: 1,
       blocks: [{ kind: 'text', text }],
     },
   }
+}
+
+function assistantStep(
+  key: string,
+  status: 'running' | 'settled',
+  text: string,
+): ChatConversationViewNode {
+  return {
+    ...assistant(key, text),
+    kind: 'assistant-step',
+    data: {
+      status,
+      turn: 1,
+      step: 1,
+      time: 1,
+      blocks: [{ kind: 'text', text }],
+    },
+  } as ChatConversationViewNode
 }
 
 function user(key: string, text: string): ChatConversationViewNode {
@@ -134,6 +152,47 @@ afterEach(() => {
 })
 
 describe('transcript block viewport', () => {
+  it.each(['xterm', 'xterm-256color'])('preserves selection, copied text and hit maps through RGB presentation rebuilds (%s)', term => {
+    for (const key of ['NO_COLOR', 'COLORTERM', 'TERM_PROGRAM', 'WT_SESSION']) vi.stubEnv(key, undefined)
+    vi.stubEnv('TERM', term)
+    const transcript = new Transcript(() => 8)
+    transcript.update(snapshot(Array.from({ length: 100 }, (_, index) => assistant(`rgb-${index}`, `## heading-${index}\ntext-${index}`))))
+    transcript.render(80)
+    transcript.scrollBy(20)
+    transcript.render(80)
+    const before = transcript.hitViewportEdgeAnchor(4, 80, 'older', 'before')!
+    const after = transcript.hitViewportEdgeAnchor(20, 80, 'newer', 'after')!
+    transcript.applyPointerSelection(before, after, 'character')
+    const selection = transcript.currentSelection()
+    const copied = transcript.copySelectionText()
+    const old = transcript.render(80)
+    const maps = transcript.viewportMaps()
+    setBackgroundMode('foreground')
+    transcript.refreshPresentation()
+    const rgb = transcript.render(80)
+    expect(rgb).not.toEqual(old)
+    expect(rgb.join('')).toContain('\u001B[38;2;')
+    expect(plain(rgb)).toBe(plain(old))
+    expect(transcript.currentSelection()).toEqual(selection)
+    expect(transcript.copySelectionText()).toBe(copied)
+    expect(transcript.viewportMaps()).toEqual(maps)
+    for (const backgroundFill of ['theme', 'terminal'] as const) {
+      setRendering({ colorMode: 'rgb', backgroundFill, terminalBackgroundSync: 'off' })
+      transcript.refreshPresentation()
+      expect(plain(transcript.render(80))).toBe(plain(rgb))
+      expect(transcript.currentSelection()).toEqual(selection)
+      expect(transcript.copySelectionText()).toBe(copied)
+      expect(transcript.viewportMaps()).toEqual(maps)
+    }
+    setBackgroundMode('theme')
+    transcript.refreshPresentation()
+    expect(transcript.render(80)).toEqual(old)
+    expect(transcript.currentSelection()).toEqual(selection)
+    expect(transcript.copySelectionText()).toBe(copied)
+    expect(transcript.viewportMaps()).toEqual(maps)
+    transcript.dispose()
+  })
+
   it('preserves the historical viewport, selection, hit maps and render budget across background mode changes', () => {
     vi.stubEnv('NO_COLOR', undefined)
     vi.stubEnv('COLORTERM', 'truecolor')
@@ -944,6 +1003,66 @@ describe('transcript block viewport', () => {
     resetRenderCounters()
     transcript.render(80)
     expect(internals.blocksVisited).toBeLessThanOrEqual(8)
+    transcript.dispose()
+  })
+
+  it('renders all loaded history in native mode and keeps committed rows immutable', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 3)
+    transcript.setNativeMode(true)
+    const history = [
+      ...Array.from({ length: 12 }, (_, index) => assistant(
+        `native-history-${String(index)}`,
+        `history-${String(index)} ${'content '.repeat(5)}`,
+      )),
+      imageNode('native-image'),
+    ]
+    transcript.update(snapshot(history))
+
+    const first = plain(transcript.render(48))
+    expect(first).toContain('history-0')
+    expect(first).toContain('history-11')
+    expect(first).toContain('pixel.png')
+    expect(first).not.toContain('\u001B_G')
+
+    transcript.refreshPresentation()
+    const resized = plain(transcript.render(20))
+    expect(resized).toBe(first)
+
+    transcript.update(snapshot([
+      ...history,
+      assistant('native-new-tail', 'new-tail-after-history', 99),
+    ]))
+    const appended = plain(transcript.render(20))
+    expect(appended).toContain(first)
+    expect(appended.match(/new-tail/gu)).toHaveLength(1)
+    transcript.dispose()
+  })
+
+  it('keeps a native assistant step live until its settled snapshot is rendered', () => {
+    vi.stubEnv('NO_COLOR', '1')
+    const transcript = new Transcript(() => 3)
+    transcript.setNativeMode(true)
+
+    transcript.update(snapshot([
+      assistantStep('native-stream', 'running', '太好了，那就定下来：以后'),
+    ]))
+    expect(plain(transcript.render(24))).toContain('以后')
+
+    transcript.update(snapshot([
+      assistantStep('native-stream', 'running', '太好了，那就定下来：以后每次输出都会继续增长'),
+    ]))
+    const streaming = plain(transcript.render(24))
+    expect(streaming.replace(/\s/gu, '')).toContain('每次输出都会继续增长')
+
+    transcript.update(snapshot([
+      assistantStep('native-stream', 'settled', '太好了，那就定下来：以后每次输出都会继续增长，直到最终消息完整结束。'),
+    ]))
+    const settled = plain(transcript.render(24))
+    expect(settled.replace(/\s/gu, '')).toContain('直到最终消息完整结束。')
+
+    transcript.refreshPresentation()
+    expect(plain(transcript.render(12))).toBe(settled)
     transcript.dispose()
   })
 

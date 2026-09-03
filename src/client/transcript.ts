@@ -1415,11 +1415,19 @@ interface TranscriptBlock {
   dirty: boolean
 }
 
-function transcriptBlockMetadata(rows: readonly TranscriptRow[]): TranscriptBlock['metadata'] {
+function transcriptBlockMetadata(
+  rows: readonly TranscriptRow[],
+  sourceMayChange = false,
+): TranscriptBlock['metadata'] {
   return {
     userTurnRows: rows.flatMap((row, index) => row.userTurn === true ? [index] : []),
     toolKeys: [...new Set(rows.flatMap(row => row.toolKey === undefined ? [] : [row.toolKey]))],
-    dynamic: rows.some(row => row.pulse !== undefined || row.liveDurationSince !== undefined),
+    // A running assistant step can already contain ordinary markdown text. It
+    // has no pulse row once answer tokens begin, but its source still changes
+    // on every streaming snapshot. Treating it as static freezes the first
+    // token fragment in terminal-native scrollback and hides the final answer.
+    dynamic: sourceMayChange
+      || rows.some(row => row.pulse !== undefined || row.liveDurationSince !== undefined),
   }
 }
 
@@ -1537,6 +1545,8 @@ export class Transcript implements Component, Focusable {
   }[] = []
   private hoveredRegionId: string | undefined
   private emptyScrollPrimed = false
+  private nativeMode = false
+  private readonly nativeFrozenBlocks = new Map<string, TranscriptBlockLines>()
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1549,6 +1559,17 @@ export class Transcript implements Component, Focusable {
     private readonly requestOlder: () => void = () => undefined,
     private readonly welcome?: TranscriptWelcomeRenderer,
   ) {}
+
+  /** Use terminal-native scrollback and freeze committed blocks once printed. */
+  setNativeMode(enabled: boolean): void {
+    if (this.nativeMode === enabled) return
+    this.nativeMode = enabled
+    this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
+    this.scrollOffset = 0
+    this.requestRender()
+  }
+
+  isNativeMode(): boolean { return this.nativeMode }
 
   /**
    * Cycle folded → expanded → hidden without mutating the Harness log.
@@ -1903,6 +1924,7 @@ export class Transcript implements Component, Focusable {
     this.pendingImages.clear()
     this.imageComponents.clear()
     this.imageBlockOwners.clear()
+    this.nativeFrozenBlocks.clear()
     this.nodeCache.clear()
     this.search = undefined
     this.searchIndex = undefined
@@ -1965,6 +1987,7 @@ export class Transcript implements Component, Focusable {
       this.lastViewportMaps = []
       this.selection = undefined
       this.emptyScrollPrimed = false
+      this.nativeFrozenBlocks.clear()
       this.syncHeightIndexCounters()
     }
     this.imageLoader = imageLoader
@@ -1999,7 +2022,12 @@ export class Transcript implements Component, Focusable {
     const blocks: TranscriptBlock[] = []
     const keep = new Set<string>()
     let hasVisibleRows = false
-    const take = (key: string, fingerprint: string, build: () => TranscriptRow[]): void => {
+    const take = (
+      key: string,
+      fingerprint: string,
+      build: () => TranscriptRow[],
+      sourceMayChange = false,
+    ): void => {
       keep.add(key)
       const hit = this.nodeCache.get(key)
       if (hit !== undefined && hit.sourceToken === fingerprint) {
@@ -2017,7 +2045,7 @@ export class Transcript implements Component, Focusable {
         rows: built,
         components: created,
         linesByWidth: new Map(),
-        metadata: transcriptBlockMetadata(built),
+        metadata: transcriptBlockMetadata(built, sourceMayChange),
         dirty: false,
       }
       this.nodeCache.set(key, block)
@@ -2028,7 +2056,12 @@ export class Transcript implements Component, Focusable {
     }
     for (const node of visibleNodes) {
       internals.fingerprintsComputed += 1
-      take(node.key, nodeFingerprint(node, preferences), () => chatNodeRows(node, preferences))
+      take(
+        node.key,
+        nodeFingerprint(node, preferences),
+        () => chatNodeRows(node, preferences),
+        assistantStepData(node.data)?.status === 'running',
+      )
     }
     if (snapshot.partial !== null && !visibleNodes.some(node => node.kind === 'assistant-step')) {
       const partial = snapshot.partial
@@ -2052,7 +2085,7 @@ export class Transcript implements Component, Focusable {
           ...(hasReasoning ? [thinking ? thinkingRow(key, expanded) : reasoningHeaderRow(key, expanded)] : []),
           ...partialRows,
         ])
-      })
+      }, true)
     }
     if (preferences.tools !== 'hidden' && !visibleNodes.some(node => node.kind === 'tool-call')) {
       for (const call of snapshot.runningCalls) {
@@ -2064,7 +2097,7 @@ export class Transcript implements Component, Focusable {
           diffContextLines: preferences.diffContextLines,
           expanded: preferences.expandedTools.has(call.callId),
           collapsed: preferences.collapsedTools.has(call.callId),
-        }), () => grouped(toolBlockRows(call, preferences, 0, call.callId)))
+        }), () => grouped(toolBlockRows(call, preferences, 0, call.callId)), true)
       }
     }
     this.emptyState = !hasVisibleRows
@@ -2174,6 +2207,7 @@ export class Transcript implements Component, Focusable {
     this.pendingImages.clear()
     this.imageComponents.clear()
     this.imageBlockOwners.clear()
+    this.nativeFrozenBlocks.clear()
     this.search = undefined
     this.searchIndex = undefined
     this.lastFullLines = []
@@ -2192,7 +2226,7 @@ export class Transcript implements Component, Focusable {
     const block = this.blocks[blockIndex]
     if (block === undefined) return { lines: [], projections: [], borderLines: [], hardBreaks: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
-    const cacheKey = blockIndex === 0 ? -contentWidth : contentWidth
+    const cacheKey = (blockIndex === 0 ? -contentWidth : contentWidth) + (this.nativeMode ? 1_000_000 : 0)
     if (block.dirty) {
       block.linesByWidth.clear()
       block.dirty = false
@@ -2222,7 +2256,9 @@ export class Transcript implements Component, Focusable {
       if (row?.userTurn === true) turnAnchors.push(lines.length)
       const pulsing = row?.pulse !== undefined || row?.liveDurationSince !== undefined
       const cached = pulsing ? undefined : this.lineCache.get(component)
-      const rendered = cached !== undefined && cached.width === contentWidth
+      const rendered = row?.format === 'image' && this.nativeMode
+        ? [color.muted(imageLabel(row.attachment))]
+        : cached !== undefined && cached.width === contentWidth
         ? cached.lines
         : (() => {
           internals.componentRenders += 1
@@ -2620,6 +2656,20 @@ export class Transcript implements Component, Focusable {
       contentWidth,
     )
     this.syncHeightIndexCounters()
+    if (this.nativeMode && !this.emptyState) {
+      const lines: string[] = []
+      for (const [index, block] of this.blocks.entries()) {
+        const frozen = this.nativeFrozenBlocks.get(block.key)
+        const rendered = frozen ?? this.renderBlock(index, contentWidth)
+        lines.push(...rendered.lines)
+        if (!block.metadata.dynamic && frozen === undefined) this.nativeFrozenBlocks.set(block.key, rendered)
+      }
+      this.scrollOffset = 0
+      this.lastScrollbar = undefined
+      this.lastViewportMaps = []
+      this.lastPointerControls = []
+      return lines.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
+    }
     const totalRows = Math.max(1, Math.floor(this.viewportRows()))
     if (Number.isFinite(totalRows) && !this.emptyState) {
       const rows = this.search === undefined ? totalRows : Math.max(1, totalRows - 1)

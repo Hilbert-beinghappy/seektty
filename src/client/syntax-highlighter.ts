@@ -13,7 +13,7 @@ import {
 } from '@shikijs/engine-javascript'
 import { normalizeThemeColor, type ResolvedTuiTheme } from './theme-config.ts'
 import { visualTextMateRules } from './syntax-theme-rules.ts'
-import { styleTerminalText, terminalColorLevel, type CodeBackgroundPolicy } from './theme.ts'
+import { styleTerminalText, renderingColorLevel, type CodeBackgroundPolicy } from './theme.ts'
 import { measureStartup } from '../startup-trace.ts'
 
 type LanguageLoader = () => Promise<{ readonly default: LanguageRegistration[] }>
@@ -283,14 +283,14 @@ export class SyntaxHighlighter {
    * @returns ANSI-styled lines or a safe plain fallback.
    */
   highlight(code: string, language: string | undefined, background: CodeBackgroundPolicy): string[] {
-    if (this.disposed || !highlightable(code) || terminalColorLevel() === 0) return plainLines(code, this.theme, background)
+    if (this.disposed || !highlightable(code) || renderingColorLevel() === 0) return plainLines(code, this.theme, background)
     const canonical = languageOf(language)
     if (canonical === undefined) return plainLines(code, this.theme, background)
     if (!this.loaded.has(canonical)) {
       this.load(canonical)
       return plainLines(code, this.theme, background)
     }
-    const key = `${this.themeName}:${String(terminalColorLevel())}:${background}:${canonical}:${code}`
+    const key = `${this.themeName}:${String(renderingColorLevel())}:${background}:${canonical}:${code}`
     const cached = this.cache.get(key)
     if (cached !== undefined) {
       this.cache.delete(key)

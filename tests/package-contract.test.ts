@@ -123,7 +123,7 @@ describe('out-of-tree Bundle contract', () => {
     expect(management).not.toContain('@deepseek-ai/dsh-tui-app')
   })
 
-  it('keeps transcript scrolling inside a managed fixed terminal viewport', () => {
+  it('keeps full mode managed while native mode uses terminal scrollback', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
     const session = readFileSync(resolve(root, 'src/client/terminal-session.ts'), 'utf8')
     const mouse = readFileSync(resolve(root, 'src/client/mouse-protocol.ts'), 'utf8')
@@ -131,7 +131,9 @@ describe('out-of-tree Bundle contract', () => {
     expect(surface).toContain('setMouseReporting')
     expect(surface).toContain('decodeMouseSequence(data)')
     expect(surface).not.toContain('mouseDecoder.push(data)')
-    expect(surface).not.toContain('Number.POSITIVE_INFINITY')
+    expect(surface).toContain("liveBehavior.get().mouseMode === 'native'")
+    expect(surface).toContain('Number.POSITIVE_INFINITY')
+    expect(session).toContain('__seekttyManagedAlternateScreen')
     expect(session).toContain('ENTER_ALTERNATE_SCREEN')
     expect(session).toContain('setMouseReporting')
     expect(mouse).toContain('?1049h')

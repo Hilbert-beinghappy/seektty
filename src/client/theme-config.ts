@@ -19,6 +19,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { ui } from './locale.ts'
 import { visualTextMateRules } from './syntax-theme-rules.ts'
+import { renderingOverrides } from './appearance-rendering.ts'
 
 interface Rgb {
   readonly red: number
@@ -704,13 +705,13 @@ export function normalizeAppearance(value: unknown): TuiAppearanceSettings {
       `The current custom code theme ${JSON.stringify(codeTheme)} does not exist`,
     ))
   }
-  return { theme, codeTheme, backgroundMode, customThemes }
+  return { theme, codeTheme, backgroundMode, customThemes, ...renderingOverrides(record) }
 }
 
 /** Validate the independent canvas policy, including legacy settings without it. */
 export function normalizeBackgroundMode(value: unknown): TuiBackgroundMode {
   if (value === undefined) return DEFAULT_TUI_BACKGROUND_MODE
-  if (value === 'theme' || value === 'terminal' || value === 'explicit') return value
+  if (value === 'theme' || value === 'terminal' || value === 'explicit' || value === 'foreground') return value
   throw new Error(ui(
     `SeekTTY 背景模式 ${JSON.stringify(value)} 不受支持`,
     `SeekTTY background mode ${JSON.stringify(value)} is not supported`,

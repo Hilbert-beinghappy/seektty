@@ -245,7 +245,7 @@ export function settingsCategoryDescription(category: SettingsCategoryId): strin
   switch (category) {
     case 'appearance': return ui('主题、代码主题、背景和界面呈现', 'Themes, code colors, backgrounds, and presentation')
     case 'welcome': return ui('信息内容、Logo 和 Fastfetch', 'Information, Logo, and Fastfetch')
-    case 'mouse': return ui('鼠标模式、滚轮、悬停、选择和滚动条', 'Mouse mode, wheel, hover, selection, and scrollbar')
+    case 'mouse': return ui('终端交互模式、滚轮、悬停、选择和滚动条', 'Terminal interaction mode, wheel, hover, selection, and scrollbar')
     case 'input': return ui('输入历史、剪贴板、确认行为和快捷键', 'Input history, clipboard, confirmations, and shortcuts')
     case 'model-agent': return ui('Provider、模型、推理强度和 Agent 模式', 'Providers, models, reasoning, and Agent modes')
     case 'permissions': return ui('默认权限、工作区边界和安全策略', 'Default access, workspace boundaries, and security policy')
@@ -289,7 +289,10 @@ const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: 
   'permission.default': { zh: '默认权限', en: 'Default permission' },
   [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.theme`]: { zh: '界面主题', en: 'Interface theme' },
   [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.codeTheme`]: { zh: '代码块主题', en: 'Code theme' },
-  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.backgroundMode`]: { zh: '背景模式', en: 'Background mode' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.backgroundMode`]: { zh: '旧版外观组合', en: 'Legacy appearance preset' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.colorMode`]: { zh: '显色方式', en: 'Color rendering' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.backgroundFill`]: { zh: '背景呈现', en: 'Background fill' },
+  [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.terminalBackgroundSync`]: { zh: '终端背景同步（高级）', en: 'Terminal background sync (advanced)' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.toolCards`]: { zh: '工具卡片默认形态', en: 'Default tool-card shape' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.showReasoning`]: { zh: '推理默认显示', en: 'Show reasoning by default' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.desktopNotifications`]: { zh: '完成/审批桌面通知', en: 'Desktop notifications' },
@@ -300,7 +303,7 @@ const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: 
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.toolOutputLineLimit`]: { zh: '工具输出行数上限', en: 'Tool output line limit' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.diffContextLines`]: { zh: 'Diff 上下文行数', en: 'Diff context lines' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.dangerConfirmDefault`]: { zh: '危险确认默认焦点', en: 'Danger confirm default focus' },
-  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.mouseMode`]: { zh: '鼠标模式', en: 'Mouse mode' },
+  [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.mouseMode`]: { zh: '终端交互模式', en: 'Terminal interaction mode' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.hoverFeedback`]: { zh: '悬停反馈', en: 'Hover feedback' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.scrollbarVisibility`]: { zh: '滚动条显示', en: 'Scrollbar visibility' },
   [`${TUI_BEHAVIOR_SETTINGS_NAMESPACE}.copyOnSelect`]: { zh: '选中后复制', en: 'Copy on select' },
@@ -355,11 +358,14 @@ export function hasDedicatedSettingsEditor(namespace: string, path: readonly str
   if (namespace === 'agent-presets' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (
     samePath(path, ['theme']) || samePath(path, ['codeTheme']) || samePath(path, ['backgroundMode'])
+    || samePath(path, ['colorMode']) || samePath(path, ['backgroundFill']) || samePath(path, ['terminalBackgroundSync'])
     || samePath(path, ['customThemes'])
   )) {
     return true
   }
-  if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE && samePath(path, ['keyBindings'])) return true
+  if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE && (
+    samePath(path, ['keyBindings']) || samePath(path, ['mouseMode'])
+  )) return true
   return namespace === 'tui-plugin-marketplace' && samePath(path, ['sources'])
 }
 

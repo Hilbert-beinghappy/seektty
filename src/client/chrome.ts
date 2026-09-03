@@ -210,6 +210,7 @@ export class BottomAnchoredLayout implements Component {
     private readonly centerTranscript: () => boolean = () => false,
     private readonly agentTree?: Component,
     private readonly showComposer: () => boolean = () => true,
+    private readonly nativeMode: () => boolean = () => false,
   ) {}
 
   invalidate(): void {
@@ -239,6 +240,32 @@ export class BottomAnchoredLayout implements Component {
     const transcriptRows = this.transcript.render(width)
     const composerRows = this.showComposer() ? this.composer.render(width) : []
     const statusRows = this.status.render(width)
+    if (this.nativeMode()) {
+      const rendered = [
+        ...contextRows,
+        '',
+        ...transcriptRows,
+        '',
+        ...agentTreeRows,
+        ...composerRows,
+        ...statusRows,
+      ]
+      const contextRow = 0
+      const transcriptRow = contextRows.length + 1
+      const agentTreeRow = transcriptRow + transcriptRows.length + 1
+      const composerRow = agentTreeRow + agentTreeRows.length
+      const statusRow = composerRow + composerRows.length
+      this.geometry = {
+        width,
+        height: rendered.length,
+        context: slot(contextRow, width, contextRows.length),
+        transcript: slot(transcriptRow, width, transcriptRows.length),
+        agentTree: { ...slot(agentTreeRow, width, agentTreeRows.length), contentRowOffset: 0 },
+        composer: slot(composerRow, width, composerRows.length),
+        status: slot(statusRow, width, statusRows.length),
+      }
+      return rendered
+    }
     const requestedRows = Math.floor(this.viewportRows())
     const fixedRows = contextRows.length + agentTreeRows.length + composerRows.length + statusRows.length + 2
     const minimumRows = Number.isFinite(requestedRows) ? Math.max(1, requestedRows) : undefined

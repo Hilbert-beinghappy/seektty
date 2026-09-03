@@ -44,6 +44,19 @@ export class TerminalBackground {
     if (!/^#[\da-f]{6}$/iu.test(color)) return
     this.desired = `rgb:${color.slice(1, 3)}/${color.slice(3, 5)}/${color.slice(5, 7)}`.toLowerCase()
     this.mode = mode
+    if (mode === 'foreground') {
+      // Abandon a pending probe. Late replies are consumed, never applied; a
+      // later explicit opt-in to background sync may start a fresh probe.
+      if (this.timer !== undefined) {
+        clearTimeout(this.timer)
+        this.timer = undefined
+        this.queried = false
+      }
+      this.forceApply = false
+      this.restoreOriginal()
+      this.reportColor()
+      return
+    }
     if (force && mode !== 'terminal') this.forceApply = true
     if (mode === 'terminal') this.restoreOriginal()
     else this.sync()
@@ -58,7 +71,7 @@ export class TerminalBackground {
   }
 
   private sync(): void {
-    if (!this.active || this.mode === 'terminal' || this.desired === undefined) return
+    if (!this.active || this.mode === 'terminal' || this.mode === 'foreground' || this.desired === undefined) return
     if (!this.enabled) this.unavailable = 'unsupported'
     if (this.unavailable !== undefined) {
       this.notifyUnavailable()

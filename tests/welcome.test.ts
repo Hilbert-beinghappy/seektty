@@ -10,6 +10,8 @@ import {
   type WelcomeRuntimeFacts,
 } from '../src/client/welcome.ts'
 import type { WelcomeLogo } from '../src/client/welcome-logo.ts'
+import { background, setBackgroundMode, setRendering } from '../src/client/theme.ts'
+import { sgrCells } from './helpers/sgr-colors.ts'
 
 const FACTS: WelcomeRuntimeFacts = {
   seekttyVersion: '1.2.4',
@@ -28,11 +30,35 @@ function logo(width: number, height: number, marker: string): WelcomeLogo {
 }
 
 afterEach(() => {
+  setBackgroundMode('theme')
   vi.unstubAllEnvs()
   setUiLocale('zh')
 })
 
 describe('welcome renderer', () => {
+  it.each(['original', 'theme'] as const)('recolors cached welcome data and %s logo without refetching', colorMode => {
+    for (const key of ['NO_COLOR', 'COLORTERM', 'TERM_PROGRAM', 'WT_SESSION']) vi.stubEnv(key, undefined)
+    vi.stubEnv('TERM', 'xterm')
+    const collect = vi.fn(async (): Promise<TuiWelcomeFastfetchResult> => ({ status: 'cancelled', rows: [] }))
+    const collectLogo = vi.fn(async (): Promise<TuiWelcomeFastfetchLogoResult> => ({ status: 'cancelled' }))
+    const settings = defaultWelcomeSettings()
+    const controller = new WelcomeController({ ...settings, logo: { ...settings.logo, colorMode } }, FACTS, collect, collectLogo, vi.fn(), vi.fn())
+    const old = controller.render(120, true).join('\n')
+    setBackgroundMode('foreground')
+    const rgb = controller.render(120, true).join('\n')
+    expect(rgb).not.toBe(old)
+    expect(rgb).toContain('\u001B[38;2;')
+    expect(rgb.replace(/\u001B\[[0-9;:]*m/gu, '')).toBe(old.replace(/\u001B\[[0-9;:]*m/gu, ''))
+    setRendering({ colorMode: 'rgb', backgroundFill: 'theme', terminalBackgroundSync: 'off' })
+    const filled = controller.render(120, true).map(background.canvas).join('\n')
+    expect(sgrCells(filled).filter(cell => cell.text !== '\n').every(cell => cell.background !== undefined)).toBe(true)
+    setBackgroundMode('theme')
+    expect(controller.render(120, true).join('\n')).toBe(old)
+    expect(collect).not.toHaveBeenCalled()
+    expect(collectLogo).not.toHaveBeenCalled()
+    controller.dispose()
+  })
+
   it('renders every custom row kind and escapes user controls', () => {
     vi.stubEnv('NO_COLOR', '1')
     const lines = renderCustomWelcomeRows([

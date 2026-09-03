@@ -20,7 +20,7 @@ import {
   TUI_WELCOME_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
   type TuiAppearanceSettings,
-  type TuiBackgroundMode,
+  type TuiRenderingSettings,
   type TuiBehaviorSettings,
   type TuiCodeThemeId,
   type TuiCustomTheme,
@@ -62,6 +62,8 @@ import type {
   SelectOverlayRequest,
 } from './overlays.ts'
 import { OverlayQueue } from './overlays.ts'
+import { resolveRendering } from './appearance-rendering.ts'
+import { renderingControl, RENDERING_KEYS } from './appearance-controls.ts'
 import {
   classifyClarifyComposer,
   paletteClarifyTransaction,
@@ -91,6 +93,7 @@ import {
   appearanceSettings,
   deleteCustomTheme,
   saveBackgroundMode,
+  saveRendering,
   saveCodeTheme,
   saveCustomTheme,
   saveTheme,
@@ -161,7 +164,7 @@ export interface TuiActionHost {
     options?: { readonly forceThemeRefresh?: boolean },
   ): void
   applyLocale(locale: LocaleId): void
-  applyBehavior?(behavior: TuiBehaviorSettings): void
+  applyBehavior?(behavior: TuiBehaviorSettings): void | Promise<void>
   applyWelcome?(settings: TuiWelcomeSettings): void
   refreshWelcome?(): Promise<void>
   previewWelcome?(settings: TuiWelcomeSettings, width: number): Promise<string>
@@ -169,6 +172,9 @@ export interface TuiActionHost {
   setEditor(text: string): void
   composerText?(): string
   canChangeSession?(): boolean
+  interactionModeBlockReason?(mode: TuiMouseMode): string | undefined
+  openTranscript?(): void
+  replayTranscript?(): void
   openAgentTree?(): Promise<boolean>
   interactionOrigin?(sessionId: SessionId): string | undefined
   copy(text: string): void
@@ -511,6 +517,7 @@ export class TuiActions {
         case 'settings': await this.settings(args); break
         case 'keymap': await this.keymap(args); break
         case 'mouse': await this.mouse(args); break
+        case 'transcript': await this.transcriptCommand(args); break
         case 'plugin':
         case 'plugins': await this.plugin(args); break
         case 'doctor': await this.doctor(); break
@@ -1624,13 +1631,17 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       case 'dark':
       case 'light': await this.activateTheme(parsed.command); return
       case 'code': await this.themeCode(parsed.rest); return
+      case 'background': await this.themeBackground(parsed.rest); return
+      case 'colors': await this.themeRendering('colorMode', parsed.rest); return
+      case 'fill': await this.themeRendering('backgroundFill', parsed.rest); return
+      case 'sync': await this.themeRendering('terminalBackgroundSync', parsed.rest); return
       case 'use': await this.themeUse(parsed.rest); return
       case 'edit': await this.themeEdit(parsed.rest); return
       case 'palette': await this.themePalette(parsed.rest); return
       case 'import': await this.themeImport(parsed.rest); return
       case 'export': await this.themeExport(parsed.rest); return
       case 'delete': await this.themeDelete(parsed.rest); return
-      default: throw new Error(ui('用法：/theme [dark|light|code|use|edit|palette|import|export|delete]', "Usage: /theme [dark|light|code|use|edit|palette|import|export|delete]"))
+      default: throw new Error(ui('用法：/theme [dark|light|colors|fill|sync|background|code|use|edit|palette|import|export|delete]', 'Usage: /theme [dark|light|colors|fill|sync|background|code|use|edit|palette|import|export|delete]'))
     }
   }
 
@@ -1700,11 +1711,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       ]
       choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
       choices.push(
-        {
-          id: '__background__',
-          label: ui('背景模式', 'Background mode'),
-          description: ui('选择主画布背景；独立于主题文件', 'Choose the canvas background independently of theme files'),
-        },
+        ...RENDERING_KEYS.map(key => {
+          const control = renderingControl(key)
+          return { id: `__rendering_${key}__`, label: control.title,
+            description: control.choices.find(choice => choice.id === resolveRendering(appearance)[key])?.label ?? '' }
+        }),
         {
           id: '__code__',
           label: ui('代码块主题', "Code-block theme"),
@@ -1725,7 +1736,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('主题', "Theme"),
-        detail: ui('手动配色、颜色组合自动生成，或导入 VS Code JSON/JSONC', "Edit colors, generate from a palette, or import VS Code JSON/JSONC"),
+        detail: ui('先选择界面配色；显色方式与背景呈现独立设置。', 'Choose an interface palette; color rendering and background fill are independent.'),
         choices: await readChoices(),
         refreshChoices: async () => ({ choices: await readChoices() }),
         options,
@@ -1733,7 +1744,10 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         let notice: string | undefined
         try {
           if (selected.id === '__code__') await this.themeCode('', navigation)
-          else if (selected.id === '__background__') await this.editBackgroundMode(navigation)
+          else if (RENDERING_KEYS.some(key => selected.id === `__rendering_${key}__`)) {
+            const key = RENDERING_KEYS.find(key => selected.id === `__rendering_${key}__`)!
+            await this.themeRendering(key, '', navigation)
+          }
           else if (selected.id === '__palette__') await this.themePalette('', navigation)
           else if (selected.id === '__import__') await this.themeImport('', navigation)
           else if (selected.id === '__export__') await this.themeExport('', navigation)
@@ -1767,38 +1781,44 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.settingsChanged(updated, resolved.name, overlays)
   }
 
-  /** Shared by /theme and the searchable Harness appearance field. No preview before saving. */
-  private async editBackgroundMode(overlays: OverlayPrompts): Promise<void> {
+  /** Direct recovery path, even when the current palette makes menus unreadable. */
+  private async themeBackground(value: string): Promise<void> {
+    if (value === '') { await this.themeRendering('backgroundFill', ''); return }
+    if (value !== 'theme' && value !== 'terminal' && value !== 'explicit' && value !== 'foreground') {
+      throw new Error(ui(
+        '用法：/theme background [theme|terminal|explicit|foreground]',
+        'Usage: /theme background [theme|terminal|explicit|foreground]',
+      ))
+    }
     const bridge = this.capabilities.managementBridge().settings
     const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
-    const current = appearanceFromSettings(document).backgroundMode
-    const selected = await overlays.select({
-      title: ui('背景模式', 'Background mode'),
-      detail: ui(
-        '主画布、弹窗面板和代码基础背景按模式继承终端效果，不设置透明度；选区与特殊 token 背景保留。保存后立即生效。',
-        'Canvas, panels and base code backgrounds inherit terminal effects by mode; opacity is not changed. Selections and explicit token backgrounds remain. Saves apply immediately.',
-      ),
+    if (JSON.stringify(resolveRendering(appearanceFromSettings(document))) === JSON.stringify(resolveRendering({ backgroundMode: value }))) return
+    const updated = await saveBackgroundMode(bridge, document, value)
+    await this.settingsChanged(updated, ui('旧版外观组合', 'Legacy appearance preset'), this.host.overlays)
+  }
+
+  /** Shared by /theme and the searchable Harness appearance field. No preview before saving. */
+  private async themeRendering(key: keyof TuiRenderingSettings, value: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const control = renderingControl(key)
+    if (value !== '' && !control.choices.some(choice => choice.id === value)) {
+      throw new Error(ui(`用法：/theme ${control.command} [${control.choices.map(choice => choice.id).join('|')}]`,
+        `Usage: /theme ${control.command} [${control.choices.map(choice => choice.id).join('|')}]`))
+    }
+    const bridge = this.capabilities.managementBridge().settings
+    const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
+    const current = resolveRendering(appearanceFromSettings(document))[key]
+    const selected = value !== '' ? { id: value } : await overlays.select({
+      title: control.title,
+      detail: control.detail,
       searchable: false,
       initialChoiceId: current,
-      choices: [
-        {
-          id: 'theme', label: ui('主题颜色＋终端效果（默认）', 'Theme + terminal effects'),
-          description: ui('默认背景＋OSC 11 主题改色；保留终端透明、模糊和图片效果', 'Default: OSC 11 theme color; retain terminal transparency, blur and images'),
-        },
-        {
-          id: 'terminal', label: ui('跟随终端', 'Follow terminal'),
-          description: ui('使用终端默认背景，不改色；恢复本次运行捕获的原色', 'Use the terminal default background without recoloring; restore the captured original'),
-        },
-        {
-          id: 'explicit', label: ui('显式主题底色（兼容）', 'Explicit fill (compatibility)'),
-          description: ui('沿用 RGB 画布、面板、代码背景与主题改色；实际透明效果由终端决定', 'Keep RGB canvas, panel and code backgrounds plus theme color sync; the terminal still decides opacity'),
-        },
-      ].map(choice => ({ ...choice, active: choice.id === current })),
+      maxPrimaryColumnWidth: 36,
+      choices: control.choices.map(choice => ({ ...choice, active: choice.id === current })),
       options: { width: 90, maxHeight: '90%', anchor: 'center', margin: 1 },
     })
     if (selected === undefined || selected.id === current) return
-    const updated = await saveBackgroundMode(bridge, document, selected.id as TuiBackgroundMode)
-    await this.settingsChanged(updated, ui('背景模式', 'Background mode'), overlays)
+    const updated = await saveRendering(bridge, document, { [key]: selected.id })
+    await this.settingsChanged(updated, control.title, overlays)
   }
 
   private async themeUse(value: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
@@ -2700,7 +2720,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.settingsChanged(updated, ui(`键位 ${id}`, `Key binding ${id}`))
   }
 
-  private async mouse(args: string): Promise<void> {
+  private async mouse(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const document = behaviorSettings(
       await this.capabilities.managementBridge().settings.describe(TUI_BEHAVIOR_SETTINGS_NAMESPACE),
     )
@@ -2713,24 +2733,24 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       throw new Error(ui('用法：/mouse [full|native|toggle]', 'Usage: /mouse [full|native|toggle]'))
     }
     if (next === undefined) {
-      const selected = await this.host.overlays.select({
-        title: ui('鼠标模式', 'Mouse mode'),
+      const selected = await overlays.select({
+        title: ui('终端交互模式', 'Terminal interaction mode'),
         detail: ui(
-          '完整模式提供应用内滚动和点击；原生模式关闭鼠标报告，供终端选择文本。切换不会离开备用屏幕。',
-          'Full mode provides in-app scrolling and clicks; native mode turns off mouse reporting so the terminal can select text. Switching never leaves the alternate screen.',
+          '完整模式使用备用屏幕和应用内滚动；终端原生模式把完整对话写入普通滚动历史。仅空闲时切换。',
+          'Full mode uses the alternate screen and app scrolling; native mode writes the full conversation to terminal scrollback. Switch while idle.',
         ),
         searchable: false,
         choices: [
           {
             id: 'full',
             label: ui('完整模式', 'Full mode'),
-            description: ui('应用内滚轮、滚动条和点击', 'In-app wheel, scrollbar, and clicks'),
+            description: ui('备用屏幕、应用内滚轮、滚动条和点击', 'Alternate screen, in-app scrolling, scrollbar, and clicks'),
             active: current.mouseMode === 'full',
           },
           {
             id: 'native',
-            label: ui('原生选择', 'Native selection'),
-            description: ui('关闭鼠标报告，使用终端选区', 'Disable mouse reporting and use terminal selection'),
+            label: ui('终端原生模式', 'Terminal native mode'),
+            description: ui('普通屏幕、完整历史、终端滚动与选区', 'Main screen, full history, terminal scrolling, and selection'),
             active: current.mouseMode === 'native',
           },
         ],
@@ -2740,19 +2760,54 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
     if (next === current.mouseMode) {
       this.host.notice(next === 'full'
-        ? ui('已是完整鼠标模式', 'Already in full mouse mode')
-        : ui('已是原生选择模式', 'Already in native selection mode'), 'info')
+        ? ui('已是完整模式', 'Already in full mode')
+        : ui('已是终端原生模式', 'Already in terminal native mode'), 'info')
       return
     }
-    const updated = await this.capabilities.managementBridge().settings.mutate(
+    const blocked = this.host.interactionModeBlockReason?.(next)
+    if (blocked !== undefined) {
+      this.host.notice(blocked, 'warning')
+      return
+    }
+    const bridge = this.capabilities.managementBridge().settings
+    const updated = await bridge.mutate(
       TUI_BEHAVIOR_SETTINGS_NAMESPACE,
       [{ op: 'set', path: ['mouseMode'], value: next }],
       document.revision,
     )
-    await this.settingsChanged(updated, ui(
-      next === 'full' ? '完整鼠标模式' : '原生选择模式',
-      next === 'full' ? 'Full mouse mode' : 'Native selection mode',
-    ))
+    try {
+      await this.settingsChanged(updated, ui(
+        next === 'full' ? '完整模式' : '终端原生模式',
+        next === 'full' ? 'Full mode' : 'Terminal native mode',
+      ))
+    } catch (error) {
+      try {
+        const rolledBack = await bridge.mutate(
+          TUI_BEHAVIOR_SETTINGS_NAMESPACE,
+          [{ op: 'set', path: ['mouseMode'], value: current.mouseMode }],
+          updated.revision,
+        )
+        await this.host.applyBehavior?.(behaviorFromSettings(rolledBack))
+      } catch {
+        // Preserve a concurrent Settings revision instead of overwriting it.
+      }
+      throw error
+    }
+  }
+
+  private async transcriptCommand(args: string): Promise<void> {
+    const token = args.trim().toLowerCase()
+    if (token === '') {
+      if (this.host.openTranscript === undefined) throw new Error(ui('当前 Surface 不支持对话查看', 'This Surface cannot open the transcript'))
+      this.host.openTranscript()
+      return
+    }
+    if (token === 'replay') {
+      if (this.host.replayTranscript === undefined) throw new Error(ui('当前 Surface 不支持历史回放', 'This Surface cannot replay history'))
+      this.host.replayTranscript()
+      return
+    }
+    throw new Error(ui('用法：/transcript [replay]', 'Usage: /transcript [replay]'))
   }
 
   private async settingsNamespace(
@@ -2826,18 +2881,26 @@ The directory, user files, and all session logs are kept; sessions become ungrou
             label: ui('代码主题…', 'Code theme…'),
             description: ui('独立选择代码块与工具内容的高亮主题', 'Choose syntax colors for code blocks and tool content independently'),
           },
-          {
-            id: '__settings_background__',
-            label: ui('背景模式…', 'Background mode…'),
-            description: ui('主题颜色、终端背景或显式主题底色', 'Theme color, terminal background, or explicit theme fill'),
-          },
+          ...RENDERING_KEYS.map(key => {
+            const control = renderingControl(key)
+            const current = resolveRendering(appearanceFromSettings(document))[key]
+            return { id: `__settings_rendering_${key}__`, label: `${control.title}…`,
+              description: control.choices.find(choice => choice.id === current)?.label ?? '' }
+          }),
         ]
       case TUI_BEHAVIOR_SETTINGS_NAMESPACE:
-        return [{
-          id: '__settings_keymap__',
-          label: ui('快捷键…', 'Keyboard shortcuts…'),
-          description: ui('查看、改绑或恢复可配置键位', 'View, rebind, or reset configurable shortcuts'),
-        }]
+        return [
+          {
+            id: '__settings_mouse_mode__',
+            label: ui('终端交互模式…', 'Terminal interaction mode…'),
+            description: ui('完整模式或写入终端滚动历史的原生模式', 'Full mode or native terminal scrollback'),
+          },
+          {
+            id: '__settings_keymap__',
+            label: ui('快捷键…', 'Keyboard shortcuts…'),
+            description: ui('查看、改绑或恢复可配置键位', 'View, rebind, or reset configurable shortcuts'),
+          },
+        ]
       case LOCALE_SETTINGS_NAMESPACE:
         return [{
           id: '__settings_language__',
@@ -2889,10 +2952,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     document: TuiSettingsDocument,
     action: string,
   ): Promise<void> {
+    const renderingKey = RENDERING_KEYS.find(key => action === `__settings_rendering_${key}__`)
+    if (renderingKey !== undefined) { await this.themeRendering(renderingKey, '', overlays); return }
     switch (action) {
       case '__settings_theme__': await this.themeCenter(overlays); return
       case '__settings_code_theme__': await this.themeCode('', overlays); return
-      case '__settings_background__': await this.editBackgroundMode(overlays); return
+      case '__settings_mouse_mode__': await this.mouse('', overlays); return
       case '__settings_keymap__': {
         const current = behaviorFromSettings(document)
         applyKeyBindingOverrides(current.keyBindings)
@@ -3029,8 +3094,8 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     field: TuiSettingsField,
   ): Promise<void> {
     if (document.namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE
-      && field.path.length === 1 && field.path[0] === 'backgroundMode') {
-      await this.editBackgroundMode(overlays)
+      && field.path.length === 1 && (field.path[0] === 'backgroundMode' || RENDERING_KEYS.some(key => key === field.path[0]))) {
+      await this.themeRendering(field.path[0] === 'backgroundMode' ? 'backgroundFill' : field.path[0] as keyof TuiRenderingSettings, '', overlays)
       return
     }
     const bridge = this.capabilities.managementBridge().settings
@@ -3238,7 +3303,7 @@ Configured: ${field.overridden ? 'User override' : `Use default ${formatSettings
         else this.host.applyAppearance(appearanceFromSettings(document), appearanceOptions)
       }
       if (document.namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
-        this.host.applyBehavior?.(behaviorFromSettings(document))
+        await this.host.applyBehavior?.(behaviorFromSettings(document))
       }
       if (document.namespace === TUI_WELCOME_SETTINGS_NAMESPACE) {
         this.host.applyWelcome?.(welcomeFromSettings(document))

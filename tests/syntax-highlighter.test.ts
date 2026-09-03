@@ -8,6 +8,8 @@ import {
   syntaxTokenBackground,
 } from '../src/client/syntax-highlighter.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
+import { background, setBackgroundMode, setRendering } from '../src/client/theme.ts'
+import { sgrCells } from './helpers/sgr-colors.ts'
 
 function truecolor(): void {
   vi.stubEnv('NO_COLOR', undefined)
@@ -16,10 +18,43 @@ function truecolor(): void {
 }
 
 afterEach(() => {
+  setBackgroundMode('theme')
   vi.unstubAllEnvs()
 })
 
 describe('Shiki terminal syntax rendering', () => {
+  it.each(['xterm', 'xterm-256color'])('re-encodes cached imported code in both directions (%s)', async term => {
+    for (const key of ['NO_COLOR', 'COLORTERM', 'TERM_PROGRAM', 'WT_SESSION']) vi.stubEnv(key, undefined)
+    vi.stubEnv('TERM', term)
+    const theme = {
+      ...BUILT_IN_THEMES.dark, id: 'custom:rgb-cache' as const,
+      tokenColors: [{ scope: ['comment'], foreground: '#ff66cc', background: '#123456', fontStyle: ['italic'] as const }],
+    }
+    const highlighter = await SyntaxHighlighter.create(theme, () => undefined)
+    try {
+      setBackgroundMode('terminal')
+      const previous = highlighter.highlight('// original color', 'typescript', 'inherit')
+      setBackgroundMode('foreground')
+      const rgb = highlighter.highlight('// original color', 'typescript', 'inherit')
+      const painted = background.canvas(rgb.join('\n'))
+      expect(rgb).not.toEqual(previous)
+      expect(painted).toContain('\u001B[38;2;255;102;204m')
+      expect(painted).not.toContain('\u001B[39m')
+      expect(painted).not.toContain('\u001B[48;2;17;24;39m')
+      // Token background policy retains deliberately different backgrounds.
+      expect(syntaxTokenBackground('#123456', '#111827', 'inherit')).toBe('#123456')
+      setRendering({ colorMode: 'rgb', backgroundFill: 'theme', terminalBackgroundSync: 'off' })
+      const filled = background.canvas(background.code(highlighter.highlight('// original color', 'typescript', 'explicit').join('\n')))
+      const cells = sgrCells(filled)
+      expect(cells.every(cell => cell.foreground === '#ff66cc')).toBe(true)
+      expect(cells.every(cell => cell.background !== undefined)).toBe(true)
+      setRendering({ colorMode: 'rgb', backgroundFill: 'terminal', terminalBackgroundSync: 'off' })
+      expect(highlighter.highlight('// original color', 'typescript', 'inherit')).toEqual(rgb)
+      setBackgroundMode('terminal')
+      expect(highlighter.highlight('// original color', 'typescript', 'inherit')).toEqual(previous)
+    } finally { highlighter.dispose() }
+  })
+
   it('preloads common Harness languages and reuses the active semantic theme', async () => {
     truecolor()
     const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => undefined)

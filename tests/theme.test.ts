@@ -28,6 +28,7 @@ import {
   styleTerminalText,
   surfaceRow,
   terminalColorLevel,
+  renderingColorLevel,
 } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES, editableTheme, themeContrast } from '../src/client/theme-config.ts'
 
@@ -61,6 +62,51 @@ afterEach(() => {
 })
 
 describe('terminal themes', () => {
+  it.each([
+    {}, { TERM: 'xterm-256color' }, { TERM: 'tmux-256color', TMUX: '/tmp/tmux' },
+    { TERM: 'tmux-256color', TMUX: '/tmp/tmux', WT_SESSION: 'inherited' },
+    { TERM: 'xterm', COLORTERM: 'truecolor' },
+  ])('preserves exact foregrounds only in experimental mode for %j', env => {
+    for (const key of ['NO_COLOR', 'TERM', 'COLORTERM', 'TERM_PROGRAM', 'WT_SESSION', 'TMUX']) vi.stubEnv(key, undefined)
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value)
+    const detected = terminalColorLevel()
+    setBackgroundMode('explicit')
+    const old = color.brand('brand')
+    setBackgroundMode('foreground')
+    expect(terminalColorLevel()).toBe(detected)
+    expect(renderingColorLevel()).toBe(3)
+    for (const theme of [BUILT_IN_THEMES.dark, BUILT_IN_THEMES.light]) {
+      setTheme(theme)
+      for (const knownBackground of [undefined, '#ffffff', '#000000']) {
+        setTerminalCanvasBackground(knownBackground)
+        const row = background.canvas(`body ${color.brand('brand')} ${color.muted('muted')} ${color.accent('accent')} ${color.success('success')} ${color.warning('warning')} ${color.danger('danger')} ${interaction.hover('hover')} ${statusColor.running('running')} ${statusColor.waiting('waiting')} ${statusColor.failed('failed')}`)
+        for (const [word, hex] of Object.entries({
+          body: theme.colors.text, brand: theme.colors.brand, muted: theme.colors.muted,
+          accent: theme.colors.accent, success: theme.colors.success, warning: theme.colors.warning,
+          danger: theme.colors.danger, hover: theme.colors.brand,
+          running: theme.tone === 'dark' ? '#22d3ee' : '#0c6478',
+          waiting: theme.tone === 'dark' ? '#facc15' : '#854d0e',
+          failed: theme.tone === 'dark' ? '#f87171' : '#b91c1c',
+        })) expect(foregroundAt(row, word)).toBe(hex.toLowerCase())
+        expect(row).toContain('\u001B[49m')
+        expect(row).not.toContain('\u001B[48;')
+      }
+    }
+    setTheme(BUILT_IN_THEMES.dark)
+    setBackgroundMode('explicit')
+    expect(renderingColorLevel()).toBe(detected)
+    expect(color.brand('brand')).toBe(old)
+  })
+
+  it.each([{ NO_COLOR: '' }, { TERM: 'dumb' }])('does not override disabled colors: %j', env => {
+    enableTruecolor()
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value)
+    setBackgroundMode('foreground')
+    expect(renderingColorLevel()).toBe(0)
+    expect(background.canvas(color.brand('plain'))).toBe('plain')
+    expect(styleTerminalText('code', { foreground: '#123456', background: '#654321' })).toBe('code')
+  })
+
   // Evaluate the effective foreground at text, not just the presence of an
   // earlier escape that a nested Markdown token could override.
   function foregroundAt(row: string, text: string): string | undefined {

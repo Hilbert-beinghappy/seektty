@@ -90,6 +90,8 @@ export interface SelectOverlayRequest {
   readonly footer?: string
   readonly searchable?: boolean
   readonly maxVisible?: number
+  /** Opt-in room for descriptive labels; other menus retain their existing cap. */
+  readonly maxPrimaryColumnWidth?: number
   readonly options?: OverlayOptions
   /** When set, Escape runs this instead of Back/close so a child page can open. */
   readonly onEscape?: () => void | Promise<void>
@@ -530,7 +532,10 @@ export class SearchSelectOverlay implements Component {
 
   private createList(choices: readonly OverlayChoice[], preferredId?: string): SelectList {
     const rows = choices.map(rowOf)
-    const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList, selectListLayout)
+    const list = new SelectList(rows, this.request.maxVisible ?? 10, editorTheme.selectList, {
+      ...selectListLayout,
+      maxPrimaryColumnWidth: this.request.maxPrimaryColumnWidth ?? selectListLayout.maxPrimaryColumnWidth,
+    })
     const preferredIndex = preferredId === undefined ? 0 : rows.findIndex(row => row.value === preferredId)
     list.setSelectedIndex(Math.max(0, preferredIndex))
     list.onSelect = () => { this.choose() }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { appearanceFromSettings, saveBackgroundMode, saveCustomTheme, saveTheme } from '../src/client/appearance.ts'
+import { appearanceFromSettings, saveBackgroundMode, saveCustomTheme, saveTheme, saveRendering } from '../src/client/appearance.ts'
+import { resolveRendering } from '../src/client/appearance-rendering.ts'
 import { BUILT_IN_THEMES, editableTheme } from '../src/client/theme-config.ts'
 import { serializeThemeExport, themeForExport } from '../src/client/theme-export.ts'
 import { TUI_APPEARANCE_SETTINGS_NAMESPACE, type TuiManagementBridge, type TuiSettingsDocument, type TuiSettingsPathOp } from '../src/protocol.ts'
@@ -23,13 +24,13 @@ function state() {
 }
 
 describe('Harness-owned background mode', () => {
-  it('persists just the background field using the current revision', async () => {
+  it.each(['explicit', 'foreground'] as const)('persists just the %s background field using the current revision', async mode => {
     const harness = state()
-    const updated = await saveBackgroundMode(harness.settings, harness.current(), 'explicit')
+    const updated = await saveBackgroundMode(harness.settings, harness.current(), mode)
     expect(harness.mutate).toHaveBeenCalledWith(TUI_APPEARANCE_SETTINGS_NAMESPACE,
-      [{ op: 'set', path: ['backgroundMode'], value: 'explicit' }], 7)
+      [{ op: 'set', path: ['backgroundMode'], value: mode }], 7)
     expect(appearanceFromSettings(updated)).toEqual({
-      theme: 'dark', codeTheme: 'auto', backgroundMode: 'explicit', customThemes: [],
+      theme: 'dark', codeTheme: 'auto', backgroundMode: mode, customThemes: [],
     })
   })
 
@@ -46,11 +47,14 @@ describe('Harness-owned background mode', () => {
 
   it('keeps mode outside theme selection, custom theme import/save and portable exports', async () => {
     const harness = state()
+    await saveRendering(harness.settings, harness.current(), { colorMode: 'rgb', backgroundFill: 'theme' })
     await saveTheme(harness.settings, harness.current(), 'light')
     const custom = editableTheme(BUILT_IN_THEMES.dark, 'imported', 'Imported')
     const updated = await saveCustomTheme(harness.settings, harness.current(), custom)
     expect(appearanceFromSettings(updated).backgroundMode).toBe('terminal')
+    expect(resolveRendering(appearanceFromSettings(updated))).toEqual({ colorMode: 'rgb', backgroundFill: 'theme', terminalBackgroundSync: 'off' })
     expect(serializeThemeExport(themeForExport(BUILT_IN_THEMES.dark))).not.toContain('backgroundMode')
+    for (const key of ['colorMode', 'backgroundFill', 'terminalBackgroundSync']) expect(serializeThemeExport(themeForExport(BUILT_IN_THEMES.dark))).not.toContain(key)
     expect(harness.mutate.mock.calls.flatMap(call => call[1]).some(op => op.path[0] === 'backgroundMode')).toBe(false)
   })
 })

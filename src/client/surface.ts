@@ -7,13 +7,15 @@ import {
   matchesKey,
   ProcessTerminal,
   TUI,
+  visibleWidth,
   type Terminal,
 } from '@mariozechner/pi-tui'
 import {
   MAX_WHEEL_SCROLL_LINES,
   TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE,
   TuiSettingsConflictError,
-  type TuiBackgroundMode,
+  type TuiMouseMode,
+  type TuiRenderingSettings,
 } from '@deepseek-ai/dsh-tui-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import type { TuiStartOptions, TuiSurfaceHandle, TuiSurfaceOutcome } from './index.ts'
@@ -48,6 +50,7 @@ import {
 import { appearanceFromSettings, appearanceSettings } from './appearance.ts'
 import { welcomeFromSettings, welcomeSettings } from './welcome-settings.ts'
 import { resolveAppearanceTheme, type ResolvedTuiTheme } from './theme-config.ts'
+import { backgroundSyncMode, resolveRendering } from './appearance-rendering.ts'
 import { behaviorFromSettings, behaviorSettings, createLiveBehavior } from './behavior.ts'
 import { clearIdleComposerDraft } from './composer-draft.ts'
 import {
@@ -68,7 +71,7 @@ import {
   type ProviderOnboardingResult,
 } from './provider-onboarding.ts'
 import { adoptSyntaxHighlighter, SyntaxHighlighter } from './syntax-highlighter.ts'
-import { background, color, escapeTerminalText, setBackgroundMode, setCodeHighlighter, setTerminalCanvasBackground, setTheme } from './theme.ts'
+import { background, color, escapeTerminalText, setRendering, setCodeHighlighter, setTerminalCanvasBackground, setTheme } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { WelcomeController, type WelcomeRuntimeFacts } from './welcome.ts'
 import { canReadClipboardText, readClipboardText, writeClipboard } from './clipboard.ts'
@@ -230,7 +233,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const initialWelcome = welcomeFromSettings(welcomeSettings(settingsDocuments))
     const initialTheme = resolveAppearanceTheme(initialAppearance)
     let liveTheme = initialTheme
-    let liveBackgroundMode = initialAppearance.backgroundMode
+    let liveRendering = resolveRendering(initialAppearance)
     const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
     applyKeyBindingOverrides(liveBehavior.get().keyBindings)
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
@@ -239,13 +242,18 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       liveBehavior.get().hoverFeedback,
     )
     setTheme(initialTheme)
-    setBackgroundMode(liveBackgroundMode)
-    terminalSession.setBackgroundColor(initialTheme.colors.canvas, liveBackgroundMode)
+    setRendering(liveRendering)
+    terminalSession.setBackgroundColor(initialTheme.colors.canvas, backgroundSyncMode(liveRendering))
     const tui = new TUI(terminal, true)
+    let suppressNativeFrames = false
     const requestTuiRender = tui.requestRender.bind(tui)
     tui.requestRender = (force = false): void => {
       performanceProbe.markRenderRequest(force ? 'forced' : 'normal')
       requestTuiRender(force)
+    }
+    const requestSurfaceRender = (force = false): void => {
+      if (suppressNativeFrames && liveBehavior.get().mouseMode === 'native') return
+      tui.requestRender(force && liveBehavior.get().mouseMode !== 'native')
     }
     stopTuiRenderingSync = () => {
       (tui as TUI & ManagedTui).stopRenderingSync?.()
@@ -260,7 +268,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       // Adapt cached foregrounds at the canvas boundary; no transcript rebuild,
       // selection reset, or scroll-anchor movement is needed for this repaint.
       tui.invalidate()
-      tui.requestRender(true)
+      requestSurfaceRender(true)
     }
     let active: TuiActiveSession | undefined
     const profile = options.profile ?? 'tui'
@@ -346,22 +354,24 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (stopping !== undefined || transcript === undefined) return
         transcript.refreshPresentation()
         tui.invalidate()
-        tui.requestRender()
+        requestSurfaceRender()
       },
       message => { reportWelcomeNotice(message) },
     )
     const agentTree = new AgentTreeDock({
       presentation: capabilities.subagentPresentation(),
-      requestRender: () => { if (stopping === undefined) tui.requestRender() },
+      requestRender: () => { if (stopping === undefined) requestSurfaceRender() },
       mouseMode: () => liveBehavior.get().mouseMode,
     })
     transcript = new Transcript(
-      () => transcriptViewportRows(
-        terminal.rows,
-        hideComposer ? 0 : editor.render(terminal.columns).length,
-        agentTree.renderedHeight(),
-      ),
-      () => { if (stopping === undefined) tui.requestRender() },
+      () => liveBehavior.get().mouseMode === 'native'
+        ? Number.POSITIVE_INFINITY
+        : transcriptViewportRows(
+          terminal.rows,
+          hideComposer ? 0 : editor.render(terminal.columns).length,
+          agentTree.renderedHeight(),
+        ),
+      () => { if (stopping === undefined) requestSurfaceRender() },
       () => {
         const current = active
         if (current === undefined) return
@@ -386,7 +396,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       // finishes loading. The differential render repaints the visible rows.
       transcript.refreshPresentation()
       tui.invalidate()
-      tui.requestRender()
+      requestSurfaceRender()
     }).then(created => {
       if (stopping !== undefined) {
         created.dispose()
@@ -407,15 +417,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       // right after startup once the highlighter becomes ready.
       transcript.refreshPresentation()
       tui.invalidate()
-      tui.requestRender()
+      requestSurfaceRender()
     }).catch(() => {
       /* first frame already shown; highlighting stays off */
     })
     const status = new StatusBar()
     const childView = new ChildSessionView()
     const canvas = new Box(0, 0, background.canvas)
-    const renderCanvas = canvas.render.bind(canvas)
-    canvas.render = (width: number): string[] => performanceProbe.measureRender(() => renderCanvas(width))
     if (options.draft !== undefined) editor.setText(escapeTerminalText(options.draft))
     const layout = new BottomAnchoredLayout(
       () => terminal.rows,
@@ -426,8 +434,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       () => transcript.isEmptyState(),
       agentTree,
       () => !hideComposer,
+      () => liveBehavior.get().mouseMode === 'native',
     )
     canvas.addChild(layout)
+    const renderCanvas = canvas.render.bind(canvas)
+    canvas.render = (width: number): string[] => performanceProbe.measureRender(() => {
+      if (liveBehavior.get().mouseMode !== 'native') return renderCanvas(width)
+      return layout.render(width).map((line) => background.canvas(
+        `${line}${' '.repeat(Math.max(0, width - visibleWidth(line)))}`,
+      ))
+    })
     tui.addChild(canvas)
     tui.setFocus(editor)
 
@@ -620,7 +636,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         mouseController.endGesture()
         clearTranscriptPointerGesture()
         clearMouseArm(true)
-        if (clearHoverPresentation()) tui.requestRender()
+        if (clearHoverPresentation()) requestSurfaceRender()
       }
     }
     tuiFrameApi(tui).onAfterRender = freezeHitMap
@@ -656,7 +672,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
 
     const renderWhileOpen = (): void => {
-      if (stopping === undefined) tui.requestRender()
+      if (stopping === undefined) requestSurfaceRender()
     }
 
     const updateTranscript = (current: TuiActiveSession): void => {
@@ -689,8 +705,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     reportBackgroundUnavailable = () => {
       setNotice(ui(
-        '终端背景改色不可用，继续使用终端背景效果；可在 /theme 选择显式底色（兼容）。',
-        'Terminal recoloring is unavailable; using terminal background effects. /theme offers an explicit-fill compatibility mode.',
+        '背景同步不可用；铺底：/theme fill theme；原色：/theme colors rgb；兼容：/theme background explicit',
+        'No background sync. Fill: /theme fill theme; RGB: /theme colors rgb; compatibility: /theme background explicit.',
       ), 'warning')
     }
     reportWelcomeNotice = message => { setNotice(message, 'warning') }
@@ -934,6 +950,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }).closed
 
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
+      historyLoadController?.abort()
       detachFatalGuards()
       detachFatalGuards = () => undefined
       detachSuspendGuards()
@@ -987,22 +1004,121 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const applyRenderedAppearance = (
       theme: ResolvedTuiTheme,
-      mode: TuiBackgroundMode,
+      rendering: TuiRenderingSettings,
       forceThemeRefresh = false,
     ): void => {
       const themeChanged = JSON.stringify(theme) !== JSON.stringify(liveTheme)
+      const renderingChanged = liveRendering.colorMode !== rendering.colorMode || liveRendering.backgroundFill !== rendering.backgroundFill
       liveTheme = theme
-      liveBackgroundMode = mode
+      liveRendering = rendering
       setTheme(theme)
-      setBackgroundMode(mode)
-      terminalSession.setBackgroundColor(theme.colors.canvas, mode, forceThemeRefresh)
-      // Background-only changes must not rebuild transcript nodes or disturb selection/anchors.
-      if (themeChanged || forceThemeRefresh) {
+      setRendering(rendering)
+      terminalSession.setBackgroundColor(theme.colors.canvas, backgroundSyncMode(rendering), forceThemeRefresh)
+      // Re-encode tokens when either encoding or base-background policy changes.
+      // refreshPresentation preserves selection and historical viewport anchors.
+      if (themeChanged || forceThemeRefresh || renderingChanged) {
         syntax?.setTheme(theme)
         transcript.refreshPresentation()
       }
       tui.invalidate()
-      tui.requestRender(true)
+      requestSurfaceRender(true)
+    }
+
+    let displayModeTransition = false
+    let historyLoadController: AbortController | undefined
+    let nativeRenderState: {
+      readonly frame: unknown
+      readonly columns: number
+      readonly rows: number
+    } | undefined
+    const interactionModeBlockReason = (next: TuiMouseMode): string | undefined => {
+      if (next === liveBehavior.get().mouseMode) return undefined
+      if (displayModeTransition) return ui('终端模式正在切换，请稍候', 'The terminal mode is already switching')
+      if (historyLoadController !== undefined) return ui('完整历史仍在补载；可按 Esc 停止', 'Complete history is still loading; press Esc to stop')
+      if (childView.isOpen()) return ui(
+        '当前正在查看子 Agent；请先按 Esc 返回父会话。',
+        'A child Agent is open; press Esc to return to the parent Session.',
+      )
+      const snapshot = active?.session.getSnapshot()
+      if (snapshot?.running === true || (snapshot?.runningCalls.length ?? 0) > 0) return ui(
+        '当前轮次仍在运行；请停止或等待完成后再切换终端模式。',
+        'The current turn is still running; stop it or wait until it finishes before switching terminal modes.',
+      )
+      if ((snapshot?.pending.length ?? 0) > 0) return ui(
+        '当前有待处理的审批或问题；处理完成后再切换终端模式。',
+        'An approval or question is pending; resolve it before switching terminal modes.',
+      )
+      if ((snapshot?.queue.length ?? 0) > 0) return ui(
+        '当前有待发送消息；清空队列或等待发送后再切换终端模式。',
+        'Queued messages are waiting; clear or send them before switching terminal modes.',
+      )
+      return undefined
+    }
+    const loadCompleteHistory = async (
+      signal?: AbortSignal,
+      report: (loadedNodes: number) => void = () => undefined,
+    ): Promise<'complete' | 'cancelled' | 'incomplete'> => {
+      const target = active
+      if (target === undefined) return 'complete'
+      let lastSize = -1
+      while (active?.sessionId === target.sessionId) {
+        if (signal?.aborted === true) return 'cancelled'
+        const snapshot = target.session.getSnapshot()
+        if (!snapshot.hasMore) return 'complete'
+        const size = snapshot.chat.order.length
+        report(size)
+        if (!snapshot.loadingOlder && size === lastSize) return 'incomplete'
+        lastSize = size
+        if (!snapshot.loadingOlder) await target.session.loadOlder()
+        else await new Promise<void>(resolve => setTimeout(resolve, 16))
+      }
+      return signal?.aborted === true ? 'cancelled' : 'incomplete'
+    }
+    const switchDisplayMode = async (next: TuiMouseMode): Promise<void> => {
+      const previous = terminalSession.displayMode()
+      if (previous === next) return
+      displayModeTransition = true
+      try {
+        if (next === 'native') {
+          const controller = new AbortController()
+          historyLoadController?.abort()
+          historyLoadController = controller
+          setNotice(ui('正在载入完整会话历史；按 Esc 可停止补载', 'Loading complete Session history; press Esc to stop backfilling'), 'info')
+          const result = await loadCompleteHistory(controller.signal, loaded => {
+            setNotice(ui(`正在载入完整会话历史 · ${String(loaded)} 个节点`, `Loading complete Session history · ${String(loaded)} nodes`), 'info')
+          }).catch(() => 'incomplete' as const)
+          if (historyLoadController === controller) historyLoadController = undefined
+          if (result !== 'complete') setNotice(ui(
+            '部分较早历史无法载入；已显示当前可用内容，可稍后使用 /transcript replay 重试。',
+            'Some older history could not be loaded; available content is shown. Use /transcript replay to retry.',
+          ), 'warning')
+        }
+        const managed = tui as TUI & ManagedTui
+        if (previous === 'native') {
+          nativeRenderState = {
+            frame: managed.captureRenderState?.(),
+            columns: terminal.columns,
+            rows: terminal.rows,
+          }
+        }
+        transcript.setNativeMode(next === 'native')
+        if (next === 'native') {
+          terminalSession.setDisplayMode(next)
+          const reusable = nativeRenderState !== undefined
+            && nativeRenderState.frame !== undefined
+            && nativeRenderState.columns === terminal.columns
+            && nativeRenderState.rows === terminal.rows
+          if (reusable) managed.restoreRenderState?.(nativeRenderState?.frame)
+          else managed.resetRenderState?.()
+        } else {
+          managed.resetRenderState?.()
+          terminalSession.setDisplayMode(next)
+        }
+        tui.invalidate()
+        requestSurfaceRender()
+      } finally {
+        displayModeTransition = false
+      }
     }
 
     actions = new TuiActions(capabilities, {
@@ -1012,12 +1128,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       refresh,
       refreshHeader: () => { refreshHeader(false) },
       applyTheme: (theme) => {
-        applyRenderedAppearance(theme, liveBackgroundMode)
+        applyRenderedAppearance(theme, liveRendering)
       },
       applyAppearance: (appearance, options) => {
         applyRenderedAppearance(
           resolveAppearanceTheme(appearance),
-          appearance.backgroundMode,
+          resolveRendering(appearance),
           options?.forceThemeRefresh === true,
         )
       },
@@ -1028,14 +1144,18 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         refreshHeader(false)
         refresh()
         tui.invalidate()
-        tui.requestRender(true)
+        requestSurfaceRender(true)
       },
-      applyBehavior: (behavior) => {
+      applyBehavior: async (behavior) => {
         contextMenu.close()
+        const previous = liveBehavior.get()
+        const blockReason = interactionModeBlockReason(behavior.mouseMode)
+        if (blockReason !== undefined) throw new Error(blockReason)
+        terminalSession.setMouseReporting(behavior.mouseMode, behavior.hoverFeedback)
+        if (previous.mouseMode !== behavior.mouseMode) await switchDisplayMode(behavior.mouseMode)
         liveBehavior.apply(behavior)
         applyKeyBindingOverrides(behavior.keyBindings)
         setDangerConfirmDefault(behavior.dangerConfirmDefault)
-        terminalSession.setMouseReporting(behavior.mouseMode, behavior.hoverFeedback)
         mouseController.endGesture()
         clearTranscriptPointerGesture()
         clearMouseArm(true)
@@ -1049,7 +1169,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         )
         transcript.refreshPresentation()
         tui.invalidate()
-        tui.requestRender(true)
+        requestSurfaceRender(true)
       },
       applyWelcome: (settings) => {
         welcome.applySettings(settings)
@@ -1064,6 +1184,35 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       composerText: () => editor.getText(),
       canChangeSession: () => !childView.isOpen(),
+      interactionModeBlockReason,
+      openTranscript: () => {
+        transcriptFocused = true
+        transcript.followLatest()
+        tui.setFocus(transcript)
+        setNotice(ui('对话查看已打开：/ 搜索，Tab 返回输入框', 'Transcript view opened: / searches, Tab returns to the composer'), 'info')
+        renderWhileOpen()
+      },
+      replayTranscript: () => {
+        if (liveBehavior.get().mouseMode !== 'native') {
+          setNotice(ui('历史回放只适用于终端原生模式；先使用 /mouse native', 'History replay is available in terminal-native mode; use /mouse native first'), 'warning')
+          return
+        }
+        const controller = new AbortController()
+        historyLoadController?.abort()
+        historyLoadController = controller
+        setNotice(ui('正在补载完整历史；按 Esc 取消', 'Backfilling complete history; press Esc to cancel'), 'info')
+        void loadCompleteHistory(controller.signal, loaded => {
+          setNotice(ui(`正在补载完整历史 · ${String(loaded)} 个节点`, `Backfilling complete history · ${String(loaded)} nodes`), 'info')
+        }).catch(() => 'incomplete' as const).then((result) => {
+          if (stopping !== undefined) return
+          if (historyLoadController === controller) historyLoadController = undefined
+          terminal.write(`\r\n${color.muted(ui('── 手动回放当前会话 ──', '── Manual transcript replay ──'))}\r\n`)
+          ;(tui as TUI & ManagedTui).resetRenderState?.()
+          transcript.refreshPresentation()
+          requestSurfaceRender()
+          if (result !== 'complete') setNotice(ui('历史载入未完成；已回放当前可用内容', 'History loading was incomplete; replayed available content'), 'warning')
+        })
+      },
       interactionOrigin: (sessionId) => {
         const child = childView.snapshot()
         if (child !== undefined && child.childSessionId === sessionId) {
@@ -1124,6 +1273,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const unsubscribeActive = capabilities.subscribeActive((current, snapshot) => {
       if (stopping !== undefined) return
       if (current === undefined || snapshot === undefined) {
+        historyLoadController?.abort()
+        historyLoadController = undefined
+        suppressNativeFrames = false
+        nativeRenderState = undefined
         if (childView.isOpen()) childView.discard()
         agentTree.suspend()
         contextMenu.close()
@@ -1154,6 +1307,20 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         focusEditor()
       }
       if (!childView.isOpen()) agentTree.resume()
+      const previousSessionId = latestSessionId
+      const sessionChanged = previousSessionId !== current.sessionId
+      if (sessionChanged) {
+        historyLoadController?.abort()
+        nativeRenderState = undefined
+        if (liveBehavior.get().mouseMode === 'native' && previousSessionId !== '') {
+          suppressNativeFrames = true
+          ;(tui as TUI & ManagedTui).resetRenderState?.()
+          terminal.write(`\r\n${color.muted(ui(
+            `── 切换会话 · ${escapeTerminalText(current.summary.displayTitle)} ──`,
+            `── Session · ${escapeTerminalText(current.summary.displayTitle)} ──`,
+          ))}\r\n${color.muted(ui('正在补载完整历史…', 'Loading complete history…'))}\r\n`)
+        }
+      }
       active = current
       const owningRoot = owningAgentRoot(capabilities.subagentPresentation(), current.sessionId)
       agentTree.showCollapsedRoot(owningRoot, current.sessionId === owningRoot ? undefined : current.sessionId)
@@ -1161,13 +1328,29 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       updateTranscript(current)
       actions.syncPending(snapshot)
       editor.disableSubmit = childView.composerMode() === 'read-only'
-      if (latestSessionId !== current.sessionId) {
+      if (sessionChanged) {
         contextMenu.close()
         latestSessionId = current.sessionId
         mouseController.endGesture()
         clearTranscriptPointerGesture()
         dismissNotice()
         refreshHeader(true)
+        if (liveBehavior.get().mouseMode === 'native' && previousSessionId !== '') {
+          const controller = new AbortController()
+          historyLoadController = controller
+          void loadCompleteHistory(controller.signal).catch(() => 'incomplete' as const).then((result) => {
+            if (historyLoadController !== controller || active?.sessionId !== current.sessionId) return
+            historyLoadController = undefined
+            updateTranscript(active)
+            suppressNativeFrames = false
+            ;(tui as TUI & ManagedTui).resetRenderState?.()
+            requestSurfaceRender()
+            if (result !== 'complete') setNotice(ui(
+              '会话历史补载未完成；已显示当前可用内容，可用 /transcript replay 重试。',
+              'Session history backfill was incomplete; available content is shown. Use /transcript replay to retry.',
+            ), 'warning')
+          })
+        }
       } else {
         refreshHeader(false)
       }
@@ -1937,6 +2120,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       clearMouseArm()
       mouseController.endGesture()
       if (clearHoverPresentation()) renderWhileOpen()
+      if (historyLoadController !== undefined && matchesKey(payload, Key.escape)) {
+        historyLoadController.abort()
+        setNotice(ui('已停止补载；当前会话和 Agent 仍保持运行', 'Backfill stopped; the Session and Agent are still running'), 'warning')
+        return { consume: true }
+      }
       if (matchesBinding('toggleMouseMode', payload)) {
         contextMenu.close()
         void actions.execute('mouse', 'toggle')
@@ -1957,6 +2145,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         }
       }
       if (overlays.hasActive()) return undefined
+      if (liveBehavior.get().mouseMode === 'native' && matchesKey(payload, Key.ctrl('l'))) {
+        transcript.invalidate()
+        tui.invalidate()
+        requestSurfaceRender()
+        return { consume: true }
+      }
       if (childView.isOpen() && matchesKey(payload, Key.escape)) {
         closeAgentChildView()
         return { consume: true }
@@ -2186,13 +2380,22 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       },
       resume: () => {
         if (stopping !== undefined) return
-        terminalSession.enter()
+        terminalSession.enter(liveBehavior.get().mouseMode)
         tui.start()
         terminalSession.startBackgroundSync()
-        tui.requestRender(true)
+        requestSurfaceRender(true)
       },
     })
-    terminalSession.enter()
+    if (liveBehavior.get().mouseMode === 'native') {
+      transcript.setNativeMode(true)
+      const historyResult = await loadCompleteHistory().catch(() => 'incomplete' as const)
+      if (historyResult !== 'complete') setNotice(ui(
+        '部分较早历史无法载入；已显示当前可用内容，可稍后使用 /transcript replay 重试。',
+        'Some older history could not be loaded; available content is shown. Use /transcript replay to retry.',
+      ), 'warning')
+      ;(tui as TUI & ManagedTui).resetRenderState?.()
+    }
+    terminalSession.enter(liveBehavior.get().mouseMode)
     tui.start()
     terminalSession.startBackgroundSync()
     refreshHeader(true)

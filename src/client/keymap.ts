@@ -96,8 +96,8 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
     id: 'toggleMouseMode',
     group: 'selection',
     keys: ['F3'],
-    zh: '切换完整鼠标模式与终端原生选择',
-    en: 'Toggle full mouse mode and native terminal selection',
+    zh: '切换完整模式与终端原生模式',
+    en: 'Toggle full and terminal-native modes',
     match: data => matchesKey(data, Key.f3),
   },
   {

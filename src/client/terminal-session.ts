@@ -23,6 +23,9 @@ export interface ManagedTerminal {
 /** Private compatibility hook supplied by the pinned pi-tui patch. */
 export interface ManagedTui {
   stopRenderingSync?(): void
+  resetRenderState?(): void
+  captureRenderState?(): unknown
+  restoreRenderState?(state: unknown): void
   getLastFrameGeometry?(): {
     readonly terminalWidth: number
     readonly terminalHeight: number
@@ -41,8 +44,10 @@ export interface ManagedTui {
 }
 
 export interface TerminalSession {
-  enter(): void
+  enter(mode?: MouseReportingMode): void
   restore(): void
+  setDisplayMode(mode: MouseReportingMode): void
+  displayMode(): MouseReportingMode
   setBackgroundColor(color: string, mode?: TuiBackgroundMode, force?: boolean): void
   startBackgroundSync(): void
   consumeInput(data: string): boolean
@@ -71,13 +76,32 @@ export function createTerminalSession(
   const background = new TerminalBackground(terminal, enabled && supportsTerminalBackground(env), onBackgroundUnavailable, onBackgroundColorChanged)
   let active = false
   let mouseMode: MouseReportingMode = 'full'
+  let displayMode: MouseReportingMode = 'full'
+  let alternateScreen = false
   let hoverFeedback = true
-  return {
-    enter: () => {
-      if (!enabled || active) return
-      active = true
+  const applyDisplayMode = (next: MouseReportingMode): void => {
+    displayMode = next
+    if (!enabled || !active || alternateScreen === (next === 'full')) return
+    if (next === 'full') {
+      alternateScreen = true
       terminal.__seekttyManagedAlternateScreen = true
       terminal.write(ENTER_ALTERNATE_SCREEN + encodeMouseReporting(mouseMode, hoverFeedback))
+      return
+    }
+    terminal.write(encodeDisableMouseReporting() + LEAVE_ALTERNATE_SCREEN)
+    alternateScreen = false
+    terminal.__seekttyManagedAlternateScreen = false
+  }
+  return {
+    enter: (mode = displayMode) => {
+      if (!enabled || active) return
+      active = true
+      displayMode = mode
+      alternateScreen = mode === 'full'
+      terminal.__seekttyManagedAlternateScreen = alternateScreen
+      terminal.write(alternateScreen
+        ? ENTER_ALTERNATE_SCREEN + encodeMouseReporting(mouseMode, hoverFeedback)
+        : encodeDisableMouseReporting())
     },
     restore: () => {
       if (!active) return
@@ -89,7 +113,9 @@ export function createTerminalSession(
         try {
           terminal.restoreProtocolsSync?.()
         } finally {
-          terminal.write(LEAVE_ALTERNATE_SCREEN)
+          if (alternateScreen) terminal.write(LEAVE_ALTERNATE_SCREEN)
+          terminal.__seekttyManagedAlternateScreen = false
+          alternateScreen = false
           active = false
         }
       }
@@ -98,11 +124,13 @@ export function createTerminalSession(
     // Must run after terminal.start() has installed its raw-mode input listener.
     startBackgroundSync: () => { if (active) background.start() },
     consumeInput: data => background.consumeInput(data),
+    setDisplayMode: applyDisplayMode,
+    displayMode: () => displayMode,
     setMouseReporting: (mode, nextHoverFeedback = hoverFeedback) => {
       if (mouseMode === mode && hoverFeedback === nextHoverFeedback) return
       mouseMode = mode
       hoverFeedback = nextHoverFeedback
-      if (!enabled || !active) return
+      if (!enabled || !active || !alternateScreen) return
       terminal.write(encodeMouseReporting(mode, hoverFeedback))
     },
     mouseReporting: () => mouseMode,
