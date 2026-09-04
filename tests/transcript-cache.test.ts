@@ -79,6 +79,23 @@ afterEach(() => {
 })
 
 describe('transcript node cache (task 5.2)', () => {
+  it.each([false, true])('reuses unchanged running answer frames without freezing new source (native=%s)', native => {
+    const transcript = new Transcript(() => 24)
+    transcript.setNativeMode(native)
+    const step = (text: string): ChatConversationViewNode => ({
+      ...assistant('live', text), kind: 'assistant-step',
+      data: { status: 'running', turn: 1, step: 1, time: 1, blocks: [{ kind: 'text', text }] },
+    })
+    transcript.update(snapshot([step('before')]))
+    const first = transcript.render(80)
+    const escaped = internals.linesEscaped
+    expect(transcript.render(80)).toEqual(first)
+    expect(internals.linesEscaped).toBe(escaped)
+    transcript.update(snapshot([step('after NEXT_CHUNK')]))
+    expect(transcript.render(80).join('\n')).toContain('NEXT_CHUNK')
+    transcript.dispose()
+  })
+
   it('rebuilds only the streaming node in a 5000-line session', () => {
     vi.stubEnv('NO_COLOR', '1')
     const nodes = Array.from({ length: 250 }, (_, index) =>
@@ -87,13 +104,16 @@ describe('transcript node cache (task 5.2)', () => {
     transcript.update(snapshot(nodes))
     expect(internals.markdownCreated).toBe(250)
     const created = internals.markdownCreated
+    const updated = internals.markdownUpdated
     const last = nodes.at(-1)
     if (last === undefined) throw new Error('expected a last assistant node')
     transcript.update(snapshot([
       ...nodes.slice(0, -1),
       assistant(last.key, `${(last.data as { blocks: readonly { text: string }[] }).blocks[0]?.text ?? ''}\nstreamed`),
     ]))
-    expect(internals.markdownCreated - created).toBe(1)
+    expect(internals.markdownCreated - created).toBe(0)
+    expect(internals.markdownUpdated - updated).toBe(1)
+    expect(transcript.render(80).join('\n')).toContain('streamed')
   })
 
   it('reuses unchanged component output across pulse frames', () => {

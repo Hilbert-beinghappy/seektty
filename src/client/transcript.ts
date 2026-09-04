@@ -57,6 +57,8 @@ import { foldLineBlock } from './tool-output-limit.ts'
 import { unifiedHunks } from './line-diff.ts'
 import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 import { HeightIndex } from './height-index.ts'
+import { sameStructuralToken, structuralToken, type StructuralToken } from './structural-token.ts'
+import { StringTransformCache } from './string-transform-cache.ts'
 import { horizontalRule } from './horizontal-rule.ts'
 import {
   appendScrollbarColumn,
@@ -91,6 +93,7 @@ const PULSE_FRAME_MS = 160
 /** Replaceable counters used by incremental-render tests. */
 export const internals = {
   markdownCreated: 0,
+  markdownUpdated: 0,
   componentRenders: 0,
   blocksVisited: 0,
   linesEscaped: 0,
@@ -1117,10 +1120,10 @@ function deliverablesFingerprint(node: ChatConversationViewNode): readonly strin
 function nodeFingerprint(
   node: ChatConversationViewNode,
   preferences: TranscriptPreferences,
-): string {
+): StructuralToken {
   const tool = node.kind === 'tool-call' ? toolChatData(node.data)?.root : undefined
   const toolKey = tool === undefined ? node.key : callKey(tool, node.key) ?? node.key
-  return JSON.stringify({
+  return structuralToken({
     kind: node.kind,
     data: node.data,
     deliverables: deliverablesFingerprint(node),
@@ -1403,7 +1406,7 @@ interface TranscriptPointerControl {
 
 interface TranscriptBlock {
   readonly key: string
-  readonly sourceToken: string
+  readonly sourceToken: string | StructuralToken
   readonly rows: TranscriptRow[]
   readonly components: Component[]
   readonly linesByWidth: Map<number, TranscriptBlockLines>
@@ -1547,6 +1550,8 @@ export class Transcript implements Component, Focusable {
   private emptyScrollPrimed = false
   private nativeMode = false
   private readonly nativeFrozenBlocks = new Map<string, TranscriptBlockLines>()
+  private readonly safeRenderedLines = new StringTransformCache(escapeTerminalText)
+  private readonly nativeInsetLines = new WeakMap<TranscriptBlockLines, { inset: number; lines: string[] }>()
 
   /**
    * @param viewportRows - current terminal-dependent transcript height.
@@ -1925,6 +1930,7 @@ export class Transcript implements Component, Focusable {
     this.imageComponents.clear()
     this.imageBlockOwners.clear()
     this.nativeFrozenBlocks.clear()
+    this.safeRenderedLines.clear()
     this.nodeCache.clear()
     this.search = undefined
     this.searchIndex = undefined
@@ -1988,6 +1994,7 @@ export class Transcript implements Component, Focusable {
       this.selection = undefined
       this.emptyScrollPrimed = false
       this.nativeFrozenBlocks.clear()
+      this.safeRenderedLines.clear()
       this.syncHeightIndexCounters()
     }
     this.imageLoader = imageLoader
@@ -2024,13 +2031,13 @@ export class Transcript implements Component, Focusable {
     let hasVisibleRows = false
     const take = (
       key: string,
-      fingerprint: string,
+      fingerprint: string | StructuralToken,
       build: () => TranscriptRow[],
       sourceMayChange = false,
     ): void => {
       keep.add(key)
       const hit = this.nodeCache.get(key)
-      if (hit !== undefined && hit.sourceToken === fingerprint) {
+      if (hit !== undefined && sameStructuralToken(hit.sourceToken, fingerprint)) {
         if (hit.rows.length > 0) {
           hasVisibleRows = true
           blocks.push(hit)
@@ -2038,7 +2045,16 @@ export class Transcript implements Component, Focusable {
         return
       }
       const built = build()
-      const created = built.map(row => this.component(row))
+      const created = built.map((row, index) => {
+        const previous = hit?.components[index]
+        if (row.format === 'markdown' && hit?.rows[index]?.format === 'markdown' && previous instanceof Markdown) {
+          internals.markdownUpdated += 1
+          previous.setText(escapeTerminalText(row.text))
+          this.lineCache.delete(previous)
+          return previous
+        }
+        return this.component(row)
+      })
       const block: TranscriptBlock = {
         key,
         sourceToken: fingerprint,
@@ -2207,6 +2223,7 @@ export class Transcript implements Component, Focusable {
    * The current viewport and durable turn cursor remain unchanged.
    */
   refreshPresentation(): void {
+    this.safeRenderedLines.clear()
     const scrollOffset = this.scrollOffset
     const turnCursor = this.turnCursor
     const viewportAnchor = this.viewportAnchor
@@ -2235,6 +2252,7 @@ export class Transcript implements Component, Focusable {
 
   /** Stop pending attachment presentation updates during terminal teardown. */
   dispose(): void {
+    this.safeRenderedLines.clear()
     this.stopPulseAnimation()
     this.imageGeneration += 1
     this.imageLoader = undefined
@@ -2265,7 +2283,10 @@ export class Transcript implements Component, Focusable {
       block.linesByWidth.clear()
       block.dirty = false
     }
-    const cachedBlock = block.metadata.dynamic ? undefined : block.linesByWidth.get(cacheKey)
+    // Source changes replace the block and its cache. Only clock-driven rows
+    // need to bypass a cache while the source itself is unchanged.
+    const clockDriven = block.rows.some(row => row.pulse !== undefined || row.liveDurationSince !== undefined)
+    const cachedBlock = clockDriven ? undefined : block.linesByWidth.get(cacheKey)
     if (cachedBlock !== undefined) {
       this.heightIndex.setExact(block.key, cachedBlock.lines.length)
       this.rememberOwnerCopy(block.key, cachedBlock)
@@ -2313,7 +2334,7 @@ export class Transcript implements Component, Focusable {
       } else {
         for (const line of rendered) {
           internals.linesEscaped += 1
-          lines.push(escapeTerminalText(line))
+          lines.push(this.safeRenderedLines.get(line))
         }
       }
       const projected = row?.format === 'rule' || row?.format === 'image'
@@ -2350,7 +2371,7 @@ export class Transcript implements Component, Focusable {
           : {}),
     }))
     const result = { lines, projections: resolvedProjections, borderLines, hardBreaks, turnAnchors, controls }
-    if (!block.metadata.dynamic) {
+    if (!clockDriven) {
       block.linesByWidth.set(cacheKey, result)
       while (block.linesByWidth.size > 4) {
         const oldest = block.linesByWidth.keys().next().value
@@ -2695,14 +2716,19 @@ export class Transcript implements Component, Focusable {
       for (const [index, block] of this.blocks.entries()) {
         const frozen = this.nativeFrozenBlocks.get(block.key)
         const rendered = frozen ?? this.renderBlock(index, contentWidth)
-        lines.push(...rendered.lines)
+        let presented = this.nativeInsetLines.get(rendered)
+        if (presented === undefined || presented.inset !== inset) {
+          presented = { inset, lines: rendered.lines.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`) }
+          this.nativeInsetLines.set(rendered, presented)
+        }
+        lines.push(...presented.lines)
         if (!block.metadata.dynamic && frozen === undefined) this.nativeFrozenBlocks.set(block.key, rendered)
       }
       this.scrollOffset = 0
       this.lastScrollbar = undefined
       this.lastViewportMaps = []
       this.lastPointerControls = []
-      return lines.map(line => line === '' ? '' : `${' '.repeat(inset)}${line}`)
+      return lines
     }
     const totalRows = Math.max(1, Math.floor(this.viewportRows()))
     if (Number.isFinite(totalRows) && !this.emptyState) {

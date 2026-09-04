@@ -163,8 +163,11 @@ function hasText(data) {
         && data.blocks.some(block => block.kind === 'text' && block.text.trim() !== '');
 }
 function tailData(context) {
-    const end = context.state?.end
-        ?? context.matches.find(match => match.event.type === 'turn/end');
+    // A started context has an authoritative reducer state, including the
+    // absence of turn/end. Only partial history without start needs a scan.
+    const end = context.state === undefined || context.state === null
+        ? context.matches.find(match => match.event.type === 'turn/end')
+        : context.state.end;
     if (end?.event.type !== 'turn/end')
         return null;
     const turn = turnLocation(context);
