@@ -3,6 +3,7 @@
 import {
   createHighlighterCore,
   type HighlighterCore,
+  type GrammarState,
   type LanguageInput,
   type LanguageRegistration,
   type ThemeRegistration,
@@ -10,7 +11,9 @@ import {
 } from '@shikijs/core'
 import {
   createJavaScriptRegexEngine,
+  defaultJavaScriptRegexConstructor,
 } from '@shikijs/engine-javascript'
+import { cacheFailedRegexSearch } from './regex-search-cache.ts'
 import { normalizeThemeColor, type ResolvedTuiTheme } from './theme-config.ts'
 import { visualTextMateRules } from './syntax-theme-rules.ts'
 import { styleTerminalText, renderingColorLevel, type CodeBackgroundPolicy } from './theme.ts'
@@ -222,6 +225,8 @@ export class SyntaxHighlighter {
   private readonly failed = new Set<SupportedLanguage>()
   private readonly themes = new Set<string>()
   private readonly cache = new Map<string, readonly string[]>()
+  private cacheCharacters = 0
+  private readonly prefixes = new Map<string, { prefix: string; lines: string[]; state: GrammarState | undefined }>()
   private themeName = ''
   private disposed = false
 
@@ -242,6 +247,7 @@ export class SyntaxHighlighter {
       const highlighter = await createHighlighterCore({
         engine: createJavaScriptRegexEngine({
           forgiving: true,
+          regexConstructor: pattern => cacheFailedRegexSearch(defaultJavaScriptRegexConstructor(pattern, { target: 'auto' })),
         }),
         langs: COMMON_LANGUAGES.map(language => LANGUAGE_LOADERS[language] as LanguageInput),
         themes: [],
@@ -274,6 +280,8 @@ export class SyntaxHighlighter {
       this.themes.add(this.themeName)
     }
     this.cache.clear()
+    this.cacheCharacters = 0
+    this.prefixes.clear()
   }
 
   /**
@@ -299,19 +307,49 @@ export class SyntaxHighlighter {
     }
     let lines: string[]
     try {
-      const result = this.highlighter.codeToTokens(code, {
-        lang: canonical,
-        theme: this.themeName,
-        tokenizeTimeLimit: 0,
-      })
-      lines = result.tokens.map(line => line.map(token => renderToken(token, this.theme, background)).join(''))
+      lines = this.highlightIncremental(code, canonical, background)
     } catch {
       this.failed.add(canonical)
       return plainLines(code, this.theme, background)
     }
     this.cache.set(key, lines)
-    if (this.cache.size > MAX_CACHE_ENTRIES) this.cache.delete(this.cache.keys().next().value as string)
+    this.cacheCharacters += key.length + lines.reduce((size, line) => size + line.length, 0)
+    while (this.cache.size > MAX_CACHE_ENTRIES || this.cacheCharacters > 8_000_000) {
+      const oldest = this.cache.keys().next().value as string
+      this.cacheCharacters -= oldest.length + this.cache.get(oldest)!.reduce((size, line) => size + line.length, 0)
+      this.cache.delete(oldest)
+    }
     return [...lines]
+  }
+
+  private highlightIncremental(code: string, language: SupportedLanguage, background: CodeBackgroundPolicy): string[] {
+    const context = `${this.themeName}:${renderingColorLevel()}:${background}:${language}`
+    const tokenize = (text: string, state?: GrammarState) => this.highlighter.codeToTokensBase(text, {
+      lang: language, theme: this.themeName, tokenizeTimeLimit: 0,
+      ...(state === undefined ? {} : { grammarState: state }),
+    })
+    const paint = (tokens: ThemedToken[][]) => tokens.map(line => line.map(token => renderToken(token, this.theme, background)).join(''))
+    // Keep the existing parser path for CR-containing source, including a split CRLF.
+    if (code.includes('\r')) return paint(tokenize(code))
+    const previous = this.prefixes.get(context)
+    const reusable = previous !== undefined && code.startsWith(previous.prefix)
+    let prefix = reusable ? previous.prefix : ''
+    let lines = reusable ? previous.lines : []
+    let state = reusable ? previous.state : undefined
+    const boundary = code.lastIndexOf('\n') + 1
+    if (boundary > prefix.length) {
+      const completed = tokenize(code.slice(prefix.length, boundary), state)
+      const nextState = this.highlighter.getLastGrammarState(completed)
+      if (nextState === undefined) return paint(tokenize(code))
+      lines = [...lines, ...paint(completed).slice(0, -1)]
+      prefix = code.slice(0, boundary)
+      state = nextState
+    }
+    this.prefixes.delete(context)
+    this.prefixes.set(context, { prefix, lines, state })
+    while (this.prefixes.size > 4) this.prefixes.delete(this.prefixes.keys().next().value!)
+    // The current incomplete line must always be reparsed from the last committed state.
+    return [...lines, ...paint(tokenize(code.slice(boundary), state))]
   }
 
   /** Release Shiki registries and ignore pending lazy-load invalidations. */
@@ -319,6 +357,8 @@ export class SyntaxHighlighter {
     if (this.disposed) return
     this.disposed = true
     this.cache.clear()
+    this.cacheCharacters = 0
+    this.prefixes.clear()
     this.highlighter.dispose()
   }
 

@@ -102,6 +102,7 @@ describe('actual Surface Header → Welcome wiring (#196)', () => {
     await Promise.resolve()
     await new Promise(resolve => setTimeout(resolve, 50))
     const before = internals.markdownCreated
+    const updated = internals.markdownUpdated
     const globalRefresh = vi.spyOn(Transcript.prototype, 'refreshPresentation')
     for (let i = 0; i < 20; i++) {
       if (i === 10) model = 'MODEL_CHANGED_WHILE_HIDDEN'
@@ -112,7 +113,8 @@ describe('actual Surface Header → Welcome wiring (#196)', () => {
       await Promise.resolve()
       await Promise.resolve()
     }
-    expect(internals.markdownCreated - before).toBe(20)
+    expect(internals.markdownCreated - before).toBe(0)
+    expect(internals.markdownUpdated - updated).toBe(20)
     expect(globalRefresh).not.toHaveBeenCalled()
     expect(headerFacts.mock.calls.length).toBeGreaterThanOrEqual(20)
     expect(start).toHaveBeenCalledOnce()

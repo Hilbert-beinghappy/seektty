@@ -99,6 +99,7 @@ describe('welcome-local invalidation (#196)', () => {
         expect(internals.markdownCreated - before).toBe(5)
         const historyIdentities = [...f.transcript['nodeCache'].values()].slice(0, 4)
         const initialized = internals.markdownCreated
+        const updated = internals.markdownUpdated
         const globalRefresh = vi.spyOn(f.transcript, 'refreshPresentation')
         for (let i = 0; i < 200; i++) {
           current += `CHUNK${String(i).padStart(3, '0')}END\n\n`
@@ -106,7 +107,8 @@ describe('welcome-local invalidation (#196)', () => {
           f.welcome.setRuntimeFacts({ ...welcomeFacts })
           if ((i + 1) % 40 === 0) f.transcript.render(100)
         }
-        expect(internals.markdownCreated - initialized).toBe(200)
+        expect(internals.markdownCreated - initialized).toBe(0)
+        expect(internals.markdownUpdated - updated).toBe(200)
         expect(globalRefresh).not.toHaveBeenCalled()
         for (let i = 0; i < 4; i++) expect(f.transcript['nodeCache'].get(`history-${i}`)).toBe(historyIdentities[i])
         const final = welcomeSnapshot([...history, welcomeAssistant('live', current + 'FINAL_SETTLED_END', 'settled', 5)])

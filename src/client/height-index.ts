@@ -163,13 +163,6 @@ export class HeightIndex {
       this.recount()
     }
     this.width = width
-    const previousHeights = new Map<string, { height: number; exact: boolean }>()
-    for (const [index, key] of this.keys.entries()) {
-      previousHeights.set(key, {
-        height: this.heights[index] ?? estimateFor(key),
-        exact: this.exactFlags[index] === true && width === this.width,
-      })
-    }
     const prefixUnchanged = keys.length >= this.keys.length
       && this.keys.every((key, index) => keys[index] === key)
     if (prefixUnchanged && keys.length >= this.keys.length && width === this.width) {
@@ -185,6 +178,15 @@ export class HeightIndex {
         this.estimatedEntries += 1
       }
       return
+    }
+    // Stable order and tail appends do not consume this snapshot. Avoid
+    // allocating one object per historical block on every streaming frame.
+    const previousHeights = new Map<string, { height: number; exact: boolean }>()
+    for (const [index, key] of this.keys.entries()) {
+      previousHeights.set(key, {
+        height: this.heights[index] ?? estimateFor(key),
+        exact: this.exactFlags[index] === true && width === this.width,
+      })
     }
     this.keys = [...keys]
     this.heights = keys.map((key) => {

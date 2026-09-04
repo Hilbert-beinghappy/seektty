@@ -1,13 +1,13 @@
 /** Interactive pi-tui lifecycle over the authoritative Harness Client Runtime. */
 
 import { chmodSync } from 'node:fs'
+import { CanvasLineCache } from './canvas-line-cache.ts'
 import {
   Box,
   Key,
   matchesKey,
   ProcessTerminal,
   TUI,
-  visibleWidth,
   type Terminal,
 } from '@mariozechner/pi-tui'
 import {
@@ -438,11 +438,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     )
     canvas.addChild(layout)
     const renderCanvas = canvas.render.bind(canvas)
+    const nativeCanvasLines = new CanvasLineCache()
     canvas.render = (width: number): string[] => performanceProbe.measureRender(() => {
       if (liveBehavior.get().mouseMode !== 'native') return renderCanvas(width)
-      return layout.render(width).map((line) => background.canvas(
-        `${line}${' '.repeat(Math.max(0, width - visibleWidth(line)))}`,
-      ))
+      return nativeCanvasLines.render(layout.render(width), width)
     })
     tui.addChild(canvas)
     tui.setFocus(editor)

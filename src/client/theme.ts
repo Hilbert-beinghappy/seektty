@@ -153,49 +153,41 @@ function csiEnd(text: string, start: number): number {
  */
 export function escapeTerminalText(text: string): string {
   let escaped = ''
-  for (let index = 0; index < text.length;) {
+  let keptStart = 0
+  const controls = /[\x00-\x08\x0B-\x1F\x7F-\x9F]/gu
+  for (let match = controls.exec(text); match !== null; match = controls.exec(text)) {
+    let index = match.index
     const code = text.charCodeAt(index)
+    let end = index + 1
     if (code === ESC) {
       const next = text.charCodeAt(index + 1)
       if (next === 0x5B) {
-        const end = csiEnd(text, index + 2)
+        end = csiEnd(text, index + 2)
         const final = text.charCodeAt(end - 1)
         const parameters = text.slice(index + 2, Math.max(index + 2, end - 1))
-        if (final === 0x6D && SGR_PARAMETERS.test(parameters)) escaped += text.slice(index, end)
-        index = end
-        continue
-      }
-      if (CONTROL_STRING_INTRODUCERS.has(next)) {
-        index = controlStringEnd(text, index + 2)
-        continue
-      }
-      if (next >= 0x20 && next <= 0x2F) {
-        let end = index + 2
+        if (final === 0x6D && SGR_PARAMETERS.test(parameters)) {
+          controls.lastIndex = end
+          continue
+        }
+      } else if (CONTROL_STRING_INTRODUCERS.has(next)) {
+        end = controlStringEnd(text, index + 2)
+      } else if (next >= 0x20 && next <= 0x2F) {
+        end = index + 2
         while (text.charCodeAt(end) >= 0x20 && text.charCodeAt(end) <= 0x2F) end += 1
         if (text.charCodeAt(end) >= 0x30 && text.charCodeAt(end) <= 0x7E) end += 1
-        index = end
-        continue
+      } else {
+        end = index + (Number.isNaN(next) ? 1 : 2)
       }
-      index += Number.isNaN(next) ? 1 : 2
-      continue
+    } else if (code === CSI) {
+      end = csiEnd(text, index + 1)
+    } else if (C1_CONTROL_STRING_INTRODUCERS.has(code)) {
+      end = controlStringEnd(text, index + 1)
     }
-    if (code === CSI) {
-      index = csiEnd(text, index + 1)
-      continue
-    }
-    if (C1_CONTROL_STRING_INTRODUCERS.has(code)) {
-      index = controlStringEnd(text, index + 1)
-      continue
-    }
-    if ((code >= 0x00 && code <= 0x1F && code !== 0x09 && code !== 0x0A)
-      || (code >= 0x7F && code <= 0x9F)) {
-      index += 1
-      continue
-    }
-    escaped += text.charAt(index)
-    index += 1
+    escaped += text.slice(keptStart, index)
+    keptStart = end
+    controls.lastIndex = end
   }
-  return escaped
+  return escaped + text.slice(keptStart)
 }
 
 /**
@@ -317,6 +309,8 @@ export interface TerminalTextStyle {
   readonly strikethrough?: boolean
 }
 
+const tokenStylePrefixes = new Map<string, string>()
+
 /**
  * Paint untrusted token text using arbitrary theme colors.
  * @param text - raw token content.
@@ -327,6 +321,12 @@ export function styleTerminalText(text: string, style: TerminalTextStyle): strin
   const safeText = escapeTerminalText(text)
   const level = renderingColorLevel()
   if (level === 0 || safeText === '') return safeText
+  // Cache only derived SGR bytes, never text; include capability and full style.
+  const flags = (style.bold === true ? 1 : 0) | (style.italic === true ? 2 : 0)
+    | (style.underline === true ? 4 : 0) | (style.strikethrough === true ? 8 : 0)
+  const key = JSON.stringify([level, style.foreground, style.background, flags])
+  const cached = tokenStylePrefixes.get(key)
+  if (cached !== undefined) return cached === '' ? safeText : `${cached}${safeText}${RESET}`
   const sequences: string[] = []
   if (style.foreground !== undefined) sequences.push(foregroundSequence(semanticColor(style.foreground), level))
   if (style.background !== undefined) sequences.push(backgroundSequence(semanticColor(style.background), level))
@@ -334,7 +334,10 @@ export function styleTerminalText(text: string, style: TerminalTextStyle): strin
   if (style.italic === true) sequences.push('\u001B[3m')
   if (style.underline === true) sequences.push('\u001B[4m')
   if (style.strikethrough === true) sequences.push('\u001B[9m')
-  return sequences.length === 0 ? safeText : `${sequences.join('')}${safeText}${RESET}`
+  const prefix = sequences.join('')
+  tokenStylePrefixes.set(key, prefix)
+  if (tokenStylePrefixes.size > 512) tokenStylePrefixes.delete(tokenStylePrefixes.keys().next().value!)
+  return prefix === '' ? safeText : `${prefix}${safeText}${RESET}`
 }
 
 /**
@@ -342,6 +345,7 @@ export function styleTerminalText(text: string, style: TerminalTextStyle): strin
  * @param theme - resolved built-in or custom theme.
  */
 export function setTheme(theme: ResolvedTuiTheme): void {
+  canvasRevision += 1
   selectedTheme = theme
   palette = runtimePalette(theme)
 }
@@ -353,12 +357,15 @@ export function currentTheme(): ResolvedTuiTheme { return selectedTheme }
 export function setBackgroundMode(mode: TuiBackgroundMode): void { setRendering(resolveRendering({ backgroundMode: mode })) }
 
 /** Encoding and canvas fill are independent of terminal background synchronization. */
-export function setRendering(settings: TuiRenderingSettings): void { rendering = { ...settings } }
+export function setRendering(settings: TuiRenderingSettings): void { canvasRevision += 1; rendering = { ...settings } }
+
+let canvasRevision = 0
+export function canvasStyleRevision(): number { return canvasRevision }
 
 let terminalCanvasBackground: string | undefined
 
 /** Actual background reported by the managed terminal, never persisted as a theme. */
-export function setTerminalCanvasBackground(color?: string): void { terminalCanvasBackground = color }
+export function setTerminalCanvasBackground(color?: string): void { canvasRevision += 1; terminalCanvasBackground = color }
 
 /**
  * Connect the asynchronously prepared syntax highlighter to Markdown rendering.
@@ -367,6 +374,7 @@ export function setTerminalCanvasBackground(color?: string): void { terminalCanv
 export function setCodeHighlighter(
   highlighter?: (code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[],
 ): void {
+  canvasRevision += 1
   codeHighlighter = highlighter
 }
 
@@ -496,6 +504,7 @@ export const editorTheme: EditorTheme = {
 
 /** Markdown/GFM theme using semantic colors and a continuous code background. */
 export const markdownTheme: MarkdownTheme = {
+  cacheKey: () => `${canvasRevision}:${terminalColorLevel()}`,
   heading: color.brand,
   link: text => ansi(4, color.accent(text)),
   linkUrl: color.muted,

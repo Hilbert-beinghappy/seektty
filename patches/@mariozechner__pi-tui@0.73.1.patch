@@ -1,5 +1,5 @@
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index fb224b9da697aab89a31336eae65071dc07d736e..49afe6c1c0769e856eb2a2ce10e49fd391c1d2af 100644
+index fb224b9da697aab89a31336eae65071dc07d736e..12d2af326ed165e4276fb47d9b38f1d253c6e5bf 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
 @@ -30,6 +30,20 @@ export interface EditorOptions {
@@ -83,7 +83,7 @@ index fb224b9da697aab89a31336eae65071dc07d736e..49afe6c1c0769e856eb2a2ce10e49fd3
      private handleBackspace;
      /**
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..e9749bd069e0fef9ebaa2e5ef2c893e53d4c2953 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..3b2bfdf64a4023597f07a89d608c87b454e6ea86 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -171,6 +171,7 @@ export class Editor {
@@ -608,7 +608,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..e9749bd069e0fef9ebaa2e5ef2c893e5
      cancelAutocomplete() {
          this.cancelAutocompleteRequest();
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..1f51d1bd61fd0228bb0d65c2bdc3fa3a7d63edd9 100644
+index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..73fe4b6fdad88ce068a96c00eae31d3e70b08afe 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -16,6 +16,12 @@ export declare class Input implements Component, Focusable {
@@ -625,7 +625,7 @@ index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..1f51d1bd61fd0228bb0d65c2bdc3fa3a
      private insertCharacter;
      private handleBackspace;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..73a9e73bd15bdb38478c2661ca1b463f41402e54 100644
+index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..1df0bdb5e026517dee2db6f1f5cdb6c749e0d1a5 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -1,5 +1,5 @@
@@ -837,10 +837,19 @@ index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..73a9e73bd15bdb38478c2661ca1b463f
          const visualLength = visibleWidth(textWithCursor);
          const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
 diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
-index e836b2e5f739a19864e166905c4dc66d7446313a..acc0c06ec6bd52b4bd322e8cbbb37e07e4d1b34d 100644
+index e836b2e5f739a19864e166905c4dc66d7446313a..d16c8011d7305845176b9adf34dda7216cb3af37 100644
 --- a/dist/components/markdown.d.ts
 +++ b/dist/components/markdown.d.ts
-@@ -40,6 +40,15 @@ export interface MarkdownTheme {
+@@ -22,6 +22,8 @@ export interface DefaultTextStyle {
+  * Each function takes text and returns styled text with ANSI codes.
+  */
+ export interface MarkdownTheme {
++    /** SeekTTY opt-in: changes whenever any theme/highlighter output can change. */
++    cacheKey?: () => string;
+     heading: (text: string) => string;
+     link: (text: string) => string;
+     linkUrl: (text: string) => string;
+@@ -40,6 +42,15 @@ export interface MarkdownTheme {
      /** Prefix applied to each rendered code block line (default: "  ") */
      codeBlockIndent?: string;
  }
@@ -856,7 +865,7 @@ index e836b2e5f739a19864e166905c4dc66d7446313a..acc0c06ec6bd52b4bd322e8cbbb37e07
  export declare class Markdown implements Component {
      private text;
      private paddingX;
-@@ -50,9 +59,11 @@ export declare class Markdown implements Component {
+@@ -50,9 +61,11 @@ export declare class Markdown implements Component {
      private cachedText?;
      private cachedWidth?;
      private cachedLines?;
@@ -869,11 +878,26 @@ index e836b2e5f739a19864e166905c4dc66d7446313a..acc0c06ec6bd52b4bd322e8cbbb37e07
      /**
       * Apply default text style to a string.
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c5dd3cefe 100644
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..d62f7f368f41c5046afec2af2a66126725d93d2d 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
-@@ -1,6 +1,101 @@
+@@ -1,6 +1,124 @@
  import { Marked, Tokenizer } from "marked";
++import { LineCache } from "../line-cache.js";
++const projectionCache = new LineCache();
++// Preserve JSON value semantics without escaping/copying long source strings.
++function tokenFingerprint(value) {
++    const strings = [];
++    const shape = JSON.stringify(value, (_key, item) => {
++        if (typeof item !== "string") return item;
++        strings.push(item);
++        return "";
++    });
++    return [shape, ...strings];
++}
++function sameTokenFingerprint(left, right) {
++    return left.length === right.length && left.every((value, index) => value === right[index]);
++}
  import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.js";
 -import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 +import { applyBackgroundToLine, extractAnsiCode, visibleWidth, wrapTextWithAnsi, wrapTextWithAnsiDetailed, } from "../utils.js";
@@ -912,6 +936,14 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
 +    return result;
 +}
 +function selectionProjection(line, displayPadding, defaultJoiner) {
++    const context = `${displayPadding}:${defaultJoiner}`;
++    const hit = projectionCache.get(line, context);
++    if (hit !== undefined) return { ...hit };
++    const result = selectionProjectionUncached(line, displayPadding, defaultJoiner);
++    projectionCache.set(line, result, result.text.length + result.joinerAfter.length, context);
++    return { ...result };
++}
++function selectionProjectionUncached(line, displayPadding, defaultJoiner) {
 +    let before = "";
 +    let selected = "";
 +    let mode = "before";
@@ -975,7 +1007,22 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
  const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
  class StrictStrikethroughTokenizer extends Tokenizer {
      del(src) {
-@@ -32,6 +127,7 @@ export class Markdown {
+@@ -22,6 +140,14 @@ markdownParser.setOptions({
+     tokenizer: new StrictStrikethroughTokenizer(),
+ });
+ export class Markdown {
++    tokenCache = [];
++    nextTokenCache;
++    tokenCursor = 0;
++    nextTokenCharacters = 0;
++    layoutContext;
++    logicalLayouts = [];
++    paddedInputs = [];
++    paddedOutputs = [];
+     text;
+     paddingX; // Left/right padding
+     paddingY; // Top/bottom padding
+@@ -32,6 +158,7 @@ export class Markdown {
      cachedText;
      cachedWidth;
      cachedLines;
@@ -983,7 +1030,25 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
      constructor(text, paddingX, paddingY, theme, defaultTextStyle) {
          this.text = text;
          this.paddingX = paddingX;
-@@ -47,6 +143,10 @@ export class Markdown {
+@@ -41,12 +168,28 @@ export class Markdown {
+     }
+     setText(text) {
+         this.text = text;
++        const retained = this.theme.cacheKey === undefined ? undefined : this.tokenCache;
++        const layout = retained === undefined ? undefined : [this.layoutContext, this.logicalLayouts, this.paddedInputs, this.paddedOutputs];
+         this.invalidate();
++        if (retained !== undefined) this.tokenCache = retained;
++        if (layout !== undefined) [this.layoutContext, this.logicalLayouts, this.paddedInputs, this.paddedOutputs] = layout;
+     }
+     invalidate() {
++        this.tokenCache = [];
++        this.nextTokenCache = undefined;
++        this.tokenCursor = 0;
++        this.nextTokenCharacters = 0;
++        this.layoutContext = undefined;
++        this.logicalLayouts = [];
++        this.paddedInputs = [];
++        this.paddedOutputs = [];
          this.cachedText = undefined;
          this.cachedWidth = undefined;
          this.cachedLines = undefined;
@@ -994,7 +1059,18 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
      }
      render(width) {
          // Check cache
-@@ -62,6 +162,7 @@ export class Markdown {
+@@ -55,6 +198,10 @@ export class Markdown {
+         }
+         // Calculate available width for content (subtract horizontal padding)
+         const contentWidth = Math.max(1, width - this.paddingX * 2);
++        const layoutContext = this.theme.cacheKey === undefined ? undefined
++            : JSON.stringify([this.theme.cacheKey(), width, this.paddingX, this.paddingY, getCapabilities()]);
++        const reuseLayout = layoutContext !== undefined && layoutContext === this.layoutContext;
++        const nextLogicalLayouts = [];
+         // Don't render anything if there's no actual text
+         if (!this.text || this.text.trim() === "") {
+             const result = [];
+@@ -62,6 +209,7 @@ export class Markdown {
              this.cachedText = this.text;
              this.cachedWidth = width;
              this.cachedLines = result;
@@ -1002,14 +1078,36 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
              return result;
          }
          // Replace tabs with 3 spaces for consistent rendering
-@@ -78,12 +179,23 @@ export class Markdown {
+@@ -70,28 +218,60 @@ export class Markdown {
+         const tokens = markdownParser.lexer(normalizedText);
+         // Convert tokens to styled terminal output
+         const renderedLines = [];
++        this.nextTokenCache = [];
++        this.tokenCursor = 0;
++        this.nextTokenCharacters = 0;
+         for (let i = 0; i < tokens.length; i++) {
+             const token = tokens[i];
+             const nextToken = tokens[i + 1];
+             const tokenLines = this.renderToken(token, contentWidth, nextToken?.type);
+             renderedLines.push(...tokenLines);
          }
++        this.tokenCache = this.nextTokenCache;
++        this.nextTokenCache = undefined;
          // Wrap lines (NO padding, NO background yet)
          const wrappedLines = [];
 -        for (const line of renderedLines) {
 +        const selectionLines = [];
 +        for (let renderedLineIndex = 0; renderedLineIndex < renderedLines.length; renderedLineIndex++) {
 +            const line = renderedLines[renderedLineIndex];
++            const hasFollowingLogicalLine = renderedLineIndex < renderedLines.length - 1;
++            const previous = reuseLayout ? this.logicalLayouts[renderedLineIndex] : undefined;
++            if (previous !== undefined && previous.source === line && previous.following === hasFollowingLogicalLine) {
++                wrappedLines.push(...previous.lines);
++                selectionLines.push(...previous.projections.map(part => ({ ...part })));
++                nextLogicalLayouts.push(previous);
++                continue;
++            }
++            const start = wrappedLines.length;
              if (isImageLine(line)) {
                  wrappedLines.push(line);
 +                selectionLines.push({ text: "", displayStartCell: this.paddingX, joinerAfter: "" });
@@ -1020,15 +1118,42 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
 +                for (let wrappedIndex = 0; wrappedIndex < wrapped.length; wrappedIndex++) {
 +                    const part = wrapped[wrappedIndex];
 +                    const isLastPart = wrappedIndex === wrapped.length - 1;
-+                    const hasFollowingLogicalLine = renderedLineIndex < renderedLines.length - 1;
 +                    const defaultJoiner = part.separator ?? (isLastPart && hasFollowingLogicalLine ? "\n" : "");
 +                    wrappedLines.push(stripProjectionMarkers(part.text));
 +                    selectionLines.push(selectionProjection(part.text, this.paddingX, defaultJoiner));
 +                }
              }
++            nextLogicalLayouts.push({ source: line, following: hasFollowingLogicalLine,
++                lines: wrappedLines.slice(start), projections: selectionLines.slice(start).map(part => ({ ...part })) });
          }
          // Add margins and background to each wrapped line
-@@ -116,10 +228,17 @@ export class Markdown {
+         const leftMargin = " ".repeat(this.paddingX);
+         const rightMargin = " ".repeat(this.paddingX);
+         const bgFn = this.defaultTextStyle?.bgColor;
+         const contentLines = [];
+-        for (const line of wrappedLines) {
++        for (const [lineIndex, line] of wrappedLines.entries()) {
++            // Opaque background callbacks can depend on mutable external state.
++            // Only pure padding is reused; callback output is always recomputed.
++            if (!bgFn && reuseLayout && this.paddedInputs[lineIndex] === line) {
++                contentLines.push(this.paddedOutputs[lineIndex]);
++                continue;
++            }
+             if (isImageLine(line)) {
+                 contentLines.push(line);
+                 continue;
+@@ -107,6 +287,10 @@ export class Markdown {
+                 contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
+             }
+         }
++        this.layoutContext = layoutContext;
++        this.logicalLayouts = nextLogicalLayouts;
++        this.paddedInputs = wrappedLines.slice();
++        this.paddedOutputs = contentLines.slice();
+         // Add top/bottom padding (empty lines)
+         const emptyLine = " ".repeat(width);
+         const emptyLines = [];
+@@ -116,10 +300,17 @@ export class Markdown {
          }
          // Combine top padding, content, and bottom padding
          const result = [...emptyLines, ...contentLines, ...emptyLines];
@@ -1046,7 +1171,29 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
          return result.length > 0 ? result : [""];
      }
      /**
-@@ -231,28 +350,35 @@ export class Markdown {
+@@ -193,6 +384,21 @@ export class Markdown {
+         };
+     }
+     renderToken(token, width, nextTokenType, styleContext) {
++        if (styleContext !== undefined || this.theme.cacheKey === undefined) return this.renderTokenUncached(token, width, nextTokenType, styleContext);
++        const key = tokenFingerprint([this.theme.cacheKey(), getCapabilities(), width, nextTokenType, token]);
++        const index = this.tokenCursor++;
++        const previous = this.tokenCache[index];
++        const result = previous !== undefined && sameTokenFingerprint(previous.key, key)
++            ? previous.result : this.renderTokenUncached(token, width, nextTokenType, styleContext);
++        const characters = key.reduce((size, part) => size + part.length, 0)
++            + result.reduce((size, line) => size + line.length, 0);
++        if (index < 20_000 && this.nextTokenCharacters + characters <= 8_000_000) {
++            (this.nextTokenCache ?? this.tokenCache)[index] = { key, result };
++            this.nextTokenCharacters += characters;
++        }
++        return [...result];
++    }
++    renderTokenUncached(token, width, nextTokenType, styleContext) {
+         const lines = [];
+         switch (token.type) {
+             case "heading": {
+@@ -231,28 +437,35 @@ export class Markdown {
              }
              case "code": {
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -1087,7 +1234,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
                  lines.push(...listLines);
                  // Don't add spacing after lists if a space token follows
                  // (the space token will handle it)
-@@ -295,9 +421,11 @@ export class Markdown {
+@@ -295,9 +508,11 @@ export class Markdown {
                  }
                  for (const quoteLine of renderedQuoteLines) {
                      const styledLine = applyQuoteStyle(quoteLine);
@@ -1101,7 +1248,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
                      }
                  }
                  if (nextTokenType && nextTokenType !== "space") {
-@@ -306,7 +434,7 @@ export class Markdown {
+@@ -306,7 +521,7 @@ export class Markdown {
                  break;
              }
              case "hr":
@@ -1110,7 +1257,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
                  if (nextTokenType && nextTokenType !== "space") {
                      lines.push(""); // Add spacing after horizontal rules (unless space token follows)
                  }
-@@ -417,7 +545,7 @@ export class Markdown {
+@@ -417,7 +632,7 @@ export class Markdown {
      /**
       * Render a list with proper nesting support
       */
@@ -1119,7 +1266,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
          const lines = [];
          const indent = "  ".repeat(depth);
          // Use the list's start property (defaults to 1 for ordered lists)
-@@ -426,7 +554,8 @@ export class Markdown {
+@@ -426,7 +641,8 @@ export class Markdown {
              const item = token.items[i];
              const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
              // Process item tokens to handle nested lists
@@ -1129,7 +1276,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
              if (itemLines.length > 0) {
                  // First line - check if it's a nested list
                  // A nested list will start with indent (spaces) followed by cyan bullet
-@@ -449,8 +578,8 @@ export class Markdown {
+@@ -449,8 +665,8 @@ export class Markdown {
                          lines.push(line);
                      }
                      else {
@@ -1140,7 +1287,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
                      }
                  }
              }
-@@ -464,13 +593,13 @@ export class Markdown {
+@@ -464,13 +680,13 @@ export class Markdown {
       * Render list item tokens, handling nested lists
       * Returns lines WITHOUT the parent indent (renderList will add it)
       */
@@ -1156,7 +1303,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
                  lines.push(...nestedLines);
              }
              else if (token.type === "text") {
-@@ -488,20 +617,27 @@ export class Markdown {
+@@ -488,20 +704,27 @@ export class Markdown {
              else if (token.type === "code") {
                  // Code block in list item
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -1189,7 +1336,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..c6ec9c7d49857470895245780790067c
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
-index 9db54d907f801e43208a462bca925f2905787b7a..3266ae6f1a277d3b82b51e52c56f95a85df06861 100644
+index 9db54d907f801e43208a462bca925f2905787b7a..7fe973ce5e8b2ff8ab464910af30bf92eb80174f 100644
 --- a/dist/components/select-list.d.ts
 +++ b/dist/components/select-list.d.ts
 @@ -22,6 +22,17 @@ export interface SelectListLayoutOptions {
@@ -1226,7 +1373,7 @@ index 9db54d907f801e43208a462bca925f2905787b7a..3266ae6f1a277d3b82b51e52c56f95a8
      render(width: number): string[];
      handleInput(keyData: string): void;
 diff --git a/dist/components/select-list.js b/dist/components/select-list.js
-index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..d12792cfcbe09dd7d90765346ea8edef523dbed6 100644
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..3f100137d36034af0d6a72e2f9b282c4159ad255 100644
 --- a/dist/components/select-list.js
 +++ b/dist/components/select-list.js
 @@ -10,6 +10,8 @@ export class SelectList {
@@ -1340,7 +1487,7 @@ index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..d12792cfcbe09dd7d90765346ea8edef
                      return this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`);
                  }
 diff --git a/dist/keybindings.d.ts b/dist/keybindings.d.ts
-index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..1001bb8463e8ca59c31390dfb3d583d57501ceeb 100644
+index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..41f4b6b3ad6792f0a3a81b51eff97ea30734f426 100644
 --- a/dist/keybindings.d.ts
 +++ b/dist/keybindings.d.ts
 @@ -125,7 +125,7 @@ export declare const TUI_KEYBINDINGS: {
@@ -1353,7 +1500,7 @@ index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..1001bb8463e8ca59c31390dfb3d583d5
      };
      readonly "tui.input.newLine": {
 diff --git a/dist/keybindings.js b/dist/keybindings.js
-index 60d400872183f1f6b754b61d3ccbf6708219215d..c0161b806238f2bd05995136dd7fcacf347a1ff5 100644
+index 60d400872183f1f6b754b61d3ccbf6708219215d..11c51686173c178d9d8d08bec6076eadc8b5d632 100644
 --- a/dist/keybindings.js
 +++ b/dist/keybindings.js
 @@ -62,7 +62,7 @@ export const TUI_KEYBINDINGS = {
@@ -1365,8 +1512,48 @@ index 60d400872183f1f6b754b61d3ccbf6708219215d..c0161b806238f2bd05995136dd7fcacf
      "tui.input.newLine": { defaultKeys: "shift+enter", description: "Insert newline" },
      "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
      "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
+diff --git a/dist/line-cache.js b/dist/line-cache.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..9e554f99dac78d4786719fd5a9ff27008287dd0d
+--- /dev/null
++++ b/dist/line-cache.js
+@@ -0,0 +1,34 @@
++// SeekTTY bounded memoization of pure ANSI line transformations.
++export class LineCache {
++    contexts = new Map();
++    entries = new Map();
++    characters = 0;
++    get(key, context = "") {
++        const hit = this.contexts.get(context)?.get(key);
++        if (hit === undefined) return undefined;
++        this.entries.delete(hit);
++        this.entries.set(hit, true);
++        return hit.value;
++    }
++    set(key, value, valueCharacters, context = "") {
++        const size = key.length + context.length + valueCharacters;
++        if (size > 8000000) return;
++        let bucket = this.contexts.get(context);
++        const prior = bucket?.get(key);
++        if (prior) { this.characters -= prior.size; this.entries.delete(prior); }
++        while (this.entries.size >= 20000 || this.characters + size > 8000000) {
++            const oldest = this.entries.keys().next().value;
++            this.characters -= oldest.size;
++            const owner = this.contexts.get(oldest.context);
++            owner.delete(oldest.key);
++            if (owner.size === 0) this.contexts.delete(oldest.context);
++            this.entries.delete(oldest);
++        }
++        bucket = this.contexts.get(context);
++        if (!bucket) { bucket = new Map(); this.contexts.set(context, bucket); }
++        const entry = { key, context, value, size };
++        bucket.set(key, entry);
++        this.entries.set(entry, true);
++        this.characters += size;
++    }
++}
 diff --git a/dist/stdin-buffer.js b/dist/stdin-buffer.js
-index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..6ed3ca60dadad5c0fc24d3fcadcb0e44afaaf65c 100644
+index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..d00980ea31e032a34d22439e84df5da250de4370 100644
 --- a/dist/stdin-buffer.js
 +++ b/dist/stdin-buffer.js
 @@ -18,6 +18,10 @@
@@ -1478,7 +1665,7 @@ index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..6ed3ca60dadad5c0fc24d3fcadcb0e44
          }
          const sequences = [this.buffer];
 diff --git a/dist/terminal.js b/dist/terminal.js
-index 3545b284ce2da594cc728803feb607a34cea5ca0..79bb3e8769594c1b8f70ef71304ab9032ed4ecd3 100644
+index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a78768300f91d 100644
 --- a/dist/terminal.js
 +++ b/dist/terminal.js
 @@ -16,6 +16,7 @@ export class ProcessTerminal {
@@ -1551,7 +1738,7 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..79bb3e8769594c1b8f70ef71304ab903
          if (this._kittyProtocolActive) {
              // Disable Kitty keyboard protocol first so any late key releases
 diff --git a/dist/tui.d.ts b/dist/tui.d.ts
-index 8394d461feed1287deba13443c7afe79ff45c151..eaac87116c36554cdd76b4caaa5e604d082443b6 100644
+index 8394d461feed1287deba13443c7afe79ff45c151..802ac48537f93339a5c9186ee43141b274a9ac87 100644
 --- a/dist/tui.d.ts
 +++ b/dist/tui.d.ts
 @@ -155,8 +155,28 @@ export declare class TUI extends Container {
@@ -1597,10 +1784,45 @@ index 8394d461feed1287deba13443c7afe79ff45c151..eaac87116c36554cdd76b4caaa5e604d
      private handleInput;
      private consumeCellSizeResponse;
 diff --git a/dist/tui.js b/dist/tui.js
-index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b0fa7aa82 100644
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5bb6d5f8d0 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -118,6 +118,15 @@ export class TUI extends Container {
+@@ -5,11 +5,20 @@ import * as fs from "node:fs";
+ import * as os from "node:os";
+ import * as path from "node:path";
+ import { performance } from "node:perf_hooks";
++import { LineCache } from "./line-cache.js";
++const kittyLineCache = new LineCache();
+ import { isKeyRelease, matchesKey } from "./keys.js";
+ import { deleteKittyImage, getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.js";
+ import { extractSegments, normalizeTerminalOutput, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils.js";
+ const KITTY_SEQUENCE_PREFIX = "\x1b_G";
+ function extractKittyImageIds(line) {
++    const cached = kittyLineCache.get(line);
++    if (cached !== undefined) return cached;
++    const result = extractKittyImageIdsUncached(line);
++    kittyLineCache.set(line, result, result.length * 8);
++    return result;
++}
++function extractKittyImageIdsUncached(line) {
+     const sequenceStart = line.indexOf(KITTY_SEQUENCE_PREFIX);
+     if (sequenceStart === -1)
+         return [];
+@@ -94,6 +103,13 @@ export class Container {
+  * TUI - Main class for managing terminal UI with differential rendering
+  */
+ export class TUI extends Container {
++    lineResetCache = new LineCache();
++    previousResetInput = [];
++    previousResetOutput = [];
++    previousResetCode;
++    previousKittyScanInput = [];
++    previousKittyScanIds = [];
++    inputFrameQueued = false;
+     terminal;
+     previousLines = [];
+     previousKittyImageIds = new Set();
+@@ -118,6 +134,15 @@ export class TUI extends Container {
      // Overlay stack for modal components rendered on top of base content
      focusOrderCounter = 0;
      overlayStack = [];
@@ -1616,7 +1838,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
      constructor(terminal, showHardwareCursor) {
          super();
          this.terminal = terminal;
-@@ -128,6 +137,9 @@ export class TUI extends Container {
+@@ -128,6 +153,9 @@ export class TUI extends Container {
      get fullRedraws() {
          return this.fullRedrawCount;
      }
@@ -1626,7 +1848,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
      getShowHardwareCursor() {
          return this.showHardwareCursor;
      }
-@@ -307,13 +319,9 @@ export class TUI extends Container {
+@@ -307,13 +335,9 @@ export class TUI extends Container {
          this.terminal.write("\x1b[16t");
      }
      stop() {
@@ -1642,7 +1864,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
              const targetRow = this.previousLines.length; // Line after the last content
              const lineDiff = targetRow - this.hardwareCursorRow;
              if (lineDiff > 0) {
-@@ -327,6 +335,62 @@ export class TUI extends Container {
+@@ -327,6 +351,62 @@ export class TUI extends Container {
          this.terminal.showCursor();
          this.terminal.stop();
      }
@@ -1705,7 +1927,31 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
      requestRender(force = false) {
          if (force) {
              this.previousLines = [];
-@@ -592,9 +656,17 @@ export class TUI extends Container {
+@@ -424,6 +504,23 @@ export class TUI extends Container {
+             }
+             this.focusedComponent.handleInput(data);
+             this.requestRender();
++            // Only component-owned keyboard input bypasses the stream cadence.
++            // Listener-consumed mouse gestures keep their deferred frame boundary.
++            if (this.renderTimer) clearTimeout(this.renderTimer);
++            this.renderTimer = undefined;
++            if (!this.inputFrameQueued) {
++                this.inputFrameQueued = true;
++                process.nextTick(() => {
++                    this.inputFrameQueued = false;
++                    if (this.stopped || !this.renderRequested) return;
++                    if (this.renderTimer) clearTimeout(this.renderTimer);
++                    this.renderTimer = undefined;
++                    this.renderRequested = false;
++                    this.lastRenderAt = performance.now();
++                    this.doRender();
++                    if (this.renderRequested) this.scheduleRender();
++                });
++            }
+         }
+     }
+     consumeCellSizeResponse(data) {
+@@ -592,9 +689,17 @@ export class TUI extends Container {
              }
              // Get final row/col with actual overlay height
              const { row, col } = this.resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);
@@ -1724,7 +1970,51 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
          // Pad to at least terminal height so overlays have screen-relative positions.
          // Excludes maxLinesRendered: the historical high-water mark caused self-reinforcing
          // inflation that pushed content into scrollback on terminal widen.
-@@ -749,30 +821,67 @@ export class TUI extends Container {
+@@ -621,21 +726,39 @@ export class TUI extends Container {
+     static SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+     applyLineResets(lines) {
+         const reset = TUI.SEGMENT_RESET;
++        const input = [...lines];
+         for (let i = 0; i < lines.length; i++) {
+             const line = lines[i];
+-            if (!isImageLine(line)) {
+-                lines[i] = normalizeTerminalOutput(line) + reset;
++            if (reset === this.previousResetCode && line === this.previousResetInput[i]) {
++                lines[i] = this.previousResetOutput[i];
++                continue;
++            }
++            let result = this.lineResetCache.get(line, reset);
++            if (result === undefined) {
++                result = isImageLine(line) ? line : normalizeTerminalOutput(line) + reset;
++                this.lineResetCache.set(line, result, result.length, reset);
+             }
++            lines[i] = result;
+         }
++        this.previousResetInput = input;
++        this.previousResetOutput = [...lines];
++        this.previousResetCode = reset;
+         return lines;
+     }
+     collectKittyImageIds(lines) {
+         const ids = new Set();
+-        for (const line of lines) {
+-            for (const id of extractKittyImageIds(line)) {
++        const lineIds = [];
++        for (let index = 0; index < lines.length; index++) {
++            const line = lines[index];
++            const cached = line === this.previousKittyScanInput[index]
++                ? this.previousKittyScanIds[index] : extractKittyImageIds(line);
++            lineIds.push(cached);
++            for (const id of cached) {
+                 ids.add(id);
+             }
+         }
++        this.previousKittyScanInput = [...lines];
++        this.previousKittyScanIds = lineIds;
+         return ids;
+     }
+     deleteKittyImages(ids) {
+@@ -749,30 +872,70 @@ export class TUI extends Container {
          // Render all components to get new lines
          let newLines = this.render(width);
          // Composite overlays into the rendered lines (before differential compare)
@@ -1760,8 +2050,13 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
 +                // (destroy native scrollback and force a history replay).
 +                buffer += "\x1b[H";
              }
-             for (let i = 0; i < newLines.length; i++) {
-                 if (i > 0)
+-            for (let i = 0; i < newLines.length; i++) {
+-                if (i > 0)
++            // Recovery redraws replace the physical viewport, not scrollback.
++            // The initial native paint (clear=false) still emits every row.
++            const firstPaintedLine = clear ? Math.max(0, newLines.length - height) : 0;
++            for (let i = firstPaintedLine; i < newLines.length; i++) {
++                if (i > firstPaintedLine)
                      buffer += "\r\n";
 +                if (clear && visibleWidth(newLines[i]) < width)
 +                    buffer += "\x1b[2K";
@@ -1796,7 +2091,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
              if (clear) {
                  this.maxLinesRendered = newLines.length;
              }
-@@ -802,7 +911,7 @@ export class TUI extends Container {
+@@ -802,7 +965,7 @@ export class TUI extends Container {
              return;
          }
          // Width changes always need a full re-render because wrapping changes.
@@ -1805,7 +2100,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
              logRedraw(`terminal width changed (${this.previousWidth} -> ${width})`);
              fullRender(true);
              return;
-@@ -810,7 +919,7 @@ export class TUI extends Container {
+@@ -810,7 +973,7 @@ export class TUI extends Container {
          // Height changes normally need a full re-render to keep the visible viewport aligned,
          // but Termux changes height when the software keyboard shows or hides.
          // In that environment, a full redraw causes the entire history to replay on every toggle.
@@ -1814,7 +2109,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
              logRedraw(`terminal height changed (${this.previousHeight} -> ${height})`);
              fullRender(true);
              return;
-@@ -844,6 +953,37 @@ export class TUI extends Container {
+@@ -844,6 +1007,37 @@ export class TUI extends Container {
              }
              lastChanged = newLines.length - 1;
          }
@@ -1852,7 +2147,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
          if (firstChanged !== -1) {
              lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
          }
-@@ -944,8 +1084,9 @@ export class TUI extends Container {
+@@ -944,8 +1138,9 @@ export class TUI extends Container {
          for (let i = firstChanged; i <= renderEnd; i++) {
              if (i > firstChanged)
                  buffer += "\r\n";
@@ -1864,7 +2159,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..4b01df1bcc60a7391077f3d2c0d6ad9b
              if (!isImage && visibleWidth(line) > width) {
                  // Log all lines to crash file for debugging
 diff --git a/dist/utils.d.ts b/dist/utils.d.ts
-index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..1b0de075a1a5f9be7118480355e49461bf1da244 100644
+index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..a7c4e4e262fecf18a555bf355fa45ea678db199f 100644
 --- a/dist/utils.d.ts
 +++ b/dist/utils.d.ts
 @@ -26,6 +26,13 @@ export declare function extractAnsiCode(str: string, pos: number): {
@@ -1882,10 +2177,55 @@ index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..1b0de075a1a5f9be7118480355e49461
   * Check if a character is whitespace.
   */
 diff --git a/dist/utils.js b/dist/utils.js
-index 9d00544d0858681339bb780057bda825f8054ca5..79e2979ea3416d79ad8c406826fe5a582aad1373 100644
+index 9d00544d0858681339bb780057bda825f8054ca5..5ade77a4a2c7693b5b92fb35f9d3aabd0f591663 100644
 --- a/dist/utils.js
 +++ b/dist/utils.js
-@@ -586,30 +586,44 @@ function splitIntoTokensWithAnsi(text) {
+@@ -1,4 +1,6 @@
+ import { eastAsianWidth } from "get-east-asian-width";
++import { LineCache } from "./line-cache.js";
++const wrapCache = new LineCache();
+ // Grapheme segmenter (shared instance)
+ const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+ /**
+@@ -28,7 +30,9 @@ const zeroWidthRegex = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Mark
+ const leadingNonPrintingRegex = /^[\p{Default_Ignorable_Code_Point}\p{Control}\p{Format}\p{Mark}\p{Surrogate}]+/v;
+ const rgiEmojiRegex = /^\p{RGI_Emoji}$/v;
+ // Cache for non-ASCII strings
+-const WIDTH_CACHE_SIZE = 512;
++const WIDTH_CACHE_SIZE = 20000;
++const WIDTH_CACHE_CHARACTERS = 8000000;
++let widthCacheCharacters = 0;
+ const widthCache = new Map();
+ function isPrintableAscii(str) {
+     for (let i = 0; i < str.length; i++) {
+@@ -177,6 +181,8 @@ export function visibleWidth(str) {
+     // Check cache
+     const cached = widthCache.get(str);
+     if (cached !== undefined) {
++        widthCache.delete(str);
++        widthCache.set(str, cached);
+         return cached;
+     }
+     // Normalize: tabs to 3 spaces, strip ANSI escape codes
+@@ -207,13 +213,16 @@ export function visibleWidth(str) {
+         width += graphemeWidth(segment);
+     }
+     // Cache result
+-    if (widthCache.size >= WIDTH_CACHE_SIZE) {
++    if (str.length > WIDTH_CACHE_CHARACTERS) return width;
++    while (widthCache.size >= WIDTH_CACHE_SIZE || widthCacheCharacters + str.length > WIDTH_CACHE_CHARACTERS) {
+         const firstKey = widthCache.keys().next().value;
+         if (firstKey !== undefined) {
++            widthCacheCharacters -= firstKey.length;
+             widthCache.delete(firstKey);
+         }
+     }
+     widthCache.set(str, width);
++    widthCacheCharacters += str.length;
+     return width;
+ }
+ /**
+@@ -586,30 +595,52 @@ function splitIntoTokensWithAnsi(text) {
   * @returns Array of wrapped lines (NOT padded to width)
   */
  export function wrapTextWithAnsi(text, width) {
@@ -1897,6 +2237,14 @@ index 9d00544d0858681339bb780057bda825f8054ca5..79e2979ea3416d79ad8c406826fe5a58
 + * ordinary render callers continue to use wrapTextWithAnsi().
 + */
 +export function wrapTextWithAnsiDetailed(text, width) {
++    const context = String(width);
++    const hit = wrapCache.get(text, context);
++    if (hit !== undefined) return hit.map(part => ({ ...part }));
++    const result = wrapTextWithAnsiDetailedUncached(text, width);
++    wrapCache.set(text, result, result.reduce((size, part) => size + part.text.length + (part.separator?.length ?? 0), 0), context);
++    return result.map(part => ({ ...part }));
++}
++function wrapTextWithAnsiDetailedUncached(text, width) {
      if (!text) {
 -        return [""];
 +        return [{ text: "" }];
@@ -1936,7 +2284,7 @@ index 9d00544d0858681339bb780057bda825f8054ca5..79e2979ea3416d79ad8c406826fe5a58
      }
      const wrapped = [];
      const tracker = new AnsiCodeTracker();
-@@ -622,18 +636,19 @@ function wrapSingleLine(line, width) {
+@@ -622,18 +653,19 @@ function wrapSingleLine(line, width) {
          // Token itself is too long - break it character by character
          if (tokenVisibleLength > width && !isWhitespace) {
              if (currentLine) {
@@ -1958,7 +2306,7 @@ index 9d00544d0858681339bb780057bda825f8054ca5..79e2979ea3416d79ad8c406826fe5a58
              currentLine = broken[broken.length - 1];
              currentVisibleLength = visibleWidth(currentLine);
              continue;
-@@ -642,12 +657,15 @@ function wrapSingleLine(line, width) {
+@@ -642,12 +674,15 @@ function wrapSingleLine(line, width) {
          const totalNeeded = currentVisibleLength + tokenVisibleLength;
          if (totalNeeded > width && currentVisibleLength > 0) {
              // Trim trailing whitespace, then add underline reset (not full reset, to preserve background)
@@ -1975,7 +2323,7 @@ index 9d00544d0858681339bb780057bda825f8054ca5..79e2979ea3416d79ad8c406826fe5a58
              if (isWhitespace) {
                  // Don't start new line with whitespace
                  currentLine = tracker.getActiveCodes();
-@@ -667,10 +685,26 @@ function wrapSingleLine(line, width) {
+@@ -667,10 +702,26 @@ function wrapSingleLine(line, width) {
      }
      if (currentLine) {
          // No reset at end of final line - let caller handle it

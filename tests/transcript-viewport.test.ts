@@ -636,13 +636,15 @@ describe('transcript block viewport', () => {
     const transcript = new Transcript(() => 8)
     transcript.update(snapshot(nodes))
     const created = internals.markdownCreated
+    const updated = internals.markdownUpdated
     transcript.update(snapshot([
       ...nodes.slice(0, 20),
       assistant('middle-20', 'updated-middle-token'),
       ...nodes.slice(21),
     ]))
 
-    expect(internals.markdownCreated - created).toBe(1)
+    expect(internals.markdownCreated - created).toBe(0)
+    expect(internals.markdownUpdated - updated).toBe(1)
     transcript.handleInput('/')
     transcript.handleInput('updated-middle-token')
     transcript.handleInput('\r')
