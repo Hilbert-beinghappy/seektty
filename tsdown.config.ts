@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 const local = (path: string): string => resolve(import.meta.dirname, path)
 
-const aliases = {
+export const aliases = {
   '@deepseek-ai/dsh-api-gateway/node-client': local('vendor/api-gateway/client/index.js'),
   '@deepseek-ai/dsh-api-gateway/client': local('vendor/api-gateway/client/index.js'),
   '@deepseek-ai/dsh-api-remotes/node-client': local('vendor/api-remotes/client/index.js'),
