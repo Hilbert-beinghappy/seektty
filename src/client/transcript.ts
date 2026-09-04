@@ -2169,6 +2169,40 @@ export class Transcript implements Component, Focusable {
   }
 
   /**
+   * Invalidate only the visible welcome page, including no-Session guidance.
+   * A late welcome resource must not rebuild or disturb an active conversation.
+   * @returns whether a welcome frame needs repainting.
+   */
+  refreshWelcomePresentation(): boolean {
+    if (!this.emptyState || this.welcome === undefined) return false
+    let changed = false
+    for (const block of this.blocks) {
+      if (!block.rows.some(row => row.welcome === true)) continue
+      // Either cache can otherwise serve stale rows after facts/Logo/fastfetch
+      // changes. Match row ownership, not __empty__/__replacement__ block keys.
+      block.linesByWidth.clear()
+      for (const [index, component] of block.components.entries()) {
+        if (block.rows[index]?.welcome === true) this.lineCache.delete(component)
+      }
+      changed = true
+    }
+    if (!changed) return false
+    this.blockGeneration += 1
+    this.heightIndex.clear()
+    this.syncHeightIndexCounters()
+    this.searchIndex = undefined
+    this.lastFullLines = []
+    this.ownerCopy.clear()
+    this.lineControls.clear()
+    this.lastViewportMaps = []
+    this.lastPointerControls = []
+    // Keep the selection, scroll offset and anchor. The next render measures
+    // the new welcome rows and clamps the empty-page viewport as before.
+    this.requestRender()
+    return true
+  }
+
+  /**
    * Rebuild colorized rows after a live theme or lazy grammar change.
    * The current viewport and durable turn cursor remain unchanged.
    */

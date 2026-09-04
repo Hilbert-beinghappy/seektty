@@ -171,6 +171,10 @@ export class WelcomeController {
   fingerprint(): number { return this.generation }
 
   setRuntimeFacts(facts: WelcomeRuntimeFacts): void {
+    // Header facts are refreshed for streaming snapshots even when the welcome
+    // page is hidden. Compare values, not the newly allocated facts object.
+    if (this.disposed || (Object.keys(this.facts) as (keyof WelcomeRuntimeFacts)[])
+      .every(key => this.facts[key] === facts[key])) return
     this.facts = facts
     this.generation += 1
     this.requestRender()

@@ -352,9 +352,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       (request, signal) => options.management.welcome.collectFastfetchLogo(request, signal),
       () => {
         if (stopping !== undefined || transcript === undefined) return
-        transcript.refreshPresentation()
-        tui.invalidate()
-        requestSurfaceRender()
+        // Welcome facts/resources are local presentation, not a theme change.
+        // Transcript owns both welcome caches and ignores hidden-page updates.
+        transcript.refreshWelcomePresentation()
       },
       message => { reportWelcomeNotice(message) },
     )
