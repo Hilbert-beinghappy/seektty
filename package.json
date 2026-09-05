@@ -216,6 +216,7 @@
     "@types/js-yaml": "4.0.9",
     "@types/node": "24.10.1",
     "@types/cross-spawn": "6.0.6",
+    "@xterm/headless": "6.0.0",
     "node-pty": "1.1.0",
     "tsdown": "0.15.11",
     "typescript": "5.9.3",
