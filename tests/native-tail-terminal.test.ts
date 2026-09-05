@@ -27,6 +27,33 @@ it('keeps committed screen/scrollback content once through tail updates, correct
   vt.dispose()
 })
 
+it('keeps restored history adjacent to the live tail through growth, settlement and new messages', async () => {
+  const vt = new xterm.Terminal({ cols: 40, rows: 24, scrollback: 10000, allowProposedApi: true })
+  const output = new NativeOutput(bytes => new Promise(resolve => { vt.write(bytes, resolve) }), error => { throw error })
+  const lines = (): string[] => Array.from({ length: vt.buffer.active.length }, (_, i) => vt.buffer.active.getLine(i)!.translateToString(true))
+  const adjacent = (expected: string[]): void => {
+    const actual = lines()
+    const start = actual.indexOf(expected[0]!)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(actual.slice(start, start + expected.length)).toEqual(expected)
+  }
+  await output.frame(['RESTORED_1', 'RESTORED_2'], ['ACTIVE', 'DRAFT'], 40, 24, { row: 1, col: 3 })
+  adjacent(['RESTORED_1', 'RESTORED_2', 'ACTIVE', 'DRAFT'])
+  await output.frame([], ['ACTIVE_MORE', 'SECOND_LINE', 'DRAFT'], 40, 24, { row: 2, col: 3 })
+  adjacent(['RESTORED_1', 'RESTORED_2', 'ACTIVE_MORE', 'SECOND_LINE', 'DRAFT'])
+  await output.frame(['SETTLED'], ['DRAFT'], 40, 24, { row: 0, col: 3 })
+  adjacent(['RESTORED_1', 'RESTORED_2', 'SETTLED', 'DRAFT'])
+  await output.frame([], ['DRAFT_EDIT'], 40, 24, { row: 0, col: 6 })
+  adjacent(['RESTORED_1', 'RESTORED_2', 'SETTLED', 'DRAFT_EDIT'])
+  await output.frame(['NEW_MESSAGE'], ['NEW_REPLY', 'DRAFT'], 40, 24, { row: 1, col: 3 })
+  adjacent(['RESTORED_1', 'RESTORED_2', 'SETTLED', 'NEW_MESSAGE', 'NEW_REPLY', 'DRAFT'])
+  expect(lines().filter(line => line === 'RESTORED_1')).toHaveLength(1)
+  const cursorLine = vt.buffer.active.getLine(vt.buffer.active.baseY + vt.buffer.active.cursorY)!.translateToString(true)
+  expect(cursorLine).toBe('DRAFT')
+  expect(vt.buffer.active.cursorX).toBe(3)
+  vt.dispose()
+})
+
 it('uses the real patched TUI component/overlay pipeline and bypasses retained row diff only for the candidate', async () => {
   const hook = vi.fn((_lines: string[]) => true)
   const terminal: Terminal & ManagedTerminal = {

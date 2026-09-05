@@ -45,6 +45,7 @@ export class NativeOutput {
   private anchor = false
   private size = ''
   private previousTail: string[] = []
+  private tailRow = 0
   private previousCursor = ''
   readonly metrics = { writes: 0, bytes: 0, cancelled: 0, frames: 0, historyLines: 0 }
 
@@ -83,15 +84,19 @@ export class NativeOutput {
       const size = `${width}:${height}`
       const reusable = this.anchor && this.size === size
       const visible = tail.slice(-height)
-      const padding = Math.max(0, height - visible.length)
-      const viewport = [...Array<string>(padding).fill(''), ...visible]
-      const row = cursor === null ? height - 1 : padding + cursor.row - Math.max(0, tail.length - height)
+      const viewport = visible.length ? visible : ['']
+      // Only the mutable tail is owned. Padding it to a whole screen inserts a
+      // blank viewport between committed history and the next response/composer.
+      const start = reusable ? this.tailRow : height - 1
+      const overflow = Math.max(0, start + history.length + viewport.length - height)
+      const tailRow = start + history.length - overflow
+      const row = cursor === null ? height - 1 : tailRow + cursor.row - Math.max(0, tail.length - height)
       const cursorCode = cursor !== null && row >= 0 && row < height
         ? `\x1b[${row + 1};${Math.min(width, cursor.col + 1)}H\x1b[?25h` : '\x1b[?25l'
-      if (reusable && history.length === 0) {
+      if (reusable && history.length === 0 && viewport.length === this.previousTail.length) {
         let changed = ''
         for (let i = 0; i < viewport.length; i++) {
-          if (viewport[i] !== this.previousTail[i]) changed += `\x1b[${i + 1};1H\x1b[2K${viewport[i]}`
+          if (viewport[i] !== this.previousTail[i]) changed += `\x1b[${tailRow + i + 1};1H\x1b[2K${viewport[i]}`
         }
         if (changed === '' && cursorCode === this.previousCursor) return
         await this.write('\x1b[?2026h' + changed + cursorCode + '\x1b[?2026l')
@@ -99,15 +104,18 @@ export class NativeOutput {
         this.metrics.frames++
         return
       }
-      // Own a whole viewport. Only the owned viewport may be erased. After a
-      // resize/mode transition append a fresh viewport instead of guessing where
-      // terminal reflow placed the old history. Never ED2 or ED3.
-      let bytes = '\x1b[?2026h\x1b[?25l' + (reusable ? '\x1b[H\x1b[0J' : '\r\n')
+      // Erase from the old tail, preserving committed rows above it. On unknown
+      // coordinates start on a new bottom line; terminal reflow owns old history.
+      // A shrinking tail leaves spare rows below, never a gap before the tail.
+      let bytes = '\x1b[?2026h\x1b[?25l' + (reusable
+        ? `\x1b[${start + 1};1H\x1b[0J`
+        : `\x1b[${height};1H\r\n`)
       if (history.length) bytes += history.join('\r\n') + '\r\n'
       bytes += viewport.join('\r\n') + cursorCode
       bytes += '\x1b[?2026l'
       await this.write(bytes)
       this.anchor = generation === this.generation; this.size = size
+      this.tailRow = tailRow
       this.previousTail = viewport; this.previousCursor = cursorCode
       this.metrics.frames++; this.metrics.historyLines += history.length
     }, generation)
