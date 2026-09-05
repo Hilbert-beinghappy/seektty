@@ -1,5 +1,5 @@
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
-index fb224b9da697aab89a31336eae65071dc07d736e..12d2af326ed165e4276fb47d9b38f1d253c6e5bf 100644
+index fb224b9da697aab89a31336eae65071dc07d736e..49afe6c1c0769e856eb2a2ce10e49fd391c1d2af 100644
 --- a/dist/components/editor.d.ts
 +++ b/dist/components/editor.d.ts
 @@ -30,6 +30,20 @@ export interface EditorOptions {
@@ -83,7 +83,7 @@ index fb224b9da697aab89a31336eae65071dc07d736e..12d2af326ed165e4276fb47d9b38f1d2
      private handleBackspace;
      /**
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..3b2bfdf64a4023597f07a89d608c87b454e6ea86 100644
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..e9749bd069e0fef9ebaa2e5ef2c893e53d4c2953 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
 @@ -171,6 +171,7 @@ export class Editor {
@@ -608,7 +608,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..3b2bfdf64a4023597f07a89d608c87b4
      cancelAutocomplete() {
          this.cancelAutocompleteRequest();
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..73fe4b6fdad88ce068a96c00eae31d3e70b08afe 100644
+index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..1f51d1bd61fd0228bb0d65c2bdc3fa3a7d63edd9 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -16,6 +16,12 @@ export declare class Input implements Component, Focusable {
@@ -625,7 +625,7 @@ index 32d03e6acdcf03a58c8a84f99b73ecd24bca29eb..73fe4b6fdad88ce068a96c00eae31d3e
      private insertCharacter;
      private handleBackspace;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..1df0bdb5e026517dee2db6f1f5cdb6c749e0d1a5 100644
+index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..73a9e73bd15bdb38478c2661ca1b463f41402e54 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -1,5 +1,5 @@
@@ -837,7 +837,7 @@ index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..1df0bdb5e026517dee2db6f1f5cdb6c7
          const visualLength = visibleWidth(textWithCursor);
          const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
 diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
-index e836b2e5f739a19864e166905c4dc66d7446313a..d16c8011d7305845176b9adf34dda7216cb3af37 100644
+index e836b2e5f739a19864e166905c4dc66d7446313a..795c7ff7dc8b1abfad2d3ad1e626f26543900f6a 100644
 --- a/dist/components/markdown.d.ts
 +++ b/dist/components/markdown.d.ts
 @@ -22,6 +22,8 @@ export interface DefaultTextStyle {
@@ -878,7 +878,7 @@ index e836b2e5f739a19864e166905c4dc66d7446313a..d16c8011d7305845176b9adf34dda721
      /**
       * Apply default text style to a string.
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..d62f7f368f41c5046afec2af2a66126725d93d2d 100644
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f5a972cc6 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
 @@ -1,6 +1,124 @@
@@ -1336,7 +1336,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..d62f7f368f41c5046afec2af2a661267
              else {
                  // Other token types - try to render as inline
 diff --git a/dist/components/select-list.d.ts b/dist/components/select-list.d.ts
-index 9db54d907f801e43208a462bca925f2905787b7a..7fe973ce5e8b2ff8ab464910af30bf92eb80174f 100644
+index 9db54d907f801e43208a462bca925f2905787b7a..3266ae6f1a277d3b82b51e52c56f95a85df06861 100644
 --- a/dist/components/select-list.d.ts
 +++ b/dist/components/select-list.d.ts
 @@ -22,6 +22,17 @@ export interface SelectListLayoutOptions {
@@ -1373,7 +1373,7 @@ index 9db54d907f801e43208a462bca925f2905787b7a..7fe973ce5e8b2ff8ab464910af30bf92
      render(width: number): string[];
      handleInput(keyData: string): void;
 diff --git a/dist/components/select-list.js b/dist/components/select-list.js
-index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..3f100137d36034af0d6a72e2f9b282c4159ad255 100644
+index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..d12792cfcbe09dd7d90765346ea8edef523dbed6 100644
 --- a/dist/components/select-list.js
 +++ b/dist/components/select-list.js
 @@ -10,6 +10,8 @@ export class SelectList {
@@ -1487,7 +1487,7 @@ index 2e9231150951c3d3f3e13ac8ae8d623f06d38d5d..3f100137d36034af0d6a72e2f9b282c4
                      return this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`);
                  }
 diff --git a/dist/keybindings.d.ts b/dist/keybindings.d.ts
-index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..41f4b6b3ad6792f0a3a81b51eff97ea30734f426 100644
+index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..1001bb8463e8ca59c31390dfb3d583d57501ceeb 100644
 --- a/dist/keybindings.d.ts
 +++ b/dist/keybindings.d.ts
 @@ -125,7 +125,7 @@ export declare const TUI_KEYBINDINGS: {
@@ -1500,7 +1500,7 @@ index a6a5a7e8e0eee248adc8b0883b4ce61d7bd26470..41f4b6b3ad6792f0a3a81b51eff97ea3
      };
      readonly "tui.input.newLine": {
 diff --git a/dist/keybindings.js b/dist/keybindings.js
-index 60d400872183f1f6b754b61d3ccbf6708219215d..11c51686173c178d9d8d08bec6076eadc8b5d632 100644
+index 60d400872183f1f6b754b61d3ccbf6708219215d..c0161b806238f2bd05995136dd7fcacf347a1ff5 100644
 --- a/dist/keybindings.js
 +++ b/dist/keybindings.js
 @@ -62,7 +62,7 @@ export const TUI_KEYBINDINGS = {
@@ -1514,7 +1514,7 @@ index 60d400872183f1f6b754b61d3ccbf6708219215d..11c51686173c178d9d8d08bec6076ead
      "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
 diff --git a/dist/line-cache.js b/dist/line-cache.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..9e554f99dac78d4786719fd5a9ff27008287dd0d
+index 0000000000000000000000000000000000000000..6fc7f327c5fda85b88594f8177f988b3094d71d2
 --- /dev/null
 +++ b/dist/line-cache.js
 @@ -0,0 +1,34 @@
@@ -1553,7 +1553,7 @@ index 0000000000000000000000000000000000000000..9e554f99dac78d4786719fd5a9ff2700
 +    }
 +}
 diff --git a/dist/stdin-buffer.js b/dist/stdin-buffer.js
-index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..d00980ea31e032a34d22439e84df5da250de4370 100644
+index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..6ed3ca60dadad5c0fc24d3fcadcb0e44afaaf65c 100644
 --- a/dist/stdin-buffer.js
 +++ b/dist/stdin-buffer.js
 @@ -18,6 +18,10 @@
@@ -1665,7 +1665,7 @@ index a3d15d66cf5f86b9d794e59c0646c0ba2ec73ce5..d00980ea31e032a34d22439e84df5da2
          }
          const sequences = [this.buffer];
 diff --git a/dist/terminal.js b/dist/terminal.js
-index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a78768300f91d 100644
+index 3545b284ce2da594cc728803feb607a34cea5ca0..7f1e3085d0857e389507a7ca8178c12895f7f8c5 100644
 --- a/dist/terminal.js
 +++ b/dist/terminal.js
 @@ -16,6 +16,7 @@ export class ProcessTerminal {
@@ -1684,6 +1684,15 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a7876
          this.resizeHandler = onResize;
          // Save previous state and enable raw mode
          this.wasRaw = process.stdin.isRaw || false;
+@@ -49,7 +51,7 @@ export class ProcessTerminal {
+         process.stdin.setEncoding("utf8");
+         process.stdin.resume();
+         // Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
+-        process.stdout.write("\x1b[?2004h");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[?2004h");
+         // Set up resize handler immediately
+         process.stdout.on("resize", this.resizeHandler);
+         // Refresh terminal dimensions - they may be stale after suspend/resume
 @@ -82,7 +84,7 @@ export class ProcessTerminal {
          // Forward individual sequences to the input handler
          this.stdinBuffer.on("data", (sequence) => {
@@ -1693,16 +1702,30 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a7876
                  const match = sequence.match(kittyResponsePattern);
                  if (match) {
                      this._kittyProtocolActive = true;
-@@ -130,7 +132,7 @@ export class ProcessTerminal {
+@@ -92,7 +94,7 @@ export class ProcessTerminal {
+                     // Flag 2 = report event types (press/repeat/release)
+                     // Flag 4 = report alternate keys (shifted key, base layout key)
+                     // Base layout key enables shortcuts to work with non-Latin keyboard layouts
+-                    process.stdout.write("\x1b[>7u");
++                    (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[>7u");
+                     return; // Don't forward protocol response to TUI
+                 }
+             }
+@@ -128,10 +130,10 @@ export class ProcessTerminal {
+     queryAndEnableKittyProtocol() {
+         this.setupStdinBuffer();
          process.stdin.on("data", this.stdinDataHandler);
-         process.stdout.write("\x1b[?u");
+-        process.stdout.write("\x1b[?u");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[?u");
          setTimeout(() => {
 -            if (!this._kittyProtocolActive && !this._modifyOtherKeysActive) {
+-                process.stdout.write("\x1b[>4;2m");
 +            if (!this._protocolsRestored && this.inputHandler && !this._kittyProtocolActive && !this._modifyOtherKeysActive) {
-                 process.stdout.write("\x1b[>4;2m");
++                (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[>4;2m");
                  this._modifyOtherKeysActive = true;
              }
-@@ -165,6 +167,34 @@ export class ProcessTerminal {
+         }, 150);
+@@ -165,16 +167,44 @@ export class ProcessTerminal {
              // koffi not available — Shift+Tab won't be distinguishable from Tab
          }
      }
@@ -1719,14 +1742,14 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a7876
 +            process.stdin.removeListener("data", this.stdinDataHandler);
 +            this.stdinDataHandler = undefined;
 +        }
-+        process.stdout.write("\x1b[?2004l");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[?2004l");
 +        if (this._kittyProtocolActive) {
-+            process.stdout.write("\x1b[<u");
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[<u");
 +            this._kittyProtocolActive = false;
 +            setKittyProtocolActive(false);
 +        }
 +        if (this._modifyOtherKeysActive) {
-+            process.stdout.write("\x1b[>4;0m");
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[>4;0m");
 +            this._modifyOtherKeysActive = false;
 +        }
 +    }
@@ -1737,8 +1760,111 @@ index 3545b284ce2da594cc728803feb607a34cea5ca0..8d1bb56398704c12b4e13e5d160a7876
      async drainInput(maxMs = 1000, idleMs = 50) {
          if (this._kittyProtocolActive) {
              // Disable Kitty keyboard protocol first so any late key releases
+             // do not generate new Kitty escape sequences.
+-            process.stdout.write("\x1b[<u");
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[<u");
+             this._kittyProtocolActive = false;
+             setKittyProtocolActive(false);
+         }
+         if (this._modifyOtherKeysActive) {
+-            process.stdout.write("\x1b[>4;0m");
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[>4;0m");
+             this._modifyOtherKeysActive = false;
+         }
+         const previousHandler = this.inputHandler;
+@@ -203,18 +233,18 @@ export class ProcessTerminal {
+     }
+     stop() {
+         if (this.clearProgressInterval()) {
+-            process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
+         }
+         // Disable bracketed paste mode
+-        process.stdout.write("\x1b[?2004l");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[?2004l");
+         // Disable Kitty keyboard protocol if not already done by drainInput()
+         if (this._kittyProtocolActive) {
+-            process.stdout.write("\x1b[<u");
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[<u");
+             this._kittyProtocolActive = false;
+             setKittyProtocolActive(false);
+         }
+         if (this._modifyOtherKeysActive) {
+-            process.stdout.write("\x1b[>4;0m");
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[>4;0m");
+             this._modifyOtherKeysActive = false;
+         }
+         // Clean up StdinBuffer
+@@ -242,7 +272,7 @@ export class ProcessTerminal {
+         }
+     }
+     write(data) {
+-        process.stdout.write(data);
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(data);
+         if (this.writeLogPath) {
+             try {
+                 fs.appendFileSync(this.writeLogPath, data, { encoding: "utf8" });
+@@ -261,47 +291,47 @@ export class ProcessTerminal {
+     moveBy(lines) {
+         if (lines > 0) {
+             // Move down
+-            process.stdout.write(`\x1b[${lines}B`);
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(`\x1b[${lines}B`);
+         }
+         else if (lines < 0) {
+             // Move up
+-            process.stdout.write(`\x1b[${-lines}A`);
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(`\x1b[${-lines}A`);
+         }
+         // lines === 0: no movement
+     }
+     hideCursor() {
+-        process.stdout.write("\x1b[?25l");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[?25l");
+     }
+     showCursor() {
+-        process.stdout.write("\x1b[?25h");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[?25h");
+     }
+     clearLine() {
+-        process.stdout.write("\x1b[K");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[K");
+     }
+     clearFromCursor() {
+-        process.stdout.write("\x1b[J");
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[J");
+     }
+     clearScreen() {
+-        process.stdout.write("\x1b[2J\x1b[H"); // Clear screen and move to home (1,1)
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))("\x1b[2J\x1b[H"); // Clear screen and move to home (1,1)
+     }
+     setTitle(title) {
+         // OSC 0;title BEL - set terminal window title
+-        process.stdout.write(`\x1b]0;${title}\x07`);
++        (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(`\x1b]0;${title}\x07`);
+     }
+     setProgress(active) {
+         if (active) {
+             // OSC 9;4;3 - indeterminate progress
+-            process.stdout.write(TERMINAL_PROGRESS_ACTIVE_SEQUENCE);
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(TERMINAL_PROGRESS_ACTIVE_SEQUENCE);
+             if (!this.progressInterval) {
+                 this.progressInterval = setInterval(() => {
+-                    process.stdout.write(TERMINAL_PROGRESS_ACTIVE_SEQUENCE);
++                    (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(TERMINAL_PROGRESS_ACTIVE_SEQUENCE);
+                 }, TERMINAL_PROGRESS_KEEPALIVE_MS);
+             }
+         }
+         else {
+             this.clearProgressInterval();
+             // OSC 9;4;0 - clear progress
+-            process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
++            (this.__seekttyWrite ?? process.stdout.write.bind(process.stdout))(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
+         }
+     }
+     clearProgressInterval() {
 diff --git a/dist/tui.d.ts b/dist/tui.d.ts
-index 8394d461feed1287deba13443c7afe79ff45c151..802ac48537f93339a5c9186ee43141b274a9ac87 100644
+index 8394d461feed1287deba13443c7afe79ff45c151..68c11704d39bf661fa797fc622e55c934b2ef641 100644
 --- a/dist/tui.d.ts
 +++ b/dist/tui.d.ts
 @@ -155,8 +155,28 @@ export declare class TUI extends Container {
@@ -1784,7 +1910,7 @@ index 8394d461feed1287deba13443c7afe79ff45c151..802ac48537f93339a5c9186ee43141b2
      private handleInput;
      private consumeCellSizeResponse;
 diff --git a/dist/tui.js b/dist/tui.js
-index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5bb6d5f8d0 100644
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..4615cd441d19eb16350744014a33ad17a107fe48 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
 @@ -5,11 +5,20 @@ import * as fs from "node:fs";
@@ -2014,7 +2140,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
          return ids;
      }
      deleteKittyImages(ids) {
-@@ -749,30 +872,70 @@ export class TUI extends Container {
+@@ -749,30 +872,76 @@ export class TUI extends Container {
          // Render all components to get new lines
          let newLines = this.render(width);
          // Composite overlays into the rendered lines (before differential compare)
@@ -2038,6 +2164,12 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
          const cursorPos = this.extractCursorPosition(newLines, height);
          newLines = this.applyLineResets(newLines);
 -        // Helper to clear scrollback and viewport and render all new lines
++        // SeekTTY candidate adapter (pi-tui 0.73.1 only): all components and
++        // overlays have rendered, but no retained-history diff has run.
++        if (this.terminal.__seekttyManagedAlternateScreen === false &&
++            this.terminal.__seekttyNativeFrame?.(newLines, cursorPos, width, height)) {
++            return;
++        }
 +        // Helper to restore the visible window. Tall buffers must never be
 +        // dumped from line 0: that replays older turns through the viewport.
          const fullRender = (clear) => {
@@ -2091,7 +2223,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
              if (clear) {
                  this.maxLinesRendered = newLines.length;
              }
-@@ -802,7 +965,7 @@ export class TUI extends Container {
+@@ -802,7 +971,7 @@ export class TUI extends Container {
              return;
          }
          // Width changes always need a full re-render because wrapping changes.
@@ -2100,7 +2232,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
              logRedraw(`terminal width changed (${this.previousWidth} -> ${width})`);
              fullRender(true);
              return;
-@@ -810,7 +973,7 @@ export class TUI extends Container {
+@@ -810,7 +979,7 @@ export class TUI extends Container {
          // Height changes normally need a full re-render to keep the visible viewport aligned,
          // but Termux changes height when the software keyboard shows or hides.
          // In that environment, a full redraw causes the entire history to replay on every toggle.
@@ -2109,7 +2241,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
              logRedraw(`terminal height changed (${this.previousHeight} -> ${height})`);
              fullRender(true);
              return;
-@@ -844,6 +1007,37 @@ export class TUI extends Container {
+@@ -844,6 +1013,37 @@ export class TUI extends Container {
              }
              lastChanged = newLines.length - 1;
          }
@@ -2147,7 +2279,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
          if (firstChanged !== -1) {
              lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
          }
-@@ -944,8 +1138,9 @@ export class TUI extends Container {
+@@ -944,8 +1144,9 @@ export class TUI extends Container {
          for (let i = firstChanged; i <= renderEnd; i++) {
              if (i > firstChanged)
                  buffer += "\r\n";
@@ -2159,7 +2291,7 @@ index b521ceb326eb8a25fc9ebc3feee4d39708296065..b3109f4160a5006681d132c247c97b5b
              if (!isImage && visibleWidth(line) > width) {
                  // Log all lines to crash file for debugging
 diff --git a/dist/utils.d.ts b/dist/utils.d.ts
-index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..a7c4e4e262fecf18a555bf355fa45ea678db199f 100644
+index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..1b0de075a1a5f9be7118480355e49461bf1da244 100644
 --- a/dist/utils.d.ts
 +++ b/dist/utils.d.ts
 @@ -26,6 +26,13 @@ export declare function extractAnsiCode(str: string, pos: number): {
@@ -2177,7 +2309,7 @@ index 45eebb9dbf0edbc96965d6a1e5e67de81d7c5c00..a7c4e4e262fecf18a555bf355fa45ea6
   * Check if a character is whitespace.
   */
 diff --git a/dist/utils.js b/dist/utils.js
-index 9d00544d0858681339bb780057bda825f8054ca5..5ade77a4a2c7693b5b92fb35f9d3aabd0f591663 100644
+index 9d00544d0858681339bb780057bda825f8054ca5..71ad6e7dc33b68e09f781bf95d77e89678dda80a 100644
 --- a/dist/utils.js
 +++ b/dist/utils.js
 @@ -1,4 +1,6 @@

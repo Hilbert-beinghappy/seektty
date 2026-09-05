@@ -15,6 +15,8 @@ export type MouseReportingMode = 'full' | 'native'
 
 /** Private compatibility marker consumed only by the pinned pi-tui patch. */
 export interface ManagedTerminal {
+  __seekttyNativeFrame?(lines: string[], cursor: { row: number; col: number } | null, width: number, height: number): boolean
+  __seekttyWrite?: ((bytes: string) => void) | undefined
   __seekttyManagedAlternateScreen?: boolean
   restoreProtocolsSync?(): void
   restoreRawModeSync?(): void

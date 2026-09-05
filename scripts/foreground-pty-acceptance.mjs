@@ -102,6 +102,9 @@ async function cycle(restarted) {
     child.write(value)
     await delay(150)
     child.write('\r')
+    // Let the atomic settings transaction close before polling settings.yaml;
+    // opening it continuously can race Windows replacement-file rename.
+    await delay(350)
   }
   try {
     await waitFor(() => /API [Kk]ey|Configure a model Provider|配置模型|输入消息|Type a message|Enter a message/u.test(plain(output)), 'composer')
@@ -191,7 +194,7 @@ async function cycle(restarted) {
     await delay(150)
     if (!exited) child.write('\u0003')
     const result = await Promise.race([finished, delay(10_000).then(() => { throw new Error('exit timeout') })])
-    assert.equal(result.exitCode, 0)
+    assert.equal(result.exitCode, 0, plain(output).slice(-3000))
     console.log(JSON.stringify({ cycle: restarted ? 'persisted-start-and-recovery' : 'manual-opt-in', tmux: useTmux, bytes: output.length, exitCode: result.exitCode }))
   } finally {
     // Only the test-owned isolated process can be terminated by this harness.
