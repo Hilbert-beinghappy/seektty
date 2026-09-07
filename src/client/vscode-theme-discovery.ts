@@ -75,6 +75,37 @@ async function applicationExtensions(root: string): Promise<readonly string[]> {
   } catch { return [direct] }
 }
 
+function platformApplicationRoots(home: string): readonly VsCodeThemeDiscoveryRoot[] {
+  const roots: VsCodeThemeDiscoveryRoot[] = []
+  const add = (editor: VsCodeEditor, label: string, paths: readonly string[]): void => {
+    for (const path of paths) roots.push({ editor, label, path })
+  }
+  if (process.platform === 'darwin') {
+    const applications = ['/Applications', resolve(home, 'Applications')]
+    add('vscode', 'VS Code（内置）', applications.map(root => resolve(root, 'Visual Studio Code.app', 'Contents', 'Resources', 'app', 'extensions')))
+    add('vscode-insiders', 'VS Code Insiders（内置）', applications.map(root => resolve(root, 'Visual Studio Code - Insiders.app', 'Contents', 'Resources', 'app', 'extensions')))
+    add('cursor', 'Cursor（内置）', applications.map(root => resolve(root, 'Cursor.app', 'Contents', 'Resources', 'app', 'extensions')))
+  }
+  if (process.platform === 'linux') {
+    add('vscode', 'VS Code（内置）', [
+      '/usr/share/code/resources/app/extensions', '/usr/lib/code/resources/app/extensions',
+      '/opt/visual-studio-code/resources/app/extensions', '/opt/code/resources/app/extensions',
+      '/snap/code/current/usr/share/code/resources/app/extensions',
+    ])
+    add('vscode-insiders', 'VS Code Insiders（内置）', [
+      '/usr/share/code-insiders/resources/app/extensions', '/usr/lib/code-insiders/resources/app/extensions',
+      '/opt/visual-studio-code-insiders/resources/app/extensions', '/opt/code-insiders/resources/app/extensions',
+      '/snap/code-insiders/current/usr/share/code-insiders/resources/app/extensions',
+    ])
+    add('cursor', 'Cursor（内置）', [
+      '/usr/share/cursor/resources/app/extensions', '/usr/lib/cursor/resources/app/extensions',
+      '/opt/Cursor/resources/app/extensions', '/opt/cursor/resources/app/extensions',
+      '/snap/cursor/current/usr/share/cursor/resources/app/extensions',
+    ])
+  }
+  return roots
+}
+
 async function defaultRoots(): Promise<readonly VsCodeThemeDiscoveryRoot[]> {
   // Unit tests inject fixture roots; never let a developer's installed themes
   // change menu-selection tests or their timing.
@@ -95,6 +126,7 @@ async function defaultRoots(): Promise<readonly VsCodeThemeDiscoveryRoot[]> {
     ]
     for (const { root, ...product } of installed) for (const path of await applicationExtensions(root)) roots.push({ ...product, path })
   }
+  roots.push(...platformApplicationRoots(home))
   const registered = await Promise.all([
     windowsApplicationRoot('Code.exe'),
     windowsApplicationRoot('Code - Insiders.exe'),
@@ -189,11 +221,15 @@ export async function discoverVsCodeThemes(
           const loaded = await loadVsCodeThemeFile(canonical)
           const label = localizedLabel(record.label, localization, loaded.suggestedName)
           const theme = convertVsCodeTheme(loaded, 'discovered', label)
+          const fingerprint = themeFingerprint(theme)
           candidates.push({
-            id: `${product.editor}:${extensionId}:${relative(extensionRoot, canonical)}`,
+            // Include the rendered-content fingerprint so parallel extension
+            // versions cannot collide when they expose the same relative path.
+            // Identical content is still collapsed by the map below.
+            id: `${product.editor}:${extensionId}:${relative(extensionRoot, canonical)}:${fingerprint}`,
             editor: product.editor, editorLabel: product.label, extensionId,
             ...(version === undefined ? {} : { extensionVersion: version }),
-            relativeThemePath: relative(extensionRoot, canonical), label, theme, fingerprint: themeFingerprint(theme),
+            relativeThemePath: relative(extensionRoot, canonical), label, theme, fingerprint,
           })
         } catch (error) {
           diagnostics.push({ path: themePath, message: error instanceof Error ? error.message : String(error) })

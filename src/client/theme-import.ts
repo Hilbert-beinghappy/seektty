@@ -193,7 +193,7 @@ function privateAddress(address: string): boolean {
     || value.startsWith('fe8') || value.startsWith('fe9') || value.startsWith('fea') || value.startsWith('feb')
 }
 
-async function remoteText(root: URL, url: URL): Promise<string> {
+async function remoteText(root: URL, url: URL): Promise<{ readonly text: string; readonly url: URL }> {
   let current = url
   for (let redirects = 0; redirects <= MAX_REMOTE_REDIRECTS; redirects += 1) {
     const addresses = await lookup(current.hostname, { all: true, verbatim: true })
@@ -219,7 +219,7 @@ async function remoteText(root: URL, url: URL): Promise<string> {
     if (reader === undefined) {
       const text = await response.text()
       if (Buffer.byteLength(text) > MAX_THEME_FILE_BYTES) throw new Error(ui('网络主题文件过大', 'Network theme file is too large'))
-      return text
+      return { text, url: current }
     }
     const chunks: Uint8Array[] = []
     let size = 0
@@ -236,7 +236,7 @@ async function remoteText(root: URL, url: URL): Promise<string> {
     const data = new Uint8Array(size)
     let offset = 0
     for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.byteLength }
-    return new TextDecoder().decode(data)
+    return { text: new TextDecoder().decode(data), url: current }
   }
   throw new Error(ui('网络主题重定向失败', 'Network theme redirect failed'))
 }
@@ -244,10 +244,13 @@ async function remoteText(root: URL, url: URL): Promise<string> {
 async function loadRemoteThemeRecord(
   root: URL, url: URL, active: readonly string[], budget: { bytes: number },
 ): Promise<{ readonly path: string; readonly value: LoadedThemeRecord }> {
-  const canonical = url.href
-  if (active.includes(canonical)) throw new Error(ui('VS Code 主题 include 存在循环', 'VS Code theme include cycle'))
+  const requested = url.href
+  if (active.includes(requested)) throw new Error(ui('VS Code 主题 include 存在循环', 'VS Code theme include cycle'))
   if (active.length >= MAX_INCLUDE_DEPTH) throw new Error(ui(`VS Code 主题 include 超过 ${String(MAX_INCLUDE_DEPTH)} 层`, `VS Code theme include exceeds ${String(MAX_INCLUDE_DEPTH)} levels`))
-  const text = await remoteText(root, url)
+  const fetched = await remoteText(root, url)
+  const canonical = fetched.url.href
+  if (active.includes(canonical)) throw new Error(ui('VS Code 主题 include 存在循环', 'VS Code theme include cycle'))
+  const text = fetched.text
   budget.bytes += Buffer.byteLength(text)
   if (budget.bytes > MAX_THEME_TOTAL_BYTES) throw new Error(ui('VS Code 主题 include 总大小超过限制', 'VS Code theme include total size exceeds the limit'))
   const current = parseJsonc(text, canonical)
@@ -255,7 +258,7 @@ async function loadRemoteThemeRecord(
   if (current.include !== undefined) {
     const include = typeof current.include === 'string' ? current.include.trim() : ''
     if (include === '') throw new Error(ui(`${canonical}.include 必须是相对 HTTPS 路径`, `${canonical}.include must be a relative HTTPS path`))
-    const included = remoteUrl(new URL(include, url).href)
+    const included = remoteUrl(new URL(include, fetched.url).href)
     if (included.origin !== root.origin) throw new Error(ui(`${canonical}.include 必须保持同源`, `${canonical}.include must stay on the same origin`))
     base = (await loadRemoteThemeRecord(root, included, [...active, canonical], budget)).value
   }
