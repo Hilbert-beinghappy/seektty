@@ -4,7 +4,7 @@
 // DSH_BIN: official CLI shim; DSH_ENTRY: its lib/bin.js; SEEKTTY_SPEC: local tgz.
 import assert from 'node:assert/strict'
 import { spawn as spawnProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, watch } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -20,7 +20,21 @@ const installed = crossSpawn.sync(DSH_BIN, ['plugin', '--profile', 'tui', 'add',
   env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
 })
 assert.equal(installed.status, 0, installed.stderr)
-const settings = () => readFileSync(join(home, 'settings.yaml'), 'utf8')
+// Read after a filesystem notification, never in the 50ms assertion poll.
+// Polling an atomically replaced file can itself provoke Windows sharing errors.
+let savedSettings = ''
+let settingsTimer
+const readSettings = () => {
+  try { savedSettings = readFileSync(join(home, 'settings.yaml'), 'utf8') } catch { /* not created yet */ }
+}
+readSettings()
+const settingsWatcher = watch(home, (_event, filename) => {
+  if (String(filename) !== 'settings.yaml') return
+  clearTimeout(settingsTimer)
+  settingsTimer = setTimeout(readSettings, 50)
+})
+settingsWatcher.unref()
+const settings = () => savedSettings
 const saved = expected => {
   try { return Object.entries(expected).every(([key, value]) => new RegExp(`${key}: ['"]?${value}`, 'u').test(settings())) }
   catch { return false }
@@ -102,6 +116,9 @@ async function cycle(restarted) {
     child.write(value)
     await delay(150)
     child.write('\r')
+    // Let the atomic settings transaction close before polling settings.yaml;
+    // opening it continuously can race Windows replacement-file rename.
+    await delay(350)
   }
   try {
     await waitFor(() => /API [Kk]ey|Configure a model Provider|配置模型|输入消息|Type a message|Enter a message/u.test(plain(output)), 'composer')
@@ -191,7 +208,7 @@ async function cycle(restarted) {
     await delay(150)
     if (!exited) child.write('\u0003')
     const result = await Promise.race([finished, delay(10_000).then(() => { throw new Error('exit timeout') })])
-    assert.equal(result.exitCode, 0)
+    assert.equal(result.exitCode, 0, plain(output).slice(-3000))
     console.log(JSON.stringify({ cycle: restarted ? 'persisted-start-and-recovery' : 'manual-opt-in', tmux: useTmux, bytes: output.length, exitCode: result.exitCode }))
   } finally {
     // Only the test-owned isolated process can be terminated by this harness.

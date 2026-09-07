@@ -9,6 +9,7 @@ import {
   Markdown,
   matchesKey,
   Text,
+  truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
   type Component,
@@ -48,6 +49,8 @@ import {
   color,
   escapeTerminalText,
   highlightCodeLines,
+  createCodeStream,
+  canvasStyleRevision,
   interaction,
   markdownTheme,
   terminalColorLevel,
@@ -87,6 +90,7 @@ import {
   type ViewportCellMap,
 } from './text-selection.ts'
 import { componentSelectionLines } from './pi-tui-adapters.ts'
+import { NativeHistory, stableParagraphEnd, fencedCodeRange, type NativeReceipt, type NativeSourceToken } from './native-history.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -99,6 +103,9 @@ export const internals = {
   linesEscaped: 0,
   lastFullLinesCopied: 0,
   fingerprintsComputed: 0,
+  nativeSnapshotBlocksChecked: 0,
+  nativeTailBlocksVisited: 0,
+  nativeHistoryLinesPrepared: 0,
   imageBlocksUpdated: 0,
   activePulseTimers: 0,
   heightIndexExact: 0,
@@ -1549,6 +1556,245 @@ export class Transcript implements Component, Focusable {
   private hoveredRegionId: string | undefined
   private emptyScrollPrimed = false
   private nativeMode = false
+  private nativeTailEnabled = false
+  private nativeHistoryPaused = false
+  private nativeClosing = false
+  private readonly nativeHistory = new NativeHistory()
+  private readonly nativeCodeStreams = new Map<string, { offset: number; context: string; stream: import('./syntax-highlighter.ts').CodeStream }>()
+  private readonly nativeSourceTokens = new Map<string, NativeSourceToken>()
+  private nativeSourceOrder: string[] = []
+  private nativeNotices: string[] = []
+  private readonly nativeRemoved = new Set<string>()
+  private readonly nativePartCounts = new Map<string, number>()
+  private readonly nativeSkipped = new Map<string, NativeSourceToken>()
+  private nativeBlocks: readonly TranscriptBlock[] = []
+  private readonly nativeProjection = new Map<string, TranscriptBlock[]>()
+  private nativeCandidates = new Set<number>()
+  private readonly nativeIndexes = new Map<string, number>()
+  private nativeBatch: { lines: string[]; receipts: NativeReceipt[]; ends: number[]; offset: number } | undefined
+  private nativeBatchInFlight = false
+
+  /** Experimental display-only path; not a Harness setting. */
+  setNativeTailEnabled(enabled: boolean): void {
+    this.nativeTailEnabled = enabled
+    this.resetNativeHistory()
+  }
+
+  resetNativeHistory(): void {
+    this.nativeHistory.reset()
+    this.nativeSourceOrder = []
+    this.nativeNotices = []
+    this.nativeRemoved.clear()
+    this.nativePartCounts.clear()
+    this.nativeCodeStreams.clear()
+    this.nativeSkipped.clear()
+    this.nativeBatch = undefined
+    this.nativeBatchInFlight = false
+    this.indexNativeCandidates()
+  }
+
+  pauseNativeHistory(paused: boolean): void { this.nativeHistoryPaused = paused }
+  finishNativeHistory(): void { this.nativeClosing = true }
+  cancelNativeReplay(): void {
+    // Cancellation is not a successful commit. Keep a separate display omission
+    // set until explicit replay; newly changed/arriving nodes still render.
+    for (const index of this.nativeCandidates) {
+      const block = this.nativeBlocks[index]!
+      if (!block.metadata.dynamic) this.nativeSkipped.set(block.key, this.nativeToken(block))
+    }
+    this.nativeBatch = undefined
+    this.nativeBatchInFlight = false
+    this.nativeHistory.discardPending()
+    this.nativeHistoryPaused = false
+    this.nativeCodeStreams.clear()
+    this.indexNativeCandidates()
+  }
+  nativeHistoryPending(): boolean {
+    if (!this.nativeMode || this.nativeHistoryPaused) return false
+    if (this.nativeNotices.length) return true
+    if (this.emptyState && !this.nativeBatch) return false
+    if (this.nativeBatch !== undefined) return true
+    for (const index of this.nativeCandidates) if (!this.nativeBlocks[index]!.metadata.dynamic) return true
+    return false
+  }
+
+  private nativeToken(block: TranscriptBlock): NativeSourceToken {
+    if (this.nativeProjection.has(block.key)) return block.sourceToken
+    return this.nativeSourceTokens.get(block.key) ?? block.sourceToken
+  }
+
+  private indexNativeCandidates(): void {
+    if (!this.nativeTailEnabled) return
+    this.nativeBlocks = this.blocks.flatMap(block => this.nativeProjection.get(block.key) ?? [block])
+    this.nativeCandidates.clear()
+    this.nativeIndexes.clear()
+    for (const [index, block] of this.nativeBlocks.entries()) {
+      internals.nativeSnapshotBlocksChecked++
+      this.nativeIndexes.set(block.key, index)
+      const token = this.nativeToken(block)
+      const skipped = this.nativeSkipped.get(block.key)
+      if (skipped !== undefined && sameStructuralToken(skipped, token)) continue
+      if (!this.nativeHistory.isCommitted(block.key, token)) this.nativeCandidates.add(index)
+    }
+  }
+
+  /** One bounded output batch; receipts become committed only after sink success. */
+  takeNativeHistoryBatch(): { lines: readonly string[]; acknowledge(): void } | undefined {
+    const batch = this.nativeBatch
+    if (!batch || this.nativeBatchInFlight) return undefined
+    this.nativeBatchInFlight = true
+    const lines = batch.lines.slice(batch.offset, batch.offset + 256)
+    const offset = batch.offset
+    let acknowledged = false
+    return { lines, acknowledge: () => {
+      if (acknowledged) return
+      acknowledged = true
+      for (let i = 0; i < batch.receipts.length; i++) {
+        const start = i === 0 ? 0 : batch.ends[i - 1]!
+        const delivered = Math.max(0, Math.min(offset + lines.length, batch.ends[i]!) - Math.max(offset, start))
+        this.nativeHistory.deliver(batch.receipts[i]!, delivered)
+      }
+      if (this.nativeBatch !== batch) return
+      batch.offset += lines.length
+      this.nativeBatchInFlight = false
+      if (batch.offset >= batch.lines.length) {
+        for (const receipt of batch.receipts) {
+          this.nativeHistory.acknowledge(receipt)
+          if (receipt.settled) this.nativeCodeStreams.delete(receipt.key)
+          const index = this.nativeIndexes.get(receipt.key)
+          const block = index === undefined ? undefined : this.nativeBlocks[index]
+          if (block && this.nativeHistory.isCommitted(block.key, this.nativeToken(block))) this.nativeCandidates.delete(index!)
+        }
+        this.nativeBatch = undefined
+      }
+      this.requestRender()
+    } }
+  }
+
+  private renderNativeTail(width: number): string[] {
+    if (this.nativeHistoryPaused) return []
+    const inset = width >= 12 ? 2 : 0
+    const contentWidth = Math.max(1, width - inset * 2)
+    const present = (lines: readonly string[]): string[] => lines.map(line => line === '' ? '' : ' '.repeat(inset) + line)
+    const renderWhole = (index: number, block: TranscriptBlock): string[] => {
+      const rendered = this.renderBlock(index, contentWidth, block)
+      return present(rendered.lines.map((line, row) => {
+        const projection = rendered.projections[row]
+        return projection?.text ? truncateToWidth(line, projection.displayStartCell + visibleWidth(projection.text), '', false) : line
+      }))
+    }
+    const tail: string[] = []
+    const history: string[] = this.nativeBatch === undefined ? this.nativeNotices.splice(0, 256).flatMap(line => wrapTextWithAnsi(line, width)) : []
+    const receipts: NativeReceipt[] = []
+    const ends: number[] = []
+    let canCommit = this.nativeBatch === undefined
+    let historyBudgetReached = this.nativeBatch !== undefined
+    for (const index of this.nativeCandidates) {
+      const block = this.nativeBlocks[index]!
+      const dynamic = block.metadata.dynamic && !this.nativeClosing
+      const pending = this.nativeHistory.pendingFor(block.key)
+      if (pending?.settled || (this.nativeBatch && !dynamic)) continue
+      if (historyBudgetReached && !dynamic) continue
+      internals.nativeTailBlocksVisited++
+      const token = this.nativeToken(block)
+      const previous = pending ?? this.nativeHistory.get(block.key)
+      const only = block.rows.length === 1 && block.rows[0]?.format === 'markdown' ? block.rows[0] : undefined
+      const source = only?.text
+      const prefixMatches = previous?.source !== undefined && source !== undefined && source.startsWith(previous.source)
+      const from = prefixMatches ? previous.to : 0
+      const correction = (previous !== undefined && !prefixMatches) || this.nativeSkipped.has(block.key)
+        || (pending === undefined && this.nativeHistory.deliveredFor(block.key) !== undefined)
+      const text = source?.slice(from)
+      const fence = source === undefined ? undefined : fencedCodeRange(source)
+      // The legacy partial placeholder has no durable node identity. Wait for
+      // its authoritative node rather than guessing a cross-key deduplication.
+      const stable = (block.key === '__partial__' && dynamic) || text === undefined ? 0 : !dynamic ? text.length
+        : fence && from < (fence.closeEnd ?? Number.POSITIVE_INFINITY) ? Math.max(0, fence.stableEnd - from)
+        : stableParagraphEnd(text)
+      const stableTo = from + stable
+      // A code block is prepared in source-line batches, not fully highlighted
+      // before the first 256-row output page can be delivered.
+      let to = stableTo
+      if (fence && from < fence.bodyEnd) {
+        let boundary = Math.max(from, fence.bodyStart)
+        for (let count = 0; count < 128 && boundary < stableTo; count++) {
+          const next = source!.indexOf('\n', boundary)
+          if (next < 0 || next >= stableTo) { boundary = stableTo; break }
+          boundary = next + 1
+        }
+        to = Math.min(to, boundary)
+      }
+      const renderText = (value: string): string[] => {
+        const lines = new Markdown(escapeTerminalText(value), 0, 0, markdownTheme).renderUnpadded(contentWidth)
+        return present(lines)
+      }
+      const renderRange = (start: number, end: number, commitCode = false): string[] => {
+        if (!source || !fence) return renderText(source?.slice(start, end) ?? '')
+        const lines: string[] = []
+        const bodyEnd = Math.min(end, fence.bodyEnd)
+        const bodyFrom = Math.max(start, fence.bodyStart)
+        if (bodyEnd > bodyFrom) {
+          const context = `${canvasStyleRevision()}:${fence.language}:${fence.bodyStart}`
+          let prepared = this.nativeCodeStreams.get(block.key)
+          if (!prepared || prepared.context !== context || prepared.offset > bodyFrom || (correction && start === from)) {
+            prepared = { offset: fence.bodyStart, context, stream: createCodeStream(fence.language) }
+            this.nativeCodeStreams.set(block.key, prepared)
+          }
+          if (prepared.offset < bodyFrom) {
+            // Source revision/theme reconstruction is explicit one-off work.
+            prepared.stream.append(escapeTerminalText(source.slice(prepared.offset, bodyFrom)).replace(/\t/gu, '   '))
+            prepared.offset = bodyFrom
+          }
+          const code = escapeTerminalText(source.slice(bodyFrom, bodyEnd)).replace(/\t/gu, '   ')
+          const complete = commitCode && code.endsWith('\n')
+          const highlighted = complete ? prepared.stream.append(code) : prepared.stream.preview(code)
+          if (complete) prepared.offset = bodyEnd
+          const indent = markdownTheme.codeBlockIndent ?? '  '
+          const codeWidth = Math.max(1, contentWidth - visibleWidth(indent))
+          for (const line of highlighted) {
+            for (const wrapped of wrapTextWithAnsi(line, codeWidth)) {
+              lines.push(indent + markdownTheme.codeBlock(wrapped))
+            }
+          }
+        }
+        const result = present(lines)
+        if (fence.closeEnd !== undefined && end > fence.closeEnd) {
+          if (start < fence.closeEnd) result.push('')
+          result.push(...renderText(source.slice(Math.max(start, fence.closeEnd), end)))
+        }
+        return result
+      }
+      if (canCommit && (!dynamic || stable > 0)) {
+        if (correction) history.push(...wrapTextWithAnsi(color.muted(ui(`── 更新 · ${escapeTerminalText(block.key)} ──`, `── Update · ${escapeTerminalText(block.key)} ──`)), width))
+        if (source !== undefined) {
+          if (from === 0 && index > 0 && only?.gapBefore) history.push('')
+          history.push(...renderRange(from, to, true))
+          if (dynamic && !fence) history.push('')
+        } else history.push(...renderWhole(index, block))
+        receipts.push(this.nativeHistory.reserve(block.key, token, from, to,
+          source?.slice(0, to), !dynamic && to === stableTo))
+        ends.push(history.length)
+        if (source !== undefined && to === stableTo && stableTo < source.length) tail.push(...renderRange(stableTo, source.length))
+        if (dynamic || to < stableTo || history.length >= 256) canCommit = false
+        if (to < stableTo || history.length >= 256) historyBudgetReached = true
+      } else {
+        canCommit = false
+        if (source !== undefined && from > 0) {
+          if (!fence || from >= fence.stableEnd) tail.push(...renderRange(from, source.length))
+        }
+        else tail.push(...renderWhole(index, block))
+      }
+    }
+    if (receipts.length || history.length) {
+      internals.nativeHistoryLinesPrepared += history.length
+      this.nativeBatch = { lines: history, receipts, ends, offset: 0 }
+    }
+    this.scrollOffset = 0
+    this.lastScrollbar = undefined
+    this.lastViewportMaps = []
+    this.lastPointerControls = []
+    return tail
+  }
   private readonly nativeFrozenBlocks = new Map<string, TranscriptBlockLines>()
   private readonly safeRenderedLines = new StringTransformCache(escapeTerminalText)
   private readonly nativeInsetLines = new WeakMap<TranscriptBlockLines, { inset: number; lines: string[] }>()
@@ -1969,6 +2215,9 @@ export class Transcript implements Component, Focusable {
     this.snapshot = snapshot
     const sessionId = String(snapshot.sessionId)
     if (sessionId !== this.sessionId) {
+      this.nativeSourceTokens.clear()
+      this.nativeProjection.clear()
+      this.resetNativeHistory()
       this.imageGeneration += 1
       this.pendingImages.clear()
       this.imageComponents.clear()
@@ -2017,6 +2266,34 @@ export class Transcript implements Component, Focusable {
       const node = snapshot.chat.nodes.get(key)
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
+    if (this.nativeTailEnabled) {
+      const order = visibleNodes.map(node => node.key)
+      const current = new Set(order)
+      const previous = new Set(this.nativeSourceOrder)
+      const removed = this.nativeSourceOrder.filter(key => !current.has(key))
+      const oldCommon = this.nativeSourceOrder.filter(key => current.has(key))
+      const newCommon = order.filter(key => previous.has(key))
+      if (!this.nativeHistoryPaused) {
+        for (const key of removed) this.nativeNotices.push(color.muted(ui(
+          `── 来源已移除或隐藏 · ${escapeTerminalText(key)}；/transcript replay 查看当前历史 ──`,
+          `── Source removed or hidden · ${escapeTerminalText(key)}; /transcript replay for current history ──`)))
+        if (oldCommon.some((key, index) => key !== newCommon[index])) this.nativeNotices.push(color.muted(ui(
+          '── 历史顺序已更新；/transcript replay 查看当前顺序 ──',
+          '── History order updated; /transcript replay for current order ──')))
+        for (const node of visibleNodes) {
+          const count = assistantStepData(node.data)?.blocks.length ?? 0
+          if (this.nativeRemoved.has(node.key) || count < (this.nativePartCounts.get(node.key) ?? 0)) this.nativeNotices.push(color.muted(ui(
+            `── 来源结构已更新 · ${escapeTerminalText(node.key)}；/transcript replay 查看当前内容 ──`,
+            `── Source structure updated · ${escapeTerminalText(node.key)}; /transcript replay for current content ──`)))
+        }
+      }
+      for (const key of removed) { this.nativeSourceTokens.delete(key); this.nativeProjection.delete(key); this.nativeRemoved.add(key); this.nativePartCounts.delete(key) }
+      for (const node of visibleNodes) {
+        this.nativeRemoved.delete(node.key)
+        this.nativePartCounts.set(node.key, assistantStepData(node.data)?.blocks.length ?? 0)
+      }
+      this.nativeSourceOrder = order
+    }
     this.reasoningStates.clear()
     for (const node of visibleNodes) {
       const step = assistantStepData(node.data)
@@ -2071,10 +2348,44 @@ export class Transcript implements Component, Focusable {
       }
     }
     for (const node of visibleNodes) {
+      const step = assistantStepData(node.data)
+      const fingerprint = nodeFingerprint(node, preferences)
+      const reusableProjection = this.nativeProjection.has(node.key)
+        && sameStructuralToken(this.nodeCache.get(node.key)?.sourceToken ?? '', fingerprint)
+      if (!(this.nativeTailEnabled && step && step.blocks.length > 1)) this.nativeProjection.delete(node.key)
+      if (this.nativeTailEnabled && step && step.blocks.length > 1 && !reusableProjection) {
+        const answer = step.blocks.some(part => part.kind === 'text' && part.text !== '')
+        // A pulsing reasoning header stays mutable until answer output starts.
+        // Once settled, each raw AssistantBlock has an independent source range.
+        if (answer || step.status !== 'running') {
+          const units: TranscriptBlock[] = []
+          const expanded = reasoningExpanded(preferences, node.key, false)
+          const add = (key: string, rows: TranscriptRow[], value: unknown, dynamic: boolean): void => {
+            if (!rows.length) return
+            units.push({ key, rows, components: rows.map(row => this.component(row)),
+              sourceToken: structuralToken(value), linesByWidth: new Map(),
+              metadata: transcriptBlockMetadata(rows, dynamic), dirty: false })
+          }
+          if (step.blocks.some(part => part.kind === 'reasoning' && part.text !== '')) {
+            add(`${node.key}/header`, [reasoningHeaderRow(node.key, expanded)], 'reasoning-header', false)
+          }
+          for (const [partIndex, part] of step.blocks.entries()) {
+            if (part.kind === 'tool-call') continue
+            const dynamic = step.status === 'running' && partIndex === step.blocks.length - 1
+            add(partIndex === 0 ? node.key : `${node.key}/source/${partIndex}`, assistantBlockRows(part, preferences, false, { key: node.key, expanded }), { part, dynamic }, dynamic)
+          }
+          if (step.status === 'interrupted') add(`${node.key}/stopped`, [{ format: 'plain', text: color.warning(ui('已停止', 'Stopped')) }], 'interrupted', false)
+          if (units[0]) units[0].rows[0] = { ...units[0].rows[0]!, gapBefore: true }
+          this.nativeProjection.set(node.key, units)
+        }
+      }
       internals.fingerprintsComputed += 1
+      if (this.nativeTailEnabled) this.nativeSourceTokens.set(node.key, structuralToken({
+        kind: node.kind, data: node.data, deliverables: deliverablesFingerprint(node),
+      }))
       take(
         node.key,
-        nodeFingerprint(node, preferences),
+        fingerprint,
         () => chatNodeRows(node, preferences),
         assistantStepData(node.data)?.status === 'running',
       )
@@ -2224,6 +2535,7 @@ export class Transcript implements Component, Focusable {
    */
   refreshPresentation(): void {
     this.safeRenderedLines.clear()
+    this.nativeCodeStreams.clear()
     const scrollOffset = this.scrollOffset
     const turnCursor = this.turnCursor
     const viewportAnchor = this.viewportAnchor
@@ -2274,8 +2586,8 @@ export class Transcript implements Component, Focusable {
     this.syncHeightIndexCounters()
   }
 
-  private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
-    const block = this.blocks[blockIndex]
+  private renderBlock(blockIndex: number, contentWidth: number, projected?: TranscriptBlock): TranscriptBlockLines {
+    const block = projected ?? this.blocks[blockIndex]
     if (block === undefined) return { lines: [], projections: [], borderLines: [], hardBreaks: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
     const cacheKey = (blockIndex === 0 ? -contentWidth : contentWidth) + (this.nativeMode ? 1_000_000 : 0)
@@ -2700,6 +3012,7 @@ export class Transcript implements Component, Focusable {
   }
 
   render(width: number): string[] {
+    if (this.nativeTailEnabled && this.nativeMode && (!this.emptyState || this.nativeNotices.length || this.nativeBatch)) return this.renderNativeTail(width)
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
     this.heightIndex.reconcile(
@@ -3183,6 +3496,7 @@ export class Transcript implements Component, Focusable {
 
   private commit(blocks: readonly TranscriptBlock[]): void {
     this.blocks = blocks
+    this.indexNativeCandidates()
     if (this.pendingOlderAnchor !== undefined
       && blocks.some(block => block.key === this.pendingOlderAnchor?.blockKey)) {
       this.viewportAnchor = { ...this.pendingOlderAnchor, followLatest: false }

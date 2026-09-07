@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   finalizeHitMap,
+  nativePresentedHitMap,
   HitMapBuilder,
   hitTest,
   OVERLAY_CAPTURE_Z_BAND,
@@ -14,6 +15,14 @@ const geometry: TuiFrameGeometry = {
   rootSliceOffset: 0,
   overlays: [{ row: 4, col: 10, width: 40, height: 10, zOrder: 1, capturing: true }],
 }
+
+it('moves native frame hits to the delivered tail but keeps the overlay viewport blocker fixed', () => {
+  const map = finalizeHitMap(new HitMapBuilder(1), geometry, { overlayId: 'menu' })
+  const shown = nativePresentedHitMap(map, 5)
+  expect(shown.regions.find(region => region.id.endsWith(':body'))?.rect.row).toBe(9)
+  expect(shown.regions.find(region => region.id.endsWith(':blocker'))?.rect.row).toBe(0)
+  expect(map.regions.find(region => region.id.endsWith(':body'))?.rect.row).toBe(4)
+})
 
 function builder(generation = 1): HitMapBuilder {
   return new HitMapBuilder(generation)
