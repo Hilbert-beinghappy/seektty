@@ -1,5 +1,9 @@
 # Native history / active tail candidate (#197)
 
+For the remaining work, evidence, open risks and an adaptable handoff guide, see
+[the follow-up plan](plans/issue-197-follow-up.md). That document is planning only,
+not an instruction to start implementation or a declaration of completion.
+
 This is an opt-in architecture candidate based on `ced1d6d` (includes #198 and
 #199). It is not a declaration that #197 is complete. The existing renderer
 remains the package default; `SEEKTTY_NATIVE_TAIL=1` enables the candidate for
