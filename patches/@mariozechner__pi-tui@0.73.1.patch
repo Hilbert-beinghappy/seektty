@@ -837,7 +837,7 @@ index 5a8780c8b2e97f5d58a239c11a6c9aa6e1a26391..73a9e73bd15bdb38478c2661ca1b463f
          const visualLength = visibleWidth(textWithCursor);
          const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
 diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
-index e836b2e5f739a19864e166905c4dc66d7446313a..795c7ff7dc8b1abfad2d3ad1e626f26543900f6a 100644
+index e836b2e5f739a19864e166905c4dc66d7446313a..c85daf27e18600f78da6103c61b0b0ac9aac3d6f 100644
 --- a/dist/components/markdown.d.ts
 +++ b/dist/components/markdown.d.ts
 @@ -22,6 +22,8 @@ export interface DefaultTextStyle {
@@ -849,7 +849,7 @@ index e836b2e5f739a19864e166905c4dc66d7446313a..795c7ff7dc8b1abfad2d3ad1e626f265
      heading: (text: string) => string;
      link: (text: string) => string;
      linkUrl: (text: string) => string;
-@@ -40,6 +42,15 @@ export interface MarkdownTheme {
+@@ -40,7 +42,18 @@ export interface MarkdownTheme {
      /** Prefix applied to each rendered code block line (default: "  ") */
      codeBlockIndent?: string;
  }
@@ -863,9 +863,12 @@ index e836b2e5f739a19864e166905c4dc66d7446313a..795c7ff7dc8b1abfad2d3ad1e626f265
 +    readonly joinerAfter: string;
 +}
  export declare class Markdown implements Component {
++    /** SeekTTY native history adapter, pi-tui 0.73.1 only; retains source spaces. */
++    renderUnpadded(width: number): string[];
      private text;
      private paddingX;
-@@ -50,9 +61,11 @@ export declare class Markdown implements Component {
+     private paddingY;
+@@ -50,9 +63,11 @@ export declare class Markdown implements Component {
      private cachedText?;
      private cachedWidth?;
      private cachedLines?;
@@ -878,7 +881,7 @@ index e836b2e5f739a19864e166905c4dc66d7446313a..795c7ff7dc8b1abfad2d3ad1e626f265
      /**
       * Apply default text style to a string.
 diff --git a/dist/components/markdown.js b/dist/components/markdown.js
-index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f5a972cc6 100644
+index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..02f047c0eff3f54d99d9b683466085f4bafa61d9 100644
 --- a/dist/components/markdown.js
 +++ b/dist/components/markdown.js
 @@ -1,6 +1,124 @@
@@ -900,7 +903,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
 +}
  import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.js";
 -import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.js";
-+import { applyBackgroundToLine, extractAnsiCode, visibleWidth, wrapTextWithAnsi, wrapTextWithAnsiDetailed, } from "../utils.js";
++import { applyBackgroundToLine, extractAnsiCode, truncateToWidth, visibleWidth, wrapTextWithAnsi, wrapTextWithAnsiDetailed, } from "../utils.js";
 +const COPY_START = "\x1b_seektty-copy:start\x07";
 +const COPY_END = "\x1b_seektty-copy:end\x07";
 +const COPY_SKIP = "\x1b_seektty-copy:skip\x07";
@@ -1007,10 +1010,19 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
  const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
  class StrictStrikethroughTokenizer extends Tokenizer {
      del(src) {
-@@ -22,6 +140,14 @@ markdownParser.setOptions({
+@@ -22,6 +140,23 @@ markdownParser.setOptions({
      tokenizer: new StrictStrikethroughTokenizer(),
  });
  export class Markdown {
++    // SeekTTY native history, pi-tui 0.73.1 only. Use the renderer's source
++    // projection to remove display padding while retaining source whitespace.
++    renderUnpadded(width) {
++        const lines = this.render(width);
++        return lines.map((line, index) => {
++            const source = this.cachedSelectionLines?.[index];
++            return source ? truncateToWidth(line, source.displayStartCell + visibleWidth(source.text), "", false) : line;
++        });
++    }
 +    tokenCache = [];
 +    nextTokenCache;
 +    tokenCursor = 0;
@@ -1022,7 +1034,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
      text;
      paddingX; // Left/right padding
      paddingY; // Top/bottom padding
-@@ -32,6 +158,7 @@ export class Markdown {
+@@ -32,6 +167,7 @@ export class Markdown {
      cachedText;
      cachedWidth;
      cachedLines;
@@ -1030,7 +1042,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
      constructor(text, paddingX, paddingY, theme, defaultTextStyle) {
          this.text = text;
          this.paddingX = paddingX;
-@@ -41,12 +168,28 @@ export class Markdown {
+@@ -41,12 +177,28 @@ export class Markdown {
      }
      setText(text) {
          this.text = text;
@@ -1059,7 +1071,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
      }
      render(width) {
          // Check cache
-@@ -55,6 +198,10 @@ export class Markdown {
+@@ -55,6 +207,10 @@ export class Markdown {
          }
          // Calculate available width for content (subtract horizontal padding)
          const contentWidth = Math.max(1, width - this.paddingX * 2);
@@ -1070,7 +1082,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
          // Don't render anything if there's no actual text
          if (!this.text || this.text.trim() === "") {
              const result = [];
-@@ -62,6 +209,7 @@ export class Markdown {
+@@ -62,6 +218,7 @@ export class Markdown {
              this.cachedText = this.text;
              this.cachedWidth = width;
              this.cachedLines = result;
@@ -1078,7 +1090,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
              return result;
          }
          // Replace tabs with 3 spaces for consistent rendering
-@@ -70,28 +218,60 @@ export class Markdown {
+@@ -70,28 +227,60 @@ export class Markdown {
          const tokens = markdownParser.lexer(normalizedText);
          // Convert tokens to styled terminal output
          const renderedLines = [];
@@ -1142,7 +1154,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
              if (isImageLine(line)) {
                  contentLines.push(line);
                  continue;
-@@ -107,6 +287,10 @@ export class Markdown {
+@@ -107,6 +296,10 @@ export class Markdown {
                  contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
              }
          }
@@ -1153,7 +1165,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
          // Add top/bottom padding (empty lines)
          const emptyLine = " ".repeat(width);
          const emptyLines = [];
-@@ -116,10 +300,17 @@ export class Markdown {
+@@ -116,10 +309,17 @@ export class Markdown {
          }
          // Combine top padding, content, and bottom padding
          const result = [...emptyLines, ...contentLines, ...emptyLines];
@@ -1171,7 +1183,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
          return result.length > 0 ? result : [""];
      }
      /**
-@@ -193,6 +384,21 @@ export class Markdown {
+@@ -193,6 +393,21 @@ export class Markdown {
          };
      }
      renderToken(token, width, nextTokenType, styleContext) {
@@ -1193,7 +1205,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
          const lines = [];
          switch (token.type) {
              case "heading": {
-@@ -231,28 +437,35 @@ export class Markdown {
+@@ -231,28 +446,35 @@ export class Markdown {
              }
              case "code": {
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -1234,7 +1246,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
                  lines.push(...listLines);
                  // Don't add spacing after lists if a space token follows
                  // (the space token will handle it)
-@@ -295,9 +508,11 @@ export class Markdown {
+@@ -295,9 +517,11 @@ export class Markdown {
                  }
                  for (const quoteLine of renderedQuoteLines) {
                      const styledLine = applyQuoteStyle(quoteLine);
@@ -1248,7 +1260,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
                      }
                  }
                  if (nextTokenType && nextTokenType !== "space") {
-@@ -306,7 +521,7 @@ export class Markdown {
+@@ -306,7 +530,7 @@ export class Markdown {
                  break;
              }
              case "hr":
@@ -1257,7 +1269,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
                  if (nextTokenType && nextTokenType !== "space") {
                      lines.push(""); // Add spacing after horizontal rules (unless space token follows)
                  }
-@@ -417,7 +632,7 @@ export class Markdown {
+@@ -417,7 +641,7 @@ export class Markdown {
      /**
       * Render a list with proper nesting support
       */
@@ -1266,7 +1278,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
          const lines = [];
          const indent = "  ".repeat(depth);
          // Use the list's start property (defaults to 1 for ordered lists)
-@@ -426,7 +641,8 @@ export class Markdown {
+@@ -426,7 +650,8 @@ export class Markdown {
              const item = token.items[i];
              const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
              // Process item tokens to handle nested lists
@@ -1276,7 +1288,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
              if (itemLines.length > 0) {
                  // First line - check if it's a nested list
                  // A nested list will start with indent (spaces) followed by cyan bullet
-@@ -449,8 +665,8 @@ export class Markdown {
+@@ -449,8 +674,8 @@ export class Markdown {
                          lines.push(line);
                      }
                      else {
@@ -1287,7 +1299,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
                      }
                  }
              }
-@@ -464,13 +680,13 @@ export class Markdown {
+@@ -464,13 +689,13 @@ export class Markdown {
       * Render list item tokens, handling nested lists
       * Returns lines WITHOUT the parent indent (renderList will add it)
       */
@@ -1303,7 +1315,7 @@ index 7dc27474f3e6e61be59d448f40c0a4e6b249e2b8..bf27155e596a97216942ae10bd4ef12f
                  lines.push(...nestedLines);
              }
              else if (token.type === "text") {
-@@ -488,20 +704,27 @@ export class Markdown {
+@@ -488,20 +713,27 @@ export class Markdown {
              else if (token.type === "code") {
                  // Code block in list item
                  const indent = this.theme.codeBlockIndent ?? "  ";
@@ -1910,7 +1922,7 @@ index 8394d461feed1287deba13443c7afe79ff45c151..68c11704d39bf661fa797fc622e55c93
      private handleInput;
      private consumeCellSizeResponse;
 diff --git a/dist/tui.js b/dist/tui.js
-index b521ceb326eb8a25fc9ebc3feee4d39708296065..4615cd441d19eb16350744014a33ad17a107fe48 100644
+index b521ceb326eb8a25fc9ebc3feee4d39708296065..801115e5f6c70854904070b534f2e3629300b4f1 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
 @@ -5,11 +5,20 @@ import * as fs from "node:fs";

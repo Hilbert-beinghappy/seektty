@@ -112,7 +112,7 @@ import {
 } from './mouse-activation.ts'
 import { ContextMenuController, mouseContextActions } from './mouse-context-menu.ts'
 import type { ContextActionNode, ContextTarget } from './context-actions.ts'
-import { emptyHitMap, finalizeHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
+import { emptyHitMap, finalizeHitMap, nativePresentedHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
 import {
   autocompleteTargetId,
   emptyFrameGeometry,
@@ -203,7 +203,15 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const delivered = outputSink(bytes)
     performanceProbe.markWrite(bytes, process.stdout.writableNeedDrain)
     await delivered
-  }, error => { stopTuiRenderingSync(); internals.reportCleanupError(error) }) : undefined
+  }, error => {
+    stopTuiRenderingSync()
+    // The stream may have accepted only the beginning of a synchronized frame.
+    // Restore protocols best-effort; never replay the uncertain body bytes.
+    nativeOutputActive = false
+    rawTerminal.__seekttyWrite = undefined
+    try { rawWrite('\x1b[?2026l\x1b[?25h'); rawTerminal.restoreProtocolsSync?.() } catch { /* failed sink */ }
+    internals.reportCleanupError(error)
+  }) : undefined
   const terminalInstrumentation = instrumentTerminalWrites(rawTerminal, performanceProbe, process.stdout)
   const terminal: Terminal & ManagedTerminal = nativeOutput ? new Proxy(rawTerminal, {
     get(target, property) {
@@ -219,7 +227,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     nativeOutputActive = nativeOutput !== undefined && enabled
     if (rawTerminal instanceof ProcessTerminal) {
       (rawTerminal as Terminal & ManagedTerminal).__seekttyWrite = nativeOutputActive
-        ? (bytes: string) => { nativeOutput!.control(bytes) } : undefined
+        ? (bytes: string) => { nativeOutput!.control(bytes, false) } : undefined
     }
   }
   const reportPerformance = (): void => {
@@ -432,7 +440,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       adoptSyntaxHighlighter(created, liveTheme, (ready) => {
         syntax = ready
         disposeConstructedSyntax = () => { ready.dispose() }
-        setCodeHighlighter((code, lang, background) => ready.highlight(code, lang, background))
+        setCodeHighlighter((code, lang, background) => ready.highlight(code, lang, background),
+          (lang, background) => ready.createStream(lang, background))
       })
       if (stopping !== undefined) {
         created.dispose()
@@ -475,15 +484,26 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     if (nativeOutput) {
       let writing = false
       let renderAgain = false
-      const historyCanvas = new CanvasLineCache()
+      const historyCanvas = new CanvasLineCache(false)
       terminal.__seekttyNativeFrame = (lines, cursor, width, height) => {
         if (writing) { renderAgain = true; return true }
         const batch = transcript.takeNativeHistoryBatch()
+        const frameHits = preparedNativeHits
+        const previousHits = hitMap
+        const epoch = nativeOutput.epoch()
         writing = true
         void nativeOutput.frame(historyCanvas.render(batch?.lines ?? [], width), lines, width, height, cursor).then(success => {
           writing = false
           if (!success) return
           batch?.acknowledge()
+          const presented = nativeOutput.presentedFrame()
+          if (terminal.columns !== width || terminal.rows !== height) {
+            nativeOutput.invalidateLayout()
+            hitMap = emptyHitMap(hitMap.generation + 1, terminal.columns, terminal.rows)
+            renderAgain = true
+          } else if (presented?.epoch === epoch && nativeOutput.epoch() === epoch && frameHits && hitMap === previousHits) {
+            hitMap = nativePresentedHitMap(frameHits, presented.tailRow)
+          }
           if (renderAgain && stopping === undefined) { renderAgain = false; requestSurfaceRender() }
         })
         return true
@@ -511,6 +531,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       hitMap = emptyHitMap(hitMap.generation + 1, terminal.columns, terminal.rows)
     })
     let hitMap = emptyHitMap(0, terminal.columns, terminal.rows)
+    let preparedNativeHits: typeof hitMap | undefined
     const freezeHitMap = (): void => {
       const resized = hitMap.terminalWidth !== terminal.columns || hitMap.terminalHeight !== terminal.rows
       const geometry = tuiFrameApi(tui).getLastFrameGeometry?.()
@@ -683,7 +704,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (clearHoverPresentation()) requestSurfaceRender()
       }
     }
-    tuiFrameApi(tui).onAfterRender = freezeHitMap
+    tuiFrameApi(tui).onAfterRender = () => {
+      if (!nativeOutputActive) { freezeHitMap(); return }
+      const displayed = hitMap
+      freezeHitMap()
+      preparedNativeHits = hitMap
+      hitMap = displayed
+    }
     mouseController = createMouseController({
       getHitMap: () => hitMap,
       getBehavior: () => liveBehavior.get(),
@@ -1011,7 +1038,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               await nativeOutput.drain()
               if (liveBehavior.get().mouseMode !== 'native') return
               transcript.finishNativeHistory()
-              const finalCanvas = new CanvasLineCache()
+              const finalCanvas = new CanvasLineCache(false)
               while (true) {
                 transcript.render(terminal.columns)
                 const batch = transcript.takeNativeHistoryBatch()
@@ -1130,15 +1157,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     ): Promise<'complete' | 'cancelled' | 'incomplete'> => {
       const target = active
       if (target === undefined) return 'complete'
-      let lastSize = -1
       while (active?.sessionId === target.sessionId) {
         if (signal?.aborted === true) return 'cancelled'
         const snapshot = target.session.getSnapshot()
         if (!snapshot.hasMore) return 'complete'
         const size = snapshot.chat.order.length
         report(size)
-        if (!snapshot.loadingOlder && size === lastSize) return 'incomplete'
-        lastSize = size
+        // Pages may contain only edits/control events. Only Harness hasMore is
+        // authoritative; unchanged visible node count does not mean exhaustion.
         if (!snapshot.loadingOlder) await target.session.loadOlder()
         else await new Promise<void>(resolve => setTimeout(resolve, 16))
         if (nativeOutput) await new Promise<void>(resolve => setImmediate(resolve))

@@ -124,6 +124,7 @@ let palette = runtimePalette(selectedTheme)
 export type CodeBackgroundPolicy = 'inherit' | 'explicit'
 
 let codeHighlighter: ((code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[]) | undefined
+let codeStreamFactory: ((lang: string | undefined, background: CodeBackgroundPolicy) => import('./syntax-highlighter.ts').CodeStream) | undefined
 
 function controlStringEnd(text: string, start: number): number {
   for (let index = start; index < text.length; index += 1) {
@@ -373,9 +374,19 @@ export function setTerminalCanvasBackground(color?: string): void { canvasRevisi
  */
 export function setCodeHighlighter(
   highlighter?: (code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[],
+  streamFactory?: (lang: string | undefined, background: CodeBackgroundPolicy) => import('./syntax-highlighter.ts').CodeStream,
 ): void {
   canvasRevision += 1
   codeHighlighter = highlighter
+  codeStreamFactory = streamFactory
+}
+
+export function createCodeStream(language?: string): import('./syntax-highlighter.ts').CodeStream {
+  const codeBackground = rendering.backgroundFill === 'theme' ? 'explicit' : 'inherit'
+  return codeStreamFactory?.(language, codeBackground) ?? {
+    append: code => highlightCodeLines(code, language).slice(0, -1),
+    preview: code => highlightCodeLines(code, language),
+  }
 }
 
 /**

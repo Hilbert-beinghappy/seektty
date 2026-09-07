@@ -4,9 +4,10 @@ import { StringTransformCache } from './string-transform-cache.ts'
 
 /** Exact memoization, bounded by both retained characters and entry count. */
 export class CanvasLineCache {
+  constructor(private readonly pad = true) {}
   private width = 0
   private readonly lines = new StringTransformCache(line => background.canvas(
-    `${line}${' '.repeat(Math.max(0, this.width - visibleWidth(line)))}`,
+    `${line}${this.pad ? ' '.repeat(Math.max(0, this.width - visibleWidth(line))) : '\x1b[K'}`,
   ))
   private context = ''
   private previousInput: string[] = []

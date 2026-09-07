@@ -1,8 +1,40 @@
 import { expect, it, vi } from 'vitest'
 import xterm from '@xterm/headless'
-import { TUI, type Terminal } from '@mariozechner/pi-tui'
+import { Markdown, TUI, type Terminal } from '@mariozechner/pi-tui'
+import { markdownTheme } from '../src/client/theme.ts'
+import { CanvasLineCache } from '../src/client/canvas-line-cache.ts'
 import { NativeOutput } from '../src/client/native-output.ts'
 import type { ManagedTerminal } from '../src/client/terminal-session.ts'
+
+it('leaves erased cells instead of display padding while preserving source code spaces', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const vt = new xterm.Terminal({ cols: 40, rows: 10, scrollback: 1000, allowProposedApi: true })
+  try {
+    const output = new NativeOutput(bytes => new Promise(resolve => { vt.write(bytes, resolve) }), error => { throw error })
+    const lines = new Markdown('```\n  SOURCE  \n```', 0, 0, markdownTheme).renderUnpadded(40)
+    await output.frame(new CanvasLineCache(false).render(lines, 40), ['DRAFT'], 40, 10, null)
+    const source = Array.from({ length: vt.buffer.active.length }, (_, i) => vt.buffer.active.getLine(i)!)
+      .find(line => line.translateToString(true).includes('SOURCE'))!
+    const start = source.translateToString(false).indexOf('SOURCE')
+    expect(source.getCell(start - 1)?.getChars()).toBe(' ')
+    expect(source.getCell(start + 6)?.getChars()).toBe(' ')
+    expect(source.getCell(start + 7)?.getChars()).toBe(' ')
+    expect(source.getCell(start + 8)?.getChars()).toBe('')
+  } finally { vt.dispose(); vi.unstubAllEnvs() }
+})
+
+it('preserves an independently appended control marker when the next frame has unchanged content', async () => {
+  const vt = new xterm.Terminal({ cols: 40, rows: 10, scrollback: 1000, allowProposedApi: true })
+  const output = new NativeOutput(bytes => new Promise(resolve => { vt.write(bytes, resolve) }), error => { throw error })
+  await output.frame(['HISTORY'], ['DRAFT'], 40, 10, { row: 0, col: 2 })
+  output.control('\r\nMARKER\r\n')
+  await output.drain()
+  await output.frame([], ['DRAFT'], 40, 10, { row: 0, col: 2 })
+  const lines = Array.from({ length: vt.buffer.active.length }, (_, i) => vt.buffer.active.getLine(i)!.translateToString(true))
+  expect(lines.filter(line => line === 'MARKER')).toHaveLength(1)
+  expect(vt.buffer.active.getLine(vt.buffer.active.baseY + vt.buffer.active.cursorY)!.translateToString(true)).toBe('DRAFT')
+  vt.dispose()
+})
 
 it('keeps committed screen/scrollback content once through tail updates, corrections and explicit replay', async () => {
   const vt = new xterm.Terminal({ cols: 40, rows: 10, scrollback: 10000, allowProposedApi: true })

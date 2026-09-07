@@ -19,7 +19,13 @@ async function run(count, candidate) {
     env: { ...process.env, SEEKTTY_PROBE_RESULT: resultPath, SEEKTTY_PROBE_LINES: String(count), SEEKTTY_NATIVE_TAIL: candidate ? '1' : '0', NO_COLOR: '1' },
   })
   let text = '', exited = false
-  child.onData(data => { text += data })
+  const markers = new Set()
+  const listeners = new Set()
+  child.onData(data => {
+    text = (text + data).slice(-4096)
+    for (const match of text.matchAll(/PROBE_READY|ECHO_\d{4}/g)) markers.add(match[0])
+    for (const notify of listeners) notify()
+  })
   child.onExit(() => { exited = true })
   const wait = async (predicate, limit = 30000) => {
     const deadline = Date.now() + limit
@@ -28,15 +34,23 @@ async function run(count, candidate) {
       await sleep(5)
     }
   }
+  const waitMarker = marker => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { listeners.delete(check); reject(new Error(`Missing ${marker}: ${text.slice(-1000)}`)) }, 30000)
+    const check = () => {
+      if (!markers.has(marker)) return
+      clearTimeout(timer); listeners.delete(check); resolve()
+    }
+    listeners.add(check); check()
+  })
   try {
-    await wait(() => text.includes('PROBE_READY'))
+    await waitMarker('PROBE_READY')
     await sleep(500)
     child.write('s')
     const echo = []
-    for (let i = 1; i <= 25; i++) {
+    for (let i = 1; i <= 75; i++) {
       const start = performance.now()
       child.write('p')
-      await wait(() => text.includes(`ECHO_${String(i).padStart(4, '0')}`))
+      await waitMarker(`ECHO_${String(i).padStart(4, '0')}`)
       echo.push(performance.now() - start)
       await sleep(30)
     }
@@ -44,8 +58,8 @@ async function run(count, candidate) {
     await wait(() => existsSync(resultPath))
     const result = JSON.parse(readFileSync(resultPath, 'utf8'))
     for (let i = 0; !exited && i < 100; i++) await sleep(10)
-    echo.sort((a,b) => a-b)
-    return { ...result, echoMs: { p50: echo[12], p95: echo[23], max: echo.at(-1) } }
+    const sorted = [...echo].sort((a,b) => a-b)
+    return { ...result, echoSamples: echo, echoMs: { p50: sorted[37], p95: sorted[71], max: sorted.at(-1) } }
   } finally { if (!exited) child.kill() }
 }
 for (let repeat = 0; repeat < repeats; repeat++) {

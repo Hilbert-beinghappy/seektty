@@ -4,7 +4,7 @@
 // DSH_BIN: official CLI shim; DSH_ENTRY: its lib/bin.js; SEEKTTY_SPEC: local tgz.
 import assert from 'node:assert/strict'
 import { spawn as spawnProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, watch } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -20,7 +20,21 @@ const installed = crossSpawn.sync(DSH_BIN, ['plugin', '--profile', 'tui', 'add',
   env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
 })
 assert.equal(installed.status, 0, installed.stderr)
-const settings = () => readFileSync(join(home, 'settings.yaml'), 'utf8')
+// Read after a filesystem notification, never in the 50ms assertion poll.
+// Polling an atomically replaced file can itself provoke Windows sharing errors.
+let savedSettings = ''
+let settingsTimer
+const readSettings = () => {
+  try { savedSettings = readFileSync(join(home, 'settings.yaml'), 'utf8') } catch { /* not created yet */ }
+}
+readSettings()
+const settingsWatcher = watch(home, (_event, filename) => {
+  if (String(filename) !== 'settings.yaml') return
+  clearTimeout(settingsTimer)
+  settingsTimer = setTimeout(readSettings, 50)
+})
+settingsWatcher.unref()
+const settings = () => savedSettings
 const saved = expected => {
   try { return Object.entries(expected).every(([key, value]) => new RegExp(`${key}: ['"]?${value}`, 'u').test(settings())) }
   catch { return false }

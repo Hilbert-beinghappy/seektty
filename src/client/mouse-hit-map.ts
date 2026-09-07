@@ -239,6 +239,13 @@ export function emptyHitMap(generation: number, width: number, height: number): 
   }
 }
 
+/** Translate the frozen root frame only after its native tail reaches the sink. */
+export function nativePresentedHitMap(snapshot: HitMapSnapshot, tailRow: number): HitMapSnapshot {
+  return { ...snapshot, regions: snapshot.regions.map(region =>
+    region.action.kind === 'overlay' && region.id.endsWith(':blocker') ? region
+      : { ...region, rect: { ...region.rect, row: region.rect.row + tailRow } }) }
+}
+
 export function emptyAction(): MouseAction {
   return EMPTY_ACTION
 }

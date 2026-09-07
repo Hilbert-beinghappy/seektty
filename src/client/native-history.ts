@@ -16,8 +16,16 @@ export class NativeHistory {
   private generation = 0
   private readonly committed = new Map<string, NativeReceipt>()
   private readonly pending = new Map<string, NativeReceipt>()
-  reset(): void { this.generation++; this.committed.clear(); this.pending.clear() }
+  private readonly delivered = new Map<string, { receipt: NativeReceipt; lines: number }>()
+  reset(): void { this.generation++; this.committed.clear(); this.pending.clear(); this.delivered.clear() }
   get(key: string): NativeReceipt | undefined { return this.committed.get(key) }
+  /** Partial physical delivery is not complete source-range coverage. */
+  deliveredFor(key: string): Readonly<{ receipt: NativeReceipt; lines: number }> | undefined { return this.delivered.get(key) }
+  deliver(receipt: NativeReceipt, lines: number): void {
+    if (this.pending.get(receipt.key) !== receipt || receipt.epoch !== this.generation || lines <= 0) return
+    const previous = this.delivered.get(receipt.key)
+    this.delivered.set(receipt.key, { receipt, lines: (previous?.receipt === receipt ? previous.lines : 0) + lines })
+  }
   isCommitted(key: string, token: NativeSourceToken): boolean {
     const entry = this.committed.get(key)
     return entry?.settled === true && sameStructuralToken(entry.token, token)
@@ -30,7 +38,7 @@ export class NativeHistory {
   }
   acknowledge(receipt: NativeReceipt): boolean {
     if (this.pending.get(receipt.key) !== receipt || receipt.epoch !== this.generation) return false
-    this.committed.set(receipt.key, receipt); this.pending.delete(receipt.key)
+    this.committed.set(receipt.key, receipt); this.pending.delete(receipt.key); this.delivered.delete(receipt.key)
     return true
   }
   busy(): boolean { return this.pending.size > 0 }

@@ -23,6 +23,109 @@ function snapshot(nodes: ChatConversationViewNode[], sessionId = 'fixture'): Con
 }
 afterEach(() => { vi.unstubAllEnvs() })
 
+it('publishes native geometry after delivery and rejects stale generation geometry', async () => {
+  let release!: () => void
+  const output = new NativeOutput(() => new Promise<void>(resolve => { release = resolve }), () => {})
+  const first = output.frame(['H'], ['DRAFT'], 40, 10, null)
+  await Promise.resolve()
+  expect(output.presentedFrame()).toBeUndefined()
+  release(); await first
+  expect(output.presentedFrame()).toMatchObject({ tailRow: 9, width: 40, height: 10 })
+  const second = output.frame([], ['CHANGED'], 40, 10, null)
+  await Promise.resolve()
+  output.reset()
+  release(); await second
+  expect(output.presentedFrame()).toBeUndefined()
+})
+
+it('explains source removal and reordering once, including deletion of all sources', () => {
+  const transcript = new Transcript(() => 24)
+  transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+  const a = node('a', 'FIRST'), b = node('b', 'SECOND')
+  const flush = () => {
+    transcript.render(80)
+    const batch = transcript.takeNativeHistoryBatch()
+    batch?.acknowledge()
+    return batch?.lines.join('\n') ?? ''
+  }
+  transcript.update(snapshot([a, b])); flush()
+  transcript.update(snapshot([b, a])); expect(flush()).toContain('/transcript replay')
+  expect(flush()).toBe('')
+  transcript.update(snapshot([])); expect(flush()).toContain('/transcript replay')
+  expect(flush()).toBe('')
+  transcript.dispose()
+})
+
+it('preserves code source trailing spaces without padding history to the terminal width', () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const transcript = new Transcript(() => 24)
+  transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+  transcript.update(snapshot([node('code', '```\n  SOURCE  \n```')]))
+  transcript.render(80)
+  const batch = transcript.takeNativeHistoryBatch()!
+  expect(batch.lines).toEqual(['      SOURCE  '])
+  transcript.dispose()
+})
+
+it('retains partial physical delivery after cancellation without claiming source coverage', () => {
+  const ledger = new NativeHistory()
+  const receipt = ledger.reserve('long', ['source'], 0, 10000, 'source', true)
+  ledger.deliver(receipt, 256)
+  ledger.discardPending()
+  expect(ledger.deliveredFor('long')).toEqual({ receipt, lines: 256 })
+  expect(ledger.get('long')).toBeUndefined()
+  expect(ledger.acknowledge(receipt)).toBe(false)
+  ledger.reset()
+  ledger.deliver(receipt, 256)
+  expect(ledger.deliveredFor('long')).toBeUndefined()
+})
+
+it('does not rescan history when a prepared batch is acknowledged', () => {
+  const transcript = new Transcript(() => 24)
+  transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+  transcript.update(snapshot([node('a', 'FIRST'), node('b', 'SECOND')]))
+  transcript.render(80)
+  const batch = transcript.takeNativeHistoryBatch()!
+  const scanned = internals.nativeSnapshotBlocksChecked
+  batch.acknowledge()
+  expect(internals.nativeSnapshotBlocksChecked).toBe(scanned)
+  transcript.dispose()
+})
+
+it('commits stable answer paragraphs from a mixed reasoning and text node before settled', () => {
+  const transcript = new Transcript(() => 24)
+  transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+  const mixed = { ...node('mixed', '', true), data: { status: 'running', turn: 1, step: 1, time: 1,
+    blocks: [{ kind: 'reasoning', text: 'Reasoning complete' }, { kind: 'text', text: 'FIRSTPARAGRAPH\n\nLIVESUFFIX' }] } } as ChatConversationViewNode
+  transcript.update(snapshot([mixed]))
+  const tail = transcript.render(80).join('\n')
+  const batch = transcript.takeNativeHistoryBatch()!
+  expect(batch.lines.join('\n')).toContain('FIRSTPARAGRAPH')
+  expect(tail).toContain('LIVESUFFIX')
+  batch.acknowledge()
+  expect(transcript.render(80).join('\n')).not.toContain('FIRSTPARAGRAPH')
+  transcript.dispose()
+})
+
+it('prepares a long code block in source batches and covers all lines once', () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const transcript = new Transcript(() => 24)
+  transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+  const source = Array.from({ length: 2000 }, (_, i) => `CODE_${i}`)
+  transcript.update(snapshot([node('long-code', '```ts\n' + source.join('\n') + '\n```')]))
+  const emitted: string[] = []
+  for (let i = 0; i < 30; i++) {
+    const before = internals.nativeHistoryLinesPrepared
+    transcript.render(80)
+    expect(internals.nativeHistoryLinesPrepared - before).toBeLessThanOrEqual(129)
+    const batch = transcript.takeNativeHistoryBatch()
+    if (!batch) break
+    emitted.push(...batch.lines); batch.acknowledge()
+  }
+  expect(emitted.map(line => line.trim())).toEqual(source)
+  transcript.dispose()
+})
+
 it('does not commit a pending or cancelled receipt; exact same-length edits remain visible', () => {
   const ledger = new NativeHistory()
   const receipt = ledger.reserve('a', ['abc'], 0, 3, 'abc', true)

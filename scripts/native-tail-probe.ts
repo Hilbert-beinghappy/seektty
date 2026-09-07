@@ -12,7 +12,7 @@ const candidate = process.env.SEEKTTY_NATIVE_TAIL === '1'
 const terminal = new ProcessTerminal() as ProcessTerminal & ManagedTerminal
 terminal.__seekttyManagedAlternateScreen = false
 const output = new NativeOutput(streamSink(process.stdout), error => { throw error })
-if (candidate) terminal.__seekttyWrite = bytes => { output.control(bytes) }
+if (candidate) terminal.__seekttyWrite = bytes => { output.control(bytes, false) }
 const tui = new TUI(terminal, false)
 const transcript = new Transcript(() => 24, () => tui.requestRender())
 transcript.setNativeMode(true); transcript.setNativeTailEnabled(candidate)

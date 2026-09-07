@@ -47,12 +47,15 @@ export class NativeOutput {
   private previousTail: string[] = []
   private tailRow = 0
   private previousCursor = ''
+  private presented: { epoch: number; width: number; height: number; tailRow: number } | undefined
   readonly metrics = { writes: 0, bytes: 0, cancelled: 0, frames: 0, historyLines: 0 }
 
   constructor(private readonly sink: NativeSink, private readonly onError: (error: Error) => void) {}
 
   epoch(): number { return this.generation }
-  reset(preserveViewport = false): void { this.generation++; if (!preserveViewport) this.anchor = false }
+  reset(preserveViewport = false): void { this.generation++; this.presented = undefined; if (!preserveViewport) this.anchor = false }
+  invalidateLayout(): void { this.anchor = false; this.presented = undefined }
+  presentedFrame(): Readonly<{ epoch: number; width: number; height: number; tailRow: number }> | undefined { return this.presented }
   drain(): Promise<void> { return this.chain.then(() => { if (this.failure) throw this.failure }) }
 
   enqueue(task: () => Promise<void>, generation?: number): Promise<boolean> {
@@ -64,6 +67,7 @@ export class NativeOutput {
     })
     this.chain = run.catch((error: unknown) => {
       this.failure = error instanceof Error ? error : new Error(String(error))
+      this.invalidateLayout()
       this.onError(this.failure)
     })
     return this.chain.then(() => accepted)
@@ -74,7 +78,13 @@ export class NativeOutput {
     this.metrics.writes++; this.metrics.bytes += Buffer.byteLength(bytes)
   }
 
-  control(bytes: string): void { void this.enqueue(() => this.write(bytes)) }
+  /** Unknown display writes may move the cursor; protocol-only callers opt out. */
+  control(bytes: string, affectsLayout = true): void {
+    void this.enqueue(async () => {
+      await this.write(bytes)
+      if (affectsLayout) this.invalidateLayout()
+    })
+  }
 
   frame(
     history: readonly string[], tail: readonly string[], width: number, height: number,
@@ -93,15 +103,19 @@ export class NativeOutput {
       const row = cursor === null ? height - 1 : tailRow + cursor.row - Math.max(0, tail.length - height)
       const cursorCode = cursor !== null && row >= 0 && row < height
         ? `\x1b[${row + 1};${Math.min(width, cursor.col + 1)}H\x1b[?25h` : '\x1b[?25l'
+      const publish = (): void => {
+        if (generation === this.generation) this.presented = { epoch: generation, width, height, tailRow }
+      }
       if (reusable && history.length === 0 && viewport.length === this.previousTail.length) {
         let changed = ''
         for (let i = 0; i < viewport.length; i++) {
           if (viewport[i] !== this.previousTail[i]) changed += `\x1b[${tailRow + i + 1};1H\x1b[2K${viewport[i]}`
         }
-        if (changed === '' && cursorCode === this.previousCursor) return
+        if (changed === '' && cursorCode === this.previousCursor) { publish(); return }
         await this.write('\x1b[?2026h' + changed + cursorCode + '\x1b[?2026l')
         this.previousTail = viewport; this.previousCursor = cursorCode
         this.metrics.frames++
+        publish()
         return
       }
       // Erase from the old tail, preserving committed rows above it. On unknown
@@ -118,6 +132,7 @@ export class NativeOutput {
       this.tailRow = tailRow
       this.previousTail = viewport; this.previousCursor = cursorCode
       this.metrics.frames++; this.metrics.historyLines += history.length
+      publish()
     }, generation)
   }
 }
