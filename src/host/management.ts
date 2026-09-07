@@ -115,6 +115,9 @@ const CustomThemeSchema = z.object({
   name: z.string().min(1).max(80).pattern(/^[^\u0000-\u001F\u007F-\u009F]+$/u).required(),
   tone: z.union(['dark', 'light']).required(),
   source: z.union(['manual', 'palette', 'vscode']).required(),
+  remoteSource: z.object({
+    url: z.string().max(2_048).pattern(/^https:\/\/[^\s#]+$/u),
+  }),
   colors: ThemeUiColorsSchema,
   syntax: SyntaxThemeColorsSchema,
   tokenColors: z.array(TextMateRuleSchema).max(MAX_TEXTMATE_RULES).default([]),

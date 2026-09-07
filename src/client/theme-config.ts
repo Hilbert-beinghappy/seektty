@@ -629,11 +629,30 @@ export function normalizeCustomTheme(value: unknown): TuiCustomTheme {
       `Custom theme source ${JSON.stringify(source)} is invalid`,
     ))
   }
+  let remoteSource: TuiCustomTheme['remoteSource']
+  if (record.remoteSource !== undefined) {
+    const remote = recordOf(record.remoteSource, 'customThemes[].remoteSource')
+    // Older Settings schema projections can materialize an omitted optional
+    // object as `{}`. Treat that exact legacy representation as absent.
+    if (Object.keys(remote).length !== 0) {
+      const url = stringOf(remote, 'url', 'customThemes[].remoteSource')
+      let parsed: URL
+      try { parsed = new URL(url) } catch {
+        throw new Error(ui('自定义主题远程来源 URL 无效', 'Custom theme remote source URL is invalid'))
+      }
+      if (url.length > 2_048 || parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '' || parsed.hash !== '') {
+        throw new Error(ui('自定义主题远程来源必须是不含凭据和片段的 HTTPS URL', 'Custom theme remote source must be an HTTPS URL without credentials or a fragment'))
+      }
+      if (source !== 'vscode') throw new Error(ui('只有 VS Code 导入主题可以保存远程来源', 'Only VS Code imported themes can keep a remote source'))
+      remoteSource = { url: parsed.href }
+    }
+  }
   return {
     id,
     name,
     tone,
     source,
+    ...(remoteSource === undefined ? {} : { remoteSource }),
     colors: colorRecord(record.colors, UI_COLOR_KEYS, 'customThemes[].colors') as unknown as TuiThemeUiColors,
     syntax: colorRecord(record.syntax, SYNTAX_COLOR_KEYS, 'customThemes[].syntax') as unknown as TuiSyntaxThemeColors,
     tokenColors: textMateRules(record.tokenColors),

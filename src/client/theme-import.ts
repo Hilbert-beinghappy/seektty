@@ -1,6 +1,8 @@
 /** VS Code JSON/JSONC theme loading and terminal-safe color mapping. */
 
 import { readFile, realpath } from 'node:fs/promises'
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,6 +28,8 @@ import { SYNTAX_ROLE_SCOPES } from './syntax-theme-rules.ts'
 const MAX_THEME_FILE_BYTES = 2 * 1024 * 1024
 const MAX_THEME_TOTAL_BYTES = 8 * 1024 * 1024
 const MAX_INCLUDE_DEPTH = 16
+const MAX_REMOTE_REDIRECTS = 3
+const REMOTE_TIMEOUT_MS = 10_000
 
 interface LoadedThemeRecord {
   readonly name?: string
@@ -163,6 +167,107 @@ export async function loadVsCodeThemeFile(input: string): Promise<LoadedVsCodeTh
   const fallback = filename.slice(0, Math.max(1, filename.length - extname(filename).length))
   const suggestedName = loaded.value.name?.trim() || fallback || 'VS Code Theme'
   return { ...loaded, suggestedName }
+}
+
+function remoteUrl(input: string): URL {
+  let url: URL
+  try { url = new URL(input.trim()) } catch {
+    throw new Error(ui('网络主题 URL 无效', 'The network theme URL is invalid'))
+  }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') {
+    throw new Error(ui('网络主题只支持不含凭据的 HTTPS URL', 'Network themes require an HTTPS URL without credentials'))
+  }
+  url.hash = ''
+  return url
+}
+
+function privateAddress(address: string): boolean {
+  if (isIP(address) === 4) {
+    const [a = -1, b = -1] = address.split('.').map(Number)
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168) || a >= 224
+  }
+  const value = address.toLowerCase()
+  return value === '::1' || value === '::' || value.startsWith('fc') || value.startsWith('fd')
+    || value.startsWith('fe8') || value.startsWith('fe9') || value.startsWith('fea') || value.startsWith('feb')
+}
+
+async function remoteText(root: URL, url: URL): Promise<string> {
+  let current = url
+  for (let redirects = 0; redirects <= MAX_REMOTE_REDIRECTS; redirects += 1) {
+    const addresses = await lookup(current.hostname, { all: true, verbatim: true })
+    if (addresses.some(entry => privateAddress(entry.address))) {
+      throw new Error(ui('网络主题地址不能指向本机或私有网络', 'Network theme URL cannot point to a local or private network'))
+    }
+    const response = await fetch(current, {
+      redirect: 'manual', signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
+      headers: { accept: 'application/json, application/jsonc, text/plain;q=0.9, */*;q=0.1' },
+    })
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location')
+      if (location === null || redirects === MAX_REMOTE_REDIRECTS) throw new Error(ui('网络主题重定向次数过多或缺少目标', 'The network theme redirected too many times or had no target'))
+      const next = remoteUrl(new URL(location, current).href)
+      if (next.origin !== root.origin) throw new Error(ui('网络主题重定向必须保持同源', 'Network theme redirects must stay on the same origin'))
+      current = next
+      continue
+    }
+    if (!response.ok) throw new Error(ui(`网络主题请求失败：HTTP ${String(response.status)}`, `Network theme request failed: HTTP ${String(response.status)}`))
+    const declared = Number(response.headers.get('content-length') ?? '')
+    if (Number.isFinite(declared) && declared > MAX_THEME_FILE_BYTES) throw new Error(ui('网络主题文件过大', 'Network theme file is too large'))
+    const reader = response.body?.getReader()
+    if (reader === undefined) {
+      const text = await response.text()
+      if (Buffer.byteLength(text) > MAX_THEME_FILE_BYTES) throw new Error(ui('网络主题文件过大', 'Network theme file is too large'))
+      return text
+    }
+    const chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      size += next.value.byteLength
+      if (size > MAX_THEME_FILE_BYTES) {
+        await reader.cancel()
+        throw new Error(ui('网络主题文件过大', 'Network theme file is too large'))
+      }
+      chunks.push(next.value)
+    }
+    const data = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.byteLength }
+    return new TextDecoder().decode(data)
+  }
+  throw new Error(ui('网络主题重定向失败', 'Network theme redirect failed'))
+}
+
+async function loadRemoteThemeRecord(
+  root: URL, url: URL, active: readonly string[], budget: { bytes: number },
+): Promise<{ readonly path: string; readonly value: LoadedThemeRecord }> {
+  const canonical = url.href
+  if (active.includes(canonical)) throw new Error(ui('VS Code 主题 include 存在循环', 'VS Code theme include cycle'))
+  if (active.length >= MAX_INCLUDE_DEPTH) throw new Error(ui(`VS Code 主题 include 超过 ${String(MAX_INCLUDE_DEPTH)} 层`, `VS Code theme include exceeds ${String(MAX_INCLUDE_DEPTH)} levels`))
+  const text = await remoteText(root, url)
+  budget.bytes += Buffer.byteLength(text)
+  if (budget.bytes > MAX_THEME_TOTAL_BYTES) throw new Error(ui('VS Code 主题 include 总大小超过限制', 'VS Code theme include total size exceeds the limit'))
+  const current = parseJsonc(text, canonical)
+  let base = EMPTY_THEME
+  if (current.include !== undefined) {
+    const include = typeof current.include === 'string' ? current.include.trim() : ''
+    if (include === '') throw new Error(ui(`${canonical}.include 必须是相对 HTTPS 路径`, `${canonical}.include must be a relative HTTPS path`))
+    const included = remoteUrl(new URL(include, url).href)
+    if (included.origin !== root.origin) throw new Error(ui(`${canonical}.include 必须保持同源`, `${canonical}.include must stay on the same origin`))
+    base = (await loadRemoteThemeRecord(root, included, [...active, canonical], budget)).value
+  }
+  return { path: canonical, value: mergeTheme(base, current, canonical) }
+}
+
+/** Load an HTTPS VS Code JSON/JSONC theme and recursively merge same-origin includes. */
+export async function loadVsCodeThemeUrl(input: string): Promise<LoadedVsCodeTheme> {
+  const root = remoteUrl(input)
+  const loaded = await loadRemoteThemeRecord(root, root, [], { bytes: 0 })
+  const filename = decodeURIComponent(root.pathname.split('/').pop() ?? '').replace(/\.jsonc?$/iu, '')
+  return { ...loaded, suggestedName: loaded.value.name?.trim() || filename || 'VS Code Theme' }
 }
 
 function safeColor(value: unknown, background: string, fallback: string): string {

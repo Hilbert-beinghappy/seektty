@@ -111,7 +111,8 @@ import {
   themeIdFromName,
   type ResolvedTuiTheme,
 } from './theme-config.ts'
-import { convertVsCodeTheme, loadVsCodeThemeFile } from './theme-import.ts'
+import { convertVsCodeTheme, loadVsCodeThemeFile, loadVsCodeThemeUrl } from './theme-import.ts'
+import { discoverVsCodeThemes, type DiscoveredVsCodeTheme } from './vscode-theme-discovery.ts'
 import { serializeThemeExport, themeForExport, writeThemeExport } from './theme-export.ts'
 import { resolveHarnessUserPath } from './workspace-path.ts'
 import {
@@ -321,6 +322,15 @@ function customThemeId(theme: TuiCustomTheme): TuiThemeId {
 
 function resolvedCustomTheme(theme: TuiCustomTheme): ResolvedTuiTheme {
   return { ...theme, id: customThemeId(theme), syntaxTone: theme.tone }
+}
+
+/** Name the persisted import route without changing the shared VS Code converter type. */
+function themeSourceLabel(theme: TuiCustomTheme): string {
+  if (theme.source === 'palette') return ui('颜色组生成', 'Generated from palette')
+  if (theme.source !== 'vscode') return ui('手动配色', 'Manual colors')
+  return theme.remoteSource === undefined
+    ? ui('本地 VS Code 导入', 'Local VS Code import')
+    : ui('网络 VS Code 导入', 'Network VS Code import')
 }
 
 function themePreviewText(theme: TuiCustomTheme, warnings: readonly string[]): string {
@@ -1639,9 +1649,12 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       case 'edit': await this.themeEdit(parsed.rest); return
       case 'palette': await this.themePalette(parsed.rest); return
       case 'import': await this.themeImport(parsed.rest); return
+      case 'import-url': await this.themeImportUrl(parsed.rest); return
+      case 'discover': await this.themeDiscover(); return
+      case 'update': await this.themeUpdate(parsed.rest); return
       case 'export': await this.themeExport(parsed.rest); return
       case 'delete': await this.themeDelete(parsed.rest); return
-      default: throw new Error(ui('用法：/theme [dark|light|colors|fill|sync|background|code|use|edit|palette|import|export|delete]', 'Usage: /theme [dark|light|colors|fill|sync|background|code|use|edit|palette|import|export|delete]'))
+      default: throw new Error(ui('用法：/theme [dark|light|colors|fill|sync|background|code|use|edit|palette|import|import-url|discover|update|export|delete]', 'Usage: /theme [dark|light|colors|fill|sync|background|code|use|edit|palette|import|import-url|discover|update|export|delete]'))
     }
   }
 
@@ -1695,6 +1708,8 @@ The directory, user files, and all session logs are kept; sessions become ungrou
 
   private async themeCenter(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
     const bridge = this.capabilities.managementBridge().settings
+    let discovered = new Map<string, { readonly theme: DiscoveredVsCodeTheme; readonly name: string }>()
+    let discoveryInitialized = false
     const readChoices = async (): Promise<OverlayChoice[]> => {
       const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE, { bypassCache: true }))
       const appearance = appearanceFromSettings(document)
@@ -1705,10 +1720,26 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         ...appearance.customThemes.map(theme => ({
           id: customThemeId(theme),
           label: theme.name,
-          description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${theme.source === 'palette' ? ui('颜色组生成', "Generate from palette") : theme.source === 'vscode' ? ui('VS Code 导入', "VS Code import") : ui('手动配色', "Manual colors")}`,
+          description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${themeSourceLabel(theme)}`,
           contextTarget: { kind: 'theme' as const, themeId: customThemeId(theme) },
         })),
       ]
+      if (!discoveryInitialized) {
+        discoveryInitialized = true
+        const found = await discoverVsCodeThemes()
+        const duplicateLabels = new Set(found.themes.filter(theme =>
+          found.themes.filter(candidate => candidate.label.toLowerCase() === theme.label.toLowerCase()).length > 1,
+        ).map(theme => theme.id))
+        discovered = new Map(found.themes.map(theme => {
+          const name = duplicateLabels.has(theme.id) ? `${theme.label} · ${theme.editorLabel}` : theme.label
+          return [`__discovered__:${theme.id}`, { theme, name }]
+        }))
+      }
+      choices.push(...[...discovered.entries()].map(([id, item]) => ({
+        id,
+        label: `${item.theme.editorLabel} · ${item.name}`,
+        description: `${item.theme.editorLabel} · ${item.theme.extensionId}${item.theme.extensionVersion === undefined ? '' : `@${item.theme.extensionVersion}`} · ${item.theme.relativeThemePath}`,
+      })))
       choices.sort((left, right) => Number(right.id === appearance.theme) - Number(left.id === appearance.theme))
       choices.push(
         ...RENDERING_KEYS.map(key => {
@@ -1723,7 +1754,9 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         },
         { id: '__edit__', label: ui('自定义颜色与代码高亮', "Custom colors and syntax highlighting"), description: ui('修改背景、文字和语法颜色', "Edit backgrounds, text, and syntax colors") },
         { id: '__palette__', label: ui('用颜色组合自动配置', "Generate automatically from a color palette"), description: ui('输入 3–16 个 HEX/RGB 颜色代码', "Enter 3–16 HEX/RGB colors") },
-        { id: '__import__', label: ui('导入 VS Code 主题', "Import VS Code theme"), description: ui('本地 JSON/JSONC · 同时应用到界面与代码', "Local JSON/JSONC · apply to interface and code") },
+        { id: '__import__', label: ui('导入本地 VS Code 主题', "Import local VS Code theme"), description: ui('JSON/JSONC · 支持相对 include', "JSON/JSONC · relative includes supported") },
+        { id: '__url__', label: ui('导入网络 VS Code 主题', "Import VS Code theme from URL"), description: ui('仅 HTTPS · 支持同源相对 include', "HTTPS only · same-origin relative includes") },
+        { id: '__update__', label: ui('更新网络主题', 'Update network theme'), description: ui('从导入时保存的 HTTPS 来源手动更新', 'Manually update from the HTTPS source saved on import') },
         { id: '__export__', label: ui('导出主题 JSON', "Export theme JSON"), description: ui('写出可分享的 SeekTTY 主题文件', "Write a shareable SeekTTY theme file") },
         { id: '__delete__', label: ui('删除主题', "Delete theme"), description: ui('管理命名自定义主题', "Manage named custom themes") },
       )
@@ -1749,7 +1782,16 @@ The directory, user files, and all session logs are kept; sessions become ungrou
             await this.themeRendering(key, '', navigation)
           }
           else if (selected.id === '__palette__') await this.themePalette('', navigation)
+          else if (selected.id.startsWith('__discovered__:')) {
+            const item = discovered.get(selected.id)
+            if (item === undefined) throw new Error(ui('已安装主题列表已刷新，请重新选择', 'Installed theme list refreshed; choose again'))
+            const document = appearanceSettings(await bridge.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
+            const identity = await this.themeIdentity(item.name, appearanceFromSettings(document), navigation)
+            if (identity !== undefined) await this.previewAndSaveTheme(document, { ...item.theme.theme, id: identity.id, name: identity.name }, undefined, 'both', navigation)
+          }
           else if (selected.id === '__import__') await this.themeImport('', navigation)
+          else if (selected.id === '__url__') await this.themeImportUrl('', navigation)
+          else if (selected.id === '__update__') await this.themeUpdate('', navigation)
           else if (selected.id === '__export__') await this.themeExport('', navigation)
           else if (selected.id === '__edit__') await this.themeEdit('', navigation)
           else if (selected.id === '__delete__') await this.themeDelete('', navigation)
@@ -1867,7 +1909,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           ...appearance.customThemes.map(theme => ({
             id: customThemeId(theme),
             label: `${currentMark(appearance.codeTheme === customThemeId(theme))}${theme.name}`,
-            description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${theme.source === 'vscode' ? ui('VS Code 导入', "VS Code import") : ui('自定义', "Custom")}`,
+            description: `${theme.tone === 'dark' ? ui('暗色', "Dark") : ui('亮色', "Light")} · ${themeSourceLabel(theme)}`,
           })),
         ],
         options: { width: 72, maxHeight: '90%', anchor: 'center', margin: 1 },
@@ -1986,6 +2028,88 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       'both',
       overlays,
     )
+  }
+
+  private async themeDiscover(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const result = await discoverVsCodeThemes()
+    if (result.themes.length === 0) {
+      this.host.notice(result.diagnostics.length === 0
+        ? ui('没有发现已安装的 VS Code、Insiders 或 Cursor 主题。', 'No installed VS Code, Insiders, or Cursor themes were found.')
+        : ui(`没有可用主题；已跳过 ${String(result.diagnostics.length)} 个无效条目。`, `No usable themes; skipped ${String(result.diagnostics.length)} invalid entries.`), 'info')
+      return
+    }
+    const duplicateNames = new Set(result.themes.filter(theme =>
+      result.themes.filter(candidate => candidate.label.toLowerCase() === theme.label.toLowerCase()).length > 1,
+    ).map(theme => theme.id))
+    const selected = await overlays.select({
+      title: ui('已安装的 VS Code 主题', 'Installed VS Code themes'),
+      detail: ui(`发现 ${String(result.themes.length)} 个不同主题内容；同名主题会显示来源。`, `Found ${String(result.themes.length)} distinct theme contents; sources are shown for duplicate names.`),
+      searchable: true,
+      choices: result.themes.map(theme => ({
+        id: theme.id,
+        label: duplicateNames.has(theme.id) ? `${theme.label} · ${theme.editorLabel}` : theme.label,
+        description: `${theme.editorLabel} · ${theme.extensionId}${theme.extensionVersion === undefined ? '' : `@${theme.extensionVersion}`} · ${theme.relativeThemePath}`,
+      })),
+      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
+    if (selected === undefined) return
+    const theme: DiscoveredVsCodeTheme | undefined = result.themes.find(candidate => candidate.id === selected.id)
+    if (theme === undefined) return
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
+    const appearance = appearanceFromSettings(document)
+    const name = duplicateNames.has(theme.id) ? selected.label : theme.label
+    const identity = await this.themeIdentity(name, appearance, overlays)
+    if (identity === undefined) return
+    await this.previewAndSaveTheme(document, { ...theme.theme, id: identity.id, name: identity.name }, undefined, 'both', overlays)
+  }
+
+  private async themeImportUrl(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
+    const appearance = appearanceFromSettings(document)
+    const [first = '', ...rest] = commandArguments(args)
+    const looksLikeUrl = /^https:\/\//iu.test(first)
+    const requestedName = looksLikeUrl ? '' : first
+    const suppliedUrl = (looksLikeUrl ? [first, ...rest] : rest).join(' ')
+    const url = suppliedUrl !== '' ? suppliedUrl : await overlays.input({
+      title: ui('导入网络 VS Code 主题', 'Import VS Code theme from URL'),
+      detail: ui('仅支持 HTTPS；远程主题的相对 include 必须保持同源。', 'HTTPS only; relative includes must stay on the same origin.'),
+      placeholder: 'https://example.com/themes/theme.json',
+      options: { width: '95%', maxHeight: '80%', anchor: 'center', margin: 1 },
+    })
+    if (url === undefined || url.trim() === '') return
+    const loaded = await loadVsCodeThemeUrl(url)
+    const identity = await this.themeIdentity(requestedName === '' ? loaded.suggestedName : requestedName, appearance, overlays)
+    if (identity === undefined) return
+    await this.previewAndSaveTheme(document, {
+      ...convertVsCodeTheme(loaded, identity.id, identity.name), remoteSource: { url: loaded.path },
+    }, undefined, 'both', overlays)
+  }
+
+  private async themeUpdate(requested: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const document = appearanceSettings(await this.capabilities.managementBridge().settings.describe(TUI_APPEARANCE_SETTINGS_NAMESPACE))
+    const appearance = appearanceFromSettings(document)
+    const remoteThemes = appearance.customThemes.filter(theme => theme.remoteSource !== undefined)
+    if (remoteThemes.length === 0) throw new Error(ui('没有可更新的网络主题', 'There are no network themes to update'))
+    let theme: TuiCustomTheme | undefined
+    if (requested !== '') {
+      const id = requested.startsWith('custom:') ? requested.slice('custom:'.length) : requested
+      theme = remoteThemes.find(candidate => candidate.id === id || candidate.name.toLowerCase() === id.toLowerCase())
+      if (theme === undefined) throw new Error(ui(`找不到可更新的网络主题 ${JSON.stringify(requested)}`, `Network theme ${JSON.stringify(requested)} was not found`))
+    } else {
+      const selected = await overlays.select({
+        title: ui('更新网络主题', 'Update network theme'),
+        detail: ui('从每个主题导入时保存的 HTTPS URL 重新读取；先预览，确认后才覆盖本地副本。', 'Reloads each HTTPS URL saved on import; preview before replacing the local copy.'),
+        choices: remoteThemes.map(candidate => ({ id: candidate.id, label: candidate.name, description: candidate.remoteSource!.url })),
+        options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+      })
+      if (selected === undefined) return
+      theme = remoteThemes.find(candidate => candidate.id === selected.id)
+    }
+    if (theme === undefined || theme.remoteSource === undefined) return
+    const loaded = await loadVsCodeThemeUrl(theme.remoteSource.url)
+    await this.previewAndSaveTheme(document, {
+      ...convertVsCodeTheme(loaded, theme.id, theme.name), remoteSource: theme.remoteSource,
+    }, undefined, 'both', overlays)
   }
 
   private async themeExport(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
