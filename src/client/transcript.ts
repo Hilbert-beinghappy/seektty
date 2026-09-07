@@ -2216,6 +2216,7 @@ export class Transcript implements Component, Focusable {
     const sessionId = String(snapshot.sessionId)
     if (sessionId !== this.sessionId) {
       this.nativeSourceTokens.clear()
+      this.nativeProjection.clear()
       this.resetNativeHistory()
       this.imageGeneration += 1
       this.pendingImages.clear()
