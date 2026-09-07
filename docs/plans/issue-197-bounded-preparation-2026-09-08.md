@@ -31,4 +31,17 @@
 
 官方 dsh 0.1.1-rc.2 的隔离 install → boot → remove → reinstall 额外验证打包 worker 能从实际 Profile 启动并响应页面协议。消费包没有新增 workspace 依赖，`dsh.bundle.patch` 和官方模块身份检查保留。
 
-最终平台结果和部署来源在完成后补记；原始日志在本工作树 `.artifacts/bounded-*` 和 Debian `/tmp/native197-bounded-*`。
+Windows 与 Debian 的最终代码均通过 typecheck、155 个测试文件（1412 项通过、1 项原有跳过）、build 和 pack-check（28 个包条目）。两平台的官方 dsh 隔离周期均通过，包含安装后与重装后的实际打包 worker 启动。首次全检查因新生成的共享 chunk 尚未进入 Git index 触发包契约测试失败；将生成文件纳入提交后最终检查通过，没有放宽检查。
+
+原始日志在本工作树 `.artifacts/bounded-*` 和 Debian `/tmp/native197-bounded-*`。本轮只保留必要回归和启动检查，不把这些结果表述成用户负责的完整人工/性能验收。
+
+## 最终本地部署
+
+- 代码提交 `6cfa484b675fafb3b11e2540b5ab2184ea1e9a8f`；构建名 `native197-bounded-20260907T174400`（UTC 命名）。
+- 两平台安装同一个本地 tarball：`seektty-1.2.5-native197-bounded-20260907T174400.tgz`，SHA-256 为 `8bdbaa00dac677638aa69c07a4556b0bf26b9a3b04f525af02b7bfaf045a2913`。
+- `lib/index.js` SHA-256 为 `00616d878cbc58ac5919079102a60eaaf2abbb81a33db61a1c61c56fe22a6bfc`。部署验证另外逐一核对全部 14 个打包 JS 文件，包括 worker 和共享 chunk，避免只验证入口文件。
+- Windows 全局包为 `F:/nodejs/node_global/v11/1064-1a07cf89dd1/node_modules/seektty`，Profile 为 `C:/Users/bymay/.dsh/profiles/tui`；常用 CMD 与 PowerShell `deepseek` 均完成启动、打开帮助、正常退出检查。
+- Debian 全局包为 `/opt/pnpm-global/v11/16-1a07cf8c8a5/node_modules/seektty`，Profile 为 `/home/bymay/.dsh/profiles/tui`；常用 `/usr/local/bin/deepseek` 在直接 PTY 与独立 tmux 均完成相同启动检查。
+- 全局和 Profile 的全部 JS hash 与本地包一致；原 bundles 列表不变。安装后及启动检查后，官方 dsh、顶层 settings 和 credentials hash 保持原值。没有停止用户原有会话；需退出重开使用新包。
+- 两边启动器继续默认 `SEEKTTY_NATIVE_TAIL=1`，显式 `0` 保留，PowerShell 结束后恢复调用前环境。
+- 备份位于 Windows `C:/Users/bymay/.local/share/seektty/backups/native197-bounded-20260907T174400/windows` 和 Debian `/home/bymay/.local/share/seektty/backups/native197-bounded-20260907T174400/linux`。其中保留上一版本包（SHA-256 `2f6c329a9e65415b299d096f31f3b74860d829d5158409c72e8cfef98f87d6a0`）、启动器、安装代码及 Profile 元数据。
