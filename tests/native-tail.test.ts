@@ -1,4 +1,10 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { prepareMarkdownWorker } from './helpers/native-markdown-worker.ts'
+import { Markdown } from '@mariozechner/pi-tui'
+import { markdownTheme } from '../src/client/theme.ts'
+import { NativeMarkdownPreparation } from '../src/client/native-markdown.ts'
+let workerFactory: Awaited<ReturnType<typeof prepareMarkdownWorker>>
+beforeAll(async () => { workerFactory = await prepareMarkdownWorker() })
 import { Writable } from 'node:stream'
 import { NativeOutput, streamSink } from '../src/client/native-output.ts'
 import { NativeHistory, stableParagraphEnd } from '../src/client/native-history.ts'
@@ -22,6 +28,185 @@ function snapshot(nodes: ChatConversationViewNode[], sessionId = 'fixture'): Con
   } as unknown as ConversationSnapshot
 }
 afterEach(() => { vi.unstubAllEnvs() })
+
+async function drainPrepared(transcript: Transcript, width = 80): Promise<string[]> {
+  const lines: string[] = []
+  for (let attempts = 0; attempts < 10000; attempts++) {
+    transcript.render(width)
+    const batch = transcript.takeNativeHistoryBatch()
+    if (!batch) { if (await transcript.waitNativePreparation()) continue; return lines }
+    expect(batch.lines.length).toBeLessThanOrEqual(256)
+    lines.push(...batch.lines)
+    batch.acknowledge()
+  }
+  throw new Error('History did not drain')
+}
+
+it('prepares a complex document off-thread and pages exactly the shared authoritative rendering', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = '- first **bold** [late][ref]\n' + Array.from({ length: 4000 }, (_, i) => `- item_${i} 中文😀`).join('\n')
+    + '\n\n| A | B |\n| --- | --- |\n| left | right |\n\n[ref]: https://example.com\n'
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('complex', source)]))
+    const before = internals.nativeHistoryLinesPrepared
+    expect(transcript.render(80).join('')).toContain('…')
+    expect(internals.nativeHistoryLinesPrepared).toBe(before)
+    expect(transcript.takeNativeHistoryBatch()).toBeUndefined()
+    const actual = await drainPrepared(transcript)
+    const expected = new Markdown(source, 0, 0, markdownTheme).renderUnpadded(76).map(line => line === '' ? '' : '  ' + line)
+    expect(actual).toEqual(expected)
+    expect(await drainPrepared(transcript)).toEqual([])
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('keeps a large live reply mutable and flushes its exact settled content on normal exit', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = '| A | B |\n| --- | --- |\n' + Array.from({ length: 3000 }, (_, i) => `| 中文😀${i} | value |`).join('\n')
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('live-big', source, true)]))
+    transcript.render(80)
+    await transcript.waitNativePreparation()
+    expect(transcript.render(80).length).toBeLessThanOrEqual(24)
+    expect(transcript.takeNativeHistoryBatch()).toBeUndefined()
+    transcript.finishNativeHistory()
+    const actual = await drainPrepared(transcript)
+    expect(actual).toEqual(new Markdown(source, 0, 0, markdownTheme).renderUnpadded(76).map(line => line === '' ? '' : '  ' + line))
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('finishes an already delivered document before reporting a smaller same-key correction', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = Array.from({ length: 4000 }, (_, i) => `- ORIGINAL_${i}`).join('\n')
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('changed', source)]))
+    transcript.render(80); await transcript.waitNativePreparation(); transcript.render(80)
+    const first = transcript.takeNativeHistoryBatch()!
+    expect(transcript.takeNativeHistoryBatch()).toBeUndefined()
+    transcript.update(snapshot([node('changed', 'FINAL_AUTHORITATIVE')]))
+    first.acknowledge()
+    const actual = [...first.lines, ...await drainPrepared(transcript)].join('\n')
+    expect(actual.match(/ORIGINAL_0\b/gu)).toHaveLength(1)
+    expect(actual.match(/ORIGINAL_3999\b/gu)).toHaveLength(1)
+    expect(actual).toContain('── 更新 · changed ──')
+    expect(actual.replace(/\x1b\[[0-9;]*m/gu, '').endsWith('FINAL_AUTHORITATIVE')).toBe(true)
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('cancels preparation and rejects pages from a previous session', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('old', '- OLD\n'.repeat(10000))]))
+    transcript.render(80)
+    transcript.cancelNativeReplay()
+    expect(await drainPrepared(transcript)).toEqual([])
+    transcript.update(snapshot([node('new', 'NEW_SESSION')], 'other'))
+    expect((await drainPrepared(transcript)).join('\n')).toContain('NEW_SESSION')
+    expect(await transcript.waitNativePreparation()).toBe(false)
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('preserves a giant code line including surrogate pairs and source spaces', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = '```text\n  ' + '中文😀'.repeat(10000) + '  \n```'
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('giant', source)]))
+    const actual = await drainPrepared(transcript)
+    expect(actual).toEqual(new Markdown(source, 0, 0, markdownTheme).renderUnpadded(76).map(line => line === '' ? '' : '  ' + line))
+    expect(actual.join('').match(/😀/gu)).toHaveLength(10000)
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('prepares a mixed reasoning header and large plain body without losing final source lines', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = Array.from({ length: 4000 }, (_, i) => `REASONING_${i} 中文😀`).join('\n')
+  const reasoning = { ...node('reasoning', '', true), data: { status: 'running', turn: 1, step: 1, time: 1,
+    blocks: [{ kind: 'reasoning', text: source }] } } as ChatConversationViewNode
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([reasoning]))
+    transcript.render(80); await transcript.waitNativePreparation()
+    expect(transcript.render(80).join('\n')).toContain('REASONING_3999')
+    transcript.finishNativeHistory()
+    const actual = (await drainPrepared(transcript)).join('\n')
+    expect(actual.match(/REASONING_\d+/gu)).toEqual(Array.from({ length: 4000 }, (_, i) => `REASONING_${i}`))
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('surfaces preparation failure without producing or acknowledging a history batch', async () => {
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, () => { throw new Error('fixture worker failure') })
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('failed', '- FAIL\n'.repeat(10000))]))
+    try { transcript.render(80) } catch (error) { expect(String(error)).toContain('fixture worker failure') }
+    await expect(transcript.waitNativePreparation()).rejects.toThrow('fixture worker failure')
+    expect(transcript.takeNativeHistoryBatch()).toBeUndefined()
+    expect(() => transcript.render(80)).toThrow('fixture worker failure')
+  } finally { transcript.dispose() }
+})
+
+it('keeps the last prepared live preview visible while coalescing newer snapshots', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = '- START\n' + '- row value\n'.repeat(4000) + '- VISIBLE_PREVIEW'
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('live-coalesced', source, true)]))
+    transcript.render(80); await transcript.waitNativePreparation()
+    transcript.update(snapshot([node('live-coalesced', source + '\n- LATEST', true)]))
+    expect(transcript.render(80).join('\n')).toContain('VISIBLE_PREVIEW')
+    expect(transcript.takeNativeHistoryBatch()).toBeUndefined()
+    transcript.setNativeMode(false)
+    expect(await transcript.waitNativePreparation()).toBe(false)
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('rewraps undelivered pages after a shrink without truncating their right-hand source', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  const source = Array.from({ length: 2000 }, (_, i) => `- ROW_${i}_abcdefghijklmnopqrstuvwxyz_END`).join('\n')
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    transcript.update(snapshot([node('resize-pages', source)]))
+    transcript.render(100); await transcript.waitNativePreparation(); transcript.render(100)
+    const first = transcript.takeNativeHistoryBatch()!
+    first.acknowledge()
+    const remaining = await drainPrepared(transcript, 24)
+    const actual = [...first.lines, ...remaining].join('').replace(/\x1b\[[0-9;]*m/gu, '').replace(/ /gu, '')
+    expect(actual.match(/ROW_\d+_abcdefghijklmnopqrstuvwxyz_END/gu)).toEqual(Array.from({ length: 2000 }, (_, i) => `ROW_${i}_abcdefghijklmnopqrstuvwxyz_END`))
+  } finally { transcript.dispose() }
+}, 60000)
+
+it('bounds worker concurrency and starts queued preparation only after a slot is released', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  let started = 0, active = 0, peak = 0
+  const factory = () => {
+    started++; active++; peak = Math.max(peak, active)
+    const worker = workerFactory()
+    worker.once('exit', () => { active-- })
+    return worker
+  }
+  const jobs = Array.from({ length: 3 }, () => new NativeMarkdownPreparation('- ROW\n'.repeat(10000), 76, 0, undefined, () => {}, factory))
+  try {
+    await Promise.all(jobs.slice(0, 2).map(job => job.wait()))
+    expect(started).toBe(2)
+    expect(jobs[2]!.page()).toBeUndefined()
+    jobs[0]!.dispose()
+    await jobs[2]!.wait()
+    expect(started).toBe(3)
+    expect(peak).toBeLessThanOrEqual(2)
+  } finally { for (const job of jobs) job.dispose() }
+}, 60000)
 
 it('publishes native geometry after delivery and rejects stale generation geometry', async () => {
   let release!: () => void
@@ -210,16 +395,16 @@ it('holds Markdown with unstable block or inline syntax instead of guessing a bo
   }
 })
 
-it.each([1000, 10000, 100000])('removes %i committed history lines from ordinary render traversal', count => {
+it.each([1000, 10000, 100000])('removes %i committed history lines from ordinary render traversal', async count => {
   vi.stubEnv('NO_COLOR', '1')
-  const transcript = new Transcript(() => 24)
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
   transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
   transcript.update(snapshot([node('history', Array.from({ length: count }, (_, i) => `H${i}`).join('\n')), node('live', 'ACTIVE', true)]))
   const history: string[] = []
   for (let i = 0; i < count + 10; i++) {
     transcript.render(80)
     const batch = transcript.takeNativeHistoryBatch()
-    if (!batch) break
+    if (!batch) { if (await transcript.waitNativePreparation()) continue; break }
     history.push(...batch.lines); batch.acknowledge()
   }
   expect(history.join('\n')).toContain(`H${count - 1}`)

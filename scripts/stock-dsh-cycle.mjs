@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { existsSync, readFileSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { Worker } from 'node:worker_threads'
 
 const dsh = process.env.DSH_BIN?.trim()
 const pluginSpec = process.env.SEEKTTY_SPEC?.trim()
@@ -134,6 +135,21 @@ function assertOfficialModuleIdentity() {
   }
 }
 
+async function assertNativePreparationWorker() {
+  const worker = new Worker(join(home, 'profiles', 'tui', 'node_modules', 'seektty', 'lib', 'native-markdown-worker.js'))
+  let timeout
+  try {
+    const page = await new Promise((resolvePage, reject) => {
+      timeout = setTimeout(() => reject(new Error('Packed native worker did not respond')), 30000)
+      worker.once('error', reject)
+      worker.once('exit', code => reject(new Error(`Packed native worker exited: ${code}`)))
+      worker.once('message', resolvePage)
+      worker.postMessage({ next: true })
+    })
+    assert(page.done === true && page.total === 0 && page.lines.length === 0, 'Packed native worker protocol failed')
+  } finally { clearTimeout(timeout); await worker.terminate() }
+}
+
 try {
   assertPackedLauncher()
   run(['plugin', '--profile', 'tui', 'add', pnpmGvsFlag, pluginSpec])
@@ -144,6 +160,7 @@ try {
   let dump = run(['--profile', 'tui', '--dump-config'])
   assert(dump.includes('id: tui-runner') && dump.includes('name: seektty'), 'add 后 dump-config 未挂载 TUI entry')
   assertOfficialModuleIdentity()
+  await assertNativePreparationWorker()
   assert(run(['--profile', 'tui', '--help']).includes('Usage: deepseek'), 'TUI Bundle 无法由 stock dsh 加载')
   assertFullBootReachesTui()
 
@@ -157,6 +174,7 @@ try {
   run(['plugin', '--profile', 'tui', 'add', pnpmGvsFlag, pluginSpec])
   const help = run(['--profile', 'tui', '--help'])
   assertOfficialModuleIdentity()
+  await assertNativePreparationWorker()
   assert(help.includes('Usage: deepseek'), 're-add 后 TUI Bundle 无法加载')
   assertFullBootReachesTui()
   process.stdout.write(`stock dsh 插拔契约通过：${home}\n`)

@@ -47,6 +47,7 @@ export default defineConfig({
     'in-process': 'src/host/in-process.ts',
     'attachment-compat': 'src/host/attachment-compat.ts',
     bin: 'src/bin.ts',
+    'native-markdown-worker': 'src/client/native-markdown-worker.ts',
   },
   outDir: 'lib',
   format: 'esm',

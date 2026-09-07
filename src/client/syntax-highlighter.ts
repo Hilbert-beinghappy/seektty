@@ -419,4 +419,11 @@ export class SyntaxHighlighter {
     }).finally(() => { this.loading.delete(language) })
     this.loading.set(language, task)
   }
+
+  /** Worker preparation can await grammars discovered by the shared renderer before delivery. */
+  async finishPendingLanguages(): Promise<boolean> {
+    if (!this.loading.size) return false
+    await Promise.all(this.loading.values())
+    return true
+  }
 }

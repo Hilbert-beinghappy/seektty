@@ -1042,7 +1042,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               while (true) {
                 transcript.render(terminal.columns)
                 const batch = transcript.takeNativeHistoryBatch()
-                if (!batch) break
+                if (!batch) {
+                  if (await transcript.waitNativePreparation()) continue
+                  break
+                }
                 const success = await nativeOutput.frame(finalCanvas.render(batch.lines, terminal.columns), [], terminal.columns, terminal.rows, null)
                 if (!success) break
                 batch.acknowledge()

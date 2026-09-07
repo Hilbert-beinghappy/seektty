@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@mariozechner/pi-tui@0.73.1': b125caec766b3d86f8a216cfb5437b0094d9f064df833a2ca5a97c20cb260ff7
+  '@mariozechner/pi-tui@0.73.1': 85260322544ee3b2dff5c2c1612d5a8515743cefdf35048f9f84386fe0910e6f
 
 importers:
 
@@ -161,7 +161,7 @@ importers:
         version: 3.18.1
       '@mariozechner/pi-tui':
         specifier: 0.73.1
-        version: 0.73.1(patch_hash=b125caec766b3d86f8a216cfb5437b0094d9f064df833a2ca5a97c20cb260ff7)
+        version: 0.73.1(patch_hash=85260322544ee3b2dff5c2c1612d5a8515743cefdf35048f9f84386fe0910e6f)
       '@types/cross-spawn':
         specifier: 6.0.6
         version: 6.0.6
@@ -3233,7 +3233,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@mariozechner/pi-tui@0.73.1(patch_hash=b125caec766b3d86f8a216cfb5437b0094d9f064df833a2ca5a97c20cb260ff7)':
+  '@mariozechner/pi-tui@0.73.1(patch_hash=85260322544ee3b2dff5c2c1612d5a8515743cefdf35048f9f84386fe0910e6f)':
     dependencies:
       '@types/mime-types': 2.1.4
       chalk: 5.6.2
