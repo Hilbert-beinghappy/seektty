@@ -47,6 +47,7 @@ export class NativeHistory {
   reserved(key: string): boolean { return this.pending.has(key) }
   pendingFor(key: string): NativeReceipt | undefined { return this.pending.get(key) }
   discardPending(): void { this.pending.clear() }
+  discard(key: string): void { this.pending.delete(key) }
 }
 
 /** Conservative paragraph boundary: uncertain Markdown stays mutable in full. */
