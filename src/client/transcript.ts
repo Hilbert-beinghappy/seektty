@@ -1644,15 +1644,17 @@ export class Transcript implements Component, Focusable {
     if (!batch || this.nativeBatchInFlight) return undefined
     this.nativeBatchInFlight = true
     const lines = batch.lines.slice(batch.offset, batch.offset + 256)
+    const offset = batch.offset
     let acknowledged = false
     return { lines, acknowledge: () => {
-      if (acknowledged || this.nativeBatch !== batch) return
+      if (acknowledged) return
       acknowledged = true
       for (let i = 0; i < batch.receipts.length; i++) {
         const start = i === 0 ? 0 : batch.ends[i - 1]!
-        const delivered = Math.max(0, Math.min(batch.offset + lines.length, batch.ends[i]!) - Math.max(batch.offset, start))
+        const delivered = Math.max(0, Math.min(offset + lines.length, batch.ends[i]!) - Math.max(offset, start))
         this.nativeHistory.deliver(batch.receipts[i]!, delivered)
       }
+      if (this.nativeBatch !== batch) return
       batch.offset += lines.length
       this.nativeBatchInFlight = false
       if (batch.offset >= batch.lines.length) {

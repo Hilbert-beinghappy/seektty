@@ -107,6 +107,18 @@ it('commits stable answer paragraphs from a mixed reasoning and text node before
   transcript.dispose()
 })
 
+it('records an in-flight success arriving after cancellation without committing or crossing epochs', () => {
+  const ledger = new NativeHistory()
+  const receipt = ledger.reserve('late', ['source'], 0, 1000, 'source', true)
+  ledger.discardPending()
+  ledger.deliver(receipt, 256)
+  expect(ledger.deliveredFor('late')?.lines).toBe(256)
+  expect(ledger.acknowledge(receipt)).toBe(false)
+  expect(ledger.get('late')).toBeUndefined()
+  ledger.reset(); ledger.deliver(receipt, 256)
+  expect(ledger.deliveredFor('late')).toBeUndefined()
+})
+
 it('prepares a long code block in source batches and covers all lines once', () => {
   vi.stubEnv('NO_COLOR', '1')
   const transcript = new Transcript(() => 24)

@@ -22,7 +22,9 @@ export class NativeHistory {
   /** Partial physical delivery is not complete source-range coverage. */
   deliveredFor(key: string): Readonly<{ receipt: NativeReceipt; lines: number }> | undefined { return this.delivered.get(key) }
   deliver(receipt: NativeReceipt, lines: number): void {
-    if (this.pending.get(receipt.key) !== receipt || receipt.epoch !== this.generation || lines <= 0) return
+    // Cancellation cannot retract an in-flight sink write. A late success still
+    // records physical delivery in this epoch, without committing its source.
+    if (receipt.epoch !== this.generation || this.committed.get(receipt.key) === receipt || lines <= 0) return
     const previous = this.delivered.get(receipt.key)
     this.delivered.set(receipt.key, { receipt, lines: (previous?.receipt === receipt ? previous.lines : 0) + lines })
   }
