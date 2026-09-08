@@ -2078,10 +2078,11 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     })
     if (url === undefined || url.trim() === '') return
     const loaded = await loadVsCodeThemeUrl(url)
+    if (loaded.sourceUrl === undefined) throw new Error(ui('网络主题缺少已验证的原始 URL', 'Network theme is missing its validated source URL'))
     const identity = await this.themeIdentity(requestedName === '' ? loaded.suggestedName : requestedName, appearance, overlays)
     if (identity === undefined) return
     await this.previewAndSaveTheme(document, {
-      ...convertVsCodeTheme(loaded, identity.id, identity.name), remoteSource: { url: loaded.path },
+      ...convertVsCodeTheme(loaded, identity.id, identity.name), remoteSource: { url: loaded.sourceUrl },
     }, undefined, 'both', overlays)
   }
 

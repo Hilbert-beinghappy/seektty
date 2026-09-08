@@ -39,9 +39,11 @@ interface LoadedThemeRecord {
   readonly semanticTokenColors: Readonly<Record<string, unknown>>
 }
 
-/** Parsed VS Code theme plus the canonical source path. */
+/** Parsed VS Code theme plus canonical response and optional import source paths. */
 export interface LoadedVsCodeTheme {
   readonly path: string
+  /** Original, validated HTTPS URL supplied by the user (remote imports only). */
+  readonly sourceUrl?: string
   readonly suggestedName: string
   readonly value: LoadedThemeRecord
 }
@@ -270,7 +272,11 @@ export async function loadVsCodeThemeUrl(input: string): Promise<LoadedVsCodeThe
   const root = remoteUrl(input)
   const loaded = await loadRemoteThemeRecord(root, root, [], { bytes: 0 })
   const filename = decodeURIComponent(root.pathname.split('/').pop() ?? '').replace(/\.jsonc?$/iu, '')
-  return { ...loaded, suggestedName: loaded.value.name?.trim() || filename || 'VS Code Theme' }
+  return {
+    ...loaded,
+    sourceUrl: root.href,
+    suggestedName: loaded.value.name?.trim() || filename || 'VS Code Theme',
+  }
 }
 
 function safeColor(value: unknown, background: string, fallback: string): string {

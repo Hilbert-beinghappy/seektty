@@ -75,18 +75,21 @@ async function applicationExtensions(root: string): Promise<readonly string[]> {
   } catch { return [direct] }
 }
 
-function platformApplicationRoots(home: string): readonly VsCodeThemeDiscoveryRoot[] {
+export function platformApplicationRoots(
+  platform: NodeJS.Platform,
+  home: string,
+): readonly VsCodeThemeDiscoveryRoot[] {
   const roots: VsCodeThemeDiscoveryRoot[] = []
   const add = (editor: VsCodeEditor, label: string, paths: readonly string[]): void => {
     for (const path of paths) roots.push({ editor, label, path })
   }
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     const applications = ['/Applications', resolve(home, 'Applications')]
     add('vscode', 'VS Code（内置）', applications.map(root => resolve(root, 'Visual Studio Code.app', 'Contents', 'Resources', 'app', 'extensions')))
     add('vscode-insiders', 'VS Code Insiders（内置）', applications.map(root => resolve(root, 'Visual Studio Code - Insiders.app', 'Contents', 'Resources', 'app', 'extensions')))
     add('cursor', 'Cursor（内置）', applications.map(root => resolve(root, 'Cursor.app', 'Contents', 'Resources', 'app', 'extensions')))
   }
-  if (process.platform === 'linux') {
+  if (platform === 'linux') {
     add('vscode', 'VS Code（内置）', [
       '/usr/share/code/resources/app/extensions', '/usr/lib/code/resources/app/extensions',
       '/opt/visual-studio-code/resources/app/extensions', '/opt/code/resources/app/extensions',
@@ -126,7 +129,7 @@ async function defaultRoots(): Promise<readonly VsCodeThemeDiscoveryRoot[]> {
     ]
     for (const { root, ...product } of installed) for (const path of await applicationExtensions(root)) roots.push({ ...product, path })
   }
-  roots.push(...platformApplicationRoots(home))
+  roots.push(...platformApplicationRoots(process.platform, home))
   const registered = await Promise.all([
     windowsApplicationRoot('Code.exe'),
     windowsApplicationRoot('Code - Insiders.exe'),
