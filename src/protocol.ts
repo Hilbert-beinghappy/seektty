@@ -81,6 +81,10 @@ export interface TuiCustomTheme {
   readonly name: string
   readonly tone: TuiThemeTone
   readonly source: TuiThemeSource
+  /** HTTPS origin retained only for a theme explicitly imported from the network. */
+  readonly remoteSource?: {
+    readonly url: string
+  }
   readonly colors: TuiThemeUiColors
   readonly syntax: TuiSyntaxThemeColors
   readonly tokenColors: readonly TuiTextMateRule[]
