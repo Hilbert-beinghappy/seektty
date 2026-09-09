@@ -41,7 +41,9 @@ afterEach(async () => {
 })
 
 describe('actual Surface Header → Welcome wiring (#196)', () => {
-  it.each(['full', 'native'] as const)('%s preserves historical components through asynchronous header changes', async (mouseMode) => {
+  it.each(['full', 'native', 'native-tail'] as const)('%s preserves historical components through asynchronous header changes', async (mode) => {
+    const mouseMode = mode === 'native-tail' ? 'native' : mode
+    if (mode === 'native-tail') vi.stubEnv('SEEKTTY_NATIVE_TAIL', '1')
     vi.stubEnv('TERM', 'xterm-256color')
     vi.stubEnv('COLORTERM', 'truecolor')
     vi.spyOn(provider, 'inspectProviderReadiness').mockResolvedValue({ kind: 'ready' })

@@ -124,6 +124,7 @@ let palette = runtimePalette(selectedTheme)
 export type CodeBackgroundPolicy = 'inherit' | 'explicit'
 
 let codeHighlighter: ((code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[]) | undefined
+let codeStreamFactory: ((lang: string | undefined, background: CodeBackgroundPolicy) => import('./syntax-highlighter.ts').CodeStream) | undefined
 
 function controlStringEnd(text: string, start: number): number {
   for (let index = start; index < text.length; index += 1) {
@@ -196,6 +197,7 @@ export function escapeTerminalText(text: string): string {
  * @returns 0 for plain text, 1 for ANSI-16, 2 for xterm-256, or 3 for truecolor.
  */
 export function terminalColorLevel(env: Readonly<NodeJS.ProcessEnv> = process.env): TerminalColorLevel {
+  if (env === process.env && workerColorLevel !== undefined) return workerColorLevel
   if (env.NO_COLOR !== undefined || env.TERM === 'dumb') return 0
   const term = env.TERM?.toLowerCase() ?? ''
   const colorTerm = env.COLORTERM?.toLowerCase() ?? ''
@@ -353,6 +355,23 @@ export function setTheme(theme: ResolvedTuiTheme): void {
 /** Return the complete theme currently used by renderers. */
 export function currentTheme(): ResolvedTuiTheme { return selectedTheme }
 
+/** Serializable presentation only; workers never receive Harness state. */
+export interface MarkdownPresentation {
+  theme: ResolvedTuiTheme
+  rendering: TuiRenderingSettings
+  colorLevel: TerminalColorLevel
+}
+let workerColorLevel: TerminalColorLevel | undefined
+export function markdownPresentation(): MarkdownPresentation {
+  return { theme: selectedTheme, rendering: { ...rendering }, colorLevel: terminalColorLevel() }
+}
+export function applyMarkdownPresentation(value: MarkdownPresentation): void {
+  // Worker stdout is not the terminal. Preserve the caller's detected capability.
+  workerColorLevel = value.colorLevel
+  setTheme(value.theme)
+  setRendering(value.rendering)
+}
+
 /** Independent of theme previews/imports; controls which UI surfaces inherit terminal effects. */
 export function setBackgroundMode(mode: TuiBackgroundMode): void { setRendering(resolveRendering({ backgroundMode: mode })) }
 
@@ -373,9 +392,19 @@ export function setTerminalCanvasBackground(color?: string): void { canvasRevisi
  */
 export function setCodeHighlighter(
   highlighter?: (code: string, lang: string | undefined, background: CodeBackgroundPolicy) => string[],
+  streamFactory?: (lang: string | undefined, background: CodeBackgroundPolicy) => import('./syntax-highlighter.ts').CodeStream,
 ): void {
   canvasRevision += 1
   codeHighlighter = highlighter
+  codeStreamFactory = streamFactory
+}
+
+export function createCodeStream(language?: string): import('./syntax-highlighter.ts').CodeStream {
+  const codeBackground = rendering.backgroundFill === 'theme' ? 'explicit' : 'inherit'
+  return codeStreamFactory?.(language, codeBackground) ?? {
+    append: code => highlightCodeLines(code, language).slice(0, -1),
+    preview: code => highlightCodeLines(code, language),
+  }
 }
 
 /**

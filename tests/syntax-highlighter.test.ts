@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   adoptSyntaxHighlighter,
   SyntaxHighlighter,
+  syntaxStreamMetrics,
   syntaxLanguageForPath,
   syntaxTokenBackground,
 } from '../src/client/syntax-highlighter.ts'
@@ -16,6 +17,24 @@ function truecolor(): void {
   vi.stubEnv('TERM', 'xterm-256color')
   vi.stubEnv('COLORTERM', 'truecolor')
 }
+
+it('keeps independent code-stream grammar states and only tokenizes newly supplied text', async () => {
+  truecolor()
+  const highlighter = await SyntaxHighlighter.create(BUILT_IN_THEMES.dark, () => {})
+  try {
+    const a = highlighter.createStream('ts', 'inherit')
+    const b = highlighter.createStream('ts', 'inherit')
+    const before = syntaxStreamMetrics.characters
+    const first = a.append('/* comment\n')
+    const other = b.append('const other = 1;\n')
+    const second = a.append('continued */\n')
+    const suffix = a.preview('const final = 2;')
+    expect([...first, ...second, ...suffix]).toEqual(highlighter.highlight('/* comment\ncontinued */\nconst final = 2;', 'ts', 'inherit'))
+    expect(other).toEqual(highlighter.highlight('const other = 1;', 'ts', 'inherit'))
+    expect(syntaxStreamMetrics.characters - before).toBe('/* comment\nconst other = 1;\ncontinued */\nconst final = 2;'.length)
+    expect(a.preview('const final = 2;')).toEqual(suffix)
+  } finally { highlighter.dispose() }
+})
 
 afterEach(() => {
   setBackgroundMode('theme')

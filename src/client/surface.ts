@@ -2,6 +2,7 @@
 
 import { chmodSync } from 'node:fs'
 import { CanvasLineCache } from './canvas-line-cache.ts'
+import { NativeOutput, streamSink } from './native-output.ts'
 import {
   Box,
   Key,
@@ -111,7 +112,7 @@ import {
 } from './mouse-activation.ts'
 import { ContextMenuController, mouseContextActions } from './mouse-context-menu.ts'
 import type { ContextActionNode, ContextTarget } from './context-actions.ts'
-import { emptyHitMap, finalizeHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
+import { emptyHitMap, finalizeHitMap, nativePresentedHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
 import {
   autocompleteTargetId,
   emptyFrameGeometry,
@@ -194,8 +195,41 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
   }
   const performanceProbe = new TuiPerformanceProbe()
   const rawTerminal = internals.createTerminal() as Terminal & ManagedTerminal
+  const nativeTailCandidate = process.env.SEEKTTY_NATIVE_TAIL === '1'
+  let nativeOutputActive = false
+  const rawWrite = rawTerminal.write.bind(rawTerminal)
+  const outputSink = rawTerminal instanceof ProcessTerminal ? streamSink(process.stdout) : async (bytes: string) => { rawWrite(bytes) }
+  const nativeOutput = nativeTailCandidate ? new NativeOutput(async bytes => {
+    const delivered = outputSink(bytes)
+    performanceProbe.markWrite(bytes, process.stdout.writableNeedDrain)
+    await delivered
+  }, error => {
+    stopTuiRenderingSync()
+    // The stream may have accepted only the beginning of a synchronized frame.
+    // Restore protocols best-effort; never replay the uncertain body bytes.
+    nativeOutputActive = false
+    rawTerminal.__seekttyWrite = undefined
+    try { rawWrite('\x1b[?2026l\x1b[?25h'); rawTerminal.restoreProtocolsSync?.() } catch { /* failed sink */ }
+    internals.reportCleanupError(error)
+  }) : undefined
   const terminalInstrumentation = instrumentTerminalWrites(rawTerminal, performanceProbe, process.stdout)
-  const terminal = terminalInstrumentation.terminal
+  const terminal: Terminal & ManagedTerminal = nativeOutput ? new Proxy(rawTerminal, {
+    get(target, property) {
+      if (property === 'write') return (bytes: string): void => {
+        if (nativeOutputActive) nativeOutput.control(bytes)
+        else rawWrite(bytes)
+      }
+      const value: unknown = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  }) : terminalInstrumentation.terminal
+  const setNativeOutputMode = (enabled: boolean): void => {
+    nativeOutputActive = nativeOutput !== undefined && enabled
+    if (rawTerminal instanceof ProcessTerminal) {
+      (rawTerminal as Terminal & ManagedTerminal).__seekttyWrite = nativeOutputActive
+        ? (bytes: string) => { nativeOutput!.control(bytes, false) } : undefined
+    }
+  }
   const reportPerformance = (): void => {
     terminalInstrumentation.release()
     const snapshot = performanceProbe.finish()
@@ -235,6 +269,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     let liveTheme = initialTheme
     let liveRendering = resolveRendering(initialAppearance)
     const liveBehavior = createLiveBehavior(behaviorFromSettings(behaviorSettings(settingsDocuments)))
+    setNativeOutputMode(liveBehavior.get().mouseMode === 'native')
     applyKeyBindingOverrides(liveBehavior.get().keyBindings)
     setDangerConfirmDefault(liveBehavior.get().dangerConfirmDefault)
     terminalSession.setMouseReporting(
@@ -405,7 +440,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       adoptSyntaxHighlighter(created, liveTheme, (ready) => {
         syntax = ready
         disposeConstructedSyntax = () => { ready.dispose() }
-        setCodeHighlighter((code, lang, background) => ready.highlight(code, lang, background))
+        setCodeHighlighter((code, lang, background) => ready.highlight(code, lang, background),
+          (lang, background) => ready.createStream(lang, background))
       })
       if (stopping !== undefined) {
         created.dispose()
@@ -437,6 +473,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       () => liveBehavior.get().mouseMode === 'native',
     )
     canvas.addChild(layout)
+    transcript.setNativeTailEnabled(nativeTailCandidate)
     const renderCanvas = canvas.render.bind(canvas)
     const nativeCanvasLines = new CanvasLineCache()
     canvas.render = (width: number): string[] => performanceProbe.measureRender(() => {
@@ -444,6 +481,34 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       return nativeCanvasLines.render(layout.render(width), width)
     })
     tui.addChild(canvas)
+    if (nativeOutput) {
+      let writing = false
+      let renderAgain = false
+      const historyCanvas = new CanvasLineCache(false)
+      terminal.__seekttyNativeFrame = (lines, cursor, width, height) => {
+        if (writing) { renderAgain = true; return true }
+        const batch = transcript.takeNativeHistoryBatch()
+        const frameHits = preparedNativeHits
+        const previousHits = hitMap
+        const epoch = nativeOutput.epoch()
+        writing = true
+        void nativeOutput.frame(historyCanvas.render(batch?.lines ?? [], width), lines, width, height, cursor).then(success => {
+          writing = false
+          if (!success) return
+          batch?.acknowledge()
+          const presented = nativeOutput.presentedFrame()
+          if (terminal.columns !== width || terminal.rows !== height) {
+            nativeOutput.invalidateLayout()
+            hitMap = emptyHitMap(hitMap.generation + 1, terminal.columns, terminal.rows)
+            renderAgain = true
+          } else if (presented?.epoch === epoch && nativeOutput.epoch() === epoch && frameHits && hitMap === previousHits) {
+            hitMap = nativePresentedHitMap(frameHits, presented.tailRow)
+          }
+          if (renderAgain && stopping === undefined) { renderAgain = false; requestSurfaceRender() }
+        })
+        return true
+      }
+    }
     tui.setFocus(editor)
 
     let mouseController!: ReturnType<typeof createMouseController>
@@ -466,6 +531,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       hitMap = emptyHitMap(hitMap.generation + 1, terminal.columns, terminal.rows)
     })
     let hitMap = emptyHitMap(0, terminal.columns, terminal.rows)
+    let preparedNativeHits: typeof hitMap | undefined
     const freezeHitMap = (): void => {
       const resized = hitMap.terminalWidth !== terminal.columns || hitMap.terminalHeight !== terminal.rows
       const geometry = tuiFrameApi(tui).getLastFrameGeometry?.()
@@ -638,7 +704,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (clearHoverPresentation()) requestSurfaceRender()
       }
     }
-    tuiFrameApi(tui).onAfterRender = freezeHitMap
+    tuiFrameApi(tui).onAfterRender = () => {
+      if (!nativeOutputActive) { freezeHitMap(); return }
+      const displayed = hitMap
+      freezeHitMap()
+      preparedNativeHits = hitMap
+      hitMap = displayed
+    }
     mouseController = createMouseController({
       getHitMap: () => hitMap,
       getBehavior: () => liveBehavior.get(),
@@ -955,9 +1027,35 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       detachSuspendGuards()
       detachSuspendGuards = () => undefined
       if (stopping !== undefined) return stopping
-      restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+      const closingNative = nativeOutput !== undefined && nativeOutputActive
+      if (!closingNative) restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+      else stopTuiRenderingSync()
       stopping = (async () => {
         const failures: unknown[] = []
+        if (nativeOutput && closingNative) {
+          try {
+            await (async () => {
+              await nativeOutput.drain()
+              if (liveBehavior.get().mouseMode !== 'native') return
+              transcript.finishNativeHistory()
+              const finalCanvas = new CanvasLineCache(false)
+              while (true) {
+                transcript.render(terminal.columns)
+                const batch = transcript.takeNativeHistoryBatch()
+                if (!batch) {
+                  if (await transcript.waitNativePreparation()) continue
+                  break
+                }
+                const success = await nativeOutput.frame(finalCanvas.render(batch.lines, terminal.columns), [], terminal.columns, terminal.rows, null)
+                if (!success) break
+                batch.acknowledge()
+                await new Promise<void>(resolve => setImmediate(resolve))
+              }
+              await nativeOutput.drain()
+            })()
+          } catch (error) { failures.push(error) }
+          restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+        }
         if (elapsedTimer !== undefined) {
           clearInterval(elapsedTimer)
           elapsedTimer = undefined
@@ -983,6 +1081,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           tui.stop()
         } catch (error) {
           failures.push(error)
+        }
+        if (nativeOutput) {
+          try { await withCleanupTimeout(() => nativeOutput.drain()) } catch (error) { failures.push(error) }
         }
         try {
           await withCleanupTimeout(() => client.ctx.fiber.dispose())
@@ -1059,17 +1160,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     ): Promise<'complete' | 'cancelled' | 'incomplete'> => {
       const target = active
       if (target === undefined) return 'complete'
-      let lastSize = -1
       while (active?.sessionId === target.sessionId) {
         if (signal?.aborted === true) return 'cancelled'
         const snapshot = target.session.getSnapshot()
         if (!snapshot.hasMore) return 'complete'
         const size = snapshot.chat.order.length
         report(size)
-        if (!snapshot.loadingOlder && size === lastSize) return 'incomplete'
-        lastSize = size
+        // Pages may contain only edits/control events. Only Harness hasMore is
+        // authoritative; unchanged visible node count does not mean exhaustion.
         if (!snapshot.loadingOlder) await target.session.loadOlder()
         else await new Promise<void>(resolve => setTimeout(resolve, 16))
+        if (nativeOutput) await new Promise<void>(resolve => setImmediate(resolve))
       }
       return signal?.aborted === true ? 'cancelled' : 'incomplete'
     }
@@ -1093,6 +1194,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           ), 'warning')
         }
         const managed = tui as TUI & ManagedTui
+        await nativeOutput?.drain()
+        nativeOutput?.reset(true)
+        setNativeOutputMode(next === 'native')
         if (previous === 'native') {
           nativeRenderState = {
             frame: managed.captureRenderState?.(),
@@ -1199,12 +1303,17 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         const controller = new AbortController()
         historyLoadController?.abort()
         historyLoadController = controller
+        if (nativeOutput) transcript.pauseNativeHistory(true)
         setNotice(ui('正在补载完整历史；按 Esc 取消', 'Backfilling complete history; press Esc to cancel'), 'info')
         void loadCompleteHistory(controller.signal, loaded => {
           setNotice(ui(`正在补载完整历史 · ${String(loaded)} 个节点`, `Backfilling complete history · ${String(loaded)} nodes`), 'info')
         }).catch(() => 'incomplete' as const).then((result) => {
-          if (stopping !== undefined) return
+          if (stopping !== undefined || historyLoadController !== controller) return
+          if (nativeOutput) transcript.pauseNativeHistory(false)
           if (historyLoadController === controller) historyLoadController = undefined
+          if (controller.signal.aborted) { requestSurfaceRender(); return }
+          nativeOutput?.reset()
+          if (nativeOutput) transcript.resetNativeHistory()
           terminal.write(`\r\n${color.muted(ui('── 手动回放当前会话 ──', '── Manual transcript replay ──'))}\r\n`)
           ;(tui as TUI & ManagedTui).resetRenderState?.()
           transcript.refreshPresentation()
@@ -1271,7 +1380,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const unsubscribeActive = capabilities.subscribeActive((current, snapshot) => {
       if (stopping !== undefined) return
-      if (current === undefined || snapshot === undefined) {
+        if (current === undefined || snapshot === undefined) {
+          nativeOutput?.reset()
+          if (nativeOutput) { transcript.resetNativeHistory(); transcript.pauseNativeHistory(false) }
         historyLoadController?.abort()
         historyLoadController = undefined
         suppressNativeFrames = false
@@ -1309,10 +1420,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const previousSessionId = latestSessionId
       const sessionChanged = previousSessionId !== current.sessionId
       if (sessionChanged) {
+        nativeOutput?.reset()
+        if (nativeOutput) transcript.pauseNativeHistory(false)
         historyLoadController?.abort()
         nativeRenderState = undefined
         if (liveBehavior.get().mouseMode === 'native' && previousSessionId !== '') {
           suppressNativeFrames = true
+          if (nativeOutput) transcript.pauseNativeHistory(true)
           ;(tui as TUI & ManagedTui).resetRenderState?.()
           terminal.write(`\r\n${color.muted(ui(
             `── 切换会话 · ${escapeTerminalText(current.summary.displayTitle)} ──`,
@@ -1341,6 +1455,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             if (historyLoadController !== controller || active?.sessionId !== current.sessionId) return
             historyLoadController = undefined
             updateTranscript(active)
+            if (nativeOutput) { transcript.pauseNativeHistory(false); transcript.resetNativeHistory() }
             suppressNativeFrames = false
             ;(tui as TUI & ManagedTui).resetRenderState?.()
             requestSurfaceRender()
@@ -2124,6 +2239,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         setNotice(ui('已停止补载；当前会话和 Agent 仍保持运行', 'Backfill stopped; the Session and Agent are still running'), 'warning')
         return { consume: true }
       }
+      if (nativeOutput && matchesKey(payload, Key.escape) && liveBehavior.get().mouseMode === 'native'
+        && !overlays.hasActive() && !active?.session.getSnapshot().running && transcript.nativeHistoryPending()) {
+        nativeOutput.reset()
+        transcript.cancelNativeReplay()
+        setNotice(ui('已停止历史输出；后续消息正常显示，可用 /transcript replay 完整回放', 'History output stopped; new messages remain visible. Use /transcript replay for complete history.'), 'warning')
+        requestSurfaceRender()
+        return { consume: true }
+      }
       if (matchesBinding('toggleMouseMode', payload)) {
         contextMenu.close()
         void actions.execute('mouse', 'toggle')
@@ -2385,7 +2508,27 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         requestSurfaceRender(true)
       },
     })
-    if (liveBehavior.get().mouseMode === 'native') {
+    let candidateHistoryLoad: (() => void) | undefined
+    if (liveBehavior.get().mouseMode === 'native' && nativeOutput) {
+      transcript.setNativeMode(true)
+      transcript.pauseNativeHistory(true)
+      const controller = new AbortController()
+      historyLoadController = controller
+      candidateHistoryLoad = () => {
+        setNotice(ui('正在补载完整历史；按 Esc 取消', 'Backfilling complete history; press Esc to cancel'), 'info')
+        void loadCompleteHistory(controller.signal, loaded => {
+          setNotice(ui(`正在补载完整历史 · ${loaded} 个节点`, `Backfilling complete history · ${loaded} nodes`), 'info')
+        }).catch(() => 'incomplete' as const).then(result => {
+          if (stopping !== undefined || historyLoadController !== controller) return
+          historyLoadController = undefined
+          transcript.pauseNativeHistory(false)
+          transcript.resetNativeHistory()
+          if (result !== 'complete') setNotice(ui('历史补载未完成；可用 /transcript replay 重试', 'History backfill incomplete; retry with /transcript replay'), 'warning')
+          else dismissNotice()
+          requestSurfaceRender()
+        })
+      }
+    } else if (liveBehavior.get().mouseMode === 'native') {
       transcript.setNativeMode(true)
       const historyResult = await loadCompleteHistory().catch(() => 'incomplete' as const)
       if (historyResult !== 'complete') setNotice(ui(
@@ -2399,6 +2542,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     terminalSession.startBackgroundSync()
     refreshHeader(true)
     refresh()
+    candidateHistoryLoad?.()
     if (options.startupNotice !== undefined) setNotice(options.startupNotice, 'success')
     const attachmentsReady = options.attachmentPaths !== undefined && options.attachmentPaths.length > 0
       ? (async () => {

@@ -21,6 +21,15 @@ import { measureStartup } from '../startup-trace.ts'
 
 type LanguageLoader = () => Promise<{ readonly default: LanguageRegistration[] }>
 
+export interface CodeStream {
+  /** Complete source lines only; the trailing newline is a state boundary. */
+  append(code: string): string[]
+  /** Reparse the mutable suffix without advancing the committed grammar state. */
+  preview(code: string): string[]
+}
+
+export const syntaxStreamMetrics = { characters: 0, lines: 0 }
+
 const LANGUAGE_LOADERS = {
   typescript: () => import('@shikijs/langs/typescript'),
   javascript: () => import('@shikijs/langs/javascript'),
@@ -230,6 +239,43 @@ export class SyntaxHighlighter {
   private themeName = ''
   private disposed = false
 
+  createStream(language: string | undefined, background: CodeBackgroundPolicy): CodeStream {
+    let state: GrammarState | undefined
+    let plainOnly = false
+    const canonical = languageOf(language)
+    const themeName = this.themeName
+    const render = (code: string, commit: boolean): string[] => {
+      syntaxStreamMetrics.characters += code.length
+      let lines: string[]
+      if (commit && !code.endsWith('\n')) throw new Error('Code stream append requires complete source lines')
+      if (this.themeName !== themeName) throw new Error('Code stream theme changed; reconstruct state before reuse')
+      if (plainOnly || this.disposed || !canonical || !this.loaded.has(canonical) || renderingColorLevel() === 0 || !highlightable(code)) {
+        if (canonical && !this.loaded.has(canonical)) this.load(canonical)
+        if (commit) plainOnly = true
+        lines = plainLines(code, this.theme, background)
+      } else {
+        try {
+          const tokens = this.highlighter.codeToTokensBase(code, {
+            lang: canonical, theme: themeName, tokenizeTimeLimit: 0,
+            ...(state === undefined ? {} : { grammarState: state }),
+          })
+          if (commit) {
+            state = this.highlighter.getLastGrammarState(tokens)
+            if (state === undefined) plainOnly = true
+          }
+          lines = tokens.map(line => line.map(token => renderToken(token, this.theme, background)).join(''))
+        } catch {
+          plainOnly = true
+          lines = plainLines(code, this.theme, background)
+        }
+      }
+      if (commit) lines = lines.slice(0, -1)
+      syntaxStreamMetrics.lines += lines.length
+      return lines
+    }
+    return { append: code => render(code, true), preview: code => render(code, false) }
+  }
+
   private constructor(
     private readonly highlighter: HighlighterCore,
     private theme: ResolvedTuiTheme,
@@ -372,5 +418,12 @@ export class SyntaxHighlighter {
       this.failed.add(language)
     }).finally(() => { this.loading.delete(language) })
     this.loading.set(language, task)
+  }
+
+  /** Worker preparation can await grammars discovered by the shared renderer before delivery. */
+  async finishPendingLanguages(): Promise<boolean> {
+    if (!this.loading.size) return false
+    await Promise.all(this.loading.values())
+    return true
   }
 }

@@ -9,6 +9,7 @@ import {
   Markdown,
   matchesKey,
   Text,
+  truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
   type Component,
@@ -48,6 +49,8 @@ import {
   color,
   escapeTerminalText,
   highlightCodeLines,
+  createCodeStream,
+  canvasStyleRevision,
   interaction,
   markdownTheme,
   terminalColorLevel,
@@ -87,6 +90,8 @@ import {
   type ViewportCellMap,
 } from './text-selection.ts'
 import { componentSelectionLines } from './pi-tui-adapters.ts'
+import { NativeHistory, stableParagraphEnd, fencedCodeRange, type NativeReceipt, type NativeSourceToken } from './native-history.ts'
+import { NativeMarkdownPreparation, NATIVE_MARKDOWN_THRESHOLD, type NativeMarkdownWorkerFactory } from './native-markdown.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -99,6 +104,9 @@ export const internals = {
   linesEscaped: 0,
   lastFullLinesCopied: 0,
   fingerprintsComputed: 0,
+  nativeSnapshotBlocksChecked: 0,
+  nativeTailBlocksVisited: 0,
+  nativeHistoryLinesPrepared: 0,
   imageBlocksUpdated: 0,
   activePulseTimers: 0,
   heightIndexExact: 0,
@@ -172,6 +180,9 @@ type TranscriptRow = ({
   /** Reasoning-region identity for pointer-only presentation toggles. */
   readonly reasoningKey?: string
 }
+
+export type NativePreparedRow = Extract<TranscriptRow, { format: 'plain' | 'code' | 'markdown' }>
+export type NativePreparedRows = readonly TranscriptRow[]
 
 /** Preserve source newlines that would otherwise be indistinguishable from exact-width wraps. */
 function explicitHardBreakIndexes(row: TranscriptRow | undefined, width: number): readonly number[] {
@@ -420,6 +431,17 @@ class CodeRow implements Component {
   }
 
   invalidate(): void {}
+}
+
+/** Shared code layout used by the native worker, including source-only padding removal. */
+export function renderNativeCode(row: Extract<TranscriptRow, { format: 'code' }>, width: number): string[] {
+  const component = new CodeRow(row)
+  const lines = component.render(width)
+  const projections = component.getSelectionLines()
+  return lines.map((line, index) => {
+    const projection = projections[index]
+    return projection?.text ? truncateToWidth(line, projection.displayStartCell + visibleWidth(projection.text), '', false) : line
+  })
 }
 
 function imageAttachment(value: unknown): TranscriptImageAttachment | undefined {
@@ -1120,13 +1142,11 @@ function deliverablesFingerprint(node: ChatConversationViewNode): readonly strin
 function nodeFingerprint(
   node: ChatConversationViewNode,
   preferences: TranscriptPreferences,
+  source = structuralToken({ kind: node.kind, data: node.data, deliverables: deliverablesFingerprint(node) }),
 ): StructuralToken {
   const tool = node.kind === 'tool-call' ? toolChatData(node.data)?.root : undefined
   const toolKey = tool === undefined ? node.key : callKey(tool, node.key) ?? node.key
-  return structuralToken({
-    kind: node.kind,
-    data: node.data,
-    deliverables: deliverablesFingerprint(node),
+  const presentation = structuralToken({
     tools: preferences.tools,
     reasoning: preferences.reasoning,
     toolOutputLineLimit: preferences.toolOutputLineLimit,
@@ -1139,6 +1159,7 @@ function nodeFingerprint(
     reasoningCollapsed: preferences.collapsedReasoning.has(node.key),
     focusedTool: preferences.focusedTool,
   })
+  return [String(source.length), ...source, ...presentation]
 }
 
 function reasoningExpanded(
@@ -1489,6 +1510,21 @@ interface TranscriptSearchIndex {
 
 /** Mutable pi-tui component backed only by the official conversation snapshot. */
 export class Transcript implements Component, Focusable {
+  /** Package-internal worker adapter: display rows only, no Session or persistence. */
+  static prepareNativeRows(rows: NativePreparedRows, width: number, first: boolean): string[] {
+    const transcript = new Transcript()
+    try {
+      transcript.setNativeMode(true)
+      const rendered = transcript.renderBlock(first ? 0 : 1, width, {
+        key: 'prepared', rows: [...rows], components: rows.map(row => transcript.component(row)),
+        sourceToken: '', linesByWidth: new Map(), metadata: transcriptBlockMetadata(rows, false), dirty: false,
+      })
+      return rendered.lines.map((line, index) => {
+        const projection = rendered.projections[index]
+        return projection?.text ? truncateToWidth(line, projection.displayStartCell + visibleWidth(projection.text), '', false) : line
+      })
+    } finally { transcript.dispose() }
+  }
   private blocks: readonly TranscriptBlock[] = []
   private readonly imageComponents = new Map<string, Component>()
   private readonly imageBlockOwners = new Map<string, Set<string>>()
@@ -1549,6 +1585,342 @@ export class Transcript implements Component, Focusable {
   private hoveredRegionId: string | undefined
   private emptyScrollPrimed = false
   private nativeMode = false
+  private nativeTailEnabled = false
+  private nativeHistoryPaused = false
+  private nativeClosing = false
+  private readonly nativeHistory = new NativeHistory()
+  private readonly nativeCodeStreams = new Map<string, { offset: number; context: string; stream: import('./syntax-highlighter.ts').CodeStream }>()
+  private readonly nativePreparations = new Map<string, { job: NativeMarkdownPreparation; token: NativeSourceToken; receipt?: NativeReceipt; preview?: string[] }>()
+  private readonly nativeSourceTokens = new Map<string, NativeSourceToken>()
+  private nativeSourceOrder: string[] = []
+  private nativeNotices: string[] = []
+  private readonly nativeRemoved = new Set<string>()
+  private readonly nativePartCounts = new Map<string, number>()
+  private readonly nativeSkipped = new Map<string, NativeSourceToken>()
+  private nativeBlocks: readonly TranscriptBlock[] = []
+  private readonly nativeProjection = new Map<string, TranscriptBlock[]>()
+  private nativeCandidates = new Set<number>()
+  private readonly nativeIndexes = new Map<string, number>()
+  private nativeBatch: { lines: string[]; receipts: NativeReceipt[]; ends: number[]; offset: number; deferCommit?: boolean; complete?: () => void } | undefined
+  private nativeBatchInFlight = false
+
+  /** Experimental display-only path; not a Harness setting. */
+  setNativeTailEnabled(enabled: boolean): void {
+    this.nativeTailEnabled = enabled
+    this.resetNativeHistory()
+  }
+
+  resetNativeHistory(): void {
+    this.clearNativePreparations()
+    this.nativeHistory.reset()
+    this.nativeSourceOrder = []
+    this.nativeNotices = []
+    this.nativeRemoved.clear()
+    this.nativePartCounts.clear()
+    this.nativeCodeStreams.clear()
+    this.nativeSkipped.clear()
+    this.nativeBatch = undefined
+    this.nativeBatchInFlight = false
+    this.indexNativeCandidates()
+  }
+
+  pauseNativeHistory(paused: boolean): void { this.nativeHistoryPaused = paused }
+  finishNativeHistory(): void { this.nativeClosing = true }
+  cancelNativeReplay(): void {
+    this.clearNativePreparations()
+    // Cancellation is not a successful commit. Keep a separate display omission
+    // set until explicit replay; newly changed/arriving nodes still render.
+    for (const index of this.nativeCandidates) {
+      const block = this.nativeBlocks[index]!
+      if (!block.metadata.dynamic) this.nativeSkipped.set(block.key, this.nativeToken(block))
+    }
+    this.nativeBatch = undefined
+    this.nativeBatchInFlight = false
+    this.nativeHistory.discardPending()
+    this.nativeHistoryPaused = false
+    this.nativeCodeStreams.clear()
+    this.indexNativeCandidates()
+  }
+  private clearNativePreparations(): void {
+    for (const { job } of this.nativePreparations.values()) job.dispose()
+    this.nativePreparations.clear()
+  }
+  /** Normal exit waits for asynchronous preparation before deciding the queue is empty. */
+  async waitNativePreparation(): Promise<boolean> {
+    const waiting = [...this.nativePreparations.values()].filter(({ job }) => !job.page())
+    if (!waiting.length) return false
+    await Promise.race(waiting.map(({ job }) => job.wait()))
+    return true
+  }
+  nativeHistoryPending(): boolean {
+    if (!this.nativeMode || this.nativeHistoryPaused) return false
+    if (this.nativeNotices.length) return true
+    if (this.emptyState && !this.nativeBatch) return false
+    if (this.nativeBatch !== undefined) return true
+    for (const index of this.nativeCandidates) if (!this.nativeBlocks[index]!.metadata.dynamic) return true
+    return false
+  }
+
+  private nativeToken(block: TranscriptBlock): NativeSourceToken {
+    if (this.nativeProjection.has(block.key)) return block.sourceToken
+    return this.nativeSourceTokens.get(block.key) ?? block.sourceToken
+  }
+
+  private indexNativeCandidates(): void {
+    if (!this.nativeTailEnabled) return
+    this.nativeBlocks = this.blocks.flatMap(block => this.nativeProjection.get(block.key) ?? [block])
+    this.nativeCandidates.clear()
+    this.nativeIndexes.clear()
+    for (const [index, block] of this.nativeBlocks.entries()) {
+      internals.nativeSnapshotBlocksChecked++
+      this.nativeIndexes.set(block.key, index)
+      const token = this.nativeToken(block)
+      const skipped = this.nativeSkipped.get(block.key)
+      if (skipped !== undefined && sameStructuralToken(skipped, token)) continue
+      if (!this.nativeHistory.isCommitted(block.key, token)) this.nativeCandidates.add(index)
+    }
+    for (const [key, state] of this.nativePreparations) {
+      if (this.nativeIndexes.has(key)) continue
+      state.job.dispose()
+      this.nativePreparations.delete(key)
+      this.nativeHistory.discard(key)
+    }
+  }
+
+  /** One bounded output batch; receipts become committed only after sink success. */
+  takeNativeHistoryBatch(): { lines: readonly string[]; acknowledge(): void } | undefined {
+    const batch = this.nativeBatch
+    if (!batch || this.nativeBatchInFlight) return undefined
+    this.nativeBatchInFlight = true
+    const lines = batch.lines.slice(batch.offset, batch.offset + 256)
+    const offset = batch.offset
+    let acknowledged = false
+    return { lines, acknowledge: () => {
+      if (acknowledged) return
+      acknowledged = true
+      for (let i = 0; i < batch.receipts.length; i++) {
+        const start = i === 0 ? 0 : batch.ends[i - 1]!
+        const delivered = Math.max(0, Math.min(offset + lines.length, batch.ends[i]!) - Math.max(offset, start))
+        this.nativeHistory.deliver(batch.receipts[i]!, delivered)
+      }
+      if (this.nativeBatch !== batch) return
+      batch.offset += lines.length
+      this.nativeBatchInFlight = false
+      if (batch.offset >= batch.lines.length) {
+        for (const receipt of batch.deferCommit ? [] : batch.receipts) {
+          this.nativeHistory.acknowledge(receipt)
+          if (receipt.settled) this.nativeCodeStreams.delete(receipt.key)
+          const index = this.nativeIndexes.get(receipt.key)
+          const block = index === undefined ? undefined : this.nativeBlocks[index]
+          if (block && this.nativeHistory.isCommitted(block.key, this.nativeToken(block))) this.nativeCandidates.delete(index!)
+        }
+        this.nativeBatch = undefined
+        batch.complete?.()
+      }
+      this.requestRender()
+    } }
+  }
+
+  private renderNativeTail(width: number): string[] {
+    if (this.nativeHistoryPaused) return []
+    const inset = width >= 12 ? 2 : 0
+    const contentWidth = Math.max(1, width - inset * 2)
+    const present = (lines: readonly string[]): string[] => lines.map(line => line === '' ? '' : ' '.repeat(inset) + line)
+    const renderWhole = (index: number, block: TranscriptBlock): string[] => {
+      const rendered = this.renderBlock(index, contentWidth, block)
+      return present(rendered.lines.map((line, row) => {
+        const projection = rendered.projections[row]
+        return projection?.text ? truncateToWidth(line, projection.displayStartCell + visibleWidth(projection.text), '', false) : line
+      }))
+    }
+    const tail: string[] = []
+    const history: string[] = this.nativeBatch === undefined ? this.nativeNotices.splice(0, 256).flatMap(line => wrapTextWithAnsi(line, width)) : []
+    const receipts: NativeReceipt[] = []
+    const ends: number[] = []
+    let canCommit = this.nativeBatch === undefined
+    let historyBudgetReached = this.nativeBatch !== undefined
+    for (const index of this.nativeCandidates) {
+      const block = this.nativeBlocks[index]!
+      let dynamic = block.metadata.dynamic && !this.nativeClosing
+      const pending = this.nativeHistory.pendingFor(block.key)
+      const only = block.rows.length === 1 && block.rows[0]?.format === 'markdown' ? block.rows[0] : undefined
+      const preparedRow = block.rows.length === 1 && ['markdown', 'plain', 'code'].includes(block.rows[0]!.format)
+        ? block.rows[0] as NativePreparedRow : undefined
+      const largeMixed = preparedRow === undefined && block.rows.reduce((size, row) => size + ('text' in row ? row.text.length : 0), 0) > NATIVE_MARKDOWN_THRESHOLD
+      let source = preparedRow?.text
+      const fence = only === undefined ? undefined : fencedCodeRange(only.text)
+      // Keep the incremental top-level code path unless it contains a huge
+      // indivisible line or a sizeable complex suffix outside the fence.
+      let longLine = false
+      if (source && source.length > NATIVE_MARKDOWN_THRESHOLD && fence) {
+        for (let start = 0; start < source.length;) {
+          const end = source.indexOf('\n', start)
+          if ((end < 0 ? source.length : end) - start > 8192) { longLine = true; break }
+          if (end < 0) break
+          start = end + 1
+        }
+      }
+      if (largeMixed || this.nativePreparations.get(block.key)?.receipt
+        || (source !== undefined && source.length > NATIVE_MARKDOWN_THRESHOLD && (!fence || longLine || source.length - (fence.closeEnd ?? source.length) > 8192))) {
+        if (this.nativeBatch || history.length || receipts.length) break
+        const revision = canvasStyleRevision()
+        const tailRows = dynamic ? Math.max(1, Math.min(256, this.viewportRows())) : undefined
+        let state = this.nativePreparations.get(block.key)
+        let preview = state?.preview
+        if (state?.receipt) dynamic = false
+        // Finish in-flight work before coalescing to the latest source; a stream
+        // of notifications must not endlessly restart parsing. Only an exact
+        // current source may become committed history.
+        if (state && (state.job.width !== contentWidth || state.job.revision !== revision || state.job.tailRows !== tailRows
+          || (!sameStructuralToken(state.token, this.nativeToken(block)) && state.job.page() !== undefined))) {
+          if (!state.receipt) {
+            if (dynamic && state.job.width === contentWidth && state.job.revision === revision) preview = state.job.page()?.lines ?? state.preview
+            else preview = undefined
+            state.job.dispose(); this.nativePreparations.delete(block.key); state = undefined
+          }
+        }
+        if (!state) {
+          state = { job: new NativeMarkdownPreparation(source ?? '', contentWidth, revision, tailRows, this.requestRender, this.nativeMarkdownWorkerFactory, preparedRow, largeMixed ? block.rows : undefined, index === 0), token: this.nativeToken(block) }
+          if (preview && dynamic) state.preview = preview
+          this.nativePreparations.set(block.key, state)
+        }
+        const page = state.job.page()
+        if (!page) {
+          if (state.preview && dynamic) tail.push(...present(state.preview))
+          else tail.push(color.muted(ui('正在准备长段内容…', 'Preparing long content…')))
+          canCommit = false
+          if (!dynamic) break
+          continue
+        }
+        if (dynamic) {
+          tail.push(...present(page.lines))
+          canCommit = false
+          continue
+        }
+        if (!canCommit) continue
+        const token = this.nativeToken(block)
+        if (!state.receipt) {
+          const previous = this.nativeHistory.get(block.key)
+          if (previous || this.nativeHistory.deliveredFor(block.key) || this.nativeSkipped.has(block.key)) history.push(color.muted(ui(
+            `── 更新 · ${escapeTerminalText(block.key)} ──`, `── Update · ${escapeTerminalText(block.key)} ──`)))
+          if (index > 0 && preparedRow?.gapBefore) history.push('')
+          state.receipt = this.nativeHistory.reserve(block.key, token, 0, source?.length ?? 0, source, true)
+        }
+        const deliveredLines = state.job.width === contentWidth ? page.lines
+          : page.lines.flatMap(line => wrapTextWithAnsi(line, contentWidth))
+        history.push(...present(deliveredLines))
+        const prepared = state
+        this.nativeBatch = { lines: [...history], receipts: [prepared.receipt!], ends: [history.length], offset: 0,
+          deferCommit: !page.done,
+          complete: () => {
+            if (page.done) { prepared.job.dispose(); this.nativePreparations.delete(block.key) }
+            else prepared.job.advance()
+          } }
+        internals.nativeHistoryLinesPrepared += history.length
+        // Already installed a bounded page; do not replace it below.
+        history.length = 0
+        break
+      }
+      source = only?.text
+      if (pending?.settled || (this.nativeBatch && !dynamic)) continue
+      if (historyBudgetReached && !dynamic) continue
+      internals.nativeTailBlocksVisited++
+      const token = this.nativeToken(block)
+      const previous = pending ?? this.nativeHistory.get(block.key)
+      const prefixMatches = previous?.source !== undefined && source !== undefined && source.startsWith(previous.source)
+      const from = prefixMatches ? previous.to : 0
+      const correction = (previous !== undefined && !prefixMatches) || this.nativeSkipped.has(block.key)
+        || (pending === undefined && this.nativeHistory.deliveredFor(block.key) !== undefined)
+      const text = only?.text.slice(from)
+      // The legacy partial placeholder has no durable node identity. Wait for
+      // its authoritative node rather than guessing a cross-key deduplication.
+      const stable = (block.key === '__partial__' && dynamic) || text === undefined ? 0 : !dynamic ? text.length
+        : fence && from < (fence.closeEnd ?? Number.POSITIVE_INFINITY) ? Math.max(0, fence.stableEnd - from)
+        : stableParagraphEnd(text)
+      const stableTo = from + stable
+      // A code block is prepared in source-line batches, not fully highlighted
+      // before the first 256-row output page can be delivered.
+      let to = stableTo
+      if (fence && from < fence.bodyEnd) {
+        let boundary = Math.max(from, fence.bodyStart)
+        for (let count = 0; count < 128 && boundary < stableTo; count++) {
+          const next = source!.indexOf('\n', boundary)
+          if (next < 0 || next >= stableTo) { boundary = stableTo; break }
+          boundary = next + 1
+        }
+        to = Math.min(to, boundary)
+      }
+      const renderText = (value: string): string[] => {
+        const lines = new Markdown(escapeTerminalText(value), 0, 0, markdownTheme).renderUnpadded(contentWidth)
+        return present(lines)
+      }
+      const renderRange = (start: number, end: number, commitCode = false): string[] => {
+        if (!source || !fence) return renderText(source?.slice(start, end) ?? '')
+        const lines: string[] = []
+        const bodyEnd = Math.min(end, fence.bodyEnd)
+        const bodyFrom = Math.max(start, fence.bodyStart)
+        if (bodyEnd > bodyFrom) {
+          const context = `${canvasStyleRevision()}:${fence.language}:${fence.bodyStart}`
+          let prepared = this.nativeCodeStreams.get(block.key)
+          if (!prepared || prepared.context !== context || prepared.offset > bodyFrom || (correction && start === from)) {
+            prepared = { offset: fence.bodyStart, context, stream: createCodeStream(fence.language) }
+            this.nativeCodeStreams.set(block.key, prepared)
+          }
+          if (prepared.offset < bodyFrom) {
+            // Source revision/theme reconstruction is explicit one-off work.
+            prepared.stream.append(escapeTerminalText(source.slice(prepared.offset, bodyFrom)).replace(/\t/gu, '   '))
+            prepared.offset = bodyFrom
+          }
+          const code = escapeTerminalText(source.slice(bodyFrom, bodyEnd)).replace(/\t/gu, '   ')
+          const complete = commitCode && code.endsWith('\n')
+          const highlighted = complete ? prepared.stream.append(code) : prepared.stream.preview(code)
+          if (complete) prepared.offset = bodyEnd
+          const indent = markdownTheme.codeBlockIndent ?? '  '
+          const codeWidth = Math.max(1, contentWidth - visibleWidth(indent))
+          for (const line of highlighted) {
+            for (const wrapped of wrapTextWithAnsi(line, codeWidth)) {
+              lines.push(indent + markdownTheme.codeBlock(wrapped))
+            }
+          }
+        }
+        const result = present(lines)
+        if (fence.closeEnd !== undefined && end > fence.closeEnd) {
+          if (start < fence.closeEnd) result.push('')
+          result.push(...renderText(source.slice(Math.max(start, fence.closeEnd), end)))
+        }
+        return result
+      }
+      if (canCommit && (!dynamic || stable > 0)) {
+        if (correction) history.push(...wrapTextWithAnsi(color.muted(ui(`── 更新 · ${escapeTerminalText(block.key)} ──`, `── Update · ${escapeTerminalText(block.key)} ──`)), width))
+        if (source !== undefined) {
+          if (from === 0 && index > 0 && only?.gapBefore) history.push('')
+          history.push(...renderRange(from, to, true))
+          if (dynamic && !fence) history.push('')
+        } else history.push(...renderWhole(index, block))
+        receipts.push(this.nativeHistory.reserve(block.key, token, from, to,
+          source?.slice(0, to), !dynamic && to === stableTo))
+        ends.push(history.length)
+        if (source !== undefined && to === stableTo && stableTo < source.length) tail.push(...renderRange(stableTo, source.length))
+        if (dynamic || to < stableTo || history.length >= 256) canCommit = false
+        if (to < stableTo || history.length >= 256) historyBudgetReached = true
+      } else {
+        canCommit = false
+        if (source !== undefined && from > 0) {
+          if (!fence || from >= fence.stableEnd) tail.push(...renderRange(from, source.length))
+        }
+        else tail.push(...renderWhole(index, block))
+      }
+    }
+    if (receipts.length || history.length) {
+      internals.nativeHistoryLinesPrepared += history.length
+      this.nativeBatch = { lines: history, receipts, ends, offset: 0 }
+    }
+    this.scrollOffset = 0
+    this.lastScrollbar = undefined
+    this.lastViewportMaps = []
+    this.lastPointerControls = []
+    return tail
+  }
   private readonly nativeFrozenBlocks = new Map<string, TranscriptBlockLines>()
   private readonly safeRenderedLines = new StringTransformCache(escapeTerminalText)
   private readonly nativeInsetLines = new WeakMap<TranscriptBlockLines, { inset: number; lines: string[] }>()
@@ -1563,11 +1935,20 @@ export class Transcript implements Component, Focusable {
     private readonly requestRender: () => void = () => undefined,
     private readonly requestOlder: () => void = () => undefined,
     private readonly welcome?: TranscriptWelcomeRenderer,
+    private readonly nativeMarkdownWorkerFactory?: NativeMarkdownWorkerFactory,
   ) {}
 
   /** Use terminal-native scrollback and freeze committed blocks once printed. */
   setNativeMode(enabled: boolean): void {
     if (this.nativeMode === enabled) return
+    if (!enabled) {
+      if (this.nativeBatch?.receipts.some(receipt => this.nativePreparations.has(receipt.key))) {
+        this.nativeBatch = undefined
+        this.nativeBatchInFlight = false
+      }
+      for (const key of this.nativePreparations.keys()) this.nativeHistory.discard(key)
+      this.clearNativePreparations()
+    }
     this.nativeMode = enabled
     this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
     this.scrollOffset = 0
@@ -1969,6 +2350,9 @@ export class Transcript implements Component, Focusable {
     this.snapshot = snapshot
     const sessionId = String(snapshot.sessionId)
     if (sessionId !== this.sessionId) {
+      this.nativeSourceTokens.clear()
+      this.nativeProjection.clear()
+      this.resetNativeHistory()
       this.imageGeneration += 1
       this.pendingImages.clear()
       this.imageComponents.clear()
@@ -2017,6 +2401,34 @@ export class Transcript implements Component, Focusable {
       const node = snapshot.chat.nodes.get(key)
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
+    if (this.nativeTailEnabled) {
+      const order = visibleNodes.map(node => node.key)
+      const current = new Set(order)
+      const previous = new Set(this.nativeSourceOrder)
+      const removed = this.nativeSourceOrder.filter(key => !current.has(key))
+      const oldCommon = this.nativeSourceOrder.filter(key => current.has(key))
+      const newCommon = order.filter(key => previous.has(key))
+      if (!this.nativeHistoryPaused) {
+        for (const key of removed) this.nativeNotices.push(color.muted(ui(
+          `── 来源已移除或隐藏 · ${escapeTerminalText(key)}；/transcript replay 查看当前历史 ──`,
+          `── Source removed or hidden · ${escapeTerminalText(key)}; /transcript replay for current history ──`)))
+        if (oldCommon.some((key, index) => key !== newCommon[index])) this.nativeNotices.push(color.muted(ui(
+          '── 历史顺序已更新；/transcript replay 查看当前顺序 ──',
+          '── History order updated; /transcript replay for current order ──')))
+        for (const node of visibleNodes) {
+          const count = assistantStepData(node.data)?.blocks.length ?? 0
+          if (this.nativeRemoved.has(node.key) || count < (this.nativePartCounts.get(node.key) ?? 0)) this.nativeNotices.push(color.muted(ui(
+            `── 来源结构已更新 · ${escapeTerminalText(node.key)}；/transcript replay 查看当前内容 ──`,
+            `── Source structure updated · ${escapeTerminalText(node.key)}; /transcript replay for current content ──`)))
+        }
+      }
+      for (const key of removed) { this.nativeSourceTokens.delete(key); this.nativeProjection.delete(key); this.nativeRemoved.add(key); this.nativePartCounts.delete(key) }
+      for (const node of visibleNodes) {
+        this.nativeRemoved.delete(node.key)
+        this.nativePartCounts.set(node.key, assistantStepData(node.data)?.blocks.length ?? 0)
+      }
+      this.nativeSourceOrder = order
+    }
     this.reasoningStates.clear()
     for (const node of visibleNodes) {
       const step = assistantStepData(node.data)
@@ -2071,10 +2483,43 @@ export class Transcript implements Component, Focusable {
       }
     }
     for (const node of visibleNodes) {
+      const step = assistantStepData(node.data)
+      const sourceToken = structuralToken({ kind: node.kind, data: node.data, deliverables: deliverablesFingerprint(node) })
+      const fingerprint = nodeFingerprint(node, preferences, sourceToken)
+      const reusableProjection = this.nativeProjection.has(node.key)
+        && sameStructuralToken(this.nodeCache.get(node.key)?.sourceToken ?? '', fingerprint)
+      if (!(this.nativeTailEnabled && step && step.blocks.length > 1)) this.nativeProjection.delete(node.key)
+      if (this.nativeTailEnabled && step && step.blocks.length > 1 && !reusableProjection) {
+        const answer = step.blocks.some(part => part.kind === 'text' && part.text !== '')
+        // A pulsing reasoning header stays mutable until answer output starts.
+        // Once settled, each raw AssistantBlock has an independent source range.
+        if (answer || step.status !== 'running') {
+          const units: TranscriptBlock[] = []
+          const expanded = reasoningExpanded(preferences, node.key, false)
+          const add = (key: string, rows: TranscriptRow[], value: unknown, dynamic: boolean): void => {
+            if (!rows.length) return
+            units.push({ key, rows, components: rows.map(row => this.component(row)),
+              sourceToken: structuralToken(value), linesByWidth: new Map(),
+              metadata: transcriptBlockMetadata(rows, dynamic), dirty: false })
+          }
+          if (step.blocks.some(part => part.kind === 'reasoning' && part.text !== '')) {
+            add(`${node.key}/header`, [reasoningHeaderRow(node.key, expanded)], 'reasoning-header', false)
+          }
+          for (const [partIndex, part] of step.blocks.entries()) {
+            if (part.kind === 'tool-call') continue
+            const dynamic = step.status === 'running' && partIndex === step.blocks.length - 1
+            add(partIndex === 0 ? node.key : `${node.key}/source/${partIndex}`, assistantBlockRows(part, preferences, false, { key: node.key, expanded }), { part, dynamic }, dynamic)
+          }
+          if (step.status === 'interrupted') add(`${node.key}/stopped`, [{ format: 'plain', text: color.warning(ui('已停止', 'Stopped')) }], 'interrupted', false)
+          if (units[0]) units[0].rows[0] = { ...units[0].rows[0]!, gapBefore: true }
+          this.nativeProjection.set(node.key, units)
+        }
+      }
       internals.fingerprintsComputed += 1
+      if (this.nativeTailEnabled) this.nativeSourceTokens.set(node.key, sourceToken)
       take(
         node.key,
-        nodeFingerprint(node, preferences),
+        fingerprint,
         () => chatNodeRows(node, preferences),
         assistantStepData(node.data)?.status === 'running',
       )
@@ -2224,6 +2669,7 @@ export class Transcript implements Component, Focusable {
    */
   refreshPresentation(): void {
     this.safeRenderedLines.clear()
+    this.nativeCodeStreams.clear()
     const scrollOffset = this.scrollOffset
     const turnCursor = this.turnCursor
     const viewportAnchor = this.viewportAnchor
@@ -2252,6 +2698,7 @@ export class Transcript implements Component, Focusable {
 
   /** Stop pending attachment presentation updates during terminal teardown. */
   dispose(): void {
+    this.clearNativePreparations()
     this.safeRenderedLines.clear()
     this.stopPulseAnimation()
     this.imageGeneration += 1
@@ -2274,8 +2721,8 @@ export class Transcript implements Component, Focusable {
     this.syncHeightIndexCounters()
   }
 
-  private renderBlock(blockIndex: number, contentWidth: number): TranscriptBlockLines {
-    const block = this.blocks[blockIndex]
+  private renderBlock(blockIndex: number, contentWidth: number, projected?: TranscriptBlock): TranscriptBlockLines {
+    const block = projected ?? this.blocks[blockIndex]
     if (block === undefined) return { lines: [], projections: [], borderLines: [], hardBreaks: [], turnAnchors: [], controls: [] }
     internals.blocksVisited += 1
     const cacheKey = (blockIndex === 0 ? -contentWidth : contentWidth) + (this.nativeMode ? 1_000_000 : 0)
@@ -2342,9 +2789,7 @@ export class Transcript implements Component, Focusable {
         : row?.format === 'plain' && row.pulse === undefined && row.welcome !== true
           ? plainSelectionLines(row.text, contentWidth)
           : componentSelectionLines(component) ?? fallbackSelectionLines(rendered, contentWidth)
-      projections.push(...(projected.length === rendered.length
-        ? projected
-        : fallbackSelectionLines(rendered, contentWidth)))
+      for (const projection of projected.length === rendered.length ? projected : fallbackSelectionLines(rendered, contentWidth)) projections.push(projection)
       for (const hardBreakIndex of explicitHardBreakIndexes(row, contentWidth)) {
         const target = start + hardBreakIndex
         if (target >= start && target < lines.length) hardBreaks[target] = true
@@ -2700,6 +3145,7 @@ export class Transcript implements Component, Focusable {
   }
 
   render(width: number): string[] {
+    if (this.nativeTailEnabled && this.nativeMode && (!this.emptyState || this.nativeNotices.length || this.nativeBatch)) return this.renderNativeTail(width)
     const inset = width >= 12 ? 2 : 0
     const contentWidth = Math.max(1, width - inset * 2)
     this.heightIndex.reconcile(
@@ -3183,6 +3629,7 @@ export class Transcript implements Component, Focusable {
 
   private commit(blocks: readonly TranscriptBlock[]): void {
     this.blocks = blocks
+    this.indexNativeCandidates()
     if (this.pendingOlderAnchor !== undefined
       && blocks.some(block => block.key === this.pendingOlderAnchor?.blockKey)) {
       this.viewportAnchor = { ...this.pendingOlderAnchor, followLatest: false }
@@ -3190,10 +3637,11 @@ export class Transcript implements Component, Focusable {
       && !blocks.some(block => block.key === this.viewportAnchor.blockKey)) {
       this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
     }
+    const keyedBlocks = new Map(blocks.map(block => [block.key, block]))
     this.heightIndex.reconcile(
-      blocks.map(block => block.key),
+      [...keyedBlocks.keys()],
       (key) => {
-        const block = blocks.find(candidate => candidate.key === key)
+        const block = keyedBlocks.get(key)
         return Math.max(1, block?.rows.length ?? 1)
       },
       this.viewportState?.contentWidth ?? this.heightIndex.contentWidth,
