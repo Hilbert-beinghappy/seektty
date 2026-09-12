@@ -4,7 +4,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type { InProcessConnectionHandle } from '@deepseek-ai/dsh-client-connection/in-process'
-import { InProcessApiClient, toFetchHandler, type IApiClient } from '@deepseek-ai/dsh-host-apiproxy'
+import type { IApiClient } from '../../vendor/api-contract/fetch/client.js'
+import { NativeTerminalApi } from './api-compat.ts'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection'
 import type { TuiManagementBridge, TuiSurfaceOutcome } from '@deepseek-ai/dsh-tui-protocol'
 import { startTui } from '../client/index.ts'
@@ -18,7 +19,7 @@ export const name = 'tui-runner'
 
 /** Host services required before the terminal can assemble its Client Runtime. */
 export const inject = [
-  'apiProxy', 'connection', 'settings', 'credentials', 'profilePluginManager', 'tuiMarketplaceProviders', TUI_STARTUP_SERVICE,
+  'agents', 'agentPresets', 'tools', 'sessionQuery', 'sessionController', 'workspaceController', 'typertGateway', 'connection', 'settings', 'credentials', 'profilePluginManager', 'tuiMarketplaceProviders', TUI_STARTUP_SERVICE,
 ]
 
 /** Structural launch values crossing the Host/Client TypeScript-program boundary. */
@@ -50,15 +51,15 @@ async function run(ctx: Context): Promise<void> {
   await ctx.get('loader')?.await()
   if (!isActive(ctx)) return
   const startup = ctx.get(TUI_STARTUP_SERVICE) as TuiStartupValues | undefined
-  const apiProxy = ctx.get('apiProxy')
+  const sessionController = ctx.get('sessionController')
   const connection = ctx.get('connection') as InProcessConnectionHandle | undefined
   const exit = ctx.get('appExit')
-  if (startup === undefined || apiProxy === undefined || connection === undefined || exit === undefined) {
+  if (startup === undefined || sessionController === undefined || connection === undefined || exit === undefined) {
     throw new Error('tui-runner: Harness startup services are incomplete')
   }
   const surface = await startTui({
     ...startup,
-    api: new InProcessApiClient(toFetchHandler(apiProxy)),
+    api: new NativeTerminalApi(ctx),
     rpc: connection.clientRpc,
     management: createTuiManagementBridge(ctx, startup.cwd),
   })

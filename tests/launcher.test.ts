@@ -186,7 +186,7 @@ describe('launcher provisioning', () => {
     expect(launch(['--version'], { LANG: 'en_US.UTF-8' }, execute, chunk => { chunks.push(chunk) })).toBe(0)
     expect(execute).not.toHaveBeenCalled()
     expect(chunks.join('')).toContain(`seektty ${PACKAGE_VERSION}`)
-    expect(chunks.join('')).toContain('Requires dsh >= 0.1.0-rc.6')
+    expect(chunks.join('')).toContain('Requires dsh >= 0.1.5-rc.1')
   })
 })
 

@@ -1,3 +1,5 @@
+> **Development branch:** this checkout adapts SeekTTY to official dsh `0.1.5-rc.1` only. It is not the published `seektty@1.2.5` artifact. The release installation commands below describe the previous release; use a locally packed candidate for this branch. Interface differences, migration decisions, and completed/pending checks are recorded in [the adaptation document](docs/dsh-0.1.5-rc.1-adaptation.md).
+
 <div align="center">
 
 <img src="assets/seektty-logo.png" alt="SeekTTY logo" width="200">
@@ -406,7 +408,7 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 
 ## Compatibility and verification
 
-The current tested Host is official `0.1.1-rc.2`; the complete compatibility boundary is summarized below.
+This development branch declares only official `0.1.5-rc.1`; validation is tracked in the adaptation document. The published SeekTTY `1.2.5` release was tested on official `0.1.1-rc.2`. The table below records that released baseline, not acceptance of this branch.
 
 | Boundary | Version |
 | --- | --- |

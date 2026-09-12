@@ -1,3 +1,4 @@
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   ChatConversationViewNode,
@@ -60,7 +61,7 @@ function user(key: string, text: string): ChatConversationViewNode {
 }
 
 const imageAttachment = {
-  attachmentId: 'image-1',
+  attachmentId: AttachmentId('image-1'),
   mediaType: 'image/png',
   bytes: 68,
   width: 1,
@@ -152,6 +153,26 @@ afterEach(() => {
 })
 
 describe('transcript block viewport', () => {
+  it('renders transient native text on a hidden running step without changing stored history', () => {
+    const transcript = new Transcript(() => 20)
+    const node = { ...assistantStep('stream', 'running', ''), visibility: 'hidden' as const }
+    const state = snapshot([node])
+    transcript.update({ ...state, partial: { turn: 1, step: 1, blocks: [{ kind: 'text', text: 'live-native-output' }] } })
+    expect(plain(transcript.render(80))).toContain('live-native-output')
+    expect(node.visibility).toBe('hidden')
+    expect(node.data).toMatchObject({ blocks: [{ kind: 'text', text: '' }] })
+    transcript.dispose()
+  })
+
+  it('renders the current partial even when an earlier assistant step is already settled', () => {
+    const transcript = new Transcript(() => 20)
+    transcript.update({ ...snapshot([assistantStep('old', 'settled', 'old-answer')]),
+      partial: { turn: 2, step: 1, blocks: [{ kind: 'text', text: 'next-answer' }] } })
+    const output = plain(transcript.render(80))
+    expect(output).toContain('old-answer')
+    expect(output).toContain('next-answer')
+    transcript.dispose()
+  })
   it.each(['xterm', 'xterm-256color'])('preserves selection, copied text and hit maps through RGB presentation rebuilds (%s)', term => {
     for (const key of ['NO_COLOR', 'COLORTERM', 'TERM_PROGRAM', 'WT_SESSION']) vi.stubEnv(key, undefined)
     vi.stubEnv('TERM', term)

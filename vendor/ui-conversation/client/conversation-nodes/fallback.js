@@ -4,7 +4,7 @@ import { chatNode } from "./common.js";
 export const unknownFallbackDefinition = {
     kind: 'unknown-surface',
     target: 'chat',
-    match: event => isAppendSurfaceEvent(event)
+    match: event => event.type !== 'system/message' && isAppendSurfaceEvent(event)
         ? { id: String(event.seq), role: 'start' }
         : null,
     start: (_context, match) => ({

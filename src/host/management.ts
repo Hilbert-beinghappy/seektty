@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { ProfilePluginManager } from './profile-plugin-manager.ts'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { SettingsConflictError, settingsNamespace, type SettingsDescriptor } from '@deepseek-ai/dsh-settings'
+import { SettingsConflictError, type SettingsDescriptor } from '@deepseek-ai/dsh-settings'
 import type {
   TuiManagementBridge,
   TuiMarketplaceSource,
@@ -36,17 +36,17 @@ import type {} from './marketplace-provider.ts'
 import { assertCredentialFreeUrl, PluginMarketplace, redactMarketplaceUrl } from './plugin-marketplace.ts'
 import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
-import { markdownFromSessionLog } from '../client/conversation-markdown.ts'
-import { producedFilesFromSessionLog } from '../client/produced-files.ts'
+import { conversationMarkdown } from '../client/conversation-markdown.ts'
 import { keyBindingsIssue, sanitizeKeyBindings } from '../client/keymap.ts'
 import { ui } from '../client/locale.ts'
 import { collectFastfetch, collectFastfetchLogo } from './fastfetch.ts'
+import { exportSession, sessionExportSource, readSessionConversation } from './session-export.ts'
 
-const MARKETPLACE_NAMESPACE = settingsNamespace('tui-plugin-marketplace')
-const APPEARANCE_NAMESPACE = settingsNamespace(TUI_APPEARANCE_SETTINGS_NAMESPACE)
-const BEHAVIOR_NAMESPACE = settingsNamespace(TUI_BEHAVIOR_SETTINGS_NAMESPACE)
-const COMPOSER_HISTORY_NAMESPACE = settingsNamespace(TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE)
-const WELCOME_NAMESPACE = settingsNamespace(TUI_WELCOME_SETTINGS_NAMESPACE)
+const MARKETPLACE_NAMESPACE = 'tui-plugin-marketplace'
+const APPEARANCE_NAMESPACE = TUI_APPEARANCE_SETTINGS_NAMESPACE
+const BEHAVIOR_NAMESPACE = TUI_BEHAVIOR_SETTINGS_NAMESPACE
+const COMPOSER_HISTORY_NAMESPACE = TUI_COMPOSER_HISTORY_SETTINGS_NAMESPACE
+const WELCOME_NAMESPACE = TUI_WELCOME_SETTINGS_NAMESPACE
 const TUI_BUNDLE = 'seektty'
 const NON_TUI_SURFACE_BUNDLES = ['@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless'] as const
 const NPM_SOURCE: TuiMarketplaceSource = Object.freeze({
@@ -420,29 +420,9 @@ export function createSettingsDescribeCache(
   }
 }
 
-function sessionExportFilename(sessionId: string): string {
-  const safe = sessionId.replace(/[^A-Za-z0-9._-]/gu, '_').slice(0, 120) || 'session'
-  return `dsh-session-${safe}.zip`
-}
-
 function sessionMarkdownFilename(sessionId: string): string {
   const safe = sessionId.replace(/[^A-Za-z0-9._-]/gu, '_').slice(0, 120) || 'session'
   return `${safe}.md`
-}
-
-async function bufferStream(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
-  const reader = stream.getReader()
-  const chunks: Uint8Array[] = []
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) break
-      chunks.push(next.value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  return Buffer.concat(chunks)
 }
 
 function textStream(text: string): ReadableStream<Uint8Array> {
@@ -578,7 +558,7 @@ async function mutateSettings(
   expectedRevision: number,
 ): Promise<void> {
   try {
-    await settings.mutate(settingsNamespace(namespace), ops, expectedRevision)
+    await settings.mutate(namespace, ops, expectedRevision)
   } catch (error) {
     if (error instanceof SettingsConflictError) {
       throw new TuiSettingsConflictError(namespace, error.expected, error.actual)
@@ -647,50 +627,15 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     includeDescendants: boolean,
     signal?: AbortSignal,
   ) => {
-    const apiProxy = ctx.get('apiProxy')
-    if (apiProxy === undefined) {
-      throw new Error(ui(
-        'Harness Session Export 服务未装配',
-        'Harness Session Export service is not mounted',
-      ))
-    }
-    const request: Parameters<typeof apiProxy.downloads.sessionLog>[0] = {
-      sessionId: sessionId as Parameters<typeof apiProxy.downloads.sessionLog>[0]['sessionId'],
-      ...(includeDescendants ? { includeDescendants: true } : {}),
-    }
-    const response = await apiProxy.downloads.sessionLog(request, signal ?? new AbortController().signal)
-    if (!response.ok) {
-      const detail = (await response.text()).trim().slice(0, 1_000)
-      throw new Error(ui(
-        `Harness Session Export 失败（HTTP ${String(response.status)}）${detail === '' ? '' : `：${detail}`}`,
-        `Harness Session Export failed (HTTP ${String(response.status)})${detail === '' ? '' : `: ${detail}`}`,
-      ))
-    }
-    if (response.body === null) {
-      throw new Error(ui(
-        'Harness Session Export 返回了空响应体',
-        'Harness Session Export returned an empty response body',
-      ))
-    }
-    const rawLength = response.headers.get('content-length')
-    const contentLength = rawLength === null ? undefined : Number.parseInt(rawLength, 10)
-    return {
-      suggestedFilename: sessionExportFilename(sessionId),
-      mediaType: response.headers.get('content-type') ?? 'application/zip',
-      ...(contentLength === undefined || !Number.isSafeInteger(contentLength) || contentLength < 0
-        ? {}
-        : { contentLength }),
-      stream: response.body,
-    }
+    return exportSession(ctx, sessionId, includeDescendants, signal ?? new AbortController().signal)
   }
 
   return {
     sessionExport: {
       download: downloadSessionLog,
       markdown: async (sessionId, signal) => {
-        const exported = await downloadSessionLog(sessionId, false, signal)
-        const bytes = await bufferStream(exported.stream)
-        const markdown = markdownFromSessionLog(bytes, sessionId)
+        const snapshot = await readSessionConversation(sessionExportSource(ctx), sessionId, signal ?? new AbortController().signal)
+        const markdown = conversationMarkdown(snapshot.title, snapshot.nodes)
         const encoded = Buffer.from(markdown, 'utf8')
         return {
           suggestedFilename: sessionMarkdownFilename(sessionId),
@@ -702,9 +647,8 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     },
     sessionFiles: {
       index: async (sessionId, signal) => {
-        const exported = await downloadSessionLog(sessionId, false, signal)
-        const bytes = await bufferStream(exported.stream)
-        return producedFilesFromSessionLog(bytes)
+        return (await readSessionConversation(sessionExportSource(ctx), sessionId,
+          signal ?? new AbortController().signal)).producedFiles
       },
     },
     settings: {
@@ -731,10 +675,10 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     },
     profiles: {
       list: () => Promise.resolve(manager.listProfiles().map(tuiProfile)),
-      create: (name, copyFrom) => Promise.resolve(tuiProfile(manager.createProfile(name, copyFrom, {
+      create: async (name, copyFrom) => tuiProfile(await manager.createUsableProfile(name, copyFrom, {
         addBundles: [TUI_BUNDLE],
         removeBundles: NON_TUI_SURFACE_BUNDLES,
-      }))),
+      })),
     },
     plugins: {
       snapshot: () => Promise.resolve(manager.snapshot()),

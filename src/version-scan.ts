@@ -16,7 +16,7 @@ export const DSH_DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/@deepseek
 export const SEEKTTY_DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/seektty/dist-tags'
 export const DEFAULT_SCAN_TIMEOUT_MS = 3_000
 
-/** Peer-aligned auto-install floor for the rc.6–rc.8 Host line. */
+/** Peer-aligned auto-install floor; a floor above the legacy ceiling permits only the tested pin. */
 export const AUTO_PERMITTED_DSH_MINIMUM = DSH_COMPATIBILITY.minimum
 /** Peer-aligned auto-install ceiling for the legacy Host line. */
 export const AUTO_PERMITTED_DSH_LEGACY_MAXIMUM = '0.1.0-rc.8'

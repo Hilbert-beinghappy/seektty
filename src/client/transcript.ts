@@ -2399,6 +2399,12 @@ export class Transcript implements Component, Focusable {
     }
     const visibleNodes = snapshot.chat.order.flatMap((key) => {
       const node = snapshot.chat.nodes.get(key)
+      const step = node?.kind === 'assistant-step' ? assistantStepData(node.data) : undefined
+      const partial = snapshot.partial
+      if (node !== undefined && step !== undefined && partial !== null
+        && step.turn === partial.turn && step.step === partial.step && step.status === 'running') {
+        return [{ ...node, visibility: 'visible' as const, data: { ...step, blocks: partial.blocks } }]
+      }
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
     if (this.nativeTailEnabled) {
@@ -2524,7 +2530,10 @@ export class Transcript implements Component, Focusable {
         assistantStepData(node.data)?.status === 'running',
       )
     }
-    if (snapshot.partial !== null && !visibleNodes.some(node => node.kind === 'assistant-step')) {
+    if (snapshot.partial !== null && !visibleNodes.some(node => {
+      const step = node.kind === 'assistant-step' ? assistantStepData(node.data) : undefined
+      return step?.turn === snapshot.partial?.turn && step?.step === snapshot.partial?.step
+    })) {
       const partial = snapshot.partial
       const key = '__partial__'
       const thinking = !partial.blocks.some(block => block.kind === 'text' && block.text !== '')

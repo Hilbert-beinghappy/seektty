@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import crossSpawn from 'cross-spawn'
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, join, resolve } from 'node:path'
+import { dump } from 'js-yaml'
+import { stockDshTarget, verifyStockDsh } from './stock-dsh-version.mjs'
 
 const mode = process.argv[2] ?? process.env.SEEKTTY_GVS_MODE ?? 'false'
 if (mode !== 'false' && mode !== 'true') {
@@ -12,7 +14,9 @@ if (mode !== 'false' && mode !== 'true') {
 }
 
 const candidateInput = process.argv[3] ?? process.env.SEEKTTY_SPEC ?? '.artifacts'
-const testedDsh = process.env.SEEKTTY_TESTED_DSH?.trim() || '0.1.1-rc.2'
+const target = stockDshTarget()
+const testedDsh = process.env.SEEKTTY_TESTED_DSH?.trim() || target.version
+if (testedDsh !== target.version) throw new Error(`The audited workspace closure is ${target.version}, not ${testedDsh}`)
 const root = mkdtempSync(join(tmpdir(), `seektty-pnpm11-gvs-${mode}-`))
 const globalDir = join(root, 'global')
 const binDir = join(root, 'bin')
@@ -124,6 +128,17 @@ try {
   const pnpmVersion = requireSuccess('pnpm', ['--version']).trim()
   assert(pnpmVersion === '11.7.0', `Expected pnpm 11.7.0, received ${JSON.stringify(pnpmVersion)}`)
 
+  // pnpm 11 reads the global project's workspace settings at <global-dir>/v11,
+  // not from the calling checkout or its package.json. Ask pnpm for that root
+  // before writing only this test's isolated settings; no user config changes.
+  const globalSettingsDir = join(globalDir, 'v11')
+  const reportedRoot = requireSuccess('pnpm', ['root', '--global',
+    `--config.global-dir=${globalDir}`, `--config.global-bin-dir=${binDir}`])
+  assert(reportedRoot.split(/\r?\n/u).some(line => line.trim() === globalSettingsDir),
+    `Unexpected pnpm 11 global settings root: ${reportedRoot}`)
+  mkdirSync(globalSettingsDir, { recursive: true })
+  writeFileSync(join(globalSettingsDir, 'pnpm-workspace.yaml'), dump({ overrides: target.overrides }), { flag: 'wx' })
+
   globalInstall(`@deepseek-ai/dsh@${testedDsh}`)
   globalInstall(pluginSpec)
   const dshPackageDir = assertLayout('@deepseek-ai/dsh', mode === 'true')
@@ -131,6 +146,8 @@ try {
   const dsh = executable('dsh')
   const deepseek = executable('deepseek')
   environment.DSH_BIN = dsh
+  const verified = verifyStockDsh(dsh, target)
+  process.stdout.write(`Verified GVS=${mode} official dsh ${verified.version}: ${verified.packageCount} exact dsh packages\n`)
 
   const version = spawn(deepseek, ['--version'])
   assert(version.status === 0 && version.output.includes('seektty'), `deepseek --version failed:\n${version.output}`)

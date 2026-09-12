@@ -4,11 +4,19 @@
 
 - id: system-prompt
   config:
-    persona: >-
+    personaPrefix: >-
       You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
 
 - id: hmr
   disabled: true
+
+# The base disables full-text search by default. `/resume <query>` keeps using
+# the official search service, opening its derived index only when requested.
+# Config replacement is whole-row, so retain the explicit in-memory path.
+- id: session-query-sqlite
+  config:
+    path: ':memory:'
+    openAt: first-search
 
 - id: tools
   config:
@@ -39,6 +47,9 @@
   disabled: true
 
 - id: tool-skill
+  disabled: true
+
+- id: command-goal
   disabled: true
 
 - id: tool-goal
@@ -87,6 +98,9 @@
   disabled: true
 
 - insert:
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
       config:
@@ -94,19 +108,6 @@
 
     - id: code-runtime
       name: '@deepseek-ai/dsh-code-runtime-worker-thread'
-
-    - id: storage
-      name: '@deepseek-ai/dsh-storage'
-
-    - id: storage-json
-      name: '@deepseek-ai/dsh-storage-json'
-      config:
-        root: !!js dshHomePath('storages')
-
-    - id: storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
-      config:
-        backend: json
 
     - id: message-feedback
       name: '@deepseek-ai/dsh-message-feedback'
@@ -122,16 +123,10 @@
     - id: workspace
       name: '@deepseek-ai/dsh-workspace'
 
-    - id: session-projection-cache
-      name: '@deepseek-ai/dsh-session-projection-cache'
-      config:
-        writeEveryEvents: 200
-        writeIntervalMs: 5000
-
     - id: session-stats
       name: '@deepseek-ai/dsh-session-stats'
 
-    # ApiProxy requires the shared directory-picker seam. The TUI composes the
+    # Session Controller uses the shared directory-picker seam. The TUI composes the
     # platform-neutral browse backend so future `/workspace` overlays can list
     # paths without opening a GUI dialog or mounting Web transport.
     - id: directory-picker
@@ -146,15 +141,23 @@
     - id: tui-marketplace-providers
       name: 'seektty/marketplace-provider'
 
-    # Official rc.6/rc.7 attachments publish a frozen ImageAttachmentLimits
-    # without maxImageDimension. This SeekTTY-owned adapter must run after
-    # that store exists and immediately before api-gateway so the rc.8
-    # host-apiproxy projection reads a capability-normalized object.
-    - id: attachment-compat
-      name: 'seektty/attachment-compat'
+    - id: session-controller
+      name: '@deepseek-ai/dsh-api-session-controller'
 
-    - id: api-gateway
-      name: '@deepseek-ai/dsh-host-apiproxy'
+    - id: file-upload
+      name: '@deepseek-ai/dsh-client-file-upload'
+
+    - id: session-reference
+      name: '@deepseek-ai/dsh-session-reference'
+
+    - id: file-reference-local
+      name: '@deepseek-ai/dsh-file-reference-local'
+
+    - id: settings-controller
+      name: '@deepseek-ai/dsh-api-settings-controller'
+
+    - id: workspace-controller
+      name: '@deepseek-ai/dsh-api-workspace-controller'
 
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'

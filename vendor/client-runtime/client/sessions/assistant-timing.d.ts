@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types';
 import type { AssistantTiming } from './conversation.ts';
-export { isTokenDelta } from '@deepseek-ai/dsh-llm/message';
+export { isTokenDelta } from '@deepseek-ai/dsh-llm/assistant-stream';
 /** Pre-finalize timing boundaries for one assistant step (start + first token). */
 export interface AssistantStepMetadata {
     stepStartTime: number | null;

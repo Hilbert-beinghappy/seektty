@@ -80,6 +80,11 @@ export class PartialAccumulator {
                 return false;
         }
     }
+    /** Install an already validated presentation block from a newer wire contract. */
+    setBlock(index, block) {
+        this.blocks[index] = block;
+        this.changed = true;
+    }
     /**
      * Current partial projection.
      * @returns the cached snapshot (the blocks array reference only changes after a mutation).

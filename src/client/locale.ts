@@ -4,7 +4,7 @@ import {
   LOCALE_IDS,
   LOCALE_PREFERENCE_FIELD,
   LOCALE_SETTINGS_NAMESPACE,
-  type LocaleId,
+  type BuiltInLocaleId as LocaleId,
   type LocaleSettings,
 } from '@deepseek-ai/dsh-client-locale'
 import type {
@@ -902,10 +902,10 @@ function localeValue(document: TuiSettingsDocument): LocaleSettings {
   const value = document.value as Readonly<Record<string, unknown>>
   const preference = value[LOCALE_PREFERENCE_FIELD]
   if (preference === undefined) return {}
-  if (!LOCALE_IDS.some(candidate => candidate === preference)) {
+  if (typeof preference !== 'string' || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/u.test(preference)) {
     throw new Error(`Harness locale preference is invalid: ${JSON.stringify(preference)}`)
   }
-  return { preference: preference as LocaleId }
+  return { preference }
 }
 
 /** Read the current process-local terminal language. */
@@ -945,7 +945,8 @@ export function localeSettings(documents: readonly TuiSettingsDocument[]): TuiSe
 
 /** Read the persisted explicit choice, or `auto` when each client chooses its platform language. */
 export function languageSelection(document: TuiSettingsDocument): TuiLanguageSelection {
-  return localeValue(document).preference ?? 'auto'
+  const preference = localeValue(document).preference
+  return preference === 'zh' || preference === 'en' ? preference : 'auto'
 }
 
 /** Resolve the terminal language from the shared preference and POSIX locale variables. */
@@ -953,7 +954,8 @@ export function localeFromSettings(
   documents: readonly TuiSettingsDocument[],
   env: NodeJS.ProcessEnv = process.env,
 ): LocaleId {
-  return localeValue(localeSettings(documents)).preference ?? localeFromEnvironment(env)
+  const preference = localeValue(localeSettings(documents)).preference
+  return preference === 'zh' || preference === 'en' ? preference : localeFromEnvironment(env)
 }
 
 /** Persist an explicit or automatic language choice through the Harness Settings service. */

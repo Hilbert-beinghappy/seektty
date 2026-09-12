@@ -25,6 +25,8 @@ export declare class PartialAccumulator {
      * @returns whether it caused a visible change (usage/finish return false, skipping notification).
      */
     push(chunk: StreamChunk): boolean;
+    /** Install an already validated presentation block from a newer wire contract. */
+    setBlock(index: number, block: AssistantBlock): void;
     /**
      * Current partial projection.
      * @returns the cached snapshot (the blocks array reference only changes after a mutation).

@@ -36,9 +36,8 @@ jobs:
 
       - name: Pack and boot without workspace dev dependencies
         run: |
-          TARGET=$(node -p "require('./package.json').dsh.compatibility.tested")
           VERSION=$(node -p "require('./package.json').version")
-          npm install --prefix "$RUNNER_TEMP/dsh-global" "@deepseek-ai/dsh@$TARGET"
+          node scripts/install-stock-dsh.mjs "$RUNNER_TEMP/dsh-global"
           pnpm pack --pack-destination "$RUNNER_TEMP"
           DSH_BIN="$RUNNER_TEMP/dsh-global/node_modules/.bin/dsh" \
           SEEKTTY_SPEC="$RUNNER_TEMP/seektty-$VERSION.tgz" \
