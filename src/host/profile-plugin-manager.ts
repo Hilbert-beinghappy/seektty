@@ -584,6 +584,56 @@ export class ProfilePluginManager {
     return this.profileSummary(name)
   }
 
+  /** Create and install a terminal Profile before offering to switch to it. */
+  async createUsableProfile(name: string, copyFrom?: string, options: ProfileCreateOptions = {}): Promise<ProfileSummary> {
+    this.ensureProfile()
+    const sourceDir = copyFrom === undefined ? this.dir : resolveProfileDir(copyFrom, this.home)
+    const current = readProfileManifest(NAME, this.dir)
+    const created = this.createProfile(name, copyFrom, options)
+    const manifest = readProfileManifest(NAME, created.dir)
+    const anchored = (spec: string, directory: string): string => {
+      const match = /^(file:|link:)(.*)$/u.exec(spec)
+      return match === null || isAbsolute(match[2]!) ? spec : `${match[1]}${resolve(directory, match[2]!)}`
+    }
+    manifest.dependencies = Object.fromEntries(Object.entries(manifest.dependencies ?? {})
+      .map(([dependency, spec]) => [dependency, anchored(spec, sourceDir)]))
+    // Native reconciliation activates installed Bundle dependencies. A Surface
+    // conversion must remove the old direct dependency as well as its ordering
+    // entry, or installation would silently add the excluded Surface back.
+    for (const bundle of options.removeBundles ?? []) delete manifest.dependencies[bundle]
+    for (const bundle of options.addBundles ?? []) {
+      if (manifest.dependencies[bundle] !== undefined) continue
+      const spec = current.dependencies?.[bundle]
+      if (spec !== undefined) {
+        manifest.dependencies[bundle] = anchored(spec, this.dir)
+        continue
+      }
+      // Shipped bundles can resolve from the Harness installation. Never guess
+      // a registry version for an out-of-tree bundle such as SeekTTY.
+      try { resolveBundleDir(NAME, bundle, this.installAnchor, created.dir) } catch {
+        throw new Error(ui(
+          `Profile ${name} 已写入 ${created.dir}，但当前 Profile 未记录 ${bundle} 的安装来源；请通过 dsh plugin --profile ${name} add 安装该 Bundle 后再切换`,
+          `Profile ${name} was written to ${created.dir}, but the current Profile has no installation source for ${bundle}; install that Bundle with dsh plugin --profile ${name} add before switching`,
+        ))
+      }
+    }
+    writeProfileManifest(created.dir, manifest)
+    const target = new ProfilePluginManager({
+      profile: name, installAnchor: this.installAnchor, invokingCwd: this.invokingCwd,
+      ...(this.home === undefined ? {} : { home: this.home }),
+    })
+    const result = await target.run(['install'])
+    if (result.exitCode !== 0) {
+      throw new Error(ui(
+        `Profile ${name} 的原生依赖安装失败（退出码 ${result.exitCode}），目录保留在 ${created.dir}。请使用 dsh plugin --profile ${name} install ${PNPM_GVS_CONFIG_ARG} 重试。\n${result.stderr || result.stdout}`,
+        `Native dependency installation for Profile ${name} failed (exit ${result.exitCode}); its directory is preserved at ${created.dir}. Retry with dsh plugin --profile ${name} install ${PNPM_GVS_CONFIG_ARG}.\n${result.stderr || result.stdout}`,
+      ))
+    }
+    const summary = this.profileSummary(name)
+    if (!summary.compatible) throw new Error(summary.diagnostic ?? `Profile ${name} is not usable at ${created.dir}`)
+    return summary
+  }
+
   private profileSummary(name: string): ProfileSummary {
     const dir = resolveProfileDir(name, this.home)
     const initialized = existsSync(join(dir, 'package.json'))

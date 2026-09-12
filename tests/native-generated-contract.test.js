@@ -45,6 +45,7 @@ it.each(cases)('%s conforms to the actual installed rc.1 generated Host descript
       const result = parameter.codec.schema.safeParse(args[parameter.wire])
       expect(result.success, `${namespace}/${nativeMethod}:${parameter.wire}: ${result.error?.message ?? ''}`).toBe(true)
     }
+    if (namespace === 'llm' && ['listConfigurableProviders', 'listProviders'].includes(nativeMethod)) return []
     return namespace === 'goals' ? { id: 'goal', revision: 2 } : {}
   } }
   await dispatchTerminalRequest(gateway, {}, method, payload, 'fixture-request', new AbortController().signal)

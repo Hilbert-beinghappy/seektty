@@ -675,10 +675,10 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     },
     profiles: {
       list: () => Promise.resolve(manager.listProfiles().map(tuiProfile)),
-      create: (name, copyFrom) => Promise.resolve(tuiProfile(manager.createProfile(name, copyFrom, {
+      create: async (name, copyFrom) => tuiProfile(await manager.createUsableProfile(name, copyFrom, {
         addBundles: [TUI_BUNDLE],
         removeBundles: NON_TUI_SURFACE_BUNDLES,
-      }))),
+      })),
     },
     plugins: {
       snapshot: () => Promise.resolve(manager.snapshot()),

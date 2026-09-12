@@ -424,7 +424,18 @@ export async function saveProviderConfig(
 }
 
 function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  if (left === right) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameJson(value, right[index]))
+  }
+  const leftObject = recordOf(left)
+  const rightObject = recordOf(right)
+  if (leftObject === undefined || rightObject === undefined) return false
+  const keys = Object.keys(leftObject)
+  return keys.length === Object.keys(rightObject).length
+    && keys.every(key => Object.hasOwn(rightObject, key) && sameJson(leftObject[key], rightObject[key]))
 }
 
 /** Re-read official Settings, Credentials, Provider, and model catalog state after a write. */
@@ -452,10 +463,12 @@ export async function verifyProviderWrite(
 
   const snapshot = snapshotResult.value
   const namespace = snapshot.namespaces.get(request.ns)
+  // Mutations address the raw user layer. The resolved value also contains
+  // schema defaults and composition values, including values restored by unset.
   const settings = namespace !== undefined && request.ops.every((op) => {
-    if (op.op === 'set') return hasPath(namespace.value, op.path)
-      && sameJson(getPath(namespace.value, op.path), op.value)
-    return !hasPath(namespace.value, op.path)
+    if (op.op === 'set') return hasPath(namespace.user, op.path)
+      && sameJson(getPath(namespace.user, op.path), op.value)
+    return !hasPath(namespace.user, op.path)
   }) ? 'confirmed' : 'mismatch'
   const row = snapshot.rows.find(candidate => candidate.entry.provider === request.provider)
 

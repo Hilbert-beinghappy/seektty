@@ -152,7 +152,7 @@ Harness 始终拥有 Agent、Session、模型、Settings、权限、Profile、�
 
 候选 tarball 每次使用不同的不可变路径。同路径同版本 tgz 再次 plugin add 可能沿用原安装结果；重新打包本身不构成重新安装证据。测试应确认安装内容或使用新候选路径。
 
-最终验收结果：
+第一轮适配验收结果（提交 `0fb9247`；后续深入验收见下）：
 
 | 检查 | 观察结果 | 本机证据 |
 |---|---|---|
@@ -164,10 +164,16 @@ Harness 始终拥有 Agent、Session、模型、Settings、权限、Profile、�
 | 性能 | 1k/10k/50k/100k，每档 3 次独立进程，门禁通过 | `/tmp/seektty-203-performance.log` |
 | pnpm 11 布局 | GVS=false 完整生命周期通过；GVS=true 的已知 Loader 故障分类通过 | `/tmp/seektty-203-gvs-false-rc1.log`、`/tmp/seektty-203-gvs-true-rc1.log` |
 
-最终可运行候选为 `.artifacts/seektty-rc1-candidate-15.tgz`，SHA256：`e4f5070ac2992adf150df6429bc0b904a95917c2071a53c4da5e1c08c5a65686`。原生交互完整报告及逐步屏幕记录在 `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-acceptance-6JGPRD/report.json`。
+第一轮候选为 `.artifacts/seektty-rc1-candidate-15.tgz`，SHA256：`e4f5070ac2992adf150df6429bc0b904a95917c2071a53c4da5e1c08c5a65686`。该候选已被下述 qa20 替代，保留名称用于追溯当时证据。第一轮原生交互报告及逐步屏幕记录在 `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-acceptance-6JGPRD/report.json`。
 
 未运行远端 CI，不声明 Windows/Linux、真实 GUI 鼠标/剪贴板或可选插件组合完成实机验收。普通 CLI 与原生插件生命周期中 dsh 可自行调用 pnpm 11.19.0；上表的 pnpm 11 布局专项明确固定为 11.7.0。
 
+
+## 第二轮用户与异常验收
+
+用户要求进一步从真实使用和测试工程师角度验收后，另设 goal，发现并修复通用命令第三参数、Provider active 目录适配，以及 Profile 创建后未安装的问题；独立复核又补齐复制 Profile 时界面组件被 reconcile 恢复的边界。随后修复 Provider 保存回读误报，按官方 raw user 层精确核对写入，保留凭据和模型路由校验。完整覆盖、故障复现、修复、日志和未测项见[用户旅程与异常回归报告](dsh-0.1.5-rc.1-user-qa.md)。
+
+当前候选为 `.artifacts/seektty-rc1-qa-20.tgz`，SHA256 `41fd3700c304dbeefce220af0508b1a0853434485a05a8188378c1c8ef565646`。全量检查 1532 passed / 1 skipped，类型、构建、28 项打包检查通过；官方安装/启动/卸载/重装和 25 项原生主要旅程在该候选重跑通过；15 个完整管理旅程及 2 项安装/启动检查通过，Provider 首次保存与 Key 轮换均有实际请求证据。上游相同请求 ID 的并发去重空窗保留为已知失败，真实桌面鼠标/剪贴板、其他平台和付费模型不记为通过。
 
 ## 在此独立目录运行
 
@@ -176,7 +182,7 @@ Harness 始终拥有 Agent、Session、模型、Settings、权限、Profile、�
 ```sh
 PATH="/opt/homebrew/opt/node@24/bin:$PATH" \
 DSH_BIN="$PWD/.artifacts/stock-dsh-0.1.5-rc.1/node_modules/.bin/dsh" \
-SEEKTTY_SPEC="$PWD/.artifacts/seektty-rc1-candidate-15.tgz" \
+SEEKTTY_SPEC="$PWD/.artifacts/seektty-rc1-qa-20.tgz" \
 SEEKTTY_UPDATE=off /opt/homebrew/opt/node@24/bin/node lib/bin.js --profile seektty-rc1
 ```
 

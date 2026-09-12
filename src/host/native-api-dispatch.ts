@@ -58,7 +58,17 @@ export async function dispatchTerminalRequest(
     await call('credentials', method.slice('credentials.'.length), p)
     return {}
   }
-  if (method === 'llm.providers') return { providers: await call('llm', 'listConfigurableProviders') }
+  if (method === 'llm.providers') {
+    // Configurable entries no longer carry `active` in rc.1. Resolve it from
+    // Harness's actual loaded routes so the terminal can distinguish both.
+    const [configured, routes] = await Promise.all([
+      call('llm', 'listConfigurableProviders'), call('llm', 'listProviders'),
+    ])
+    const active = new Set(z.array(z.object({ id: z.string() })).parse(routes).map(route => route.id))
+    return { providers: z.array(record).parse(configured).map(entry => ({
+      ...entry, active: active.has(z.string().parse(entry.provider)),
+    })) }
+  }
   if (method === 'llm.models') return call('session', 'modelCatalog')
   if (method === 'llm.discoverModels') {
     const { settingsNs, ...request } = p
