@@ -1,3 +1,5 @@
+> **适配开发分支：** 当前代码仅适配官方 dsh `0.1.5-rc.1`，不等同于已发布的 `seektty@1.2.5`。下方发行版安装命令说明上一发布版本；本分支请使用本地打包的候选包。接口差异、迁移决策和已完成／待完成验证见[适配文档](docs/dsh-0.1.5-rc.1-adaptation.md)。
+
 <div align="center">
 
 <img src="assets/seektty-logo.png" alt="SeekTTY logo" width="200">
@@ -406,7 +408,7 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 
 ## 兼容与验证
 
-当前已测 Host 是官方 `0.1.1-rc.2`；完整兼容边界汇总如下。
+本适配分支仅声明官方 `0.1.5-rc.1`，验证进展记录在适配文档中。已发布的 SeekTTY `1.2.5` 验证于官方 `0.1.1-rc.2`。下表记录已发布版本的基线，不代表本分支验收结果。
 
 | 边界 | 版本 |
 | --- | --- |

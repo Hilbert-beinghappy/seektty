@@ -65,6 +65,14 @@ describe('terminal locale preference', () => {
     expect(localeFromEnvironment({ LANGUAGE: 'en_GB:zh_CN', LANG: 'zh_CN.UTF-8' })).toBe('en')
   })
 
+  it('keeps an external language-pack preference intact while using a shipped terminal language', () => {
+    const shared = document({ preference: 'fr-FR' })
+    expect(localeFromSettings([shared], { LANG: 'en_US.UTF-8' })).toBe('en')
+    expect(localeFromSettings([shared], { LANG: 'zh_CN.UTF-8' })).toBe('zh')
+    expect(shared.value).toEqual({ preference: 'fr-FR' })
+    expect(() => localeFromSettings([document({ preference: '../bad' })])).toThrow('invalid')
+  })
+
   it('persists explicit and automatic choices through revision-protected Harness mutations', async () => {
     const mutate = vi.fn(async (
       _namespace: string,

@@ -6,6 +6,7 @@ import { existsSync, readFileSync, mkdtempSync, readdirSync, realpathSync, rmSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Worker } from 'node:worker_threads'
+import { verifyStockDsh } from './stock-dsh-version.mjs'
 
 const dsh = process.env.DSH_BIN?.trim()
 const pluginSpec = process.env.SEEKTTY_SPEC?.trim()
@@ -16,6 +17,11 @@ if (!dsh || !pluginSpec) {
   process.stderr.write('用法：DSH_BIN=/path/to/dsh SEEKTTY_SPEC=/path/to/seektty.tgz pnpm test:stock\n')
   process.exit(2)
 }
+
+// Reject a CLI whose caret dependencies drifted to another prerelease before
+// installing the candidate or claiming an exact-version lifecycle pass.
+const stock = verifyStockDsh(dsh)
+process.stdout.write(`Verified official dsh ${stock.version}: ${stock.packageCount} exact dsh packages\n`)
 
 const home = mkdtempSync(join(tmpdir(), 'seektty-stock-cycle-'))
 const packedRoot = mkdtempSync(join(tmpdir(), 'seektty-packed-launcher-'))
@@ -121,18 +127,40 @@ function assertOfficialModuleIdentity() {
     `SeekTTY 不得把官方 Host 包物理安装进 Profile：${shadowed.join(', ')}`,
   )
 
-  const fromSeektty = createRequire(join(profileModules, 'seektty', 'lib', 'index.js'))
-  const fromOfficialFallback = createRequire(join(home, 'profiles', 'identity-probe.cjs'))
-  for (const name of [
-    '@deepseek-ai/cordis',
-    '@deepseek-ai/dsh-host-apiproxy',
-    '@deepseek-ai/dsh-session',
-    '@deepseek-ai/dsh-tools',
-  ]) {
-    const actual = realpathSync(fromSeektty.resolve(name))
-    const official = realpathSync(fromOfficialFallback.resolve(name))
-    assert(actual === official, `${name} 模块身份分裂：SeekTTY=${actual} official=${official}`)
+  // Node follows the installed package's real path into pnpm's virtual store.
+  // Probe from that same directory, not the lexical node_modules symlink path.
+  const probe = join(realpathSync(join(profileModules, 'seektty')), 'identity-probe.mjs')
+  const overlay = join(home, 'identity-probe.patch.yml')
+  const names = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-api-session-controller']
+  const officialRequire = createRequire(stock.entry)
+  const expected = Object.fromEntries(names.map(name => [name, realpathSync(officialRequire.resolve(name))]))
+  writeFileSync(probe, `
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { Service } from '@deepseek-ai/cordis';
+import { SessionStore } from '@deepseek-ai/dsh-session';
+import { ToolRuntime } from '@deepseek-ai/dsh-tools';
+import { SessionController } from '@deepseek-ai/dsh-api-session-controller';
+export const inject = ['sessions', 'tools', 'sessionController'];
+export function apply(ctx) {
+  if (!(ctx.sessions instanceof SessionStore) || !(ctx.tools instanceof ToolRuntime)
+    || !(ctx.sessionController instanceof SessionController) || !(ctx.sessionController instanceof Service)) {
+    throw new Error('Official Host service identity split');
   }
+  const actual = Object.fromEntries(${JSON.stringify(names)}.map(name => [name, realpathSync(fileURLToPath(import.meta.resolve(name)))]));
+  if (JSON.stringify(actual) !== ${JSON.stringify(JSON.stringify(expected))}) throw new Error('Official Host resolution identity split: ' + JSON.stringify(actual));
+  console.log('SEEKTTY_OFFICIAL_IDENTITY_OK');
+}
+`)
+  writeFileSync(overlay, `- insert:\n    - id: seektty-identity-probe\n      name: ${JSON.stringify(probe)}\n`)
+  const result = spawnSync(resolve(dsh), ['--profile', 'tui', '--patch', overlay], {
+    env: environment, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 60000,
+  })
+  if (result.error) throw result.error
+  const output = `${result.stdout}${result.stderr}`
+  assert(output.includes('SEEKTTY_OFFICIAL_IDENTITY_OK'), `官方加载器内模块身份验证失败：\n${output}`)
+  assert(!output.includes('plugin tree failed to load'), `身份探针启动失败：\n${output}`)
+
 }
 
 async function assertNativePreparationWorker() {

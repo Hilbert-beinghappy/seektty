@@ -1,6 +1,6 @@
 /** Shared terminal Provider manager for Settings, Model, and first-run entry points. */
 
-import { nodeAtPath, rehydrateSchema } from '@deepseek-ai/dsh-client-schema-form'
+import { nodeAtPath, rehydrateSchema } from '../../vendor/schema-form/index.js'
 import { ui } from './locale.ts'
 import type { OverlayChoice, OverlayPrompts } from './overlays.ts'
 import {

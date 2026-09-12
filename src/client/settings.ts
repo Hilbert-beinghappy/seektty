@@ -5,7 +5,7 @@ import {
   hasPath,
   rehydrateSchema,
   type SchemaNode,
-} from '@deepseek-ai/dsh-client-schema-form'
+} from '../../vendor/schema-form/index.js'
 import { LOCALE_PREFERENCE_FIELD, LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,

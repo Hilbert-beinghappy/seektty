@@ -27,7 +27,7 @@ import {
 import { PNPM_GVS_CONFIG_ARG } from '../src/pnpm-compat.ts'
 
 const facts = (overrides: Partial<InstalledFacts> = {}): InstalledFacts => ({
-  dshTested: '0.1.1-rc.2',
+  dshTested: '0.1.5-rc.1',
   dshInstalled: '0.1.0-rc.8',
   seekttyVersion: '1.2.1',
   dshPinned: false,
@@ -76,32 +76,32 @@ function plannedSpecs(plan: UpdatePlan): string[] {
 describe('live version scan', () => {
   it('reads the npm latest dist-tags for dsh and SeekTTY', async () => {
     const scan = await scanLatestVersions(fakeFetch({
-      [DSH_DIST_TAGS_URL]: { latest: '0.1.1-rc.2', next: '0.1.2' },
+      [DSH_DIST_TAGS_URL]: { latest: '0.1.5-rc.1', next: '0.1.2' },
       [SEEKTTY_DIST_TAGS_URL]: { latest: '1.3.0', next: '9.9.9' },
     }))
     expect(scan).toEqual({
-      dshLatest: '0.1.1-rc.2',
+      dshLatest: '0.1.5-rc.1',
       seekttyLatest: '1.3.0',
     })
   })
 
   it('ignores npm next even when that channel is newer', async () => {
     const scan = await scanLatestVersions(fakeFetch({
-      [DSH_DIST_TAGS_URL]: { latest: '0.1.0-rc.8', next: '0.1.2' },
+      [DSH_DIST_TAGS_URL]: { latest: '0.1.5-rc.1', next: '0.1.5-rc.2' },
       [SEEKTTY_DIST_TAGS_URL]: { latest: '1.2.1', next: '9.9.9' },
     }))
-    expect(scan.dshLatest).toBe('0.1.0-rc.8')
+    expect(scan.dshLatest).toBe('0.1.5-rc.1')
     expect(scan.seekttyLatest).toBe('1.2.1')
-    expect(updatePlan(scan, facts({ dshInstalled: '0.1.0-rc.8' }))).toEqual({
+    expect(updatePlan(scan, facts({ dshInstalled: '0.1.5-rc.1' }))).toEqual({
       dshSpec: undefined,
       seekttySpec: undefined,
     })
-    expect(updateAdvice(scan, facts({ dshInstalled: '0.1.0-rc.8' }), true)).toEqual([])
+    expect(updateAdvice(scan, facts({ dshInstalled: '0.1.5-rc.1' }), true)).toEqual([])
   })
 
   it('queries only the npm dist-tag endpoints', async () => {
     const fetchImpl = vi.fn(fakeFetch({
-      [DSH_DIST_TAGS_URL]: { latest: '0.1.1-rc.2', next: '0.1.2' },
+      [DSH_DIST_TAGS_URL]: { latest: '0.1.5-rc.1', next: '0.1.2' },
       [SEEKTTY_DIST_TAGS_URL]: { latest: '1.2.1' },
     }))
     await scanLatestVersions(fetchImpl)
@@ -119,9 +119,9 @@ describe('live version scan', () => {
       seekttyLatest: undefined,
     })
     const partial = await scanLatestVersions(fakeFetch({
-      [DSH_DIST_TAGS_URL]: { latest: '0.1.1-rc.2', next: '0.1.2' },
+      [DSH_DIST_TAGS_URL]: { latest: '0.1.5-rc.1', next: '0.1.2' },
     }))
-    expect(partial.dshLatest).toBe('0.1.1-rc.2')
+    expect(partial.dshLatest).toBe('0.1.5-rc.1')
     expect(partial.seekttyLatest).toBeUndefined()
 
     const seekttyOnly = await scanLatestVersions(fakeFetch({
@@ -146,7 +146,7 @@ describe('live version scan', () => {
 describe('dsh CLI version and auto-permitted range', () => {
   it('parses official dsh --version text and ignores the host.describe placeholder', () => {
     expect(parseDshCliVersion('0.1.0-rc.8\n')).toBe('0.1.0-rc.8')
-    expect(parseDshCliVersion('0.1.1-rc.2\n')).toBe('0.1.1-rc.2')
+    expect(parseDshCliVersion('0.1.5-rc.1\n')).toBe('0.1.5-rc.1')
     expect(parseDshCliVersion('dsh 0.1.0-rc.8')).toBe('0.1.0-rc.8')
     expect(parseDshCliVersion('v0.1.0-rc.6')).toBe('0.1.0-rc.6')
     expect(parseDshCliVersion('0.0.1')).toBeUndefined()
@@ -155,47 +155,49 @@ describe('dsh CLI version and auto-permitted range', () => {
 
   it('refuses banner, path, placeholder-prefix, and conflicting version text', () => {
     expect(parseDshCliVersion('Node.js v24.5.0\n')).toBeUndefined()
-    expect(parseDshCliVersion('Node.js v24.5.0\n0.1.1-rc.2\n')).toBe('0.1.1-rc.2')
+    expect(parseDshCliVersion('Node.js v24.5.0\n0.1.5-rc.1\n')).toBe('0.1.5-rc.1')
     expect(parseDshCliVersion('using /opt/dsh/0.1.0-rc.8/bin/dsh\n')).toBeUndefined()
-    expect(parseDshCliVersion('0.0.1\n0.1.1-rc.2\n')).toBe('0.1.1-rc.2')
-    expect(parseDshCliVersion('0.1.0-rc.8\n0.1.1-rc.2\n')).toBeUndefined()
+    expect(parseDshCliVersion('0.0.1\n0.1.5-rc.1\n')).toBe('0.1.5-rc.1')
+    expect(parseDshCliVersion('0.1.0-rc.8\n0.1.5-rc.1\n')).toBeUndefined()
   })
 
-  it('permits the legacy rc.6–rc.8 line and the exact 0.1.1-rc.2 pin', () => {
-    expect(isAutoPermittedDshVersion('0.1.0-rc.6')).toBe(true)
-    expect(isAutoPermittedDshVersion('0.1.0-rc.7')).toBe(true)
-    expect(isAutoPermittedDshVersion('0.1.0-rc.8')).toBe(true)
-    expect(isAutoPermittedDshVersion('0.1.1-rc.2')).toBe(true)
+  it('permits only the exact native Remote Host pin', () => {
+    expect(isAutoPermittedDshVersion('0.1.0-rc.6')).toBe(false)
+    expect(isAutoPermittedDshVersion('0.1.0-rc.7')).toBe(false)
+    expect(isAutoPermittedDshVersion('0.1.0-rc.8')).toBe(false)
+    expect(isAutoPermittedDshVersion('0.1.5-rc.1')).toBe(true)
     expect(isAutoPermittedDshVersion('0.1.0-rc.5')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.0-rc.9')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.1-rc.0')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.1-rc.1')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.1-rc.3')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.2')).toBe(false)
+    expect(isAutoPermittedDshVersion('0.1.5-rc.2')).toBe(false)
+    expect(isAutoPermittedDshVersion('0.1.6')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.0')).toBe(false)
-    expect(isAutoPermittedDshVersion('0.1.0-rc.6.1')).toBe(true)
+    expect(isAutoPermittedDshVersion('0.1.0-rc.6.1')).toBe(false)
     expect(isAutoPermittedDshVersion('0.1.0-rc.8.1')).toBe(false)
   })
 })
 
 describe('update plan gates', () => {
-  it('upgrades an old Host to 0.1.1-rc.2 when that is npm latest', () => {
-    expect(updatePlan({ dshLatest: '0.1.1-rc.2' }, facts({ dshInstalled: '0.1.0-rc.6' }))).toEqual({
-      dshSpec: '@deepseek-ai/dsh@0.1.1-rc.2',
+  it('upgrades an old Host to 0.1.5-rc.1 when that is npm latest', () => {
+    expect(updatePlan({ dshLatest: '0.1.5-rc.1' }, facts({ dshInstalled: '0.1.0-rc.6' }))).toEqual({
+      dshSpec: '@deepseek-ai/dsh@0.1.5-rc.1',
       seekttySpec: undefined,
     })
-    expect(updatePlan({ dshLatest: '0.1.1-rc.2' }, facts({ dshInstalled: '0.1.0-rc.8' }))).toEqual({
-      dshSpec: '@deepseek-ai/dsh@0.1.1-rc.2',
+    expect(updatePlan({ dshLatest: '0.1.5-rc.1' }, facts({ dshInstalled: '0.1.0-rc.8' }))).toEqual({
+      dshSpec: '@deepseek-ai/dsh@0.1.5-rc.1',
       seekttySpec: undefined,
     })
   })
 
   it('still plans dsh when latest equals tested but the installed Host is older', () => {
     expect(updatePlan(
-      { dshLatest: '0.1.1-rc.2' },
-      facts({ dshTested: '0.1.1-rc.2', dshInstalled: '0.1.0-rc.8' }),
+      { dshLatest: '0.1.5-rc.1' },
+      facts({ dshTested: '0.1.5-rc.1', dshInstalled: '0.1.0-rc.8' }),
     )).toEqual({
-      dshSpec: '@deepseek-ai/dsh@0.1.1-rc.2',
+      dshSpec: '@deepseek-ai/dsh@0.1.5-rc.1',
       seekttySpec: undefined,
     })
   })
@@ -206,15 +208,15 @@ describe('update plan gates', () => {
     expect(updatePlan({ dshLatest: '0.1.1-rc.1' }, facts()).dshSpec).toBeUndefined()
     expect(updatePlan({ dshLatest: '0.1.1-rc.3' }, facts()).dshSpec).toBeUndefined()
     expect(updatePlan({ dshLatest: '0.1.2' }, facts()).dshSpec).toBeUndefined()
-    expect(updatePlan({ dshLatest: '0.1.1-rc.2' }, facts({ dshInstalled: '0.1.1-rc.2' })).dshSpec)
+    expect(updatePlan({ dshLatest: '0.1.5-rc.1' }, facts({ dshInstalled: '0.1.5-rc.1' })).dshSpec)
       .toBeUndefined()
-    expect(updatePlan({ dshLatest: '0.1.1-rc.2' }, facts({ dshInstalled: undefined })).dshSpec)
+    expect(updatePlan({ dshLatest: '0.1.5-rc.1' }, facts({ dshInstalled: undefined })).dshSpec)
       .toBeUndefined()
   })
 
   it('plans only SeekTTY when npm latest is newer, even if dsh is also eligible', () => {
     const plan = updatePlan(
-      { dshLatest: '0.1.1-rc.2', seekttyLatest: '1.3.0' },
+      { dshLatest: '0.1.5-rc.1', seekttyLatest: '1.3.0' },
       facts({ seekttyVersion: '1.2.1', dshInstalled: '0.1.0-rc.8' }),
     )
     expect(plan).toEqual({
@@ -233,8 +235,8 @@ describe('update plan gates', () => {
 
   it('plans at most one spec in every combination', () => {
     const cases = [
-      updatePlan({ dshLatest: '0.1.1-rc.2', seekttyLatest: '1.3.0' }, facts()),
-      updatePlan({ dshLatest: '0.1.1-rc.2' }, facts()),
+      updatePlan({ dshLatest: '0.1.5-rc.1', seekttyLatest: '1.3.0' }, facts()),
+      updatePlan({ dshLatest: '0.1.5-rc.1' }, facts()),
       updatePlan({ seekttyLatest: '1.3.0' }, facts()),
       updatePlan({ dshLatest: '0.1.2', seekttyLatest: '1.3.0' }, facts()),
       updatePlan({ dshLatest: '0.1.2' }, facts()),
@@ -242,7 +244,7 @@ describe('update plan gates', () => {
     ]
     for (const plan of cases) expect(plannedSpecs(plan).length).toBeLessThanOrEqual(1)
     expect(exclusiveUpdatePlan({
-      dshSpec: '@deepseek-ai/dsh@0.1.1-rc.2',
+      dshSpec: '@deepseek-ai/dsh@0.1.5-rc.1',
       seekttySpec: 'seektty@1.3.0',
     })).toEqual({
       dshSpec: undefined,
@@ -251,24 +253,24 @@ describe('update plan gates', () => {
   })
 
   it('keeps DSH_BIN, SEEKTTY_SPEC, and local/link pins from installing that side', () => {
-    expect(updatePlan({ dshLatest: '0.1.1-rc.2' }, facts({ dshPinned: true })).dshSpec).toBeUndefined()
+    expect(updatePlan({ dshLatest: '0.1.5-rc.1' }, facts({ dshPinned: true })).dshSpec).toBeUndefined()
     expect(updatePlan(
-      { dshLatest: '0.1.1-rc.2', seekttyLatest: '1.3.0' },
+      { dshLatest: '0.1.5-rc.1', seekttyLatest: '1.3.0' },
       facts({ seekttyPinned: true }),
     )).toEqual({
-      dshSpec: '@deepseek-ai/dsh@0.1.1-rc.2',
+      dshSpec: '@deepseek-ai/dsh@0.1.5-rc.1',
       seekttySpec: undefined,
     })
   })
 
   it('advises installable updates and only prompts for future/gap Hosts', () => {
     expect(updateAdvice({}, facts(), true)).toEqual([])
-    expect(updateAdvice({ dshLatest: '0.1.1-rc.2' }, facts({ dshInstalled: '0.1.1-rc.2' }), true))
+    expect(updateAdvice({ dshLatest: '0.1.5-rc.1' }, facts({ dshInstalled: '0.1.5-rc.1' }), true))
       .toEqual([])
     expect(updateAdvice({ seekttyLatest: '1.3.0' }, facts({ seekttyPinned: true }), true))
       .toEqual([])
-    const installable = updateAdvice({ dshLatest: '0.1.1-rc.2' }, facts(), true)
-    expect(installable.some(line => line.includes('0.1.1-rc.2'))).toBe(true)
+    const installable = updateAdvice({ dshLatest: '0.1.5-rc.1' }, facts(), true)
+    expect(installable.some(line => line.includes('0.1.5-rc.1'))).toBe(true)
     expect(installable.at(-1)).toContain('deepseek --update')
     const gap = updateAdvice({ dshLatest: '0.1.0-rc.9' }, facts(), true)
     expect(gap.some(line => line.includes('0.1.0-rc.9'))).toBe(true)
@@ -282,11 +284,11 @@ describe('update plan gates', () => {
     expect(future.some(line => line.includes('0.1.2'))).toBe(true)
     expect(future.some(line => line.includes('1.3.0'))).toBe(true)
     expect(future.at(-1)).toContain('deepseek --update')
-    const selfFirst = updateAdvice({ dshLatest: '0.1.1-rc.2', seekttyLatest: '1.3.0' }, facts(), true)
+    const selfFirst = updateAdvice({ dshLatest: '0.1.5-rc.1', seekttyLatest: '1.3.0' }, facts(), true)
     expect(selfFirst.some(line => line.includes('1.3.0'))).toBe(true)
     expect(selfFirst.join('\n')).not.toMatch(/installable dsh|可安装版本/u)
     expect(selfFirst.join('\n')).not.toMatch(/automatically/u)
-    const unread = updateAdvice({ dshLatest: '0.1.1-rc.2' }, facts({ dshInstalled: undefined }), true)
+    const unread = updateAdvice({ dshLatest: '0.1.5-rc.1' }, facts({ dshInstalled: undefined }), true)
     expect(unread.join('\n')).toMatch(/Could not read|无法读取/u)
     expect(unread.join('\n')).not.toContain('deepseek --update')
   })
@@ -310,7 +312,7 @@ describe('launcher update flow', () => {
       { LANG: 'en_US.UTF-8' },
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(status).toBe(0)
     expect(calls).toEqual([
@@ -318,7 +320,7 @@ describe('launcher update flow', () => {
     ])
   })
 
-  it('updates a compatible old Host to 0.1.1-rc.2 when SeekTTY is already current', async () => {
+  it('updates a compatible old Host to 0.1.5-rc.1 when SeekTTY is already current', async () => {
     internals.readInstalledDshVersion = () => '0.1.0-rc.6'
     const calls: string[][] = []
     const execute = vi.fn((command: string, args: readonly string[]) => {
@@ -330,11 +332,11 @@ describe('launcher update flow', () => {
       { LANG: 'en_US.UTF-8' },
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '1.2.1' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '1.2.1' }),
     )
     expect(status).toBe(0)
     expect(calls).toEqual([
-      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'],
+      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.5-rc.1'],
     ])
   })
 
@@ -348,7 +350,7 @@ describe('launcher update flow', () => {
       { LANG: 'en_US.UTF-8', DSH_BIN: '/opt/dsh/bin/dsh' },
       execute,
       chunk => { chunks.push(chunk) },
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: undefined }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: undefined }),
     )
     expect(status).toBe(0)
     expect(probe).not.toHaveBeenCalled()
@@ -365,11 +367,11 @@ describe('launcher update flow', () => {
       { LANG: 'en_US.UTF-8', SEEKTTY_SPEC: 'github:Hilbert-beinghappy/seektty#v1.2.1' },
       execute,
       chunk => { chunks.push(chunk) },
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(status).toBe(0)
     expect(execute).toHaveBeenCalledTimes(1)
-    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'])
+    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.5-rc.1'])
     expect(chunks.join('')).toMatch(/SEEKTTY_SPEC|pinned/u)
     expect(chunks.join('')).not.toMatch(/already the latest/u)
   })
@@ -394,14 +396,14 @@ describe('launcher update flow', () => {
     await postSessionUpdateNotice(
       { LANG: 'en_US.UTF-8', SEEKTTY_UPDATE: 'check' },
       chunk => { chunks.push(chunk) },
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: undefined }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: undefined }),
     )
     expect(chunks.join('')).toContain('deepseek --update')
     chunks.length = 0
     await postSessionUpdateNotice(
       { LANG: 'en_US.UTF-8' },
       chunk => { chunks.push(chunk) },
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: undefined }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: undefined }),
     )
     expect(chunks).toEqual([])
     chunks.length = 0
@@ -431,7 +433,7 @@ describe('launcher update flow', () => {
       { LANG: 'en_US.UTF-8', SEEKTTY_UPDATE: 'check' },
       execute,
       chunk => { chunks.push(chunk) },
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(execute).not.toHaveBeenCalled()
     expect(chunks).toEqual([])
@@ -460,7 +462,7 @@ describe('launcher update flow', () => {
       isolatedProfileEnv(),
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(calls).toEqual([
       ['dsh', 'plugin', '--profile', 'tui', 'add', PNPM_GVS_CONFIG_ARG, 'seektty@9.9.9'],
@@ -471,10 +473,10 @@ describe('launcher update flow', () => {
       isolatedProfileEnv({ seektty: 'link:/tmp/seektty' }),
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(calls).toEqual([
-      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'],
+      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.5-rc.1'],
     ])
     calls.length = 0
     await maybeAutoUpdate(
@@ -482,10 +484,10 @@ describe('launcher update flow', () => {
       { ...isolatedProfileEnv(), SEEKTTY_SPEC: 'github:Hilbert-beinghappy/seektty#v1.2.1' },
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(calls).toEqual([
-      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'],
+      ['pnpm', 'add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.5-rc.1'],
     ])
     calls.length = 0
     await maybeAutoUpdate(
@@ -493,7 +495,7 @@ describe('launcher update flow', () => {
       { LANG: 'en_US.UTF-8', SEEKTTY_UPDATE: '0' },
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )
     expect(calls).toEqual([])
     await maybeAutoUpdate(
@@ -513,7 +515,7 @@ describe('launcher update flow', () => {
       isolatedProfileEnv(),
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )).resolves.toBeUndefined()
     expect(execute).toHaveBeenCalledTimes(1)
     expect(execute).toHaveBeenCalledWith(
@@ -529,10 +531,10 @@ describe('launcher update flow', () => {
       isolatedProfileEnv({ seektty: 'link:/tmp/seektty' }),
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '9.9.9' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '9.9.9' }),
     )).resolves.toBeUndefined()
     expect(execute).toHaveBeenCalledTimes(1)
-    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.1-rc.2'])
+    expect(execute).toHaveBeenCalledWith('pnpm', ['add', '--global', PNPM_GVS_CONFIG_ARG, '@deepseek-ai/dsh@0.1.5-rc.1'])
   })
 
   it('skips future and gap Hosts during auto-update instead of installing them', async () => {
@@ -608,7 +610,7 @@ describe('launcher update flow', () => {
       isolatedProfileEnv({ seektty: 'link:/tmp/seektty' }),
       execute,
       () => {},
-      () => Promise.resolve({ dshLatest: '0.1.1-rc.2', seekttyLatest: '1.2.1' }),
+      () => Promise.resolve({ dshLatest: '0.1.5-rc.1', seekttyLatest: '1.2.1' }),
     )).resolves.toBeUndefined()
     expect(execute).toHaveBeenCalledTimes(1)
   })

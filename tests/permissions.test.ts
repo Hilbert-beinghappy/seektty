@@ -6,6 +6,8 @@ import type { TuiClientContext } from '../src/client/context.ts'
 import { OverlayQueue } from '../src/client/overlays.ts'
 import { setUiLocale } from '../src/client/locale.ts'
 import { ProjectionValueStore } from '../vendor/client-runtime/client/sessions/projection-store.js'
+import { TYPERT as commandsHost } from '@deepseek-ai/dsh-commands/typert'
+import { z } from 'zod'
 
 function harness(fields = ['agentId', 'line', 'images']) {
   let selected = 'one'
@@ -56,6 +58,17 @@ function harness(fields = ['agentId', 'line', 'images']) {
 afterEach(() => { setUiLocale('zh') })
 
 describe('permission command contract and projection', () => {
+  it('accepts the actual rc.1 command descriptor and sends no attachments for a permission change', async () => {
+    const face = z.object({ invocations: z.array(z.object({ namespace: z.string(), method: z.string(),
+      parameters: z.array(z.object({ wire: z.string() })),
+    })) }).parse(commandsHost)
+    const descriptor = face.invocations.find(item => item.namespace === 'commands' && item.method === 'execute')
+    if (descriptor === undefined) throw new Error('Official commands/execute descriptor missing')
+    const h = harness(descriptor.parameters.map(parameter => parameter.wire))
+    await h.capabilities.selectPermission('read-only')
+    expect(h.execute.mock.calls).toEqual([['one', '/permission read-only', []]])
+    expect(h.capabilities.listPermissions().find(option => option.current)?.id).toBe('read-only')
+  })
   it.each([['agentId', 'line'], ['agentId', 'line', 'images']])('uses the mounted parameter contract %j', async (...fields) => {
     const h = harness(fields)
     await h.capabilities.selectPermission('read-only')

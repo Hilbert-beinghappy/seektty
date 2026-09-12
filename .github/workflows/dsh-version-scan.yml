@@ -66,8 +66,7 @@ jobs:
       - name: Stock dsh add/boot/remove/re-add contract under an isolated DSH_HOME
         if: steps.check.outputs.update == 'true' && steps.guard.outputs.exists == 'false'
         run: |
-          TARGET="${{ steps.check.outputs.target }}"
-          npm install --prefix "$RUNNER_TEMP/dsh-global" "@deepseek-ai/dsh@$TARGET"
+          node scripts/install-stock-dsh.mjs "$RUNNER_TEMP/dsh-global"
           TARBALL=$(pnpm pack | tail -1)
           DSH_BIN="$RUNNER_TEMP/dsh-global/node_modules/.bin/dsh" \
           SEEKTTY_SPEC="$PWD/$TARBALL" \
@@ -84,7 +83,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git checkout -b "$BRANCH"
-          git add package.json pnpm-lock.yaml src/dsh-compat.ts lib/ README.md README.zh.md
+          git add package.json pnpm-lock.yaml pnpm-workspace.yaml src/dsh-compat.ts src/pnpm-compat.ts lib/ README.md README.zh.md
           git commit -m "chore(compat): adapt to official dsh $TARGET"
           git push -u origin "$BRANCH"
           gh pr create \

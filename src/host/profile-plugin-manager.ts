@@ -277,7 +277,8 @@ export class ProfilePluginManager {
    */
   ensureProfile(): boolean {
     if (existsSync(join(this.dir, 'package.json'))) return false
-    initProfile(this.dir, PROFILE_TEMPLATES[this.profile] ?? DEFAULT_PROFILE_BUNDLES)
+    const template = PROFILE_TEMPLATES[this.profile]
+    initProfile(this.dir, template?.bundles ?? DEFAULT_PROFILE_BUNDLES, template?.patchReload)
     return true
   }
 
@@ -553,10 +554,11 @@ export class ProfilePluginManager {
       ))
     }
     if (copyFrom === undefined) {
+      const template = PROFILE_TEMPLATES[name] ?? PROFILE_TEMPLATES.tui
       initProfile(target, convertedBundles(
-        PROFILE_TEMPLATES[name] ?? PROFILE_TEMPLATES.tui ?? DEFAULT_PROFILE_BUNDLES,
+        template?.bundles ?? DEFAULT_PROFILE_BUNDLES,
         options,
-      ))
+      ), template?.patchReload)
       return this.profileSummary(name)
     }
     const source = resolveProfileDir(copyFrom, this.home)
@@ -587,7 +589,7 @@ export class ProfilePluginManager {
     const initialized = existsSync(join(dir, 'package.json'))
     try {
       const manifest = initialized ? readProfileManifest(NAME, dir) : undefined
-      const bundles = [...manifest?.dsh?.profile?.bundles ?? PROFILE_TEMPLATES[name] ?? []]
+      const bundles = [...manifest?.dsh?.profile?.bundles ?? PROFILE_TEMPLATES[name]?.bundles ?? []]
       for (const bundle of bundles) resolveBundleDir(NAME, bundle, this.installAnchor, dir)
       return {
         name,

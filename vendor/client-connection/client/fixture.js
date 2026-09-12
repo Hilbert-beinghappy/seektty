@@ -1,10 +1,11 @@
+import { isTokenDelta } from '@deepseek-ai/dsh-llm/assistant-stream';
 // FixtureApi: standalone UI development without a server. Real contract shape: unary takes
 // RpcRequest<P> and returns RpcResponse<T> (echoing the rpcId); streams yield RpcRequest<frame>
 // (the fixture IS the fake server, so it mints frame rpcIds); root respond takes ClientResponse
 // and returns RpcReceipt. fx-alpha carries a hand-built history script (74 turns, pageable);
 // prompt triggers a chunked streaming replay; cancel stops the replay; resident pending
 // approval/question requests exercise replay and composer takeover with stable rpcIds.
-import { createAssistantMessage, createToolResultMessage, createUserMessage, isTokenDelta, } from '@deepseek-ai/dsh-llm/message';
+import { createAssistantMessage, createToolResultMessage, createUserMessage, } from '@deepseek-ai/dsh-llm/message';
 import { CallId } from '@deepseek-ai/dsh-llm/brand';
 import { deriveEventMessage, foldSurface } from '@deepseek-ai/dsh-session/surface';
 import { AbstractApiClient, RpcId, SESSION_SEARCH_RESULT_LIMIT } from "./api.js";

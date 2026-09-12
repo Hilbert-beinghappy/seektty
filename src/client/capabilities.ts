@@ -955,14 +955,14 @@ export class HarnessTuiCapabilities {
     if (!this.listPermissions().some(option => option.id === id)) {
       throw new Error(ui(`未知权限预设 ${JSON.stringify(id)}`, `Unknown permission preset ${JSON.stringify(id)}`))
     }
-    // Compatibility range: dsh 0.1.0-rc.6–rc.8 and 0.1.1-rc.2. The latter's
-    // tested contract includes images. Use the mounted descriptor, never retry a
+    // dsh 0.1.5-rc.1 renamed images to submittedAttachments. Use the mounted
+    // descriptor (legacy view fixtures remain supported), never retry a
     // potentially executed permission command with another argument shape.
     const fields = this.ctx.typert.remotes.get('commands/execute')?.parameters.map(parameter => parameter.wire).join(',')
     const commands = this.ctx.remote.commands
     const line = `/permission ${id}`
     let result: Awaited<ReturnType<typeof commands.execute>>
-    if (fields === 'agentId,line,images') result = await commands.execute(sessionId, line, [])
+    if (fields === 'agentId,line,submittedAttachments' || fields === 'agentId,line,images') result = await commands.execute(sessionId, line, [])
     else if (fields === 'agentId,line') {
       result = await Reflect.apply(commands.execute, commands, [sessionId, line])
     } else {

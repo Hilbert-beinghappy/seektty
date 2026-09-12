@@ -4,6 +4,11 @@ import { resolve } from 'node:path'
 const local = (path: string): string => resolve(import.meta.dirname, path)
 
 export const aliases = {
+  '@deepseek-ai/dsh-host-apiproxy/api/events.schema': local('vendor/api-contract/api/events.schema.js'),
+  '@deepseek-ai/dsh-host-apiproxy/api/rpc.schema': local('vendor/api-contract/api/rpc.schema.js'),
+  '@deepseek-ai/dsh-host-apiproxy/api/sessions.schema': local('vendor/api-contract/api/sessions.schema.js'),
+  '@deepseek-ai/dsh-host-apiproxy/api': local('vendor/api-contract/api/index.js'),
+  '@deepseek-ai/dsh-host-apiproxy/client': local('vendor/api-contract/fetch/client.js'),
   '@deepseek-ai/dsh-api-gateway/node-client': local('vendor/api-gateway/client/index.js'),
   '@deepseek-ai/dsh-api-gateway/client': local('vendor/api-gateway/client/index.js'),
   '@deepseek-ai/dsh-api-remotes/node-client': local('vendor/api-remotes/client/index.js'),

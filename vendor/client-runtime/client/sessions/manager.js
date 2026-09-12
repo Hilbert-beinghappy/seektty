@@ -952,10 +952,12 @@ export class SessionManager {
             // value; there is no dedicated title frame).
             const projectionStore = this.projectionStores.get(summary.sessionId);
             const title = projectionStore?.get('title');
+            const agentPreset = projectionStore?.get('agentPreset');
             const projectionValues = projectionStore?.values();
             return {
                 ...summary,
                 ...(typeof title === 'string' && title !== '' ? { title } : {}),
+                ...(typeof agentPreset === 'string' ? { agentPreset } : {}),
                 ...(projectionValues === undefined ? {} : { projectionValues }),
             };
         });

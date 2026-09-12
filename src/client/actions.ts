@@ -4,7 +4,7 @@ import { visibleWidth, type OverlayOptions } from '@mariozechner/pi-tui'
 import { chmodSync } from 'node:fs'
 import {
   LOCALE_SETTINGS_NAMESPACE,
-  type LocaleId,
+  type BuiltInLocaleId as LocaleId,
 } from '@deepseek-ai/dsh-client-locale'
 import type {
   QuestionResponsePayload, SessionId, WorkspaceId, WorkspaceView,

@@ -12,6 +12,14 @@ import type {
 } from '@deepseek-ai/dsh-client-connection'
 import { ConnectionRpcRegistry } from './rpc-registry.ts'
 
+/** Exact Fetch seam published by dsh-client-connection 0.1.5-rc.1. */
+export interface NativeFetchRoute {
+  readonly path: string
+  readonly methods: readonly ('GET' | 'HEAD' | 'POST')[]
+  readonly requestBody: 'buffered' | 'streaming'
+  readonly fetch: (request: Request) => Promise<Response>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Connection transport and RPC registrations. */
@@ -32,6 +40,35 @@ export interface InProcessConnectionHandle extends HostConnectionHandle {
  */
 export class InProcessConnectionService extends Service implements InProcessConnectionHandle {
   private readonly registry = new ConnectionRpcRegistry()
+  private readonly fetchRoutes = new Map<string, NativeFetchRoute>()
+
+  /** Host-owned streaming upload routes remain entirely in-process. */
+  get fetch() {
+    const owner = this.ctx
+    return { register: (route: NativeFetchRoute) => owner.effect(() => {
+      if (!route.path.startsWith('/api/') && !route.path.startsWith('/api.')) throw new Error('Fetch route must be below /api')
+      if (/[?#]/u.test(route.path) || route.methods.length === 0) throw new Error('Invalid exact Fetch route')
+      if (this.fetchRoutes.has(route.path)) throw new Error(`Duplicate Fetch route: ${route.path}`)
+      this.fetchRoutes.set(route.path, route)
+      return () => { if (this.fetchRoutes.get(route.path) === route) this.fetchRoutes.delete(route.path) }
+    }, `seektty: Fetch route ${route.path}`) }
+  }
+
+  createSharedFetchHandler(channel: '/api') {
+    if (channel !== '/api') throw new Error('Unsupported shared Fetch channel')
+    const routeFor = (method: string, url: URL) => {
+      const route = this.fetchRoutes.get(url.pathname)
+      return route?.methods.some(candidate => candidate === method) ? route : undefined
+    }
+    return {
+      requestBodyMode: (request: { method: string; url: URL }) => routeFor(request.method, request.url)?.requestBody ?? 'buffered',
+      fetch: async (request: Request): Promise<Response> => {
+        request.signal.throwIfAborted()
+        const route = routeFor(request.method, new URL(request.url))
+        return route === undefined ? new Response('Not found', { status: 404 }) : route.fetch(request)
+      },
+    }
+  }
 
   /** Client caller paired with this service's registry. */
   readonly clientRpc: ClientConnectionRpc = {

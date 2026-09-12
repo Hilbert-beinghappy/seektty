@@ -6,7 +6,7 @@ import type {
   IApiClient,
   SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
-import { getPath } from '@deepseek-ai/dsh-client-schema-form'
+import { getPath } from '../../vendor/schema-form/index.js'
 import { ui } from './locale.ts'
 import type { InputOverlayRequest, OverlayPrompts } from './overlays.ts'
 import { normalizeProviderApiKey } from './provider-config.ts'

@@ -55,6 +55,7 @@ export function compareDshVersions(left, right) {
  * @param legacyMaximum - last Host on the 0.1.0-rc line still in the union.
  */
 export function dshPeerRange(minimumVersion, testedVersion, legacyMaximum = DSH_LEGACY_PEER_MAXIMUM) {
+  if (compareDshVersions(minimumVersion, legacyMaximum) > 0) return testedVersion
   const legacy = `>=${minimumVersion} <=${legacyMaximum}`
   const vsMin = compareDshVersions(testedVersion, minimumVersion)
   const vsLegacy = compareDshVersions(testedVersion, legacyMaximum)

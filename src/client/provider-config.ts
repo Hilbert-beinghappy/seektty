@@ -13,7 +13,7 @@ import {
   hasPath,
   nodeAtPath,
   rehydrateSchema,
-} from '@deepseek-ai/dsh-client-schema-form'
+} from '../../vendor/schema-form/index.js'
 import { normalizeApiKey } from '@deepseek-ai/dsh-llm'
 import { ui } from './locale.ts'
 

@@ -1,10 +1,10 @@
 // Shared assistant step-timing fold: Chat Definitions and the Trajectory
 // history fold derive AssistantTiming from the same step/start -> first token
 // delta -> assistant/message sequence.
-import { isTokenDelta } from '@deepseek-ai/dsh-llm/message';
+import { isTokenDelta, assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm/assistant-stream';
 // The first-token predicate lives beside the StreamChunk type in dsh-llm;
 // re-exported here so Chat Definitions keep their client-runtime import.
-export { isTokenDelta } from '@deepseek-ai/dsh-llm/message';
+export { isTokenDelta } from '@deepseek-ai/dsh-llm/assistant-stream';
 /**
  * Composite map key for one assistant step.
  * @param turn - turn number from the event payload.
@@ -31,6 +31,12 @@ export function indexAssistantStepTiming(steps, event) {
         if (current.firstTokenTime === null) {
             steps.set(key, { ...current, firstTokenTime: event.time });
         }
+    }
+    else if ((event.type === 'assistant/message' || event.type === 'assistant/attempt') && Array.isArray(event.data.stream)) {
+        const key = assistantStepKey(event.data.turn, event.data.step);
+        const current = steps.get(key) ?? { stepStartTime: null, firstTokenTime: null };
+        const time = assistantStreamFirstTokenTime(event.data.stream);
+        if (time !== undefined && current.firstTokenTime === null) steps.set(key, { ...current, firstTokenTime: time });
     }
 }
 /**

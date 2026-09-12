@@ -72,7 +72,7 @@ function currentRuntime(options: {
 
 describe('current dsh subagent presentation contract', () => {
   it('names the exact audited range and keeps unsupported future fields explicit', () => {
-    expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.tested).toBe('0.1.1-rc.2')
+    expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.tested).toBe('0.1.5-rc.1')
     expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.required).toContain('SubagentAddress.childSessionId')
     expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.unsupported).toContain('terminalLifecycle')
     expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.unsupported).toContain('permissionOwnerSessionId')

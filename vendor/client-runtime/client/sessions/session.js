@@ -1,3 +1,4 @@
+import { NativeAssistantStream } from '../../../../src/client/native-assistant-stream.ts';
 // Sessions remain resident after creation so they continue consuming mux frames off-screen.
 // Value import from the inline-safe wire layer (not the connection plugin):
 // plugin-to-plugin value imports are a bundle purity error.
@@ -18,6 +19,7 @@ export const PAGE_MESSAGES = 50;
  * remaining public members are manager/runtime entry points.
  */
 export class Session {
+    nativeAssistant = new NativeAssistantStream();
     sessionId;
     api;
     remote;
@@ -420,6 +422,20 @@ export class Session {
      */
     handleMuxEnvelope(rpcId, frame) {
         switch (frame.type) {
+            case 'session/assistant-baseline':
+                this.nativeAssistant.baseline(frame.baseline);
+                this.notifier.markFrameDirty();
+                return;
+            case 'session/assistant-stream':
+                try {
+                    this.nativeAssistant.accept(frame.frame);
+                } catch {
+                    void this.resync();
+                    return;
+                }
+                this.nativeAssistant.settle(this.windowTailSeq() ?? -1);
+                this.notifier.markFrameDirty();
+                return;
             case 'session/event': {
                 this.acceptLiveEvent(frame.event, frame.view);
                 return;
@@ -430,6 +446,7 @@ export class Session {
                 return;
             }
             case 'session/subscribed': {
+                this.nativeAssistant = new NativeAssistantStream();
                 this.subscribedLastSeq = frame.lastSeq;
                 // New mux-generation baseline: the host pushes this session's queue
                 // snapshot AFTER the subscribed frame on the same stream, so the
@@ -577,14 +594,17 @@ export class Session {
                 return;
             }
             this.installWindow(result.value.events, result.value.hasMore, result.value.projections);
+            if (result.value.assistantStream !== undefined) this.nativeAssistant.baseline(result.value.assistantStream);
             // Gap detection: baseline past the window tail and liveBuffer did not cover it -> pull the tail page once more.
             const tailSeq = this.windowTailSeq();
             if (this.subscribedLastSeq !== null && tailSeq !== null && this.subscribedLastSeq > tailSeq) {
                 result = (await this.history({ maxMessages: PAGE_MESSAGES })).result;
                 if (generation !== this.openGeneration)
                     return;
-                if (result.ok)
+                if (result.ok) {
                     this.installWindow(result.value.events, result.value.hasMore, result.value.projections);
+                    if (result.value.assistantStream !== undefined) this.nativeAssistant.baseline(result.value.assistantStream);
+                }
             }
             this.openState = 'open';
         }
@@ -678,6 +698,7 @@ export class Session {
             // Failure or superseded by a full resync: drop — the resync path rebuilds and clears the buffer itself.
             if (result.ok && generation === this.openGeneration && this.openState === 'open') {
                 this.installWindow(result.value.events, result.value.hasMore, result.value.projections);
+                if (result.value.assistantStream !== undefined) this.nativeAssistant.baseline(result.value.assistantStream);
             }
         }
         catch (error) {
@@ -696,6 +717,7 @@ export class Session {
             this.pendingCache = { rev: this.pendingRev, value: [...this.pending.values()] };
         }
         const chat = this.conversation.snapshot('chat') ?? EMPTY_CHAT_SNAPSHOT;
+        this.nativeAssistant.settle(this.windowTailSeq() ?? -1);
         const legacy = chat.legacy;
         return {
             sessionId: this.sessionId,
@@ -704,7 +726,7 @@ export class Session {
             nodes: legacy.nodes,
             turnTimings: legacy.turnTimings,
             turnEnds: legacy.turnEnds,
-            partial: legacy.partial,
+            partial: this.nativeAssistant.snapshot() ?? legacy.partial,
             runningCalls: legacy.runningCalls,
             pending: this.pendingCache.value,
             queue: this.queueMirror.snapshot(),

@@ -1,5 +1,6 @@
 import { emptyAssistantBlock, isAppendSurfaceEvent, isTokenDelta, toAssistantBlock, toAssistantBlocks, } from '@deepseek-ai/dsh-client-runtime/projection';
 import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from "./common.js";
+import { assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm/assistant-stream';
 function initialState(turn, step) {
     return {
         turn,
@@ -116,9 +117,10 @@ function finalNode(state, context) {
             step: state.step,
             blocks: toAssistantBlocks(event.data.message.content),
             usage: event.data.usage,
+            ...(event.data.interrupted === true ? { interrupted: true } : {}),
             timing: {
                 stepStartTime: context.start?.event.time ?? null,
-                firstTokenTime: state.firstTokenTime ?? null,
+                firstTokenTime: state.firstTokenTime ?? (Array.isArray(event.data.stream) ? assistantStreamFirstTokenTime(event.data.stream) : undefined) ?? null,
                 completedTime: event.time,
             },
         };
