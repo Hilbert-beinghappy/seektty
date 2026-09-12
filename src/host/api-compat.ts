@@ -194,6 +194,13 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
     const disposeInteractions = this.interactions.subscribe(pushInteraction)
     const follows = new Set<string>()
     const queueBaselines = new Map<string, Extract<MuxFrame, { type: 'session/queue' }>>()
+    const jobBaselines = new Map<string, Extract<MuxFrame, { type: 'session/jobs' }>>()
+    const pushJobs = (value: unknown) => {
+      const frame = muxFrameSchema.parse(value)
+      if (frame.type !== 'session/jobs') throw new Error('Expected a native jobs frame')
+      jobBaselines.set(frame.sessionId, frame)
+      push(frame)
+    }
     const pushQueue = (value: unknown) => {
       const frame = muxFrameSchema.parse(value)
       if (frame.type !== 'session/queue') throw new Error('Expected a native queue frame')
@@ -219,6 +226,8 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
             // control baseline after the retained client's subscribed reset.
             const pendingQueue = queueBaselines.get(sessionId)
             if (pendingQueue !== undefined) push(pendingQueue)
+            const pendingJobs = jobBaselines.get(sessionId)
+            if (pendingJobs !== undefined) push(pendingJobs)
             this.interactions.replay(sessionId, pushInteraction)
             project(sessionId, frame.projections)
             if (frame.assistantStream !== undefined) push({ type: 'session/assistant-baseline', sessionId, baseline: frame.assistantStream })
@@ -246,10 +255,10 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
       for await (const frame of this.ctx.sessionController.control(lifetime)) {
         if (frame.type === 'baseline') {
           for (const [sessionId, items] of Object.entries(frame.value.queues)) pushQueue({ type: 'session/queue', sessionId, items })
-          for (const [sessionId, jobs] of Object.entries(frame.value.jobs)) push({ type: 'session/jobs', sessionId, jobs })
+          for (const [sessionId, jobs] of Object.entries(frame.value.jobs)) pushJobs({ type: 'session/jobs', sessionId, jobs })
           for (const [sessionId, value] of Object.entries(frame.value.projections)) project(sessionId, value)
         } else if (frame.type === 'queue') pushQueue({ ...frame, type: 'session/queue' })
-        else if (frame.type === 'jobs') push({ ...frame, type: 'session/jobs' })
+        else if (frame.type === 'jobs') pushJobs({ ...frame, type: 'session/jobs' })
         else if (frame.type === 'projection' && frame.seq >= 0) push({ ...frame, type: 'session/projection' })
       }
     })())
