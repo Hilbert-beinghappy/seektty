@@ -64,6 +64,71 @@ afterEach(() => {
 })
 
 describe('AgentTreeDock', () => {
+  it('does not accumulate evidence across 20000 unchanged stream notifications', async () => {
+    const adapter = presentation({ root: catalog('root', [{ id: 'running', running: true }]) })
+    let statusChanged!: Parameters<NonNullable<SubagentPresentationCapabilities['subscribePublicStatus']>>[1]
+    adapter.subscribePublicStatus = (_id, listener) => {
+      statusChanged = listener
+      return { support: 'supported', value: () => undefined }
+    }
+    const dock = new AgentTreeDock({ presentation: adapter, requestRender: vi.fn() })
+    dock.showCollapsedRoot(id('root'))
+    await dock.loadChildren(id('root'))
+    const initial = dock.node(id('running'))!
+    // Exercise both sampled production stacks: subscription and resume/read.
+    // Also await each catalog refresh so in-flight coalescing cannot hide growth.
+    for (let index = 0; index < 20_000; index += 1) {
+      statusChanged({ sessionId: id('running'), evidence: [{ kind: 'session-running', running: true }] })
+      dock.resume()
+      await dock.loadChildren(id('root'))
+    }
+    expect(dock.node(id('running')) === initial).toBe(true)
+    expect(dock.node(id('running'))!.evidence === initial.evidence).toBe(true)
+    statusChanged({ sessionId: id('running'), evidence: [{ kind: 'turn-timing', settledMs: 10, active: false }] })
+    expect(dock.node(id('running'))?.lifecycle).toBe('completed')
+    statusChanged({ sessionId: id('running'), evidence: [{ kind: 'session-running', running: true }] })
+    expect(dock.node(id('running'))?.lifecycle).toBe('running')
+    expect(dock.node(id('running'))!.evidence.length).toBe(initial.evidence.length + 2)
+    dock.dispose()
+  })
+
+  it('retains catalog changes, error recovery, explicit refresh and root isolation', async () => {
+    vi.useFakeTimers()
+    let current = catalog('root', [{ id: 'running', running: true }])
+    const adapter = presentation({})
+    const list = vi.fn(async () => ({ support: 'supported' as const, value: current }))
+    adapter.listDirectChildren = list
+    const requestRender = vi.fn()
+    const dock = new AgentTreeDock({ presentation: adapter, requestRender })
+    dock.showCollapsedRoot(id('root'))
+    await dock.loadChildren(id('root'))
+    await vi.advanceTimersByTimeAsync(50)
+    requestRender.mockClear()
+    const initial = dock.node(id('running'))!
+    current = catalog('root', [{ id: 'running', label: 'renamed', running: true }])
+    await dock.loadChildren(id('root'))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(requestRender).toHaveBeenCalledTimes(1)
+    current = catalog('root', [{ id: 'running', label: 'renamed', running: true }, { id: 'new' }])
+    await dock.loadChildren(id('root'))
+    expect(dock.node(id('running'))?.label).toBe('renamed')
+    expect(dock.node(id('new'))).toBeDefined()
+    list.mockRejectedValueOnce(new Error('transient'))
+    await dock.loadChildren(id('root'))
+    await dock.loadChildren(id('root'))
+    expect(dock.render(100).join('\n')).not.toContain('重试')
+    const recovered = dock.node(id('running'))!
+    await dock.loadChildren(id('root'), undefined, true)
+    expect(dock.node(id('running'))).not.toBe(recovered)
+    expect(dock.node(id('running'))?.lifecycle).toBe('running')
+    dock.showCollapsedRoot(id('other'))
+    current = catalog('other', [{ id: 'running', running: true }])
+    await dock.loadChildren(id('other'))
+    expect(dock.node(id('running'))?.parentSessionId).toBe(id('other'))
+    expect(dock.node(id('running'))).not.toBe(initial)
+    dock.dispose()
+  })
+
   it('does not reserve collapsed rows until the Session has a subagent', async () => {
     vi.stubEnv('NO_COLOR', '1')
     const dock = new AgentTreeDock({

@@ -228,6 +228,7 @@ export class AgentTreeDock implements Component, Focusable {
   private readonly inflight = new Map<string, { readonly token: number; readonly controller: AbortController; readonly promise: Promise<void> }>()
   private readonly summaries = new Map<SessionId, CachedSummary>()
   private readonly statusSubscriptions = new Map<SessionId, () => void>()
+  private readonly catalogSnapshots = new Map<SessionId, string>()
   private catalogSubscription: (() => void) | undefined
   private summaryBytes = 0
   private renderTimer: ReturnType<typeof setTimeout> | undefined
@@ -278,6 +279,7 @@ export class AgentTreeDock implements Component, Focusable {
     this.rootToken += 1
     this.rootId = owningRootId
     this.tree = createAgentTreeState(owningRootId)
+    this.catalogSnapshots.clear()
     this.open = false
     this.focused = false
     this.selectedId = selectedSessionId
@@ -301,6 +303,7 @@ export class AgentTreeDock implements Component, Focusable {
       this.rootToken += 1
       this.rootId = owningRootId
       this.tree = createAgentTreeState(owningRootId)
+      this.catalogSnapshots.clear()
       this.expanded.clear()
       this.expanded.add(owningRootId)
       this.viewportOffset = 0
@@ -393,9 +396,13 @@ export class AgentTreeDock implements Component, Focusable {
     for (const sessionId of sessionIds) {
       const status = this.options.presentation.publicStatusEvidence(sessionId)
       if (status.support !== 'supported') continue
+      const lifecycle = deriveLifecycle(status.value.evidence).lifecycle
+      // List notifications also carry token updates. They are observations, not
+      // new lifecycle evidence; retaining each one makes reduction quadratic.
+      const current = next.nodes.get(sessionId)
+      if (current?.lifecycle === lifecycle && current.lifecycleEvidence?.source === 'session') continue
       const now = this.now()
       const statusRevision = ++this.revision
-      const lifecycle = deriveLifecycle(status.value.evidence).lifecycle
       next = reduceAgentTree(next, {
         kind: 'lifecycle',
         rootSessionId: tree.rootSessionId,
@@ -410,7 +417,7 @@ export class AgentTreeDock implements Component, Focusable {
     }
     this.tree = next
     this.syncStatusSubscriptions(sessionIds)
-    this.scheduleRender()
+    if (next !== tree) this.scheduleRender()
   }
 
   visibleRows(limit = this.options.maxVisibleRows ?? DEFAULT_VISIBLE_ROWS, loadDetails = true): AgentTreeVisibleRow[] {
@@ -821,16 +828,18 @@ export class AgentTreeDock implements Component, Focusable {
     const token = this.rootToken
     const controller = new AbortController()
     const loadingEvidence = evidence(this.now(), requestRevision, `children:${root}:${parentSessionId}:${requestRevision}:loading`)
-    this.tree = reduceAgentTree(this.tree, {
+    const showLoading = refresh || !this.catalogSnapshots.has(parentSessionId)
+    if (showLoading) this.tree = reduceAgentTree(this.tree, {
       kind: 'children-state', rootSessionId: root,
       ...(parentSessionId === root ? {} : { sessionId: parentSessionId }),
       state: 'loading', evidence: loadingEvidence,
     })
-    this.scheduleRender()
+    if (showLoading) this.scheduleRender()
     const promise = this.options.presentation.listDirectChildren(parentSessionId, { refresh })
       .then((result) => {
         if (controller.signal.aborted || token !== this.rootToken || root !== this.rootId || this.tree === undefined) return
         if (result.support === 'unsupported') {
+          this.catalogSnapshots.delete(parentSessionId)
           this.tree = reduceAgentTree(this.tree, {
             kind: 'children-state', rootSessionId: root,
             ...(parentSessionId === root ? {} : { sessionId: parentSessionId }),
@@ -841,14 +850,22 @@ export class AgentTreeDock implements Component, Focusable {
           return
         }
         const catalog: DirectSubagentCatalog = result.value
+        // Compare the complete public catalog, never transcript lengths or
+        // fingerprints. An unchanged background observation must not overwrite
+        // newer Session lifecycle evidence or append another audit record.
+        const snapshot = JSON.stringify(catalog)
+        if (!showLoading && this.catalogSnapshots.get(parentSessionId) === snapshot) return
+        this.catalogSnapshots.set(parentSessionId, snapshot)
         this.tree = reduceAgentTree(this.tree, {
           kind: 'catalog', rootSessionId: root, parentSessionId, catalog,
           evidence: evidence(this.now(), requestRevision, `catalog:${root}:${parentSessionId}:${requestRevision}`),
         })
+        this.scheduleRender()
         if (this.selectedId === undefined) this.selectedId = orderedAgentChildren(this.tree, root)[0]?.sessionId
         this.refreshVisibleStatus()
       }, () => {
         if (controller.signal.aborted || token !== this.rootToken || root !== this.rootId || this.tree === undefined) return
+        this.catalogSnapshots.delete(parentSessionId)
         this.tree = reduceAgentTree(this.tree, {
           kind: 'children-state', rootSessionId: root,
           ...(parentSessionId === root ? {} : { sessionId: parentSessionId }),
@@ -946,9 +963,11 @@ export class AgentTreeDock implements Component, Focusable {
       const tree = this.tree
       const directWhileCollapsed = !this.open && tree?.nodes.get(sessionId)?.parentSessionId === this.rootId
       if ((!this.open && !directWhileCollapsed) || tree === undefined || !this.statusSubscriptions.has(sessionId)) return
+      const lifecycle = deriveLifecycle(status.evidence).lifecycle
+      const current = tree.nodes.get(sessionId)
+      if (current?.lifecycle === lifecycle && current.lifecycleEvidence?.source === 'session') return
       const now = this.now()
       const statusRevision = ++this.revision
-      const lifecycle = deriveLifecycle(status.evidence).lifecycle
       this.tree = reduceAgentTree(tree, {
         kind: 'lifecycle', rootSessionId: tree.rootSessionId, sessionId,
         lifecycle,
