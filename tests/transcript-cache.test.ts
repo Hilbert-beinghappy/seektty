@@ -161,3 +161,57 @@ describe('transcript node cache (task 5.2)', () => {
     expect(transcript.render(80).join('\n')).toContain('notes.md')
   })
 })
+
+it.each([false, true])('does not reproject frozen long reasoning on animated frames (native=%s)', native => {
+  const transcript = new Transcript(() => 24)
+  const source = '中文👩‍💻 é reasoning line\n'.repeat(1000)
+  const step = (text: string): ChatConversationViewNode => ({ ...assistant('thinking', ''), kind: 'assistant-step',
+    data: { status: 'running', turn: 1, step: 1, time: 1, blocks: [{ kind: 'reasoning', text }] } })
+  try {
+    transcript.setNativeMode(native)
+    transcript.update(snapshot([step(source)]))
+    transcript.render(80)
+    const scanned = internals.plainProjectionCharacters
+    expect(scanned).toBeGreaterThan(0)
+    const started = performance.now()
+    for (let i = 0; i < 10; i++) { transcript.invalidate(); transcript.render(80) }
+    if (process.env.SEEKTTY_REASONING_BENCH) console.log(JSON.stringify({ native, pulseFramesMs: performance.now() - started, scannedCharacters: internals.plainProjectionCharacters - scanned }))
+    expect(internals.plainProjectionCharacters).toBe(scanned)
+    transcript.update(snapshot([step(source.replace('reasoning', 'CORRECTED'))]))
+    transcript.render(80)
+    expect(internals.plainProjectionCharacters).toBeGreaterThan(scanned)
+    const revised = internals.plainProjectionCharacters
+    transcript.render(40)
+    expect(internals.plainProjectionCharacters).toBeGreaterThan(revised)
+  } finally { transcript.dispose() }
+})
+
+
+it('animates the header without changing Unicode source copy across cache hits and resize', () => {
+  vi.useFakeTimers()
+  vi.stubEnv('NO_COLOR', undefined)
+  vi.stubEnv('FORCE_COLOR', '3')
+  const transcript = new Transcript(() => 100)
+  const source = '  中文👩‍💻 é\t keep spaces  \n\nlast line'
+  const live = { ...assistant('thinking-copy', ''), kind: 'assistant-step',
+    data: { status: 'running', turn: 1, step: 1, time: 1, blocks: [{ kind: 'reasoning', text: source }] } } as ChatConversationViewNode
+  const select = () => transcript.setSelection({
+    granularity: 'character',
+    anchor: { surface: 'transcript', ownerKey: 'thinking-copy', textOffset: 0, affinity: 'before' },
+    focus: { surface: 'transcript', ownerKey: 'thinking-copy', textOffset: 100000, affinity: 'after' },
+  })
+  try {
+    transcript.update(snapshot([live]))
+    const first = transcript.render(80)
+    select()
+    const copied = transcript.copySelectionText()
+    expect(copied).toContain(source.replace(/\t/g, '   '))
+    vi.advanceTimersByTime(160)
+    const next = transcript.render(80)
+    expect(next).not.toEqual(first)
+    expect(transcript.copySelectionText()).toBe(copied)
+    transcript.render(20)
+    select()
+    expect(transcript.copySelectionText()).toBe(copied)
+  } finally { transcript.dispose(); vi.useRealTimers() }
+})

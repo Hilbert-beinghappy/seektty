@@ -131,12 +131,18 @@ it('prepares a mixed reasoning header and large plain body without losing final 
   const source = Array.from({ length: 4000 }, (_, i) => `REASONING_${i} 中文😀`).join('\n')
   const reasoning = { ...node('reasoning', '', true), data: { status: 'running', turn: 1, step: 1, time: 1,
     blocks: [{ kind: 'reasoning', text: source }] } } as ChatConversationViewNode
-  const transcript = new Transcript(() => 24, undefined, undefined, undefined, workerFactory)
+  let workers = 0
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, () => { workers++; return workerFactory() })
   try {
     transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
     transcript.update(snapshot([reasoning]))
     transcript.render(80); await transcript.waitNativePreparation()
     expect(transcript.render(80).join('\n')).toContain('REASONING_3999')
+    const preparedWorkers = workers
+    const scanned = internals.plainProjectionCharacters
+    for (let i = 0; i < 10; i++) { transcript.invalidate(); transcript.render(80) }
+    expect(workers).toBe(preparedWorkers)
+    expect(internals.plainProjectionCharacters).toBe(scanned)
     transcript.finishNativeHistory()
     const actual = (await drainPrepared(transcript)).join('\n')
     expect(actual.match(/REASONING_\d+/gu)).toEqual(Array.from({ length: 4000 }, (_, i) => `REASONING_${i}`))
@@ -553,3 +559,28 @@ it('does not duplicate a legacy partial when its durable node appears under a di
   expect(batch.lines.join('\n').match(/PREFIX/gu)).toHaveLength(1)
   transcript.dispose()
 })
+
+it('coalesces rapid long reasoning updates without losing final source', async () => {
+  vi.stubEnv('NO_COLOR', '1')
+  let workers = 0
+  const transcript = new Transcript(() => 24, undefined, undefined, undefined, () => { workers++; return workerFactory() })
+  let source = '中文👩‍💻 reasoning\n'.repeat(3000)
+  const update = () => transcript.update(snapshot([{ ...node('thinking-burst', '', true), data: {
+    status: 'running', turn: 1, step: 1, time: 1, blocks: [{ kind: 'reasoning', text: source }],
+  } } as ChatConversationViewNode]))
+  try {
+    transcript.setNativeMode(true); transcript.setNativeTailEnabled(true)
+    update(); transcript.render(80)
+    for (let i = 0; i < 20; i++) { source += `\nTAIL_${i}`; update(); transcript.render(80) }
+    expect(workers).toBe(1)
+    // UI callbacks can run while the full document is being prepared.
+    let inputEcho = false
+    await new Promise<void>(resolve => setTimeout(() => { inputEcho = true; resolve() }, 0))
+    expect(inputEcho).toBe(true)
+    transcript.finishNativeHistory()
+    const actual = (await drainPrepared(transcript)).join('\n')
+    expect(actual.match(/TAIL_\d+/gu)).toEqual(Array.from({ length: 20 }, (_, i) => `TAIL_${i}`))
+    expect(actual.match(/👩‍💻/gu)).toHaveLength(3000)
+    expect(workers).toBeLessThanOrEqual(3)
+  } finally { transcript.dispose() }
+}, 60000)
