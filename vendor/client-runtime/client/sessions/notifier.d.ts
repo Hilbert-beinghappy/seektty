@@ -6,6 +6,7 @@ export declare class Notifier {
     private notifyPending;
     private scheduled;
     private scheduleGeneration;
+    private frameTimer;
     /** @param rebuild - snapshot rebuild function injected by the owner (writes the owner's snapshotCache). */
     constructor(rebuild: () => void);
     /**
@@ -30,6 +31,7 @@ export declare class Notifier {
     ensureFresh(): void;
     private schedule;
     private invalidateSchedule;
+    private cancelFrameTimer;
     private flush;
 }
 //# sourceMappingURL=notifier.d.ts.map

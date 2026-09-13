@@ -9,6 +9,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { setImmediate as yieldToInput } from 'node:timers/promises'
 import { z } from 'zod'
 import { AbstractApiClient } from '../../vendor/api-contract/fetch/client.js'
 import { RpcId } from '../../vendor/api-contract/api/rpc.js'
@@ -25,19 +26,49 @@ import { toolPresenterScope } from './tool-presenter-scope.ts'
 
 /** A cancellable single-consumer queue; closing releases a pending read. */
 export class TerminalStream<T> implements AsyncIterable<T> {
-  private items: T[] = []
+  private items: (T | undefined)[] = []
+  private head = 0
   private wake: (() => void) | undefined
   private closed = false
   private failure: unknown
-  push(value: T): void { if (!this.closed) { this.items.push(value); this.wake?.() } }
+  readonly metrics = { enqueued: 0, consumed: 0, discarded: 0, peakPending: 0, yields: 0 }
+  get pending(): number { return this.items.length - this.head }
+  push(value: T): void {
+    if (this.closed) return
+    this.items.push(value); this.metrics.enqueued++
+    this.metrics.peakPending = Math.max(this.metrics.peakPending, this.pending)
+    this.wake?.()
+  }
   close(error?: unknown): void { this.closed = true; this.failure = error; this.wake?.() }
+  /** Only lifetime cancellation discards unread work; normal close drains it. */
+  cancel(): void { this.metrics.discarded += this.pending; this.items = []; this.head = 0; this.close() }
   async *[Symbol.asyncIterator](): AsyncGenerator<T> {
-    while (true) {
-      while (this.items.length > 0) yield this.items.shift()!
-      if (this.closed) { if (this.failure !== undefined) throw this.failure; return }
-      await new Promise<void>(resolve => { this.wake = resolve })
-      this.wake = undefined
-    }
+    try {
+      while (true) {
+        let deadline = performance.now() + 4
+        let batch = 0
+        while (this.pending > 0) {
+          const value = this.items[this.head]!
+          this.items[this.head++] = undefined // Release consumed snapshots immediately.
+          this.metrics.consumed++
+          if (this.head >= 1024 && this.head * 2 >= this.items.length) {
+            this.items = this.items.slice(this.head); this.head = 0
+          }
+          yield value
+          // Include consumer work in the budget. Even cheap microtasks must
+          // periodically yield so timers, cancellation and input can execute.
+          if (this.pending > 0 && (++batch >= 128 || performance.now() >= deadline)) {
+            this.metrics.yields++
+            await yieldToInput()
+            deadline = performance.now() + 4; batch = 0
+          }
+        }
+        this.items = []; this.head = 0
+        if (this.closed) { if (this.failure !== undefined) throw this.failure; return }
+        await new Promise<void>(resolve => { this.wake = resolve })
+        this.wake = undefined
+      }
+    } finally { this.cancel(); this.wake = undefined }
   }
 }
 
@@ -175,7 +206,7 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
         if (frame.type === 'archived') push({ type: 'host/archived-sessions-changed', archivedSessionIds: frame.archivedSessionIds })
       }
     })().catch(error => { if (!lifetime.aborted) queue.close(error) })
-    const abort = () => queue.close()
+    const abort = () => queue.cancel()
     lifetime.addEventListener('abort', abort, { once: true })
     onOpen?.()
     try { yield* queue } finally {
@@ -262,7 +293,7 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
         else if (frame.type === 'projection' && frame.seq >= 0) push({ ...frame, type: 'session/projection' })
       }
     })())
-    const abort = () => queue.close()
+    const abort = () => queue.cancel()
     lifetime.addEventListener('abort', abort, { once: true })
     onOpen?.()
     try { yield* queue } finally {

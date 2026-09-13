@@ -17,6 +17,7 @@ export class Notifier {
     notifyPending = false;
     scheduled = 'none';
     scheduleGeneration = 0;
+    frameTimer;
     /** @param rebuild - snapshot rebuild function injected by the owner (writes the owner's snapshotCache). */
     constructor(rebuild) {
         this.rebuild = rebuild;
@@ -46,7 +47,7 @@ export class Notifier {
         this.notifyPending = true;
         if (this.scheduled !== 'none')
             return;
-        this.schedule(typeof globalThis.requestAnimationFrame === 'function' ? 'frame' : 'microtask');
+        this.schedule('frame');
     }
     /**
      * Synchronous flush: controlled-input writes must notify in the same tick as
@@ -69,24 +70,38 @@ export class Notifier {
         this.rebuild();
     }
     schedule(kind) {
+        this.cancelFrameTimer();
         const generation = ++this.scheduleGeneration;
         this.scheduled = kind;
         const publish = () => {
             if (generation !== this.scheduleGeneration)
                 return;
             this.scheduled = 'none';
+            this.frameTimer = undefined;
             this.flush();
         };
         if (kind === 'frame') {
-            globalThis.requestAnimationFrame(publish);
+            if (typeof globalThis.requestAnimationFrame === 'function') {
+                globalThis.requestAnimationFrame(publish);
+            } else {
+                // Node has no animation frame. A microtask here republishes on
+                // every async-iterator item and can starve input behind a burst.
+                this.frameTimer = setTimeout(publish, 16);
+                this.frameTimer.unref?.();
+            }
         }
         else {
             queueMicrotask(publish);
         }
     }
     invalidateSchedule() {
+        this.cancelFrameTimer();
         this.scheduleGeneration++;
         this.scheduled = 'none';
+    }
+    cancelFrameTimer() {
+        if (this.frameTimer !== undefined) clearTimeout(this.frameTimer);
+        this.frameTimer = undefined;
     }
     flush() {
         if (!this.notifyPending)
