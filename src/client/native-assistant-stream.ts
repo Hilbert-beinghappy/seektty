@@ -17,12 +17,20 @@ export class NativeAssistantStream {
   private nextIndex = 0
   private accumulator: PartialAccumulator | undefined
   private settlementSeq: number | undefined
+  private startedAfterSeq = -Infinity
+  private activationGeneration = 0
+
+  /** Used to reject history reads started before an Agent activation changed. */
+  get generation(): number { return this.activationGeneration }
 
   snapshot(): PartialAssistant | null { return this.accumulator?.toPartial() ?? null }
 
   baseline(value: SessionAssistantStreamBaseline): void {
-    if (value.revision <= this.revision) return
     const active = value.activeAttempt
+    if (active !== undefined && active.startedAfterSeq < this.startedAfterSeq) return
+    const restarted = active !== undefined && active.attemptId !== this.attemptId
+      && active.startedAfterSeq > this.startedAfterSeq && value.revision <= this.revision
+    if (!restarted && value.revision <= this.revision) return
     const previous = this.accumulator
     this.accumulator = active === undefined ? undefined : new PartialAccumulator(active.turn, active.step)
     try {
@@ -38,14 +46,23 @@ export class NativeAssistantStream {
       throw error
     }
     this.revision = value.revision
+    if (restarted) this.activationGeneration += 1
+    if (active !== undefined) this.startedAfterSeq = active.startedAfterSeq
     this.attemptId = active?.attemptId
     this.nextIndex = active?.nextIndex ?? 0
     this.settlementSeq = undefined
   }
 
   accept(frame: SessionAssistantStreamFrame): void {
-    if (frame.revision <= this.revision) return
     if (frame.type === 'start') {
+      // rc.1 recreates continuable child Agents with revision 1. The durable
+      // start position distinguishes that activation from an old replayed start.
+      if (frame.startedAfterSeq < this.startedAfterSeq) return
+      const restarted = frame.revision === 1 && frame.attemptId !== this.attemptId
+        && frame.startedAfterSeq > this.startedAfterSeq
+      if (!restarted && frame.revision <= this.revision) return
+      if (restarted && this.revision >= 0) this.activationGeneration += 1
+      this.startedAfterSeq = frame.startedAfterSeq
       this.revision = frame.revision
       this.attemptId = frame.attemptId
       this.nextIndex = 0
@@ -53,6 +70,7 @@ export class NativeAssistantStream {
       this.accumulator = new PartialAccumulator(frame.turn, frame.step)
       return
     }
+    if (frame.revision <= this.revision) return
     if (frame.attemptId !== this.attemptId || this.accumulator === undefined) {
       throw new Error('Assistant stream has no matching baseline')
     }

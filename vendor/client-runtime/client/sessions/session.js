@@ -585,7 +585,8 @@ export class Session {
         this.openError = null;
         this.notifier.markDirty();
         try {
-            let { result } = await this.history({ maxMessages: PAGE_MESSAGES });
+            let response = await this.history({ maxMessages: PAGE_MESSAGES });
+            let { result } = response;
             if (generation !== this.openGeneration)
                 return;
             if (!result.ok) {
@@ -594,16 +595,17 @@ export class Session {
                 return;
             }
             this.installWindow(result.value.events, result.value.hasMore, result.value.projections);
-            if (result.value.assistantStream !== undefined) this.nativeAssistant.baseline(result.value.assistantStream);
+            response.applyAssistantBaseline();
             // Gap detection: baseline past the window tail and liveBuffer did not cover it -> pull the tail page once more.
             const tailSeq = this.windowTailSeq();
             if (this.subscribedLastSeq !== null && tailSeq !== null && this.subscribedLastSeq > tailSeq) {
-                result = (await this.history({ maxMessages: PAGE_MESSAGES })).result;
+                response = await this.history({ maxMessages: PAGE_MESSAGES });
+                result = response.result;
                 if (generation !== this.openGeneration)
                     return;
                 if (result.ok) {
                     this.installWindow(result.value.events, result.value.hasMore, result.value.projections);
-                    if (result.value.assistantStream !== undefined) this.nativeAssistant.baseline(result.value.assistantStream);
+                    response.applyAssistantBaseline();
                 }
             }
             this.openState = 'open';
@@ -694,11 +696,12 @@ export class Session {
         this.stitching = true;
         const generation = this.openGeneration;
         try {
-            const { result } = await this.history({ maxMessages: PAGE_MESSAGES });
+            const response = await this.history({ maxMessages: PAGE_MESSAGES });
+            const { result } = response;
             // Failure or superseded by a full resync: drop — the resync path rebuilds and clears the buffer itself.
             if (result.ok && generation === this.openGeneration && this.openState === 'open') {
                 this.installWindow(result.value.events, result.value.hasMore, result.value.projections);
-                if (result.value.assistantStream !== undefined) this.nativeAssistant.baseline(result.value.assistantStream);
+                response.applyAssistantBaseline();
             }
         }
         catch (error) {
@@ -749,10 +752,19 @@ export class Session {
         };
     }
     /** Select ordinary or addressed history transport from the stored browser fact. */
-    history(payload) {
-        return this.address === undefined
+    async history(payload) {
+        const assistant = this.nativeAssistant;
+        const generation = assistant.generation;
+        const response = await (this.address === undefined
             ? this.api.sessions.history({ sessionId: this.sessionId, ...payload })
-            : this.api.subagents.history({ ...this.address, ...payload });
+            : this.api.subagents.history({ ...this.address, ...payload }));
+        // Check at consumption, not just response arrival: live frames may run
+        // between these awaits. Durable history remains independently usable.
+        return { ...response, applyAssistantBaseline: () => {
+            if (assistant !== this.nativeAssistant || generation !== assistant.generation) return;
+            if (response.result.ok && response.result.value.assistantStream !== undefined)
+                assistant.baseline(response.result.value.assistantStream);
+        } };
     }
 }
 /** Convert one wire history row into the assembler's transport-neutral input. */

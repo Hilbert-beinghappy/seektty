@@ -1,3 +1,4 @@
+import { SessionSeq } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 import { LlmAttemptId } from '@deepseek-ai/dsh-llm/brand'
 import { AssistantStreamAccumulator } from '@deepseek-ai/dsh-llm/assistant-stream'
@@ -70,4 +71,25 @@ describe('native transient assistant stream', () => {
     stream.accept({ type: 'end', attemptId, revision: 4, index: 2, outcome: { kind: 'abandoned' } })
     expect(stream.snapshot()).toBeNull()
   })
+})
+
+it('rebaselines a restarted activation and ignores retired activation baselines and starts', () => {
+  const stream = start()
+  stream.accept(chunk(20))
+  const next = LlmAttemptId('next')
+  const official = new AssistantStreamAccumulator()
+  official.push({ time: 1, chunk: { type: 'text-delta', index: 0, text: 'new' } })
+  const baseline = { revision: 2, activeAttempt: { attemptId: next, startedAfterSeq: SessionSeq(9), turn: 2, step: 1,
+    nextIndex: 1, stream: z.array(z.json()).parse(official.snapshot()) } }
+  expect(() => stream.baseline({ ...baseline, activeAttempt: { ...baseline.activeAttempt, nextIndex: 3 } })).toThrow()
+  expect(stream.snapshot()?.blocks).toEqual([{ kind: 'text', text: 'hello' }])
+  expect(stream.generation).toBe(0)
+  stream.baseline(baseline)
+  expect(stream.generation).toBe(1)
+  stream.accept({ type: 'start', attemptId, revision: 1, startedAfterSeq: -1, turn: 1, step: 2 })
+  stream.baseline({ revision: 100, activeAttempt: { attemptId, startedAfterSeq: -1, turn: 1, step: 2, nextIndex: 0, stream: [] } })
+  stream.baseline(baseline)
+  stream.accept({ type: 'start', attemptId: next, revision: 1, startedAfterSeq: SessionSeq(9), turn: 2, step: 1 })
+  stream.accept({ ...chunk(3, 1), attemptId: next })
+  expect(stream.snapshot()?.blocks).toEqual([{ kind: 'text', text: 'newhello' }])
 })
