@@ -55,6 +55,45 @@ function move(point = { col: 2, row: 2 }): MouseInput {
 }
 
 describe('mouse controller skeleton', () => {
+  it('keeps stationary hover across stream frames and retargets only when the displayed hit changes', () => {
+    let hits = snapshot(1, 'button')
+    const controller = createMouseController({ getHitMap: () => hits, getBehavior: () => DEFAULT_TUI_BEHAVIOR })
+    expect(controller.handle(move()).semantic).toMatchObject({ kind: 'hover', region: { id: 'transcript:tool:a' } })
+    for (let generation = 2; generation < 1002; generation++) {
+      hits = snapshot(generation, 'button')
+      expect(controller.reconcileHover().semantic).toBeUndefined()
+    }
+    hits = snapshot(1002, 'text')
+    const removed = controller.reconcileHover()
+    expect(removed.semantic).toMatchObject({ kind: 'hover' })
+    expect(removed.semantic && 'region' in removed.semantic ? removed.semantic.region : undefined).toBeUndefined()
+    expect(controller.reconcileHover().requestRender).toBeUndefined()
+    hits = snapshot(1003, 'button')
+    expect(controller.reconcileHover().semantic).toMatchObject({ kind: 'hover', region: { id: 'transcript:tool:a' } })
+    controller.clearHover()
+    expect(controller.reconcileHover().semantic).toBeUndefined()
+    controller.handle(move())
+    controller.handle({ kind: 'focus', focused: false })
+    expect(controller.reconcileHover().semantic).toBeUndefined()
+    controller.dispose()
+  })
+
+  it('does not reconcile hover into an active click or native-mode gesture', () => {
+    let hits = snapshot(1, 'button')
+    let mouseMode: 'full' | 'native' = 'full'
+    const controller = createMouseController({ getHitMap: () => hits, getBehavior: () => ({ ...DEFAULT_TUI_BEHAVIOR, mouseMode }) })
+    controller.handle(move())
+    controller.handle(press())
+    hits = snapshot(2, 'text')
+    expect(controller.reconcileHover().semantic).toBeUndefined()
+    controller.endGesture()
+    expect(controller.reconcileHover().semantic).toMatchObject({ kind: 'hover' })
+    mouseMode = 'native'
+    hits = snapshot(3, 'button')
+    expect(controller.reconcileHover().semantic).toBeUndefined()
+    controller.dispose()
+  })
+
   it('scales each protocol detent by wheelScrollLines=3', () => {
     const controller = createMouseController({
       getHitMap: () => snapshot(1),
