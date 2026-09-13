@@ -503,6 +503,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             renderAgain = true
           } else if (presented?.epoch === epoch && nativeOutput.epoch() === epoch && frameHits && hitMap === previousHits) {
             hitMap = nativePresentedHitMap(frameHits, presented.tailRow)
+            reconcileHoverPresentation()
           }
           if (renderAgain && stopping === undefined) { renderAgain = false; requestSurfaceRender() }
         })
@@ -513,6 +514,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     let mouseController!: ReturnType<typeof createMouseController>
     let clearHoverPresentation = (): boolean => false
+    let reconcileHoverPresentation = (): void => undefined
     let extendTranscriptPointerAtEdge = (_edge: 'older' | 'newer', _point: CellPoint): void => undefined
     const contextMenu = new ContextMenuController(tui, () => {
       mouseController.endGesture()
@@ -705,7 +707,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       }
     }
     tuiFrameApi(tui).onAfterRender = () => {
-      if (!nativeOutputActive) { freezeHitMap(); return }
+      if (!nativeOutputActive) { freezeHitMap(); reconcileHoverPresentation(); return }
       const displayed = hitMap
       freezeHitMap()
       preparedNativeHits = hitMap
@@ -748,7 +750,6 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
 
     const updateTranscript = (current: TuiActiveSession): void => {
       clearMouseArm(true)
-      clearHoverPresentation()
       performanceProbe.markSnapshot()
       transcript.update(current.session.getSnapshot(), async (attachment) => {
         const result = await current.session.readAttachment(attachment.attachmentId)
@@ -1420,6 +1421,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const previousSessionId = latestSessionId
       const sessionChanged = previousSessionId !== current.sessionId
       if (sessionChanged) {
+        clearHoverPresentation()
         nativeOutput?.reset()
         if (nativeOutput) transcript.pauseNativeHistory(false)
         historyLoadController?.abort()
@@ -1997,6 +1999,13 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     clearHoverPresentation = (): boolean => {
       const controllerChanged = mouseController.clearHover()
       return applyHoverPresentation(undefined) || controllerChanged
+    }
+
+    reconcileHoverPresentation = (): void => {
+      const outcome = mouseController.reconcileHover()
+      if (outcome.semantic?.kind === 'hover' && applyHoverPresentation(outcome.semantic.region)) {
+        requestSurfaceRender()
+      }
     }
 
     const dispatchMouseClick = (semantic: Extract<MouseSemanticEvent, { kind: 'click' }>): void => {

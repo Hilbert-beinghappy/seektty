@@ -172,6 +172,7 @@ export class MouseController {
   private lastWheelAt = 0
   private lastWheelDir = 0
   private hoveredTarget: string | undefined
+  private hoverInput: Extract<MouseInput, { kind: 'move' }> | undefined
 
   constructor(private readonly options: MouseControllerOptions) {
     this.now = options.now ?? Date.now
@@ -236,9 +237,16 @@ export class MouseController {
 
   /** Clear the last hover identity; returns whether presentation must be repainted. */
   clearHover(): boolean {
+    this.hoverInput = undefined
     if (this.hoveredTarget === undefined) return false
     this.hoveredTarget = undefined
     return true
+  }
+
+  /** Re-hit-test a stationary pointer against the frame actually displayed. */
+  reconcileHover(): MouseControllerOutcome {
+    if (this.hoverInput === undefined || this.state.kind !== 'idle' || this.mode === 'native') return { consume: true }
+    return this.handleMove(this.hoverInput)
   }
 
   endGesture(): void {
@@ -255,6 +263,7 @@ export class MouseController {
     this.clickButton = undefined
     this.clickTarget = undefined
     this.hoveredTarget = undefined
+    this.hoverInput = undefined
     this.counters.edgeScrollTimers = 0
   }
 
@@ -314,6 +323,7 @@ export class MouseController {
   }
 
   private handleMove(input: Extract<MouseInput, { kind: 'move' }>): MouseControllerOutcome {
+    this.hoverInput = input
     if (!this.options.getBehavior().hoverFeedback) {
       const changed = this.clearHover()
       return changed

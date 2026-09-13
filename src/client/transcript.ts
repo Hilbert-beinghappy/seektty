@@ -112,6 +112,7 @@ export const internals = {
   heightIndexExact: 0,
   heightIndexEstimated: 0,
   selectionCellsProjected: 0,
+  plainProjectionCharacters: 0,
 }
 
 /** User-visible tool-card posture; display only, never a model/runtime mutation. */
@@ -330,11 +331,18 @@ function wrappedSourceProjections(
   return projections
 }
 
-function plainSelectionLines(text: string, width: number): SelectionLineProjection[] {
+function plainSelectionLayout(text: string, width: number): {
+  projections: SelectionLineProjection[]; hardBreaks: number[]
+} {
+  internals.plainProjectionCharacters += text.length
   const normalized = escapeTerminalText(text).replace(/\t/gu, '   ')
   const logicalLines = normalized.split('\n')
-  return logicalLines.flatMap((logicalLine, index) => {
+  const hardBreaks: number[] = []
+  let renderedIndex = 0
+  const projections = logicalLines.flatMap((logicalLine, index) => {
     const visualLines = wrapTextWithAnsi(logicalLine, Math.max(1, width))
+    renderedIndex += Math.max(1, visualLines.length)
+    if (index < logicalLines.length - 1) hardBreaks.push(renderedIndex - 1)
     return wrappedSourceProjections(
       logicalLine,
       visualLines.length === 0 ? [''] : visualLines,
@@ -342,6 +350,7 @@ function plainSelectionLines(text: string, width: number): SelectionLineProjecti
       index < logicalLines.length - 1 ? '\n' : '',
     )
   })
+  return { projections, hardBreaks }
 }
 
 function fallbackSelectionLines(
@@ -1412,6 +1421,7 @@ function chatNodeRows(node: ChatConversationViewNode, preferences: TranscriptPre
 }
 
 interface TranscriptBlockLines {
+  readonly clockSpans?: readonly { component: Component; start: number; length: number }[]
   readonly lines: readonly string[]
   readonly projections: readonly SelectionLineProjection[]
   readonly borderLines: readonly number[]
@@ -1563,12 +1573,18 @@ export class Transcript implements Component, Focusable {
   private readonly reasoningStates = new Map<string, boolean>()
   private readonly nodeCache = new Map<string, TranscriptBlock>()
   private readonly lineCache = new WeakMap<Component, { width: number; lines: readonly string[] }>()
+  // Row identity changes with source/presentation. Keep one width per row;
+  // animation must not re-wrap an unchanged plain body for copy metadata.
+  private readonly plainProjectionCache = new WeakMap<TranscriptRow, {
+    width: number; projections: SelectionLineProjection[]; hardBreaks: readonly number[]
+  }>()
   focused = false
   private readonly heightIndex = new HeightIndex()
   private scrollbarVisible: 'always' | 'hidden' = DEFAULT_TUI_BEHAVIOR.scrollbarVisibility
   private pendingOlderAnchor: TranscriptCoordinate | undefined
   private lastScrollbar: ScrollbarModel | undefined
   private readonly ownerCopy = new Map<string, {
+    readonly sourceProjections: readonly SelectionLineProjection[]
     readonly text: string
     readonly lineStarts: readonly number[]
     readonly projections: readonly SelectionLineProjection[]
@@ -2540,7 +2556,7 @@ export class Transcript implements Component, Focusable {
       const hasReasoning = partial.blocks.some(block => block.kind === 'reasoning' && block.text !== '')
       const expanded = reasoningExpanded(preferences, key, thinking)
       if (hasReasoning) this.reasoningStates.set(key, expanded)
-      take('__partial__', JSON.stringify({
+      take('__partial__', structuralToken({
         partial,
         tools: preferences.tools,
         reasoning: preferences.reasoning,
@@ -2739,10 +2755,30 @@ export class Transcript implements Component, Focusable {
       block.linesByWidth.clear()
       block.dirty = false
     }
-    // Source changes replace the block and its cache. Only clock-driven rows
-    // need to bypass a cache while the source itself is unchanged.
+    // Source changes replace the block. Animation patches only its own spans;
+    // text/geometry changes (for example a wider elapsed label) rebuild layout.
     const clockDriven = block.rows.some(row => row.pulse !== undefined || row.liveDurationSince !== undefined)
-    const cachedBlock = clockDriven ? undefined : block.linesByWidth.get(cacheKey)
+    let cachedBlock = block.linesByWidth.get(cacheKey)
+    if (clockDriven && cachedBlock !== undefined) {
+      const lines = [...cachedBlock.lines]
+      for (const span of cachedBlock.clockSpans ?? []) {
+        const rendered = span.component.render(contentWidth)
+        internals.componentRenders += 1
+        const projections = componentSelectionLines(span.component) ?? fallbackSelectionLines(rendered, contentWidth)
+        if (rendered.length !== span.length || projections.some((projection, index) => {
+          const previous = cachedBlock!.projections[span.start + index]
+          return previous?.text !== projection.text || previous.displayStartCell !== projection.displayStartCell
+        })) {
+          cachedBlock = undefined
+          break
+        }
+        for (const [index, line] of rendered.entries()) {
+          internals.linesEscaped += 1
+          lines[span.start + index] = this.safeRenderedLines.get(line)
+        }
+      }
+      if (cachedBlock !== undefined) cachedBlock = { ...cachedBlock, lines }
+    }
     if (cachedBlock !== undefined) {
       this.heightIndex.setExact(block.key, cachedBlock.lines.length)
       this.rememberOwnerCopy(block.key, cachedBlock)
@@ -2751,6 +2787,7 @@ export class Transcript implements Component, Focusable {
       return cachedBlock
     }
     const lines: string[] = []
+    const clockSpans: { component: Component; start: number; length: number }[] = []
     const projections: SelectionLineProjection[] = []
     const borderLines: number[] = []
     const hardBreaks: Array<boolean | undefined> = []
@@ -2778,6 +2815,7 @@ export class Transcript implements Component, Focusable {
           return output
         })()
       const start = lines.length
+      if (pulsing) clockSpans.push({ component, start, length: rendered.length })
       const control: TranscriptPointerControl | undefined = row?.toolKey !== undefined
         ? { kind: 'tool', id: row.toolKey }
         : row?.reasoningKey !== undefined
@@ -2793,13 +2831,19 @@ export class Transcript implements Component, Focusable {
           lines.push(this.safeRenderedLines.get(line))
         }
       }
+      let plainProjection = row === undefined ? undefined : this.plainProjectionCache.get(row)
+      if (row?.format === 'plain' && row.pulse === undefined && row.welcome !== true
+        && plainProjection?.width !== contentWidth) {
+        plainProjection = { width: contentWidth, ...plainSelectionLayout(row.text, contentWidth) }
+        this.plainProjectionCache.set(row, plainProjection)
+      }
       const projected = row?.format === 'rule' || row?.format === 'image'
         ? rendered.map(() => ({ text: '', displayStartCell: 0, joinerAfter: '' }))
         : row?.format === 'plain' && row.pulse === undefined && row.welcome !== true
-          ? plainSelectionLines(row.text, contentWidth)
+          ? plainProjection!.projections
           : componentSelectionLines(component) ?? fallbackSelectionLines(rendered, contentWidth)
       for (const projection of projected.length === rendered.length ? projected : fallbackSelectionLines(rendered, contentWidth)) projections.push(projection)
-      for (const hardBreakIndex of explicitHardBreakIndexes(row, contentWidth)) {
+      for (const hardBreakIndex of plainProjection?.hardBreaks ?? explicitHardBreakIndexes(row, contentWidth)) {
         const target = start + hardBreakIndex
         if (target >= start && target < lines.length) hardBreaks[target] = true
       }
@@ -2824,14 +2868,12 @@ export class Transcript implements Component, Focusable {
           ? { joinerAfter: '' }
           : {}),
     }))
-    const result = { lines, projections: resolvedProjections, borderLines, hardBreaks, turnAnchors, controls }
-    if (!clockDriven) {
-      block.linesByWidth.set(cacheKey, result)
-      while (block.linesByWidth.size > 4) {
-        const oldest = block.linesByWidth.keys().next().value
-        if (oldest === undefined) break
-        block.linesByWidth.delete(oldest)
-      }
+    const result = { lines, projections: resolvedProjections, borderLines, hardBreaks, turnAnchors, controls, clockSpans }
+    block.linesByWidth.set(cacheKey, result)
+    while (block.linesByWidth.size > 4) {
+      const oldest = block.linesByWidth.keys().next().value
+      if (oldest === undefined) break
+      block.linesByWidth.delete(oldest)
     }
     this.heightIndex.setExact(block.key, result.lines.length)
     this.rememberOwnerCopy(block.key, result)
@@ -2844,10 +2886,12 @@ export class Transcript implements Component, Focusable {
     key: string,
     block: TranscriptBlockLines,
   ): void {
+    if (this.ownerCopy.get(key)?.sourceProjections === block.projections) return
     const projections = block.projections.map((projection, index) => block.borderLines.includes(index)
       ? { text: '', displayStartCell: 0, joinerAfter: projection.joinerAfter }
       : projection)
     const next = {
+      sourceProjections: block.projections,
       ...ownerTextFromProjections(projections),
       projections,
       borderLines: block.borderLines,
