@@ -1,4 +1,4 @@
-> **Development branch:** this checkout adapts SeekTTY to official dsh `0.1.5-rc.1` only. It is not the published `seektty@1.2.5` artifact. The release installation commands below describe the previous release; use a locally packed candidate for this branch. Interface differences, migration decisions, and completed/pending checks are recorded in [the adaptation document](docs/dsh-0.1.5-rc.1-adaptation.md).
+> **Current release:** `seektty@1.2.6` adapts SeekTTY to official dsh `0.1.5-rc.1`. Interface differences, migration decisions, and completed/pending checks are recorded in [the adaptation document](docs/dsh-0.1.5-rc.1-adaptation.md).
 
 <div align="center">
 
@@ -9,8 +9,8 @@
 <p>A terminal workspace for DeepSeek Harness.</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.5-orange" alt="Version 1.2.5"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.1--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.1-rc.2">
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.6-orange" alt="Version 1.2.6"></a>
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.1-5B5BD6" alt="DeepSeek Harness 0.1.5-rc.1">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
@@ -44,35 +44,35 @@ For requirements that still need definition, the optional [Clarify Host plugin](
 
 ## Quick start
 
-Install SeekTTY on the tested official DeepSeek Harness `0.1.1-rc.2`:
+Install SeekTTY on the tested official DeepSeek Harness `0.1.5-rc.1`:
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.1
 
-dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.5
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.6
 
 dsh --profile tui
 ```
 
 These commands install the prebuilt Bundle through native `dsh plugin` reconciliation. The per-command pnpm option avoids the pnpm 11 Global Virtual Store layout that the Cordis loader in the currently tested dsh releases cannot reliably load. SeekTTY never changes global pnpm configuration. Clarify and Auxiliary Runtime are optional, not default dependencies; their historical joint acceptance is listed under [Compatibility](#compatibility-and-verification).
 
-The exact `seektty@1.2.5` npm package and the GitHub Release tarball are built from the same reviewed package inputs. The [1.2.5 owner review and release checklist](docs/release-v1.2.5-verification.md) records the publication and verification procedure.
+The exact `seektty@1.2.6` npm package is built from the reviewed package inputs documented in [the release notes](docs/release-v1.2.6.md), [the verification record](docs/release-v1.2.6-verification.md), and [the dsh 0.1.5-rc.1 adaptation record](docs/dsh-0.1.5-rc.1-adaptation.md).
 
 ### Bare `deepseek` launcher
 
 After installing `dsh`, install the same SeekTTY release globally and pin Profile reconciliation to its exact npm version:
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.5
-export SEEKTTY_SPEC=seektty@1.2.5
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.6
+export SEEKTTY_SPEC=seektty@1.2.6
 deepseek
 ```
 
 PowerShell uses the same exact npm spec:
 
 ```powershell
-pnpm add --global --config.enable-global-virtual-store=false 'seektty@1.2.5'
-$env:SEEKTTY_SPEC='seektty@1.2.5'
+pnpm add --global --config.enable-global-virtual-store=false 'seektty@1.2.6'
+$env:SEEKTTY_SPEC='seektty@1.2.6'
 deepseek
 ```
 
@@ -90,7 +90,7 @@ deepseek --update
 
 `deepseek --update` is self-first: it checks SeekTTY before dsh, installs at most one compatible component per run, and never installs an untested gap or future Host. `DSH_BIN`, local installs, and `SEEKTTY_SPEC` overrides are left unchanged. Update failures do not block startup. Set `SEEKTTY_UPDATE=check` for a post-session notice or `SEEKTTY_UPDATE=0` to disable checks.
 
-SeekTTY `1.2.5` brings a Fastfetch-style welcome page, terminal-integrated backgrounds, VS Code-grade TextMate highlighting, more reliable transcript and selection controls, and pnpm 11 installation compatibility to official Harness `0.1.1-rc.2`. No Settings or Session migration is required.
+SeekTTY `1.2.6` brings the dsh `0.1.5-rc.1` native API adaptation, while retaining the Fastfetch-style welcome page, terminal-integrated backgrounds, TextMate highlighting, transcript and selection controls, and pnpm 11 installation compatibility. No Settings or Session migration is required.
 
 ### What's new in 1.2.5
 
@@ -387,8 +387,8 @@ Replace the former `deepseek-tui` global package once:
 
 ```sh
 pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
-pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.5
-export SEEKTTY_SPEC=seektty@1.2.5
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.6
+export SEEKTTY_SPEC=seektty@1.2.6
 deepseek
 ```
 
@@ -396,7 +396,7 @@ Custom Profiles migrate independently on first launch. Native dsh-only installat
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
-dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.5
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.6
 ```
 
 To remove both the Profile Bundle and the optional global launcher while leaving the dsh installation untouched:
@@ -408,16 +408,16 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 
 ## Compatibility and verification
 
-This development branch declares only official `0.1.5-rc.1`; validation is tracked in the adaptation document. The published SeekTTY `1.2.5` release was tested on official `0.1.1-rc.2`. The table below records that released baseline, not acceptance of this branch.
+This release declares and tests only official dsh `0.1.5-rc.1`; validation is tracked in the adaptation document. The table below records the current release boundary.
 
 | Boundary | Version |
 | --- | --- |
 | Node.js | `^22.19.0 || >=24` |
 | Declared minimum Harness Host | `0.1.0-rc.6` |
-| Current tested Harness Host | `0.1.1-rc.2` |
+| Current tested Harness Host | `0.1.5-rc.1` |
 | pnpm 11 layout adapter | pnpm `11.7.0`; dsh `>=0.1.0-rc.6 <=0.1.0-rc.8 || 0.1.1-rc.2`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| Current release | SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`; appearance, highlighting, interaction, and pnpm-layout changes are included; optional plugin joint acceptance is not extended |
+| Current release | SeekTTY `1.2.6` on official dsh `0.1.5-rc.1`; native API adaptation and prior terminal, highlighting, interaction, and pnpm-layout changes are included |
 
 Hosts older than the declared minimum are rejected. Newer-than-tested Hosts may boot with a notice, but automatic updates install only an explicitly compatible range. The published Bundle does not install Cordis or identity-bearing `@deepseek-ai/dsh-*` packages into a Profile: optional peers describe the Host contract, and runtime imports resolve through the official Harness installation. The attachment compatibility adapter handles only the exact tested legacy image-limit shape and fails closed for unknown shapes.
 
@@ -429,7 +429,7 @@ This adapter does not run `pnpm config set`, set `NODE_PATH`, copy Host packages
 
 See the bilingual [pnpm 11 layout acceptance record](docs/pnpm11-layout-acceptance.md) for the gate contract, current local evidence, and the adapter exit condition.
 
-The 1.2.5 release-candidate checks cover:
+The 1.2.6 release checks cover:
 
 - Type checking, unit/integration tests, production build, packed-content checks, and duplicate-Host-package rejection.
 - Isolated add, boot, remove, and re-add on unmodified official dsh `0.1.1-rc.2` using the exact candidate tarball.
@@ -460,4 +460,4 @@ CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor
 ```
 
-SeekTTY `1.2.5` is published on the npm Registry and can be installed with pnpm using the per-command GVS compatibility option shown above. The identical reviewed package is also available as a prebuilt tarball attached to the matching GitHub Release.
+After npm authentication, publish `seektty@1.2.6` to the npm Registry and install it with pnpm using the per-command GVS compatibility option shown above.
