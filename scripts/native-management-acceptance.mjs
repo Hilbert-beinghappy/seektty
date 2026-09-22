@@ -14,15 +14,17 @@ import crossSpawn from 'cross-spawn'
 import { spawn } from 'node-pty'
 import xterm from '@xterm/headless'
 import { load } from 'js-yaml'
-import { verifyStockDsh } from './stock-dsh-version.mjs'
+import { stockDshTarget, verifyStockDsh } from './stock-dsh-version.mjs'
 
 const { Terminal } = xterm
 const repository = resolve(import.meta.dirname, '..')
 export const fixtureSecret = 'management-fixture-not-a-real-key'
 
 export async function managementAcceptance({ interactive = false } = {}) {
-  const dsh = resolve(process.env.DSH_BIN ?? join(repository, '.artifacts/stock-dsh-0.1.5-rc.1/node_modules/.bin/dsh'))
-  const candidate = resolve(process.env.SEEKTTY_SPEC ?? join(repository, '.artifacts/seektty-rc1-qa-20.tgz'))
+  const target = stockDshTarget()
+  const dsh = resolve(process.env.DSH_BIN ?? join(repository, `.artifacts/stock-dsh-${target.version}/node_modules/.bin/dsh`))
+  assert(process.env.SEEKTTY_SPEC?.trim(), 'Set SEEKTTY_SPEC to the current candidate tarball')
+  const candidate = resolve(process.env.SEEKTTY_SPEC)
   const stock = verifyStockDsh(dsh)
   const root = mkdtempSync(join(tmpdir(), 'seektty-management-acceptance-'))
   const home = join(root, 'dsh-home')
