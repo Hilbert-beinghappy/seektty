@@ -88,4 +88,6 @@ or credentials.
 The local checks do not establish Windows/Linux or Node 22 acceptance, real
 GUI-terminal mouse/clipboard behavior, paid external-provider behavior, or
 optional Clarify/Vision-Exp combinations. GVS remains disabled per package-tree
-mutation. No push, PR, or npm publication was performed for this adaptation.
+mutation. This record covers local verification before PR creation; remote CI
+results are reported separately on the PR. It does not represent a new npm
+publication.
