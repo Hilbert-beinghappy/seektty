@@ -4,7 +4,7 @@ import {
   createSubagentPresentationCapabilities,
   type SubagentRuntimeLike,
 } from '../src/client/subagent-presentation.ts'
-import { CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT } from '../src/dsh-compat.ts'
+import { CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT, DSH_COMPATIBILITY } from '../src/dsh-compat.ts'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
 import type { OverlayQueue, SelectOverlayRequest } from '../src/client/overlays.ts'
@@ -72,7 +72,7 @@ function currentRuntime(options: {
 
 describe('current dsh subagent presentation contract', () => {
   it('names the exact audited range and keeps unsupported future fields explicit', () => {
-    expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.tested).toBe('0.1.5-rc.1')
+    expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.tested).toBe(DSH_COMPATIBILITY.tested)
     expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.required).toContain('SubagentAddress.childSessionId')
     expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.unsupported).toContain('terminalLifecycle')
     expect(CURRENT_DSH_SUBAGENT_PRESENTATION_CONTRACT.unsupported).toContain('permissionOwnerSessionId')

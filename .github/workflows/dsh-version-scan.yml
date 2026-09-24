@@ -56,7 +56,7 @@ jobs:
       - name: Bump to the npm latest dsh
         if: steps.check.outputs.update == 'true' && steps.guard.outputs.exists == 'false'
         run: |
-          node scripts/bump-dsh.mjs
+          node scripts/bump-dsh.mjs "${{ steps.check.outputs.target }}"
           pnpm install --no-frozen-lockfile
 
       - name: Typecheck, test, build, and pack dry-run

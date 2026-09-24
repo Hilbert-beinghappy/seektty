@@ -186,7 +186,7 @@ SEEKTTY_SPEC="$PWD/.artifacts/seektty-rc1-qa-20.tgz" \
 SEEKTTY_UPDATE=off /opt/homebrew/opt/node@24/bin/node lib/bin.js --profile seektty-rc1
 ```
 
-保留平时启动时的 DSH_HOME、Credential 与环境变量即可沿用原 key。此命令第一次运行会由官方 dsh 创建 `seektty-rc1` Profile 并安装本地候选。该 Profile 尚未写入用户正式 DSH_HOME；验收全部使用临时隔离 Profile。本分支仍保留 package version 1.2.5，不能用 npm 上已经发布的 seektty@1.2.5 代替本地候选。
+保留平时启动时的 DSH_HOME、Credential 与环境变量即可沿用原 key。此命令第一次运行会由官方 dsh 创建 `seektty-rc1` Profile 并安装本地候选。该 Profile 尚未写入用户正式 DSH_HOME；验收全部使用临时隔离 Profile。本发布分支的 package version 为 1.2.6，不能用 npm 上的旧版 seektty 代替本地候选。
 
 在另一台机器重建时，先使用 Node 24 与 `corepack pnpm install --frozen-lockfile`，再执行：
 

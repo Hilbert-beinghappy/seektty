@@ -47,13 +47,14 @@ describe('out-of-tree Bundle contract', () => {
   })
 
   it('pins the native Remote adapter to the exact tested Host', () => {
-    expect(manifest.version).toBe('1.2.5')
-    expect(PACKAGE_VERSION).toBe('1.2.5')
-    expect(DSH_COMPATIBILITY).toEqual({ minimum: '0.1.5-rc.1', tested: '0.1.5-rc.1' })
+    expect(manifest.version).toBe('1.2.6')
+    expect(PACKAGE_VERSION).toBe('1.2.6')
+    expect(DSH_COMPATIBILITY.minimum).toBe('0.1.5-rc.1')
+    expect(compareDshVersion(DSH_COMPATIBILITY.tested, DSH_COMPATIBILITY.minimum)).toBeGreaterThanOrEqual(0)
     expect(AUTO_PERMITTED_DSH_MINIMUM).toBe(DSH_COMPATIBILITY.minimum)
     expect(AUTO_PERMITTED_DSH_EXACT).toBe(DSH_COMPATIBILITY.tested)
     const expectedPeer = dshPeerRange(DSH_COMPATIBILITY.minimum, DSH_COMPATIBILITY.tested)
-    expect(expectedPeer).toBe('0.1.5-rc.1')
+    expect(expectedPeer).toBe(DSH_COMPATIBILITY.tested)
     expect(PNPM_GVS_DSH_RANGE).toBe(expectedPeer)
     expect(PNPM_GVS_TESTED_WITH).toEqual({ dsh: DSH_COMPATIBILITY.tested, pnpm: '11.7.0' })
     expect(manifest.packageManager).toBe(`pnpm@${PNPM_GVS_TESTED_WITH.pnpm}`)
@@ -67,7 +68,7 @@ describe('out-of-tree Bundle contract', () => {
     const devDependencies = manifest.devDependencies as Record<string, string>
     for (const [name, version] of Object.entries(devDependencies)) {
       if (!name.startsWith('@deepseek-ai/dsh-')) continue
-      expect(version, name).toBe('0.1.5-rc.1')
+      expect(version, name).toBe(DSH_COMPATIBILITY.tested)
     }
   })
 
@@ -210,11 +211,13 @@ describe('out-of-tree Bundle contract', () => {
     for (const name of ['README.md', 'README.zh.md']) {
       const text = readFileSync(resolve(root, name), 'utf8')
       expect(text).toContain(`Version-${PACKAGE_VERSION}`)
-      expect(text).toContain('DeepSeek%20Harness-0.1.1--rc.2')
+      expect(text).toContain(`DeepSeek%20Harness-${DSH_COMPATIBILITY.tested.replaceAll('-', '--')}`)
       expect(text).toContain('https://github.com/Hilbert-beinghappy/seektty/releases')
       expect(text).toContain(`seektty@${PACKAGE_VERSION}`)
       expect(text).not.toContain('/releases/download/v1.2.0/')
-      expect(text).toContain('pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.1-rc.2')
+      expect(text).toContain('pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.1')
+      expect(text).toContain(`pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@${DSH_COMPATIBILITY.tested}`)
+      expect(text).toContain(`dsh plugin --profile tui add --config.enable-global-virtual-store=false ./seektty-${PACKAGE_VERSION}.tgz`)
       expect(text).toContain('store/v11/links')
       expect(text).toContain(`docs/release-v${PACKAGE_VERSION}.md`)
       expect(text).toContain(`docs/release-v${PACKAGE_VERSION}-verification.md`)
@@ -225,10 +228,13 @@ describe('out-of-tree Bundle contract', () => {
     }
     const english = readFileSync(resolve(root, 'README.md'), 'utf8')
     const chinese = readFileSync(resolve(root, 'README.zh.md'), 'utf8')
-    expect(english).toContain('This development branch declares only official `0.1.5-rc.1`')
-    expect(chinese).toContain('本适配分支仅声明官方 `0.1.5-rc.1`')
-    expect(english).toContain('SeekTTY `1.2.5` on official dsh `0.1.1-rc.2`')
-    expect(chinese).toContain('SeekTTY `1.2.5` + 官方 dsh `0.1.1-rc.2`')
+    expect(english).toContain(`The current tested Host is official \`${DSH_COMPATIBILITY.tested}\``)
+    expect(chinese).toContain(`当前已测 Host 是官方 \`${DSH_COMPATIBILITY.tested}\``)
+    expect(english).toContain(`| Declared minimum Harness Host | \`${DSH_COMPATIBILITY.minimum}\` |`)
+    expect(chinese).toContain(`| 声明的最低 Harness Host | \`${DSH_COMPATIBILITY.minimum}\` |`)
+    for (const text of [english, chinese]) expect(text).toContain(`dsh \`${PNPM_GVS_DSH_RANGE}\``)
+    expect(english).toContain('SeekTTY `1.2.6` on official dsh `0.1.5-rc.1`')
+    expect(chinese).toContain('SeekTTY `1.2.6` + 官方 dsh `0.1.5-rc.1`')
     const release = readFileSync(resolve(root, `docs/release-v${PACKAGE_VERSION}.md`), 'utf8')
     expect(release).toContain(`# SeekTTY ${PACKAGE_VERSION}`)
     expect(release).toContain('## English')

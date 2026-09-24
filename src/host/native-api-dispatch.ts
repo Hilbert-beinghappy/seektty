@@ -1,4 +1,4 @@
-/** Terminal unary protocol adapter. Exact target: official dsh 0.1.5-rc.1. */
+/** Terminal unary protocol adapter. Exact tested target is declared in dsh-compat.ts. */
 
 import type { InvokeRemoteRequest, TypertGateway } from '@deepseek-ai/dsh-api-gateway/types'
 import { z } from 'zod'

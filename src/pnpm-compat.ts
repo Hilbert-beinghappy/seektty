@@ -10,11 +10,11 @@
 export const PNPM_GVS_CONFIG_ARG = '--config.enable-global-virtual-store=false'
 
 /** Exact Host range to which this compatibility adapter applies. */
-export const PNPM_GVS_DSH_RANGE = '0.1.5-rc.1'
+export const PNPM_GVS_DSH_RANGE = '0.1.5-rc.2'
 
 /** Host and pnpm versions used by the release acceptance gate. */
 export const PNPM_GVS_TESTED_WITH = Object.freeze({
-  dsh: '0.1.5-rc.1',
+  dsh: '0.1.5-rc.2',
   pnpm: '11.7.0',
 })
 
