@@ -1,4 +1,4 @@
-> **Development compatibility:** The current tested Host is official `0.1.5-rc.2`. This checkout contains the adaptation; the published `seektty@1.2.6` release was verified with dsh `0.1.5-rc.1`. See the [rc.2 verification record](docs/dsh-0.1.5-rc.2-adaptation.md) and [original API migration](docs/dsh-0.1.5-rc.1-adaptation.md).
+> **Development compatibility:** The current tested Host is official `0.1.5-rc.3`. This checkout contains the adaptation; the published `seektty@1.2.6` release was verified with dsh `0.1.5-rc.1`. See the [rc.3 verification record](docs/dsh-0.1.5-rc.3-adaptation.md) and [original API migration](docs/dsh-0.1.5-rc.1-adaptation.md).
 
 <div align="center">
 
@@ -10,7 +10,7 @@
 
 <p>
   <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.6-orange" alt="Version 1.2.6"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.5-rc.2">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.3-5B5BD6" alt="DeepSeek Harness 0.1.5-rc.3">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
@@ -47,7 +47,7 @@ For requirements that still need definition, the optional [Clarify Host plugin](
 To use this branch's dsh adaptation, build and install its local package from the repository root:
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.2
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.3
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
@@ -423,14 +423,14 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 
 ## Compatibility and verification
 
-The current tested Host is official `0.1.5-rc.2`. The [rc.2 adaptation record](docs/dsh-0.1.5-rc.2-adaptation.md) documents that version's validation. Published release evidence is listed separately below.
+The current tested Host is official `0.1.5-rc.3`. The [rc.3 adaptation record](docs/dsh-0.1.5-rc.3-adaptation.md) documents that version's validation. Published release evidence is listed separately below.
 
 | Boundary | Version |
 | --- | --- |
 | Node.js | `^22.19.0 || >=24` |
 | Declared minimum Harness Host | `0.1.5-rc.1` |
-| Current tested Harness Host | `0.1.5-rc.2` |
-| pnpm 11 layout adapter | pnpm `11.7.0`; dsh `0.1.5-rc.2`; GVS disabled per mutation |
+| Current tested Harness Host | `0.1.5-rc.3` |
+| pnpm 11 layout adapter | pnpm `11.7.0`; dsh `0.1.5-rc.3`; GVS disabled per mutation |
 | Last jointly accepted Clarify release stack | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
 | Current release | SeekTTY `1.2.6` on official dsh `0.1.5-rc.1`; native API adaptation and prior terminal, highlighting, interaction, and pnpm-layout changes are included |
 
@@ -444,7 +444,7 @@ This adapter does not run `pnpm config set`, set `NODE_PATH`, copy Host packages
 
 See the bilingual [pnpm 11 layout acceptance record](docs/pnpm11-layout-acceptance.md) for the gate contract, current local evidence, and the adapter exit condition.
 
-The exact rc.2 package, local checks, official dsh lifecycle, and terminal acceptance results are recorded in the [rc.2 adaptation record](docs/dsh-0.1.5-rc.2-adaptation.md). The [1.2.6 release record](docs/release-v1.2.6-verification.md) and earlier optional-plugin observations, including Clarify and Vision-Exp, remain historical evidence. Local macOS results do not replace the Windows/Linux CI matrix or manual GUI mouse and clipboard checks.
+The exact rc.3 package, local checks, and official dsh lifecycle are recorded in the [rc.3 adaptation record](docs/dsh-0.1.5-rc.3-adaptation.md). The [1.2.6 release record](docs/release-v1.2.6-verification.md) and earlier optional-plugin observations, including Clarify and Vision-Exp, remain historical evidence. Local Windows results do not replace the Linux/macOS CI matrix or manual GUI mouse and clipboard checks.
 
 Reusable checks:
 

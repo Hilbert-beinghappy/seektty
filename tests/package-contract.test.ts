@@ -70,6 +70,16 @@ describe('out-of-tree Bundle contract', () => {
       if (!name.startsWith('@deepseek-ai/dsh-')) continue
       expect(version, name).toBe(DSH_COMPATIBILITY.tested)
     }
+    const hostPeers = {
+      '@deepseek-ai/cordis': '4.0.2',
+      '@deepseek-ai/cordis-plugin-include': '1.0.7',
+      '@deepseek-ai/cordis-plugin-loader': '1.0.3',
+      '@deepseek-ai/schemastery': '3.18.2',
+    }
+    for (const [name, version] of Object.entries(hostPeers)) {
+      expect(peers[name], name).toBe(version)
+      expect(devDependencies[name], name).toBe(version)
+    }
   })
 
   it('mounts the terminal entries through one valid patch list', () => {
