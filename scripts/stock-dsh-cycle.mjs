@@ -26,7 +26,9 @@ process.stdout.write(`Verified official dsh ${stock.version}: ${stock.packageCou
 const home = mkdtempSync(join(tmpdir(), 'seektty-stock-cycle-'))
 const packedRoot = mkdtempSync(join(tmpdir(), 'seektty-packed-launcher-'))
 const launcherHome = mkdtempSync(join(tmpdir(), 'seektty-launcher-home-'))
-const environment = { ...process.env, DSH_HOME: home }
+// A machine-wide NODE_PATH can make stock dsh resolve a global SeekTTY before
+// the candidate installed in this isolated Profile, invalidating the test.
+const environment = { ...process.env, NODE_PATH: undefined, DSH_HOME: home }
 
 function run(args) {
   const result = spawnSync(resolve(dsh), args, {
@@ -89,6 +91,7 @@ function assertPackedLauncher() {
   const launcher = join(packedRoot, 'node_modules', '.bin', 'deepseek')
   const launcherEnvironment = {
     ...process.env,
+    NODE_PATH: undefined,
     DSH_BIN: resolve(dsh),
     DSH_HOME: launcherHome,
     SEEKTTY_SPEC: pluginSpec,

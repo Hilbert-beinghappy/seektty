@@ -46,6 +46,7 @@ function candidateSpec(input) {
 const pluginSpec = candidateSpec(candidateInput)
 const environment = {
   ...process.env,
+  NODE_PATH: undefined,
   DSH_HOME: dshHome,
   PNPM_HOME: binDir,
   PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,

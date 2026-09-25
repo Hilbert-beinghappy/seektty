@@ -17,6 +17,12 @@ import { compareDshVersions, dshPeerRange } from './dsh-peer-range.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/@deepseek-ai/dsh/dist-tags'
+const HOST_PEERS = [
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/cordis-plugin-include',
+  '@deepseek-ai/cordis-plugin-loader',
+  '@deepseek-ai/schemastery',
+]
 
 const args = process.argv.slice(2)
 const checkOnly = args.includes('--check')
@@ -86,6 +92,17 @@ for (const name of requiredPackages) {
 if (missing.length > 0) {
   process.stderr.write(`需要人工迁移：以下包没有 ${target}，未修改任何文件：\n${missing.join('\n')}\n`)
   process.exit(2)
+}
+const host = await fetchJson(`https://registry.npmjs.org/${encodeURIComponent('@deepseek-ai/dsh')}/${encodeURIComponent(target)}`)
+if (host?.version !== target) throw new Error(`Cannot verify official dsh ${target} manifest; no files written`)
+const peerDrift = HOST_PEERS.filter(name => {
+  const expected = host.dependencies?.[name]
+  return typeof expected !== 'string'
+    || manifest.peerDependencies?.[name] !== expected
+    || manifest.devDependencies?.[name] !== expected
+})
+if (peerDrift.length > 0) {
+  throw new Error(`Official Host peer pins changed or are incomplete: ${peerDrift.join(', ')}; manual migration required, no files written`)
 }
 for (const name of packages) manifest.devDependencies[name] = target
 for (const name of Object.keys(manifest.peerDependencies ?? {})) {

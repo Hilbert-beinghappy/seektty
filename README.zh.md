@@ -1,4 +1,4 @@
-> **开发分支兼容性：** 当前已测 Host 是官方 `0.1.5-rc.2`。本分支包含适配改动；已发布的 `seektty@1.2.6` 在 dsh `0.1.5-rc.1` 上验证。详见[rc.2 验证记录](docs/dsh-0.1.5-rc.2-adaptation.md)和[原生 API 迁移记录](docs/dsh-0.1.5-rc.1-adaptation.md)。
+> **开发分支兼容性：** 当前已测 Host 是官方 `0.1.5-rc.3`。本分支包含适配改动；已发布的 `seektty@1.2.6` 在 dsh `0.1.5-rc.1` 上验证。详见[rc.3 验证记录](docs/dsh-0.1.5-rc.3-adaptation.md)和[原生 API 迁移记录](docs/dsh-0.1.5-rc.1-adaptation.md)。
 
 <div align="center">
 
@@ -10,7 +10,7 @@
 
 <p>
   <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.6-orange" alt="Version 1.2.6"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-5B5BD6" alt="DeepSeek Harness 0.1.5-rc.2">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.3-5B5BD6" alt="DeepSeek Harness 0.1.5-rc.3">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"></a>
@@ -47,7 +47,7 @@
 使用本分支的 dsh 适配时，在仓库根目录构建并安装本地包：
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.2
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.3
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
@@ -423,14 +423,14 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 
 ## 兼容与验证
 
-当前已测 Host 是官方 `0.1.5-rc.2`。[rc.2 适配记录](docs/dsh-0.1.5-rc.2-adaptation.md)列明该版本的验证结果。已发布版本的验证证据在下方单独列明。
+当前已测 Host 是官方 `0.1.5-rc.3`。[rc.3 适配记录](docs/dsh-0.1.5-rc.3-adaptation.md)列明该版本的验证结果。已发布版本的验证证据在下方单独列明。
 
 | 边界 | 版本 |
 | --- | --- |
 | Node.js | `^22.19.0 || >=24` |
 | 声明的最低 Harness Host | `0.1.5-rc.1` |
-| 当前已测 Harness Host | `0.1.5-rc.2` |
-| pnpm 11 布局适配器 | pnpm `11.7.0`；dsh `0.1.5-rc.2`；每次变更单独关闭 GVS |
+| 当前已测 Harness Host | `0.1.5-rc.3` |
+| pnpm 11 布局适配器 | pnpm `11.7.0`；dsh `0.1.5-rc.3`；每次变更单独关闭 GVS |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
 | 当前 Release | SeekTTY `1.2.6` + 官方 dsh `0.1.5-rc.1`；包含原生 API 适配及此前的外观、高亮、交互与 pnpm 布局改动 |
 
@@ -444,7 +444,7 @@ pnpm 11 可能把全局包放到 `store/v11/links`。当前已测的 dsh/Cordis 
 
 门禁合同、当前本机证据和适配器退出条件见双语的 [pnpm 11 布局验收记录](docs/pnpm11-layout-acceptance.md)。
 
-rc.2 实际打包产物、本地检查、官方 dsh 插拔流程和终端验收结果见[rc.2 适配记录](docs/dsh-0.1.5-rc.2-adaptation.md)。[1.2.6 发布记录](docs/release-v1.2.6-verification.md)及此前的 Clarify、Vision-Exp 等可选插件观察保留为历史证据。本机 macOS 结果不代替 Windows/Linux CI 矩阵或真实 GUI 终端鼠标、剪贴板检查。
+rc.3 实际打包产物、本地检查和官方 dsh 插拔流程见[rc.3 适配记录](docs/dsh-0.1.5-rc.3-adaptation.md)。[1.2.6 发布记录](docs/release-v1.2.6-verification.md)及此前的 Clarify、Vision-Exp 等可选插件观察保留为历史证据。本机 Windows 结果不代替 Linux/macOS CI 矩阵或真实 GUI 终端鼠标、剪贴板检查。
 
 可复用检查：
 
