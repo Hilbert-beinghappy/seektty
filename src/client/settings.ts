@@ -6,7 +6,7 @@ import {
   rehydrateSchema,
   type SchemaNode,
 } from '../../vendor/schema-form/index.js'
-import { LOCALE_PREFERENCE_FIELD, LOCALE_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-client-locale'
+import { LOCALE_PREFERENCE_FIELD, LOCALE_SETTINGS_NAMESPACE } from '../compat/locale-contract.ts'
 import {
   TUI_APPEARANCE_SETTINGS_NAMESPACE,
   TUI_BEHAVIOR_SETTINGS_NAMESPACE,
@@ -197,7 +197,7 @@ export function formatSettingsValue(value: unknown): string {
 export function settingsSectionLabel(namespace: string): string {
   if (namespace === LOCALE_SETTINGS_NAMESPACE) return ui('界面语言', 'Interface language')
   if (namespace === 'permission') return ui('默认权限', 'Default permission')
-  if (namespace === 'agent-presets') return ui('默认 Agent Preset', 'Default Agent Preset')
+  if ((namespace === 'agent-presets' || namespace === 'agent-preset-registry')) return ui('默认 Agent Preset', 'Default Agent Preset')
   if (namespace === 'agent-default-model' || namespace.startsWith('llm-')) return ui('模型与 Provider', 'Models and Providers')
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return ui('SeekTTY 主题', 'SeekTTY themes')
   if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) return ui('SeekTTY 行为', 'SeekTTY behavior')
@@ -277,7 +277,7 @@ export function settingsCategoryFor(
     if (INPUT_BEHAVIOR_FIELDS.has(root)) return 'input'
     return 'language-system'
   }
-  if (namespace === 'agent-default-model' || namespace === 'agent-presets'
+  if (namespace === 'agent-default-model' || (namespace === 'agent-presets' || namespace === 'agent-preset-registry')
     || namespace.startsWith('llm-') || /(?:model|provider|agent)/iu.test(namespace)) return 'model-agent'
   if (namespace === 'permission' || /(?:permission|security|sandbox|access)/iu.test(namespace)) return 'permissions'
   if (namespace === 'tui-plugin-marketplace' || /(?:plugin|marketplace|skill|mcp|extension)/iu.test(namespace)) return 'extensions'
@@ -355,7 +355,7 @@ export function hasDedicatedSettingsEditor(namespace: string, path: readonly str
   }
   if (namespace === 'llm-pi-ai' && samePath(path, ['providers'])) return true
   if (namespace === 'permission' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
-  if (namespace === 'agent-presets' && (samePath(path, ['default']) || samePath(path, ['defaultPreset']))) return true
+  if ((namespace === 'agent-presets' || namespace === 'agent-preset-registry') && (samePath(path, ['default']) || samePath(path, ['defaultPreset']) || samePath(path, ['selectedDefault']))) return true
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE && (
     samePath(path, ['theme']) || samePath(path, ['codeTheme']) || samePath(path, ['backgroundMode'])
     || samePath(path, ['colorMode']) || samePath(path, ['backgroundFill']) || samePath(path, ['terminalBackgroundSync'])

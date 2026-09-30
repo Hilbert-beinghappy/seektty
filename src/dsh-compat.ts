@@ -8,8 +8,8 @@ export interface DshCompatibility {
 export const PACKAGE_NAME = 'seektty'
 export const PACKAGE_VERSION = '1.2.6'
 export const DSH_COMPATIBILITY: DshCompatibility = {
-  minimum: '0.1.5-rc.1',
-  tested: '0.1.5-rc.3',
+  minimum: '0.2.0-rc.2',
+  tested: '0.2.0-rc.2',
 }
 
 /**

@@ -17,7 +17,7 @@ describe('out-of-tree Bundle contract', () => {
   it('declares the native dsh Bundle patch and exact tested baseline', () => {
     expect(manifest.dsh).toEqual({
       bundle: { patch: './cordis.patch.yml' },
-      compatibility: { minimum: '0.1.5-rc.1', tested: DSH_COMPATIBILITY.tested },
+      compatibility: { minimum: '0.2.0-rc.2', tested: DSH_COMPATIBILITY.tested },
     })
     expect(manifest.bin).toEqual({ deepseek: './lib/bin.js' })
     const launcher = readFileSync(resolve(root, 'src/bin.ts'), 'utf8')
@@ -49,7 +49,7 @@ describe('out-of-tree Bundle contract', () => {
   it('pins the native Remote adapter to the exact tested Host', () => {
     expect(manifest.version).toBe('1.2.6')
     expect(PACKAGE_VERSION).toBe('1.2.6')
-    expect(DSH_COMPATIBILITY.minimum).toBe('0.1.5-rc.1')
+    expect(DSH_COMPATIBILITY.minimum).toBe('0.2.0-rc.2')
     expect(compareDshVersion(DSH_COMPATIBILITY.tested, DSH_COMPATIBILITY.minimum)).toBeGreaterThanOrEqual(0)
     expect(AUTO_PERMITTED_DSH_MINIMUM).toBe(DSH_COMPATIBILITY.minimum)
     expect(AUTO_PERMITTED_DSH_EXACT).toBe(DSH_COMPATIBILITY.tested)
@@ -71,10 +71,10 @@ describe('out-of-tree Bundle contract', () => {
       expect(version, name).toBe(DSH_COMPATIBILITY.tested)
     }
     const hostPeers = {
-      '@deepseek-ai/cordis': '4.0.2',
-      '@deepseek-ai/cordis-plugin-include': '1.0.7',
-      '@deepseek-ai/cordis-plugin-loader': '1.0.3',
-      '@deepseek-ai/schemastery': '3.18.2',
+      '@deepseek-ai/cordis': '~4.0.4',
+      '@deepseek-ai/cordis-plugin-include': '~1.0.9',
+      '@deepseek-ai/cordis-plugin-loader': '~1.0.5',
+      '@deepseek-ai/schemastery': '~3.18.4',
     }
     for (const [name, version] of Object.entries(hostPeers)) {
       expect(peers[name], name).toBe(version)

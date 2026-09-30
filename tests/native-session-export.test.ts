@@ -14,7 +14,7 @@ function fixture() {
     ] } }]
   const inspect = vi.fn<SessionExportSource['inspect']>(async (id: SessionId) => ({ meta: { version: SESSION_FORMAT_VERSION, id, createdAt: 1, isSeeded: false },
     inheritedEventCount: SessionLogOffset(0), events }))
-  const source: SessionExportSource = { inspect, presenter: async () => () => undefined }
+  const source: SessionExportSource = { inspect, presenter: async () => ({ present: () => undefined, async [Symbol.asyncDispose]() {} }) }
   return { source, signal, events, inspect }
 }
 

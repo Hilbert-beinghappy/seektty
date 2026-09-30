@@ -23,7 +23,7 @@ it.each([true, false])('retains a queue when control precedes subscribed: %s', a
     },
     async *control(signal: AbortSignal) {
       if (!controlFirst) await gate.promise
-      yield { type: 'baseline', value: { queues: { fixture: items }, jobs: {}, projections: {} } }
+      yield { type: 'baseline', value: { projections: { fixture: { asOfSeq: -1, values: { inbox: { 'next-turn': items.map(item => item.message), 'next-step': [] } } } } } }
       if (controlFirst) gate.resolve()
       await waitForAbort(signal)
     },

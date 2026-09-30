@@ -48,7 +48,7 @@ The upstream license is retained in `vendor/schema-form/LICENSE`.
 `vendor/api-contract/` retains the MIT-licensed serialization schemas and fetch
 client contract from `@deepseek-ai/dsh-host-apiproxy@0.1.1-rc.2`. It does not include
 ApiProxyService or the old Host business implementation. The terminal adapter
-must delegate state and operations to the official dsh 0.1.5-rc.1 controllers.
+must delegate state and operations to the official dsh 0.2.0-rc.2 controllers.
 The upstream license is retained in `vendor/api-contract/LICENSE`.
 
 ## DeepSeek Harness license
@@ -77,3 +77,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Declarative Agent presets
+
+`cordis.patch.yml` includes the standard, minimal, and PTC preset declarations
+from `@deepseek-ai/dsh-web-app@0.2.0-rc.2`, under the DeepSeek MIT license above.
+Only the declarative plugin rows are included; all Agent services remain in Harness.

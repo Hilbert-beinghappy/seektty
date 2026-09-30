@@ -3,6 +3,7 @@
 // native settings/Profile persistence, and loopback-only model responses.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { messagesFixtureReply } from './helpers/messages-fixture.mjs'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -34,7 +35,12 @@ export async function managementAcceptance({ interactive = false } = {}) {
   const report = { root, home, workspace, candidate, candidateSha256: createHash('sha256').update(readFileSync(candidate)).digest('hex'),
     version: stock.version, mode: interactive ? 'supervised' : 'automated', startedAt: new Date().toISOString(), steps: [], requests: [] }
   const save = () => writeFileSync(join(root, 'report.json'), JSON.stringify(report, null, 2) + '\n')
-  const settings = () => existsSync(join(home, 'settings.yaml')) ? load(readFileSync(join(home, 'settings.yaml'), 'utf8')) ?? {} : {}
+  let activeProfile = 'tui'
+  const settings = () => {
+    const path = join(home, 'profiles', activeProfile, 'cordis.patch.yml')
+    const rows = existsSync(path) ? load(readFileSync(path, 'utf8')) ?? [] : []
+    return Object.fromEntries(rows.filter(row => row.id && row.config && Object.keys(row.config).length).map(row => [row.id, row.config]))
+  }
   const record = (name, extra = {}) => { report.steps.push({ name, status: 'passed', ...extra }); save(); console.log(JSON.stringify({ passed: name, ...extra })) }
   const env = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT']
     .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]))
@@ -57,7 +63,8 @@ export async function managementAcceptance({ interactive = false } = {}) {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ object: 'list', data: [{ id: 'management-fixture-model', object: 'model', owned_by: 'fixture' }] })); return
     }
-    if (req.method !== 'POST' || !req.url?.endsWith('/chat/completions')) { res.writeHead(404); res.end(); return }
+    const messagesApi = req.url?.endsWith('/messages')
+    if (req.method !== 'POST' || (!messagesApi && !req.url?.endsWith('/chat/completions'))) { res.writeHead(404); res.end(); return }
     let body = ''; for await (const chunk of req) body += chunk
     const data = JSON.parse(body)
     report.requests.push({ kind: 'inference', model: data.model, stream: data.stream === true,
@@ -65,6 +72,7 @@ export async function managementAcceptance({ interactive = false } = {}) {
     const content = data.tools?.length ? 'MANAGEMENT_MODEL_REPLY' : 'Management fixture'
     const completion = { id: 'management-fixture', object: 'chat.completion', created: 1, model: data.model,
       choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+    if (messagesApi) { await messagesFixtureReply(res, data, { id: 'management-fixture', content }); return }
     if (!data.stream) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(completion)); return }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
     for (const delta of [{ role: 'assistant' }, { content }, {}]) res.write('data: ' + JSON.stringify({ ...completion, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: Object.keys(delta).length ? null : 'stop' }] }) + '\n\n')
@@ -73,7 +81,6 @@ export async function managementAcceptance({ interactive = false } = {}) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const baseURL = `http://127.0.0.1:${server.address().port}/v1`
   report.baseURL = baseURL
-  writeFileSync(join(home, 'settings.yaml'), `locale:\n  preference: en\nllm-deepseek:\n  apiKeyEnv: SEEKTTY_MANAGEMENT_OFFICIAL_KEY\n  baseURL: ${baseURL}\n  retryPolicy:\n    mode: normal\n    maxRetries: 0\n`)
   const fixturePlugin = join(root, 'management-fixture-plugin')
   mkdirSync(fixturePlugin)
   writeFileSync(join(fixturePlugin, 'package.json'), JSON.stringify({ name: 'seektty-management-fixture', version: '0.0.1', type: 'module', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
@@ -94,6 +101,7 @@ export async function managementAcceptance({ interactive = false } = {}) {
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve))
     throw new Error(report.failure)
   }
+  writeFileSync(join(home, 'profiles', 'tui', 'cordis.patch.yml'), `- id: locale\n  config:\n    preference: en\n- id: llm-deepseek\n  config:\n    apiKeyEnv: SEEKTTY_MANAGEMENT_OFFICIAL_KEY\n    baseURL: ${baseURL}\n    retryPolicy:\n      mode: normal\n      maxRetries: 0\n`)
   record('isolated-native-install')
   let child, terminal, exited, writes = Promise.resolve(), cycle = 0
   let raw = ''
@@ -113,6 +121,7 @@ export async function managementAcceptance({ interactive = false } = {}) {
     throw new Error(`${label}: timeout\n${screen()}`)
   }
   const open = async (profile = 'tui') => {
+    activeProfile = profile
     cycle++; exited = undefined; raw = ''
     terminal = new Terminal({ cols: 140, rows: 44, allowProposedApi: true, scrollback: 3000 })
     child = spawn(process.execPath, [stock.entry, '--profile', profile], { cwd: workspace, cols: 140, rows: 44, name: 'xterm-256color', env })
@@ -161,7 +170,7 @@ export async function managementAcceptance({ interactive = false } = {}) {
       const expectScreen = (pattern, label = String(pattern), timeout) => wait(() => pattern.test(screen()), label, timeout)
       const state = (predicate, label) => wait(() => predicate(settings()), label)
       const pass = name => record(name, { screen: snapshot(name) })
-      const escape = () => key('\u001b')
+      const escape = async () => { await key('\u001b'); await delay(450); await writes }
       const confirm = async () => { await key('\u001b[B'); await key('\r') }
       const saveThemePreview = async () => {
         await key('\r')

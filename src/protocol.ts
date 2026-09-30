@@ -402,7 +402,7 @@ export interface TuiPluginEntry {
   readonly source: 'npm' | 'git' | 'tarball' | 'local' | 'unknown'
   readonly bundle: boolean
   readonly active: boolean
-  readonly patch?: string
+  readonly patch?: string | readonly string[]
   readonly patchValid: boolean
   readonly scripts: readonly string[]
   readonly diagnostics: readonly string[]

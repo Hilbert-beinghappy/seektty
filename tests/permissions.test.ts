@@ -9,14 +9,14 @@ import { ProjectionValueStore } from '../vendor/client-runtime/client/sessions/p
 import { TYPERT as commandsHost } from '@deepseek-ai/dsh-commands/typert'
 import { z } from 'zod'
 
-function harness(fields = ['agentId', 'line', 'images']) {
+function harness(fields = ['agentId', 'line', 'images'], nativeCatalog = false) {
   let selected = 'one'
   let seq = 1
   const listeners = new Set<() => void>()
   const projections = { one: new ProjectionValueStore(), two: new ProjectionValueStore() }
   const options = ['read-only', 'workspace-write', 'danger-full-access', 'unknown-preset'].map(value => ({ value, name: value }))
   const set = (id: 'one' | 'two', value: string) => projections[id].apply('permissions', {
-    kind: 'select', currentValue: value, options,
+    currentValue: value, ...(nativeCatalog ? {} : { options }),
   }, seq++)
   set('one', 'workspace-write'); set('two', 'workspace-write')
   const sessions = Object.fromEntries(Object.entries(projections).map(([id, store]) => [id, {
@@ -27,8 +27,10 @@ function harness(fields = ['agentId', 'line', 'images']) {
     set(id as 'one' | 'two', line.slice('/permission '.length))
     return { ok: true, value: { commandId: 'command-1', result: { kind: 'success' } } }
   })
+  const catalogListeners = new Map<string, () => void>()
+  const catalog = vi.fn(async () => ({ ok: true, value: { options, defaultOptions: options.filter(option => option.value !== 'auto'), defaultPreset: 'workspace-write' } }))
   const ctx = {
-    remote: { $on: vi.fn(), commands: { execute } }, on: vi.fn(),
+    remote: { $on: vi.fn((event: string, listener: () => void) => catalogListeners.set(event, listener)), commands: { execute }, ...(nativeCatalog ? { permissionPresets: { catalog } } : {}) }, on: vi.fn(),
     typert: { remotes: { get: () => ({ parameters: fields.map(wire => ({ wire })) }) } },
     sessions: {
       list: {
@@ -47,7 +49,7 @@ function harness(fields = ['agentId', 'line', 'images']) {
   } as unknown as TUI)
   const host = { overlays, notice: vi.fn(), refreshHeader: vi.fn() } as unknown as TuiActionHost
   return {
-    capabilities, execute, set, host, overlays, sessions,
+    capabilities, execute, set, host, overlays, sessions, options, catalog, catalogListeners,
     actions: new TuiActions(capabilities, host),
     selectSession: (id: string) => { selected = id; for (const listener of listeners) listener() },
     text: () => mounted?.render(100).join('\n').replace(/\u001B\[[0-9;:]*m/gu, '') ?? '',
@@ -58,7 +60,7 @@ function harness(fields = ['agentId', 'line', 'images']) {
 afterEach(() => { setUiLocale('zh') })
 
 describe('permission command contract and projection', () => {
-  it('accepts the actual rc.1 command descriptor and sends no attachments for a permission change', async () => {
+  it('accepts the actual 0.2.0-rc.2 command descriptor and sends no attachments for a permission change', async () => {
     const face = z.object({ invocations: z.array(z.object({ namespace: z.string(), method: z.string(),
       parameters: z.array(z.object({ wire: z.string() })),
     })) }).parse(commandsHost)
@@ -120,6 +122,23 @@ describe('permission command contract and projection', () => {
     await Promise.resolve()
     expect(listener).not.toHaveBeenCalled()
   })
+})
+
+it('refreshes the process catalog without advancing the durable selection watermark', async () => {
+  const h = harness(undefined, true)
+  const listener = vi.fn()
+  const stop = h.capabilities.subscribeActive(listener)
+  await vi.waitFor(() => expect(h.capabilities.listPermissions()).toHaveLength(4))
+  expect(h.capabilities.listPermissions().find(option => option.current)?.id).toBe('workspace-write')
+  listener.mockClear()
+  h.options.push({ value: 'auto', name: 'Auto' })
+  h.catalogListeners.get('permission-presets/catalog-changed')?.()
+  await vi.waitFor(() => expect(h.capabilities.listPermissions()).toHaveLength(5))
+  expect(h.capabilities.listPermissions(true).map(option => option.id)).not.toContain('auto')
+  expect(h.catalog).toHaveBeenCalledTimes(2)
+  expect(listener).toHaveBeenCalled()
+  expect(h.sessions.one!.projections.get('permissions')).toEqual({ currentValue: 'workspace-write' })
+  stop()
 })
 
 describe('permission UI', () => {

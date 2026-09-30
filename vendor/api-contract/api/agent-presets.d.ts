@@ -19,7 +19,7 @@ export interface AgentPresetEntry {
      * A `user` preset is exactly as privileged as the plugins it names, so a
      * surface offering one should say so rather than present it as vetted.
      */
-    readonly trust: 'system' | 'user';
+    readonly trust?: 'system' | 'user';
     /** Whether a session that names no preset gets this one. */
     readonly isDefault: boolean;
     /**
@@ -83,7 +83,7 @@ export interface AgentPresetsApi {
         agentPreset: string;
     }>): Promise<RpcResponse<{
         agentPreset: string;
-        trust: 'system' | 'user';
+        trust?: 'system' | 'user';
         content: string;
         name?: string;
         description?: string;

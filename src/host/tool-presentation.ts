@@ -19,9 +19,9 @@ export function presentToolEvent(ctx: Context, event: SessionEvent,
     for (let index = history.length - 1; index >= 0; index -= 1) {
       const call = history[index]!
       if (call.seq > event.seq || call.type !== 'tool/call' || call.data.callId !== callId) continue
-      const result = event.data.message.content[0]
+      const result = event.data.message
       const view = ctx.tools.get(call.data.name, scope)?.presentResult?.(JSON.parse(call.data.arguments), {
-        content: result.content, isError: result.isError === true,
+        content: [...result.content], isError: result.isError === true,
         ...(event.data.meta === undefined ? {} : { meta: event.data.meta }),
       })
       return view === undefined ? undefined : { for: 'result', view }

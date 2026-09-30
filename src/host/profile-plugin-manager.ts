@@ -68,7 +68,7 @@ export interface ProfilePluginEntry {
   /** Whether the dependency currently participates in Profile composition. */
   readonly active: boolean
   /** Declared patch path, when this is a Bundle. */
-  readonly patch?: string
+  readonly patch?: string | readonly string[]
   /** Whether the declared patch exists and parses as a patch-list array. */
   readonly patchValid: boolean
   /** Lifecycle scripts declared by the installed package. */
@@ -204,7 +204,9 @@ function readInstalledManifest(packageDir: string): InstalledManifest {
   return JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as InstalledManifest
 }
 
-function validPatch(packageDir: string, patch: string): boolean {
+function validPatch(packageDir: string, patch: string | readonly string[]): boolean {
+  if (Array.isArray(patch)) return patch.length > 0 && patch.every(path => validPatch(packageDir, path))
+  if (typeof patch !== 'string') return false
   try {
     const root = realpathSync(packageDir)
     const path = resolve(root, patch)
@@ -278,7 +280,7 @@ export class ProfilePluginManager {
   ensureProfile(): boolean {
     if (existsSync(join(this.dir, 'package.json'))) return false
     const template = PROFILE_TEMPLATES[this.profile]
-    initProfile(this.dir, template?.bundles ?? DEFAULT_PROFILE_BUNDLES, template?.patchReload)
+    initProfile(this.dir, template?.bundles ?? DEFAULT_PROFILE_BUNDLES)
     return true
   }
 
@@ -558,7 +560,7 @@ export class ProfilePluginManager {
       initProfile(target, convertedBundles(
         template?.bundles ?? DEFAULT_PROFILE_BUNDLES,
         options,
-      ), template?.patchReload)
+      ))
       return this.profileSummary(name)
     }
     const source = resolveProfileDir(copyFrom, this.home)

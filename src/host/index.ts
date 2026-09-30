@@ -19,7 +19,7 @@ export const name = 'tui-runner'
 
 /** Host services required before the terminal can assemble its Client Runtime. */
 export const inject = [
-  'agents', 'agentPresets', 'tools', 'sessionQuery', 'sessionController', 'workspaceController', 'typertGateway', 'connection', 'settings', 'credentials', 'profilePluginManager', 'tuiMarketplaceProviders', TUI_STARTUP_SERVICE,
+  'agents', 'agentPresets', 'tools', 'sessionQuery', 'sessionController', 'jobController', 'workspaceController', 'typertGateway', 'connection', 'settings', 'credentials', 'profilePluginManager', 'tuiMarketplaceProviders', TUI_STARTUP_SERVICE,
 ]
 
 /** Structural launch values crossing the Host/Client TypeScript-program boundary. */
