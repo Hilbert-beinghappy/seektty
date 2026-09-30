@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { TYPERT as session } from '@deepseek-ai/dsh-api-session-controller/typert'
 import { TYPERT as workspace } from '@deepseek-ai/dsh-api-workspace-controller/typert'
 import { TYPERT as settings } from '@deepseek-ai/dsh-api-settings-controller/typert'
-import { TYPERT as presets } from '@deepseek-ai/dsh-agent-presets/typert'
+import { TYPERT as presets } from '@deepseek-ai/dsh-agent-preset-registry/typert'
 import { TYPERT as goals } from '@deepseek-ai/dsh-goal/typert'
 import { TYPERT as llm } from '@deepseek-ai/dsh-llm/typert'
 import { dispatchTerminalRequest } from '../src/host/native-api-dispatch.ts'
@@ -28,13 +28,13 @@ const cases = [
   ['credentials.unset', { ref: 'FIXTURE_KEY' }], ['llm.providers', {}], ['llm.models', {}],
   ['llm.discoverModels', { settingsNs: 'llm-pi-ai', provider: 'fixture' }],
   ['agentPreset.list', {}], ['agentPreset.select', { sessionId: 's', agentPreset: 'standard' }],
-  ['agentPreset.read', { agentPreset: 'standard' }], ['agentPreset.copy', { from: 'standard', agentPreset: 'fixture-copy' }],
-  ['agentPreset.remove', { agentPreset: 'fixture-copy' }], ['agentPreset.openDocument', { agentPreset: 'standard' }],
+  ['agentPreset.read', { agentPreset: 'standard' }],
+  ['agentPreset.openDocument', { agentPreset: 'standard' }],
   ['goal.create', { sessionId: 's', objective: 'fixture' }], ['goal.edit', { sessionId: 's', ref, objective: 'changed' }],
   ...['pause', 'resume', 'complete', 'clear'].map(method => [`goal.${method}`, { sessionId: 's', ref }]),
 ]
 
-it.each(cases)('%s conforms to the actual installed rc.1 generated Host descriptor', async (method, payload) => {
+it.each(cases)('%s conforms to the actual installed 0.2.0-rc.2 generated Host descriptor', async (method, payload) => {
   let calls = 0
   const gateway = { async invoke({ namespace, method: nativeMethod, args }) {
     calls++
@@ -42,7 +42,7 @@ it.each(cases)('%s conforms to the actual installed rc.1 generated Host descript
     expect(descriptor, `${namespace}/${nativeMethod}`).toBeDefined()
     expect(Object.keys(args).filter(key => !descriptor.parameters.some(p => p.wire === key))).toEqual([])
     for (const parameter of descriptor.parameters) {
-      const result = parameter.codec.schema.safeParse(args[parameter.wire])
+      const result = parameter.codec.create().safeParse(args[parameter.wire])
       expect(result.success, `${namespace}/${nativeMethod}:${parameter.wire}: ${result.error?.message ?? ''}`).toBe(true)
     }
     if (namespace === 'llm' && ['listConfigurableProviders', 'listProviders'].includes(nativeMethod)) return []

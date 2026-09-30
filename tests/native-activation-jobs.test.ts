@@ -26,9 +26,16 @@ it.each([[true, 'baseline'], [false, 'baseline'], [true, 'updated'], [false, 'up
       await waitForAbort(signal)
     },
     async *control(signal: AbortSignal) {
+      yield { type: 'baseline', value: { projections: {} } }
+      await waitForAbort(signal)
+    },
+  })
+  ctx.provide('jobController')
+  ctx.set('jobController', {
+    async *list(_request: unknown, signal: AbortSignal) {
       if (!controlFirst) await gate.promise
-      yield { type: 'baseline', value: { queues: {}, jobs: { 'review-session': jobs }, projections: {} } }
-      if (mode !== 'baseline') yield { type: 'jobs', sessionId: 'review-session', jobs: latestJobs }
+      yield { type: 'rows', jobs }
+      if (mode !== 'baseline') yield { type: 'rows', jobs: latestJobs }
       if (controlFirst) gate.resolve()
       await waitForAbort(signal)
     },

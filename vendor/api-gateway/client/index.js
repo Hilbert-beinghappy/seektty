@@ -448,7 +448,7 @@ function parse(codec, value, endpoint, field) {
         throw new Error(`client api: generated Remote ${endpoint} field ${JSON.stringify(field)} has no strict codec`);
     }
     try {
-        return codec.schema.parse(value);
+        return (codec.create?.() ?? codec.schema).parse(value);
     }
     catch (cause) {
         throw new Error(`client api: ${endpoint} rejected ${JSON.stringify(field)}`, { cause });

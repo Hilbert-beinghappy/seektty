@@ -4,6 +4,7 @@ import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol';
 export type { TypertClientRemote as ClientRemote } from '@deepseek-ai/dsh-typert-protocol';
 export type { PluginInventorySnapshot } from '@deepseek-ai/dsh-host-plugin-inventory/types';
 export type {} from '@deepseek-ai/dsh-commands/remote';
+export type {} from '@deepseek-ai/dsh-permission-presets/remote';
 export type {} from '@deepseek-ai/dsh-goal/remote';
 export type {} from '@deepseek-ai/dsh-host-plugin-inventory/remote';
 export type {} from '@deepseek-ai/dsh-message-feedback/remote';
@@ -12,7 +13,7 @@ export type {} from '@deepseek-ai/dsh-commands/types';
 export type {} from '@deepseek-ai/dsh-cordis-host-runner/types';
 export type {} from '@deepseek-ai/dsh-credentials/types';
 export type {} from '@deepseek-ai/dsh-llm/types';
-export type {} from '@deepseek-ai/dsh-agent-presets/types';
+export type {} from '@deepseek-ai/dsh-agent-preset-registry/types';
 export type {} from '@deepseek-ai/dsh-settings/types';
 /**
  * The carrier's Client-facing types, re-exported so a business package names one

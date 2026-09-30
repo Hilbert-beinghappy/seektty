@@ -11,10 +11,10 @@ it('resolves cold presenters from a real Cordis consumer using the runner depend
   const ctx = new Context()
   const scope = { preset: 'standard' }
   const released = vi.fn()
-  const standingKeyFor = vi.fn(async () => scope)
+  const acquireScope = vi.fn(async () => ({ key: scope, async [Symbol.asyncDispose]() {} }))
   const services = {
     agents: { get: () => undefined },
-    agentPresets: { standingKeyFor },
+    agentPresets: { acquireScope },
     sessionQuery: { observeSession: async () => ({
       projections: { values: { agentPreset: 'standard' } }, [Symbol.dispose]: released,
     }) },
@@ -36,7 +36,7 @@ it('resolves cold presenters from a real Cordis consumer using the runner depend
       },
     })
     await expect(finished.promise).resolves.toMatchObject({ producedFiles: [] })
-    expect(standingKeyFor).toHaveBeenCalledWith('standard')
+    expect(acquireScope).toHaveBeenCalledWith('standard')
     expect(released).toHaveBeenCalledOnce()
   } finally {
     await ctx.fiber.dispose()

@@ -6,7 +6,7 @@ import {
   LOCALE_SETTINGS_NAMESPACE,
   type BuiltInLocaleId as LocaleId,
   type LocaleSettings,
-} from '@deepseek-ai/dsh-client-locale'
+} from '../compat/locale-contract.ts'
 import type {
   TuiManagementBridge,
   TuiSettingsDocument,

@@ -12,7 +12,7 @@ it('joins native configurable entries with loaded routes before the actual Provi
   const resultFor = { listConfigurableProviders: configured, listProviders: [{ id: 'loaded', name: 'Loaded' }] }
   const invoke = async ({ method }) => {
     const descriptor = TYPERT_REMOTE.descriptors.find(item => item.method === method)
-    return descriptor.result.schema.parse(resultFor[method])
+    return descriptor.result.create().parse(resultFor[method])
   }
   const result = await dispatchTerminalRequest({ invoke }, {}, 'llm.providers', {}, 'qa', new AbortController().signal)
   const value = llmProvidersValueSchema.parse(result)

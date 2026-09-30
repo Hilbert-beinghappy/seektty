@@ -7,7 +7,7 @@ import { sessionIdSchema } from "./sessions.schema.js";
 /** AgentPresetEntry row of agentPreset.list. */
 export const agentPresetEntrySchema = z.object({
     id: z.string().min(1),
-    trust: z.union([z.literal('system'), z.literal('user')]),
+    trust: z.union([z.literal('system'), z.literal('user')]).optional(),
     isDefault: z.boolean(),
     name: z.string().optional(),
     description: z.string().optional(),
@@ -37,7 +37,7 @@ export const agentPresetReadRequestSchema = z.object({
 /** agentPreset.read response value. */
 export const agentPresetReadValueSchema = z.object({
     agentPreset: z.string(),
-    trust: z.union([z.literal('system'), z.literal('user')]),
+    trust: z.union([z.literal('system'), z.literal('user')]).optional(),
     content: z.string(),
     name: z.string().optional(),
     description: z.string().optional(),

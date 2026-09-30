@@ -67,7 +67,7 @@ const CatalogSourceSchema = z.object({
   credentialRef: z.string().role('credential-ref').default(''),
 })
 
-const MarketplaceSettingsSchema = z.object({
+export const MarketplaceSettingsSchema = z.object({
   sources: z.array(CatalogSourceSchema).default([]),
 })
 
@@ -345,7 +345,7 @@ export const BehaviorSettingsSchema = z.object({
       en: 'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
     })),
 })
-const ComposerHistorySettingsSchema = z.object({
+export const ComposerHistorySettingsSchema = z.object({
   entries: z.array(z.string().max(100_000)).max(MAX_COMPOSER_HISTORY).default([]),
 })
 
@@ -585,11 +585,6 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
       'tui-runner: Settings, Credentials, or the Profile Plugin Manager is not mounted',
     ))
   }
-  settings.register(MARKETPLACE_NAMESPACE, MarketplaceSettingsSchema, { applies: 'live' })
-  settings.register(APPEARANCE_NAMESPACE, AppearanceSettingsSchema, { applies: 'live' })
-  settings.register(BEHAVIOR_NAMESPACE, BehaviorSettingsSchema, { applies: 'live' })
-  settings.register(COMPOSER_HISTORY_NAMESPACE, ComposerHistorySettingsSchema, { applies: 'live' })
-  settings.register(WELCOME_NAMESPACE, WelcomeSettingsSchema, { applies: 'live' })
   const marketplace = new PluginMarketplace({
     cwd,
     resolveCredential: async ref => (await credentials.resolve(credentialRef(ref)))?.value,
