@@ -1,0 +1,10 @@
+# Explicit opt-in experimental installed-driver provider. One ComputerUse backend only.
+# The separate Cua application/driver owns its OS setup and permissions.
+- insert:
+    - id: computer-use
+      name: '@deepseek-ai/dsh-computer-use'
+    - id: computer-use-provider
+      name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-mcp'
+      config:
+        command: cua-driver
+        args: [mcp]

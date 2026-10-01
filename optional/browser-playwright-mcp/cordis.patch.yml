@@ -1,0 +1,10 @@
+# Explicit opt-in experimental provider; select one BrowserUse backend only.
+# Mount before creating/resuming a Session. Launches Chromium when an Agent activates.
+- insert:
+    - id: browser-use
+      name: '@deepseek-ai/dsh-browser-use'
+    - id: browser-use-provider
+      name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
+      config:
+        mode: launch
+        headless: true

@@ -82,7 +82,7 @@ describe('actual Surface Header → Welcome wiring (#196)', () => {
     const capabilities = {
       active: () => active,
       subscribeActive: vi.fn((callback: typeof listener) => { listener = callback; return unsubscribe }),
-      headerFacts, draftAttachments: () => [], jobs: () => [],
+      headerFacts, draftAttachments: () => [], draftFiles: () => [], jobs: () => [],
       managementBridge: () => management,
       subagentPresentation: () => ({
         continuation: () => ({ support: 'unsupported', reason: 'navigation-unavailable' }),
@@ -90,9 +90,10 @@ describe('actual Surface Header → Welcome wiring (#196)', () => {
         listDirectChildren: async () => ({ support: 'unsupported', reason: 'catalog-unavailable' }),
       }),
     } as unknown as HarnessTuiCapabilities
-    const dispose = vi.fn(async () => {})
+    const effects: (() => unknown)[] = []
+    const dispose = vi.fn(async () => { for (const cleanup of effects.splice(0)) await cleanup() })
     const start = vi.spyOn(surface, 'startClient').mockResolvedValue({ capabilities, session,
-      ctx: { fiber: { dispose } }, sessionId: snapshot.sessionId, workspacePath: 'synthetic',
+      ctx: { effect: (effect: () => () => unknown) => { effects.push(effect()) }, fiber: { dispose } }, sessionId: snapshot.sessionId, workspacePath: 'synthetic',
     } as unknown as TuiClient)
     const handle = await startTuiSurface({ api: {}, rpc: {}, cwd: 'synthetic', management, draft: 'UNSENT_DRAFT' } as TuiStartOptions)
     handles.push(handle)

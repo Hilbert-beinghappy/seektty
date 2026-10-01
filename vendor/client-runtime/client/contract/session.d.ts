@@ -24,6 +24,8 @@ export interface ProjectionsFace {
 }
 /** Identity plus the behavior verbs features may invoke on a session. */
 export interface ISession {
+    /** Read-only current event window with original Host presentation annotations. */
+    recordedEvents?(): readonly import('./conversation.js').ConversationEventInput[];
     /** The session's host identity (agent id — same axis). */
     readonly sessionId: SessionId;
     /** Host-computed projection values by key (the useProjection seat). */

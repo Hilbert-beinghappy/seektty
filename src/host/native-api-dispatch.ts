@@ -12,6 +12,7 @@ export interface TerminalDomainReads {
   readHistory(payload: Readonly<Record<string, unknown>>, subagent: boolean, signal: AbortSignal): Promise<unknown>
   readModels(payload: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown>
   readWorkspaces(signal: AbortSignal): Promise<unknown>
+  readSubagents?(payload: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown>
 }
 
 /**
@@ -74,11 +75,7 @@ export async function dispatchTerminalRequest(
     const { settingsNs, ...request } = p
     return { models: await call('llm', 'discoverModels', { settingsNs, request }) }
   }
-  if (method === 'agentPreset.list') {
-    const roster = record.parse(await call('agentPresets', 'list'))
-    const settings = record.parse(await call('settings', 'describe'))
-    return { ...roster, authorable: false, hasDocument: settings.hasDocument === true }
-  }
+  if (method === 'agentPreset.list') return call('agentPresets', 'list')
   if (method === 'agentPreset.select') {
     return { agentPreset: await call('agentPresets', 'select', { agentId: p.sessionId, agentPreset: p.agentPreset }) }
   }
@@ -87,7 +84,10 @@ export async function dispatchTerminalRequest(
     throw new Error('Agent presets are declared in the Harness profile patch; edit the native Settings document')
   }
   if (method === 'agentPreset.openDocument') return call('settings', 'openSettingsDocument')
-  if (method === 'subagent.list') return call('subagents', 'list', p)
+  if (method === 'subagent.list') {
+    if (reads.readSubagents === undefined) throw new Error('Native subagent catalog adapter is unavailable')
+    return reads.readSubagents(p, signal)
+  }
   if (method === 'subagent.prompt') return call('subagents', 'prompt', { request: p })
   if (method === 'subagent.interrupt') return call('subagents', 'interruptByParent', p)
   if (method.startsWith('goal.')) {

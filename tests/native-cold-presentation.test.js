@@ -80,3 +80,13 @@ it('does not swallow cancellation while waiting for a standing preset scope', as
   expect(f.release).toHaveBeenCalledOnce()
   expect(f.dispose).toHaveBeenCalledOnce()
 })
+
+it('releases a cold scope when its presenter throws and never resumes an Agent', async () => {
+  const f = fixture()
+  f.ctx.tools.get.mockImplementation(() => { throw new Error('presenter unavailable') })
+  const snapshot = await readSessionConversation(sessionExportSource(f.ctx), 'cold', new AbortController().signal)
+  expect(snapshot.producedFiles).toEqual([])
+  expect(snapshot.nodes).toContainEqual({ kind: 'tool-result', content: f.result.data.message.content, isError: false })
+  expect(f.release).toHaveBeenCalledOnce()
+  expect(f.services.agents.get).toHaveBeenCalledWith('cold')
+})

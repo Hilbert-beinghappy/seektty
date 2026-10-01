@@ -1,0 +1,7 @@
+# Explicit opt-in experimental native SDK; host desktop permissions are required.
+# Loading can initialize native code. It does not request or grant OS permissions.
+- insert:
+    - id: computer-use
+      name: '@deepseek-ai/dsh-computer-use'
+    - id: computer-use-provider
+      name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'

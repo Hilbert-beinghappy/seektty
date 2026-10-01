@@ -2,7 +2,7 @@
 
 本轮从适配提交 `0fb9247` 另设验收 goal。结论是：上一轮检查没有覆盖住全部使用问题；本轮实际找到了通用命令、Provider 管理入口、Profile 创建和 Provider 保存校验四类问题，并补齐修复与回归。以下记录能够证明已执行场景的结果，不能证明所有平台、插件和外部服务组合均无缺陷。
 
-工作目录为 `/Volumes/huawei/项目实战/seektty-issue-203`，分支 `codex/issue-203-dsh-0.1.5-rc.1`。全部模型交互使用本机 loopback 和假 key，运行在全新临时 `DSH_HOME`、临时工作区及未经修改的官方 rc.1 发布包上。原目录、正式 Session 和原 key 未被用于这些测试。主题来源只做公开文件读取。
+工作目录为仓库 checkout，分支 `codex/issue-203-dsh-0.1.5-rc.1`。全部模型交互使用本机 loopback 和假 key，运行在全新临时 `DSH_HOME`、临时工作区及未经修改的官方 rc.1 发布包上。原目录、正式 Session 和原 key 未被用于这些测试。主题来源只做公开文件读取。
 
 ## 验收方式与候选
 
@@ -96,7 +96,7 @@ export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
 export DSH_BIN="$PWD/.artifacts/stock-dsh-0.1.5-rc.1/node_modules/.bin/dsh"
 export DSH_ENTRY="$PWD/.artifacts/stock-dsh-0.1.5-rc.1/node_modules/@deepseek-ai/dsh/lib/bin.js"
 export SEEKTTY_SPEC="$PWD/.artifacts/seektty-rc1-qa-20.tgz"
-export SEEKTTY_PNPM_ENTRY="/Users/huangjiawei/.cache/node/corepack/v1/pnpm/11.7.0/bin/pnpm.cjs"
+export SEEKTTY_PNPM_ENTRY="<installed-pnpm-11.7.0-entry>"
 corepack pnpm run check
 node scripts/stock-dsh-cycle.mjs
 node scripts/native-dsh-acceptance.mjs

@@ -4,7 +4,7 @@ function isCompactionCheckpoint(event) {
     if (event.type !== 'user/message' || !isReplacementSurfaceEvent(event))
         return false;
     const source = event.data.source;
-    return source.kind === 'plugin' && source.plugin === 'compact';
+    return source.kind === 'compact-checkpoint';
 }
 /** User, steering, and injected-context message classification Definition. */
 export const messageDefinition = {
@@ -62,4 +62,3 @@ export const messageDefinition = {
 export function registerMessageConversationNode(ctx) {
     ctx.conversationEvents.register(messageDefinition);
 }
-//# sourceMappingURL=message.js.map

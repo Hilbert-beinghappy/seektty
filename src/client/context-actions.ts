@@ -18,6 +18,7 @@ export type ContextTarget =
   | { readonly kind: 'job'; readonly jobId: string }
   | { readonly kind: 'subagent'; readonly sessionId: string }
   | { readonly kind: 'tool-card' | 'reasoning'; readonly targetKey: string }
+  | { readonly kind: 'fetch-title'; readonly targetKey: string }
   | { readonly kind: 'agent-tree'; readonly sessionId: string; readonly part: 'row' | 'chevron' }
   | { readonly kind: 'mcp-tool' | 'mcp-instance' | 'settings' | 'skill' | 'trajectory'; readonly id: string }
   | { readonly kind: 'chrome'; readonly commandId: string }

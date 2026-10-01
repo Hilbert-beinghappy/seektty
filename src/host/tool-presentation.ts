@@ -1,4 +1,4 @@
-/** Render-intent adapter for the raw event journal in dsh 0.1.5-rc.1. */
+/** Render-intent adapter for the raw event journal in dsh 0.2.0-rc.2. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-tools'

@@ -1,0 +1,51 @@
+{
+  "package": "@deepseek-ai/dsh-client-ui-chat",
+  "version": "0.2.0-rc.2",
+  "tarballIntegrity": "sha512-1rsCHGvWNLaO6B6t1fJa8Qsov0OvJC6bnhpyK2NmDCaLu9uzb4dC4DxCH3OzmJwJkEByHrb3j3l9kbpaV+dTCw==",
+  "bundleSha256": "575de08018f49053a58680fbd62d5b9832a93aafc385217cc4331d5fed6d0dc0",
+  "regions": [
+    {
+      "file": "assistant-content.js",
+      "rawRegionSha256": "ac4340121f5f67effa621814d9d68bbe396303e39fdc7c2513aecb458f477338",
+      "sha256": "638f079056d218c9426e3e2695212928a9f27e1fc947448963f112d8b6f5d330"
+    },
+    {
+      "file": "chat-visibility.js",
+      "rawRegionSha256": "bba98ff83d29d988e879dd4805d34937e1f3fd83ba25a357014af3e317c222a9",
+      "sha256": "2c439bbe33c9a3f0f3c3a2d1dda78619967e0076fb0751ad0babbc1996aa7205"
+    },
+    {
+      "file": "turn-process-contract.js",
+      "rawRegionSha256": "61f4ee33865ee8ca98b4ed00d33d93badddf63449291e2350c39d1c4f2294351",
+      "sha256": "c45e640ff84a1e0088fb4111d91f4a1b1bbc3b2e12a76aacf82f645953f7797d"
+    },
+    {
+      "file": "turn-process.js",
+      "rawRegionSha256": "c116041667bbfa48c5153bdbc9708768d8753955ca53a9dafa5bed7b11d4aeda",
+      "sha256": "4ea8fe49eec2832b79f018faacfbe3739cb327a027cacffa25a557111a06aafd"
+    },
+    {
+      "file": "turn-process-presentation.js",
+      "rawRegionSha256": "36ce3288a8cef3195dea5a3972391edb26b3b9f4e41e329264ee8f9b4a2a173b",
+      "sha256": "5109c2a2bc57471053d3490b7b4491aab9ac3808fcd8a21bc93ce7688ff6f43a"
+    },
+    {
+      "file": "process-activity.js",
+      "rawRegionSha256": "dbde4c4c87d41cd437934439f87b9503fa852925f68c2b91f7473d281c954de1",
+      "sha256": "7e66ae4e63fc2b30bf502c78bc873f512e07bc945a7489bccbb726d3b5d331e5"
+    },
+    {
+      "file": "process-groups.js",
+      "rawRegionSha256": "608236a149fd0ddc73ffc28a72b7af89f0cc217ebcd1da08589958f78758cc66",
+      "sha256": "b6b88f1b796c3955845991bbb5df1d0d82ffa5c5d36b8b8c49209f39189a1392"
+    },
+    {
+      "file": "assistant.js",
+      "rawRegionSha256": "4a903bb935972368d137aea861f8d3eca3b9f7519d8c5293c9f62bf25cf43221",
+      "sha256": "d23316f9df6dce8c0e765261a3cf3ec94f32312e5d14f55966f2df553b2e303e"
+    }
+  ],
+  "boundaryAdapters": [
+    "Imports target existing vendored pure conversation/classification modules; published brandString identity inlined unchanged."
+  ]
+}

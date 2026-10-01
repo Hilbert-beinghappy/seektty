@@ -40,6 +40,7 @@ export interface SessionOptions {
  * remaining public members are manager/runtime entry points.
  */
 export declare class Session implements SessionFace {
+    recordedEvents(): readonly import('../contract/conversation.js').ConversationEventInput[];
     readonly sessionId: SessionId;
     private readonly api;
     private readonly remote;

@@ -110,7 +110,14 @@ export class NativeMarkdownPreparation {
       activeWorkers--
       schedule()
     }
-    if (worker) void worker.terminate().then(release, release)
-    else queueMicrotask(release)
+    if (worker) {
+      try { void worker.terminate().then(release, release) }
+      catch { release() }
+      finally {
+        // Node's terminate() refs the worker again. Slow termination must not
+        // pin a Surface whose cleanup deadline has already elapsed.
+        try { worker.unref() } catch { /* the worker may already have exited */ }
+      }
+    } else queueMicrotask(release)
   }
 }

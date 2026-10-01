@@ -1,4 +1,4 @@
-/** Terminal presentation plus official dsh 0.1.5-rc.1 streaming Session export. */
+/** Terminal presentation plus official dsh 0.2.0-rc.2 streaming Session export. */
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId, isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import type { SessionController } from '@deepseek-ai/dsh-api-session-controller'
@@ -48,6 +48,7 @@ export function sessionConversation(inspection: Inspection, presentCall: CallPre
       nodes.push({ kind: 'assistant', blocks: toAssistantBlocks(event.data.message.content) })
     } else if (event.type === 'tool/result') {
       const result = event.data.message
+      nodes.push({ kind: 'tool-result', content: result.content, isError: result.isError === true })
       const call = calls.get(String(event.data.message.source.callId))
       if (result.isError === true || call === undefined) continue
       if (call.card !== 'diff' && !(call.card === 'generic' && call.kind === 'edit')) continue

@@ -9,8 +9,8 @@ import {
 } from '../src/client/pasted-image.ts'
 import { resolveHarnessUserPath } from '../src/client/workspace-path.ts'
 
-const QQ_ESCAPED = '/Users/huangjiawei/Library/Containers/com.tencent.qq/Data/Library/Application\\ Support/QQ/nt_qq_7d04be481f9407d5701cc094bdef8766/nt_data/Pic/2026-08/Thumb/acdd5ba85276c535a5785dd0fa63d372_0.png'
-const QQ_REAL = '/Users/huangjiawei/Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/nt_qq_7d04be481f9407d5701cc094bdef8766/nt_data/Pic/2026-08/Thumb/acdd5ba85276c535a5785dd0fa63d372_0.png'
+const QQ_ESCAPED = '/Users/fixture-account/Library/Containers/com.tencent.qq/Data/Library/Application\\ Support/QQ/nt_qq_00000000000000000000000000000000/nt_data/Pic/2026-08/Thumb/00000000000000000000000000000000_0.png'
+const QQ_REAL = '/Users/fixture-account/Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/nt_qq_00000000000000000000000000000000/nt_data/Pic/2026-08/Thumb/00000000000000000000000000000000_0.png'
 
 function bracketed(text: string): string {
   return `\u001B[200~${text}\u001B[201~`

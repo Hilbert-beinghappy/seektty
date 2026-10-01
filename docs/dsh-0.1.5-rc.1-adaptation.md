@@ -177,7 +177,7 @@ Harness 始终拥有 Agent、Session、模型、Settings、权限、Profile、�
 
 ## 在此独立目录运行
 
-本机已准备好官方运行时和最终候选。进入 `/Volumes/huawei/项目实战/seektty-issue-203` 后即可运行：
+本机已准备好官方运行时和最终候选。进入仓库 checkout 后即可运行：
 
 ```sh
 PATH="/opt/homebrew/opt/node@24/bin:$PATH" \

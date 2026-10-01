@@ -13,6 +13,7 @@ import {
   providerFailureMessage,
   providerModelsIssue,
   providerProfileOps,
+  providerProfileSchema,
   providerProtocolChoices,
   removeProviderConfig,
   saveProviderConfig,
@@ -391,6 +392,7 @@ interface ProviderSavePlan {
   readonly ops: readonly SettingsPathOpView[]
   readonly credential?: { readonly ref: string; readonly value: string }
   readonly credentialMustBeUnconfigured?: boolean
+  readonly credentialSettingsPath?: readonly string[]
   readonly expectedCredentialRef?: string
 }
 
@@ -432,6 +434,15 @@ async function finishSave(
     await reportSaveReadback(api, plan, notice)
     return true
   }
+  if (result.stage === 'credential' && result.code === 'transport') {
+    // Metadata cannot prove equality with a secret that is never read back.
+    notice(ui('凭据写入结果未知；Ref 元数据不能核实 Key 值，本次不会自动重试。请重新读取状态后明确决定是否覆盖。', 'The credential write outcome is unknown. Ref metadata cannot verify the key value, so it will not be retried. Reload state before explicitly choosing to overwrite.'), 'warning')
+    return result.settingsCommitted || plan.ops.length === 0
+  }
+  if (result.stage === 'credential' && result.code.startsWith('credential-target-')) {
+    notice(ui('Settings 已处理，但凭据目标发生变化或无法核实；未写入 Key。请重新打开 Provider。', 'Settings were processed, but the credential target changed or could not be verified. The key was not written; reopen the Provider.'), 'warning')
+    return result.settingsCommitted
+  }
   if (result.stage === 'settings' && result.code === 'transport') {
     const readback = await verifyProviderWrite(api, {
       provider: plan.provider,
@@ -457,6 +468,8 @@ async function finishSave(
       ops: [],
       expectedRevision: 0,
       credential: plan.credential,
+      ...(plan.credentialSettingsPath === undefined ? {} : { credentialSettingsPath: plan.credentialSettingsPath }),
+      ...(plan.credentialMustBeUnconfigured === undefined ? {} : { credentialMustBeUnconfigured: plan.credentialMustBeUnconfigured }),
     })
     return finishSave(overlays, api, credentialResult.ok ? credentialResult : {
       ...credentialResult,
@@ -473,7 +486,8 @@ async function finishSave(
   )
   if (!retry) return true
   const retryMetadata = await credentialMetadata(api, plan.credential.ref)
-  if (retryMetadata === undefined || !retryMetadata.writable) {
+  if (retryMetadata === undefined || !retryMetadata.writable
+    || (plan.credentialMustBeUnconfigured === true && retryMetadata.configured)) {
     notice(ui('无法重新确认该 Credential Ref 可写；未重试 Key。', 'The Credential Ref could not be reconfirmed as writable, so the key was not retried.'), 'warning')
     return true
   }
@@ -482,6 +496,8 @@ async function finishSave(
     ops: [],
     expectedRevision: result.namespace?.revision ?? 0,
     credential: plan.credential,
+    ...(plan.credentialSettingsPath === undefined ? {} : { credentialSettingsPath: plan.credentialSettingsPath }),
+    ...(plan.credentialMustBeUnconfigured === undefined ? {} : { credentialMustBeUnconfigured: plan.credentialMustBeUnconfigured }),
   })
   if (retried.ok) await reportSaveReadback(api, plan, notice)
   else notice(providerFailureMessage(retried.stage, retried.code), 'error')
@@ -500,7 +516,8 @@ async function editProvider(
     options.notice(ui('该路由没有官方 Settings 地址，不能在这里编辑。', 'This route has no official Settings address and cannot be edited here.'), 'warning')
     return false
   }
-  if (!['llm-pi-ai', 'llm-deepseek'].includes(row.namespace.ns)) {
+  const profileSchema = providerProfileSchema(row.namespace, row.entry.settingsPath)
+  if (profileSchema === undefined) {
     options.notice(ui('该 Provider 使用未知配置 schema，请继续使用通用 Settings。', 'This Provider uses an unknown configuration schema; use general Settings.'), 'warning')
     return false
   }
@@ -510,8 +527,8 @@ async function editProvider(
   let credentialIntent: CredentialIntent | undefined
   const credentialUnavailable = credentialState === 'unavailable'
     || (row.apiKeyEnv !== undefined && row.credential === undefined)
-  const protocols = providerProtocolChoices(row.namespace)
-  const custom = row.entry.declared === true && row.namespace.ns === 'llm-pi-ai'
+  const protocols = providerProtocolChoices(row.namespace, row.entry.settingsPath)
+  const custom = row.entry.declared === true && profileSchema.dict?.displayName !== undefined && protocols.length > 0
   const setField = (key: string, value: unknown): void => {
     dirty.add(key)
     if (value === undefined || value === '') delete draft[key]
@@ -528,7 +545,9 @@ async function editProvider(
           description: row.apiKeyEnv === undefined
             ? ui('当前使用 Provider 原生认证；输入 Key 后将建立 Credential Ref', 'Provider-native authentication; entering a key creates a credential reference')
             : row.credential?.configured === true ? ui('已配置；留空保持现状', 'Configured; leave blank to keep it') : ui('未配置', 'Not configured'),
-          ...(credentialUnavailable
+          ...(profileSchema.dict?.apiKeyEnv === undefined
+            ? { disabledReason: ui('此原生 schema 没有 API Key Ref 字段', 'This native schema has no API key Ref field') }
+            : credentialUnavailable
             ? { disabledReason: ui('无法确认凭据来源与可写性', 'Credential source and writability could not be confirmed') }
             : row.credential?.writable === false
               ? { disabledReason: ui('凭据由外部只读来源管理', 'Credential is managed by a read-only external source') }
@@ -565,6 +584,7 @@ async function editProvider(
       ],
     })
     if (selected === undefined) return false
+    if (selected.disabledReason !== undefined) continue
     if (selected.id === 'credential') {
       if (credentialUnavailable) {
         options.notice(ui('无法确认 Credential 元数据；Key 更新已禁用。', 'Credential metadata is unavailable; key updates are disabled.'), 'warning')
@@ -810,6 +830,8 @@ async function editProvider(
         ops,
         expectedRevision: row.namespace.revision,
         ...(credential === undefined ? {} : { credential }),
+        ...(credential === undefined ? {} : { credentialSettingsPath: [...row.entry.settingsPath, 'apiKeyEnv'],
+          credentialMustBeUnconfigured: credentialIntent?.kind === 'write' && credentialIntent.requireUnconfigured }),
       })
       const expectedCredentialRef = credentialIntent?.ref ?? row.apiKeyEnv
       return finishSave(overlays, api, result, {
@@ -817,6 +839,7 @@ async function editProvider(
         ns: row.namespace.ns,
         ops,
         ...(credential === undefined ? {} : { credential }),
+        ...(credential === undefined ? {} : { credentialSettingsPath: [...row.entry.settingsPath, 'apiKeyEnv'] }),
         ...(credentialIntent?.kind === 'write' && credentialIntent.requireUnconfigured
           ? { credentialMustBeUnconfigured: true }
           : {}),
@@ -834,14 +857,25 @@ async function createCustomProvider(
   const openedGeneration = options.stateGeneration?.()
   const snapshot = await loadProviderConfig(api)
   if (providerStateChanged(options, openedGeneration)) return false
-  const namespace = snapshot.namespaces.get('llm-pi-ai')
-  if (!snapshot.writable || namespace === undefined) {
-    options.notice(ui('当前 Harness 没有可写的 llm-pi-ai Settings。', 'This Harness has no writable llm-pi-ai Settings namespace.'), 'warning')
+  const candidates = [...snapshot.namespaces.values()].filter(namespace => {
+    try { return nodeAtPath(rehydrateSchema(namespace.schema), ['providers'])?.type === 'dict'
+      && providerProfileSchema(namespace, ['providers', '\0seektty-probe']) !== undefined
+      && providerProtocolChoices(namespace).length > 0 } catch { return false }
+  })
+  if (!snapshot.writable || candidates.length === 0) {
+    options.notice(ui('当前 Harness 没有可写且受支持的 Provider 配置实例。', 'This Harness has no writable supported Provider configuration instance.'), 'warning')
     return false
   }
+  const selectedInstance = candidates.length === 1 ? candidates[0]?.ns : (await overlays.select({
+    title: ui('Provider 配置实例', 'Provider configuration instance'),
+    detail: ui('新路由仅写入所选 Host Settings 实例。', 'The new route writes only to the selected Host Settings instance.'),
+    choices: candidates.map(namespace => ({ id: namespace.ns, label: namespace.ns })),
+  }))?.id
+  const namespace = candidates.find(candidate => candidate.ns === selectedInstance)
+  if (namespace === undefined) return false
   const protocols = providerProtocolChoices(namespace)
   if (protocols.length === 0) {
-    options.notice(ui('当前 llm-pi-ai schema 没有公布可用协议。', 'The current llm-pi-ai schema exposes no protocol choices.'), 'warning')
+    options.notice(ui('所选原生 schema 没有公布可用协议。', 'The selected native schema exposes no protocol choices.'), 'warning')
     return false
   }
   const existing = new Set(snapshot.rows.map(row => row.entry.provider))
@@ -984,12 +1018,14 @@ async function createCustomProvider(
     ops,
     expectedRevision: namespace.revision,
     ...(credential === undefined ? {} : { credential }),
+    ...(credential === undefined ? {} : { credentialSettingsPath: [...targetPath, 'apiKeyEnv'], credentialMustBeUnconfigured: true }),
   })
   return finishSave(overlays, api, result, {
     provider,
     ns: namespace.ns,
     ops,
     ...(credential === undefined ? {} : { credential }),
+    ...(credential === undefined ? {} : { credentialSettingsPath: [...targetPath, 'apiKeyEnv'] }),
     ...(credentialIntent?.kind === 'write' ? { credentialMustBeUnconfigured: true } : {}),
     ...(keyRef === undefined ? {} : { expectedCredentialRef: keyRef }),
   }, options.notice)
@@ -1016,7 +1052,7 @@ export async function manageProviders(
       title: ui('Provider 管理', 'Provider management'),
       detail: ui('配置与选择分离；保存不会自动修改当前会话或新会话默认模型。', 'Configuration and selection are separate. Saving does not change the current session or the default model.'),
       choices: [
-        { id: '__add__', label: ui('添加自定义 Provider…', 'Add custom Provider…'), ...(snapshot.namespaces.has('llm-pi-ai') && snapshot.writable ? {} : { disabledReason: ui('llm-pi-ai 不可写', 'llm-pi-ai is not writable') }) },
+        { id: '__add__', label: ui('添加自定义 Provider…', 'Add custom Provider…'), ...(snapshot.writable && [...snapshot.namespaces.values()].some(namespace => providerProfileSchema(namespace, ['providers', '\0seektty-probe']) !== undefined && providerProtocolChoices(namespace).length > 0) ? {} : { disabledReason: ui('没有受支持的可写 Provider 实例', 'No supported writable Provider instance') }) },
         ...snapshot.rows.map(row => ({
           id: row.entry.provider,
           label: providerLabel(row),

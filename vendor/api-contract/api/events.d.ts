@@ -89,6 +89,8 @@ export type MuxFrame = {
     toolName: string;
     callId?: CallId;
     reason?: string;
+    /** Transient localized prompt copy; the audited reason is unchanged (dsh 0.2.0-rc.2). */
+    displayReason?: { readonly en: string; readonly [locale: string]: string };
 } | {
     type: 'approval/resolved';
     sessionId: SessionId;
@@ -98,11 +100,12 @@ export type MuxFrame = {
     type: 'question/requested';
     sessionId: SessionId;
     questions: AskUserQuestionItem[];
+    wait?: { callId: string; timed?: boolean };
 } | {
     type: 'question/resolved';
     sessionId: SessionId;
     questionRpcId: RpcId;
-    outcome: 'answered' | 'cancelled';
+    outcome: 'answered' | 'cancelled' | 'timed-out';
 }
 /**
  * Complete transient inbox state after every enqueue, mutation, claim, or

@@ -91,7 +91,9 @@ function fieldOf(
   path: readonly string[],
 ): TuiSettingsField {
   const secret = document.secrets.find(item => samePath(item.path, path))
-  const description = descriptionOf(node)
+  const description = document.namespace === 'session-log-deepseek' && samePath(path, ['enabled'])
+    ? ui('随 DeepSeek Provider 请求上传会话工作目录和事件正文；关闭不撤回已上传或已准备的请求。更多策略见 /privacy。', 'Upload the session working directory and event bodies with DeepSeek Provider requests; disabling does not recall uploaded or already prepared requests. See /privacy for other policies.')
+    : descriptionOf(node)
   return {
     path,
     label: settingsFieldLabel(document.namespace, path),
@@ -195,6 +197,8 @@ export function formatSettingsValue(value: unknown): string {
  * @returns dedicated-control or generic-settings label.
  */
 export function settingsSectionLabel(namespace: string): string {
+  if (namespace === 'session-log-deepseek') return ui('会话日志上传', 'Session log upload')
+  if (namespace === 'session-telemetry-otel') return ui('反馈会话上传', 'Feedback session upload')
   if (namespace === LOCALE_SETTINGS_NAMESPACE) return ui('界面语言', 'Interface language')
   if (namespace === 'permission') return ui('默认权限', 'Default permission')
   if ((namespace === 'agent-presets' || namespace === 'agent-preset-registry')) return ui('默认 Agent Preset', 'Default Agent Preset')
@@ -269,6 +273,7 @@ export function settingsCategoryFor(
   path: readonly string[] = [],
 ): SettingsCategoryId {
   const root = path[0] ?? ''
+  if (namespace === 'session-log-deepseek' || namespace === 'session-telemetry-otel') return 'permissions'
   if (namespace === TUI_APPEARANCE_SETTINGS_NAMESPACE) return 'appearance'
   if (namespace === TUI_WELCOME_SETTINGS_NAMESPACE) return 'welcome'
   if (namespace === TUI_BEHAVIOR_SETTINGS_NAMESPACE) {
@@ -285,6 +290,8 @@ export function settingsCategoryFor(
 }
 
 const FIELD_LABELS: Readonly<Record<string, { readonly zh: string; readonly en: string }>> = {
+  'session-log-deepseek.enabled': { zh: '上传会话日志（工作目录与事件正文）', en: 'Upload session logs (working directory and event bodies)' },
+  'session-telemetry-otel.mode': { zh: '反馈会话上传策略', en: 'Feedback session upload policy' },
   'agent-presets.defaultPreset': { zh: '默认 Agent 模式', en: 'Default Agent preset' },
   'permission.default': { zh: '默认权限', en: 'Default permission' },
   [`${TUI_APPEARANCE_SETTINGS_NAMESPACE}.theme`]: { zh: '界面主题', en: 'Interface theme' },

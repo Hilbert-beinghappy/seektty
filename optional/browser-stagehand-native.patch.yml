@@ -1,0 +1,14 @@
+# Explicit opt-in experimental browser provider. SDK inference has its own cost.
+# Required model/key are deliberately not borrowed from the Session's DeepSeek route.
+# Absence fails configuration; no implicit model, browser or account is selected.
+- insert:
+    - id: browser-use
+      name: '@deepseek-ai/dsh-browser-use'
+    - id: browser-use-provider
+      name: '@deepseek-ai/dsh-experimental-browser-use-stagehand-native'
+      config:
+        mode: launch
+        headless: true
+        model:
+          modelName: !!js process.env.SEEKTTY_STAGEHAND_MODEL
+          apiKey: !!js process.env.SEEKTTY_STAGEHAND_API_KEY

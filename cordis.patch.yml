@@ -162,6 +162,11 @@
     - id: workspace-controller
       name: '@deepseek-ai/dsh-api-workspace-controller'
 
+    # Ordinary published Host file service; owns scope lookup, bounded reads and
+    # native metadata changes. No Web Client or filesystem provider is mounted.
+    - id: workspace-files
+      name: '@deepseek-ai/dsh-api-workspace-files'
+
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
 

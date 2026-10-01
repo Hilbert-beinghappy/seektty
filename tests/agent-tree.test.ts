@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/node-client'
 import { AgentTreeDock, owningAgentRoot, type AgentTreeSummary } from '../src/client/agent-tree.ts'
@@ -526,4 +527,20 @@ describe('owningAgentRoot', () => {
     expect(owningAgentRoot(adapter, id('grandchild'))).toBe(id('root'))
     expect(owningAgentRoot(adapter, id('root'))).toBe(id('root'))
   })
+})
+
+it('keeps identity-based labels distinct when descendant navigation leaves the tree selection on the prior hot child', async () => {
+  const dock = new AgentTreeDock({ presentation: presentation({ root: catalog('root', [
+    { id: 'hot', label: 'REVIEW_LIVE_CHILD', running: true }, { id: 'cold', label: 'REVIEW_COLD_CHILD' },
+  ]) }), requestRender: vi.fn() })
+  try {
+    dock.openOrFocus(id('root'), id('hot')); await dock.loadChildren(id('root'))
+    expect(dock.selectedNode()?.label).toBe('REVIEW_LIVE_CHILD')
+    expect(dock.node(id('cold'))?.label).toBe('REVIEW_COLD_CHILD')
+    expect(dock.node(id('unknown'))).toBeUndefined()
+    const surface = readFileSync(new URL('../src/client/surface.ts', import.meta.url), 'utf8')
+    const entry = surface.slice(surface.indexOf('const openAgentChild ='), surface.indexOf('contextBar.setChildContext', surface.indexOf('const openAgentChild =')))
+    expect(entry).toContain('agentTree.node(sessionId)')
+    expect(entry).not.toContain('agentTree.selectedNode()')
+  } finally { dock.dispose() }
 })

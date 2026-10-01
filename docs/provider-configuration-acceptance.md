@@ -27,7 +27,7 @@ Vite printed non-failing warnings for missing source maps in the vendored client
 
 ## Real OpenCode API checks
 
-The first line of `/Volumes/huawei/项目实战/opencode.md` was loaded directly into a temporary environment variable without echoing it. The documented OpenCode Go base URL and endpoints were then called from the command line.
+An explicitly supplied private credential was loaded into a temporary environment variable without echoing it; its local source path is intentionally omitted. The documented OpenCode Go base URL and endpoints were then called from the command line.
 
 | Protocol / endpoint | Model | Observed result |
 | --- | --- | --- |

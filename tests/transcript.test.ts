@@ -8,6 +8,10 @@ import { Transcript } from '../src/client/transcript.ts'
 import { setUiLocale } from '../src/client/locale.ts'
 import { color, interaction, setCodeHighlighter, setTheme } from '../src/client/theme.ts'
 import { BUILT_IN_THEMES } from '../src/client/theme-config.ts'
+import { safeArtifactUrl } from '../src/client/artifact-view.ts'
+import { fetchCall, fetchResult, fetchUrl, fetchRedirect } from './fixtures/fetch-title-presenters.ts'
+import { TuiActions } from '../src/client/actions.ts'
+import { scriptedOverlays } from './fixtures/optional-native-views.ts'
 
 function chatNode(key: string, data: unknown): ChatConversationViewNode {
   return {
@@ -108,6 +112,7 @@ function tool(
     name: 'fixture_tool',
     argsRaw: '{"path":"src/index.ts"}',
   },
+  isError = false,
 ): ChatConversationViewNode {
   return {
     ...chatNode(key, {
@@ -119,7 +124,7 @@ function tool(
         resultView,
         content,
         meta: undefined,
-        isError: false,
+        isError,
         turn: 1,
         step: 1,
         time: 25,
@@ -134,6 +139,129 @@ function tool(
 function stripAnsi(value: string): string {
   return value.replace(/\u001B\[[0-9;:]*m/gu, '')
 }
+
+describe('official Auto review error presentation', () => {
+  it.each([false, true])('distinguishes structured denial from technical failure, collapsed and expanded (native=%s)', native => {
+    setUiLocale('en')
+    const render = (structured: boolean) => {
+      const node = tool('review-call', undefined, undefined, [{ type: 'text', text: 'model-facing failure body' }],
+        { name: 'fixture_action', argsRaw: '{}' }, true)
+      const root = (node.data as { root: { error?: { name: string; code: string; reason: string } } }).root
+      root.error = { name: structured ? 'AutoReviewDeniedError' : 'Error',
+        code: structured ? 'AUTO_REVIEW_DENIED' : 'FAILED', reason: 'review reason 原文\u001b[2J' }
+      const transcript = new Transcript(() => 24)
+      try {
+        transcript.setNativeMode(native)
+        transcript.update(snapshot([node]))
+        transcript.enterToolFocus()
+        const collapsed = stripAnsi(transcript.render(120).join('\n'))
+        // Printed native blocks are frozen; Surface switches to its resident browser for expansion.
+        if (native) transcript.setNativeMode(false)
+        transcript.activateFocused()
+        const expanded = stripAnsi(transcript.render(120).join('\n'))
+        return { collapsed, expanded }
+      } finally { transcript.dispose() }
+    }
+    const denial = render(true)
+    expect(denial.collapsed).toContain('Auto review · Experimental · Denied')
+    expect(denial.expanded).toContain('tool body was not executed')
+    expect(denial.expanded).toContain('review reason 原文')
+    expect(denial.expanded).not.toContain('\u001b[2J')
+    expect(denial.expanded).toContain('model-facing failure body')
+    const failure = render(false)
+    expect(failure.collapsed).toContain('Failed')
+    expect(failure.collapsed).not.toContain('Auto review')
+    expect(failure.expanded).toContain('model-facing failure body')
+    expect(failure.expanded).not.toContain('tool body was not executed')
+  })
+})
+
+describe('public fetch title rendering and actions', () => {
+  const ports = { safeUrl: safeArtifactUrl, capability: () => ({ available: true }), open: async () => {}, copy: () => {} }
+  it.each([80, 24, 10])('maps rendered wrapped URL glyphs separately from toggle cells at width %s', width => {
+    const transcript = new Transcript(() => 12)
+    try {
+      transcript.update(snapshot([tool('fetch', fetchCall.view, fetchResult.view)]))
+      transcript.render(width)
+      const regions = transcript.controlHitRegions({ col: 0, row: 0, width, height: 12 }, ports)
+      const links = regions.filter(region => region.role === 'link')
+      expect(links.length).toBeGreaterThan(0)
+      expect(new Set(links.map(region => region.id)).size).toBe(links.length)
+      expect(transcript.fetchTitleTarget('fetch')?.href).toBe(fetchUrl)
+      for (const link of links) {
+        expect(link.action).toEqual({ kind: 'transcript', command: 'fetch-title', targetKey: 'fetch' })
+        for (const toggle of regions.filter(region => region.action.kind === 'transcript' && region.action.command === 'toggle' && region.rect.row === link.rect.row)) {
+          expect(toggle.rect.col + toggle.rect.width <= link.rect.col || link.rect.col + link.rect.width <= toggle.rect.col).toBe(true)
+        }
+      }
+      transcript.pointerToggleTool('fetch'); transcript.render(width)
+      expect(transcript.controlHitRegions({ col: 0, row: 0, width, height: 12 }, ports).some(region => region.role === 'link')).toBe(false)
+    } finally { transcript.dispose() }
+  })
+  it('keeps redirect spelling, unavailable opener, changed Session and new frame truthful', () => {
+    const transcript = new Transcript(() => 12)
+    try {
+      const original = snapshot([tool('fetch', fetchCall.view, fetchRedirect.view)])
+      transcript.update(original); transcript.render(80)
+      const origin = { col: 0, row: 0, width: 80, height: 12 }
+      const unavailable = { ...ports, capability: () => ({ available: false, reason: 'No opener' }) }
+      const links = transcript.controlHitRegions(origin, unavailable).filter(region => region.role === 'link')
+      expect(links[0]?.activation).toBe('none')
+      expect(transcript.fetchTitleTarget('fetch')?.href).toBe(fetchUrl)
+      const old = transcript.fetchTitleTarget('fetch')
+      transcript.update({ ...original, sessionId: 'another' } as unknown as ConversationSnapshot)
+      expect(transcript.fetchTitleTarget('fetch')).toBeUndefined()
+      transcript.render(80); transcript.controlHitRegions(origin, ports)
+      expect(transcript.fetchTitleTarget('fetch')?.scopeId).toBe('another')
+      expect(transcript.fetchTitleTarget('fetch')?.generation).not.toBe(old?.generation)
+    } finally { transcript.dispose() }
+  })
+  it.each([false, true])('uses exact Unicode URL fragments in native mode %s', native => {
+    const transcript = new Transcript(() => 12)
+    try {
+      const url = 'https://example.invalid/资料😀é'
+      transcript.setNativeMode(native)
+      transcript.update(snapshot([tool('unicode', { card: 'generic', kind: 'fetch', title: url, rawInput: url }, undefined)]))
+      if (native) transcript.enterToolFocus()
+      transcript.render(24)
+      const regions = transcript.controlHitRegions({ col: 0, row: 0, width: 24, height: 12 }, ports)
+      expect(regions.some(region => region.role === 'link')).toBe(!native)
+      expect(transcript.fetchTitleTarget('unicode')?.href).toBe(safeArtifactUrl(url))
+      expect(regions.every(region => region.rect.col >= 0 && region.rect.col + region.rect.width <= 24)).toBe(true)
+    } finally { transcript.dispose() }
+  })
+  it('does not invalidate an unchanged pending URL target for a clock-only pulse', () => {
+    vi.useFakeTimers(); vi.setSystemTime(20_000)
+    const transcript = new Transcript(() => 12)
+    try {
+      transcript.update(snapshot([], { runningCalls: [{ callId: 'pending', name: 'fetch', argsRaw: '{}', time: 10_000, turn: 1, step: 1,
+        callView: fetchCall.view, subCalls: [] }] as never }))
+      const origin = { col: 0, row: 0, width: 80, height: 12 }
+      transcript.render(80); transcript.controlHitRegions(origin, ports)
+      const old = transcript.fetchTitleTarget('pending')
+      expect(old?.href).toBe(fetchUrl)
+      vi.advanceTimersByTime(160)
+      transcript.render(80); transcript.controlHitRegions(origin, ports)
+      expect(transcript.fetchTitleTarget('pending')?.generation).toBe(old?.generation)
+    } finally { transcript.dispose() }
+  })
+  it('exposes keyboard copy-url independently and keeps Enter on the tool toggle path', async () => {
+    const transcript = new Transcript(() => 12)
+    try {
+      transcript.update(snapshot([tool('fetch', fetchCall.view, fetchResult.view)]))
+      transcript.enterToolFocus(); transcript.render(80)
+      transcript.controlHitRegions({ col: 0, row: 0, width: 80, height: 12 }, ports)
+      const action = vi.fn(async () => {})
+      const script = scriptedOverlays(['copy-url'])
+      const host = { transcript, overlays: script.overlays, notice: vi.fn(), fetchTitleReason: () => undefined, fetchTitleAction: action }
+      await new TuiActions({} as never, host as never).execute('fetch-url', '')
+      expect(action).toHaveBeenCalledExactlyOnceWith('fetch', 'copy')
+      expect(script.selects[0]?.choices.map(row => row.id)).toEqual(['open-url', 'copy-url', 'toggle'])
+      expect(transcript.focusedFetchTitleTarget()?.targetKey).toBe('fetch')
+      expect(transcript.activateFocused()).toEqual({ kind: 'tool', key: 'fetch' })
+    } finally { transcript.dispose() }
+  })
+})
 
 afterEach(() => {
   vi.useRealTimers()
@@ -944,4 +1072,24 @@ describe('conversation viewport', () => {
     expect(transcript.cancelSearch()).toBe(false)
     expect(stripAnsi(transcript.render(60).join('\n'))).not.toContain('查找 unique-token')
   })
+})
+
+
+it.each([undefined, { card: 'terminal', title: 'write', exitCode: 1 },
+  { card: 'generic', content: [{ type: 'text', text: 'presenter summary' }] }])('retains V4 error body even when its presenter omits it: %j', async resultView => {
+  const { sessionV4Fixture } = await import('./helpers/session-v4-fixture.ts')
+  const f = sessionV4Fixture()
+  const event = f.events.find(candidate => candidate.type === 'tool/result')
+  if (event?.type !== 'tool/result') throw new Error('Missing V4 tool result')
+  vi.stubEnv('NO_COLOR', '1')
+  const transcript = new Transcript(() => 20)
+  try {
+    transcript.update(snapshot([tool('v4-error', undefined, resultView, event.data.message.content,
+      { name: 'write', argsRaw: '{}' }, event.data.message.isError === true)]))
+    transcript.pointerToggleTool('v4-error')
+    const rendered = stripAnsi(transcript.render(80).join('\n'))
+    expect(rendered).toContain('失败')
+    expect(rendered).toContain('permission denied: output.txt')
+    expect(rendered.match(/permission denied: output.txt/gu)).toHaveLength(1)
+  } finally { transcript.dispose() }
 })

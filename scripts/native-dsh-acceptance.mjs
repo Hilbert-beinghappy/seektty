@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { messagesFixtureReply } from './helpers/messages-fixture.mjs'
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -54,6 +54,13 @@ Object.assign(env, {
   DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', SEEKTTY_UPDATE: 'off',
   SEEKTTY_NATIVE_FIXTURE_KEY: 'fixture-only-not-a-real-key', TERM: 'xterm-256color',
 })
+const pnpmEntry = process.env.SEEKTTY_PNPM_ENTRY
+assert(pnpmEntry && existsSync(pnpmEntry), 'Set SEEKTTY_PNPM_ENTRY to the installed pnpm CLI entry')
+const bin = join(root, 'bin'); mkdirSync(bin)
+const quote = value => `'${value.replaceAll("'", "'\\''")}'`
+writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(pnpmEntry)} "$@"\n`)
+chmodSync(join(bin, 'pnpm'), 0o700)
+env.PATH = `${bin}:${env.PATH ?? ''}`
 
 let requestCount = 0
 const requests = []

@@ -20,7 +20,7 @@ interface AssistantState {
     readonly firstVisibleSeq: number | undefined;
     readonly firstVisibleTime: number | undefined;
     readonly firstTokenTime: number | undefined;
-    readonly hidden: boolean;
+    readonly visibleBlocks: number;
     readonly final: ConversationMatch | undefined;
     readonly usage: unknown;
 }
