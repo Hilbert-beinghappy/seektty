@@ -82,12 +82,12 @@
 
 | 内容 | 证据目录 |
 |---|---|
-| 最终原生 25 项 | `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-acceptance-39qks8` |
-| 17 项故障 | `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-faults-iyN4Oa` |
-| 状态 23 项 | `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-state-qa-ECUPWf` |
-| 交互 11 项 | `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-interactions-ThvzYq` |
-| 逐步人工 PTY | `/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-user-qa-JDqm6I`，`actions.jsonl` 保存按键序列，`manual-report.json` 汇总核验 |
-| 最终管理 15 个旅程 | `/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-management-acceptance-h6j3yj` |
+| 最终原生 25 项 | `<temporary-directory>/seektty-native-acceptance-<run-id>` |
+| 17 项故障 | `<temporary-directory>/seektty-native-faults-<run-id>` |
+| 状态 23 项 | `<temporary-directory>/seektty-native-state-qa-<run-id>` |
+| 交互 11 项 | `<temporary-directory>/seektty-native-interactions-<run-id>` |
+| 逐步人工 PTY | `<temporary-directory>/seektty-user-qa-<run-id>`，`actions.jsonl` 保存按键序列，`manual-report.json` 汇总核验 |
+| 最终管理 15 个旅程 | `<temporary-directory>/seektty-management-acceptance-<run-id>` |
 
 在独立工作目录设置绝对路径后复跑，每个脚本自行建立隔离环境：
 

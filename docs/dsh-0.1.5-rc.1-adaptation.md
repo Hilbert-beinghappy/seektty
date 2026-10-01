@@ -164,7 +164,7 @@ Harness 始终拥有 Agent、Session、模型、Settings、权限、Profile、�
 | 性能 | 1k/10k/50k/100k，每档 3 次独立进程，门禁通过 | `/tmp/seektty-203-performance.log` |
 | pnpm 11 布局 | GVS=false 完整生命周期通过；GVS=true 的已知 Loader 故障分类通过 | `/tmp/seektty-203-gvs-false-rc1.log`、`/tmp/seektty-203-gvs-true-rc1.log` |
 
-第一轮候选为 `.artifacts/seektty-rc1-candidate-15.tgz`，SHA256：`e4f5070ac2992adf150df6429bc0b904a95917c2071a53c4da5e1c08c5a65686`。该候选已被下述 qa20 替代，保留名称用于追溯当时证据。第一轮原生交互报告及逐步屏幕记录在 `/private/var/folders/xd/1qtnjp4s4kv_9z6x7bq465kw0000gn/T/seektty-native-acceptance-6JGPRD/report.json`。
+第一轮候选为 `.artifacts/seektty-rc1-candidate-15.tgz`，SHA256：`e4f5070ac2992adf150df6429bc0b904a95917c2071a53c4da5e1c08c5a65686`。该候选已被下述 qa20 替代，保留名称用于追溯当时证据。第一轮原生交互报告及逐步屏幕记录在 `<temporary-directory>/seektty-native-acceptance-<first-run-id>/report.json`。
 
 未运行远端 CI，不声明 Windows/Linux、真实 GUI 鼠标/剪贴板或可选插件组合完成实机验收。普通 CLI 与原生插件生命周期中 dsh 可自行调用 pnpm 11.19.0；上表的 pnpm 11 布局专项明确固定为 11.7.0。
 
