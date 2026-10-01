@@ -1,3 +1,5 @@
+> Clean release snapshot and new metadata-only package mapping: [release-snapshot-2026-10-01.md](release-snapshot-2026-10-01.md). The original205207c candidate evidence below is preserved by its exact digest.
+
 # Remaining terminal adapters: frozen candidate and evidence
 
 The preserved integration branch is `codex/remaining-terminal-adapters`. The separate release snapshot branch is `codex/seektty-rc2-terminal-release`, parented directly by PR211 head00dba96. The earlier17770b9 candidate and all other worktrees remain preserved. No push, PR or publication occurred.
