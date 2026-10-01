@@ -162,6 +162,7 @@ export declare const historyEntrySchema: z.ZodType<Wire<HistoryEntry>>;
  * deep-validating here would import every domain's schema into the carrier.
  */
 export declare const sessionProjectionsBlockSchema: z.ZodType<Wire<SessionProjectionsBlock>>;
+export declare const sessionProjectionHintsSchema: z.ZodType<Wire<SessionProjectionsBlock & { readonly kind?: string }>>;
 /** Host-side validation for the persisted Session-list projection. */
 export declare const sessionListMetadataProjectionSchema: z.ZodType<SessionListMetadata>;
 /**
@@ -237,6 +238,9 @@ export declare const promptContentPartSchema: z.ZodDiscriminatedUnion<[z.ZodObje
     mediaType: z.ZodUnion<readonly [z.ZodLiteral<"image/png">, z.ZodLiteral<"image/jpeg">, z.ZodLiteral<"image/webp">, z.ZodLiteral<"image/gif">]>;
     data: z.ZodString;
     name: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"file">;
+    receiptId: z.ZodString;
 }, z.core.$strip>], "type">;
 /** session.prompt request payload, including optional browser-local request provenance. */
 export declare const sessionPromptRequestSchema: z.ZodType<RequestPayload<"session.prompt">>;

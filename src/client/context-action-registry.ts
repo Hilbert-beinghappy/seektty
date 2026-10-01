@@ -2,6 +2,7 @@
 
 import { ui } from './locale.ts'
 import type { ContextActionMenu, ContextActionNode, ContextTarget } from './context-actions.ts'
+import type { TerminalExtensionRow } from '../terminal-extensions.ts'
 
 const action = (
   id: string,
@@ -16,7 +17,7 @@ const submenu = (id: string, label: string, children: readonly ContextActionNode
 
 export function contextActionMenu(
   target: ContextTarget,
-  state: { readonly jobStoppable?: boolean; readonly customTheme?: boolean } = {},
+  state: { readonly jobStoppable?: boolean; readonly customTheme?: boolean; readonly urlOpenReason?: string | undefined; readonly urlCopyReason?: string | undefined; readonly fileOpenReason?: string | undefined; readonly sessionExtensions?: readonly TerminalExtensionRow[] } = {},
 ): ContextActionMenu | undefined {
   const menu = (title: string, nodes: readonly ContextActionNode[]): ContextActionMenu => ({ title, target, nodes })
   switch (target.kind) {
@@ -30,6 +31,12 @@ export function contextActionMenu(
         action('export-descendants', ui('会话与子 Agent ZIP', 'Session and subagents ZIP')),
         action('export-markdown', 'Markdown'),
       ]),
+      ...(state.sessionExtensions?.length ? [{ kind: 'separator' as const, id: 'terminal-extensions' },
+        ...state.sessionExtensions.map(row => action(`seektty-extension:${row.revision}:${row.id}`, row.label, {
+          ...(row.description === undefined ? {} : { description: row.description }),
+          ...(row.disabledReason === undefined ? {} : { disabledReason: row.disabledReason }),
+          ...(row.danger === undefined ? {} : { danger: row.danger }),
+        }))] : []),
       { kind: 'separator', id: 'session-danger' },
       action('archive', ui('归档…', 'Archive…'), { danger: true }),
     ])
@@ -101,7 +108,7 @@ export function contextActionMenu(
     case 'file': return menu(ui(`文件 · ${target.path}`, `File · ${target.path}`), [
       action('view', ui('在 TUI 查看', 'View in TUI')),
       action('copy-path', ui('复制绝对路径', 'Copy absolute path')),
-      action('open-external', ui('外部打开…', 'Open externally…')),
+      action('open-external', ui('Host 外部打开…', 'Open externally on Host…'), { ...(state.fileOpenReason === undefined ? {} : { disabledReason: state.fileOpenReason }) }),
     ])
     case 'job': return menu(ui(`后台任务 · ${target.jobId}`, `Background job · ${target.jobId}`), [
       action('details', ui('查看详情', 'View details')),
@@ -112,6 +119,11 @@ export function contextActionMenu(
     ])
     case 'subagent': return menu(ui(`子 Agent · ${target.sessionId}`, `Subagent · ${target.sessionId}`), [action('open', ui('打开', 'Open'))])
     case 'tool-card': return menu(ui('工具调用', 'Tool call'), [action('toggle', ui('展开／收起', 'Expand / collapse'))])
+    case 'fetch-title': return menu(ui('获取网址', 'Fetch URL'), [
+      action('open-url', ui('用浏览器打开', 'Open in browser'), state.urlOpenReason === undefined ? {} : { disabledReason: state.urlOpenReason }),
+      action('copy-url', ui('复制网址', 'Copy URL'), state.urlCopyReason === undefined ? {} : { disabledReason: state.urlCopyReason }),
+      action('toggle', ui('展开／收起', 'Expand / collapse')),
+    ])
     case 'reasoning': return menu(ui('思考', 'Reasoning'), [action('toggle', ui('展开／收起', 'Expand / collapse'))])
     case 'agent-tree': return menu(ui(`Agent · ${target.sessionId}`, `Agent · ${target.sessionId}`), target.part === 'chevron'
       ? [action('toggle', ui('展开／收起', 'Expand / collapse'))]

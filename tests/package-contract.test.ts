@@ -110,6 +110,7 @@ describe('out-of-tree Bundle contract', () => {
     const devDependencies = manifest.devDependencies as Record<string, string>
     const hostPeers = Object.keys(peers).filter(name => name.startsWith('@deepseek-ai/'))
     expect(hostPeers).toContain('@deepseek-ai/dsh-client-locale')
+    expect(hostPeers).toContain('@deepseek-ai/dsh-api-workspace-files')
     expect(hostPeers).toContain('@deepseek-ai/dsh-tools')
     for (const name of hostPeers) {
       expect(peerMeta[name], name).toEqual({ optional: true })

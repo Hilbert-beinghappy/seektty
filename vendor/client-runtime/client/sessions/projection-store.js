@@ -2,8 +2,9 @@ import { Notifier } from "./notifier.js";
 /**
  * One session's projection values. Framework semantics, uniform across every
  * key: a baseline seeds rows at its cut, a push frame updates one row, and in
- * both paths a lower-or-equal seq loses — a replayed frame cannot regress a
- * value, a stale baseline cannot overwrite a newer frame. A key the store has
+ * both sequenced paths a lower-or-equal seq loses — a replayed frame cannot regress a
+ * value, a stale baseline cannot overwrite a newer frame. Cached list hints
+ * carry no live sequence authority and always yield to sequenced values. A key the store has
  * never seen reads `undefined` (capability absent). Faces are identity-stable
  * per key (create-on-demand, cached) so the React side binds each exactly
  * once; the store-level channel (`subscribeAny`) serves coarse consumers (the
@@ -61,9 +62,9 @@ export class ProjectionValueStore {
      */
     apply(key, value, seq) {
         const row = this.rows.get(key);
-        if (row !== undefined && seq <= row.seq)
+        if (row?.kind === 'sequenced' && seq <= row.seq)
             return; // higher seq wins; replays and stale frames drop
-        this.rows.set(key, { value, seq });
+        this.rows.set(key, { kind: 'sequenced', value, seq });
         this.changed(key);
     }
     /**
@@ -74,7 +75,27 @@ export class ProjectionValueStore {
      * clear newer values).
      * @param baseline - the response's projections block.
      */
+    /** Cached list hints never compare their stored watermark with live values. */
+    applyCached(values) {
+        for (const key of Object.keys(values)) {
+            if (this.rows.get(key)?.kind === 'sequenced') continue;
+            this.rows.set(key, { kind: 'cached', value: values[key] });
+            this.changed(key);
+        }
+    }
+    /** Clear generation-local authority without changing subscribed face identities. */
+    clear() {
+        for (const key of this.rows.keys()) {
+            this.rows.delete(key);
+            this.changed(key);
+        }
+    }
     seed(baseline) {
+        for (const [key, row] of this.rows) {
+            if (row.kind !== 'cached') continue;
+            this.rows.delete(key);
+            this.changed(key);
+        }
         // Erased walk: the framework crosses the open key space; per-key typing
         // is re-established at the consumer (useProjection's map lookup).
         const values = baseline.values;
@@ -100,7 +121,7 @@ export class ProjectionValueStore {
      */
     truncate(lastSeq) {
         for (const [key, row] of this.rows) {
-            if (row.seq <= lastSeq)
+            if (row.kind === 'sequenced' && row.seq <= lastSeq)
                 continue;
             this.rows.delete(key);
             this.changed(key);

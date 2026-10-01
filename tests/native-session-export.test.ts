@@ -44,3 +44,28 @@ describe('native logical Session export', () => {
     expect(f.inspect).not.toHaveBeenCalled()
   })
 })
+
+it.each([true, false])('exports flat V4 tool content and failure state: isError=%s', async isError => {
+  const { sessionV4Fixture } = await import('./helpers/session-v4-fixture.ts')
+  const f = sessionV4Fixture(isError)
+  const release = vi.fn(async () => {})
+  const source: SessionExportSource = { inspect: async () => f.inspection,
+    presenter: async () => ({ present: () => ({ card: 'generic', title: 'Write file', kind: 'edit', locations: [{ path: 'output.txt' }] }), [Symbol.asyncDispose]: release }) }
+  const snapshot = await readSessionConversation(source, f.id, new AbortController().signal)
+  const result = f.events.find(event => event.type === 'tool/result')
+  if (result?.type !== 'tool/result') throw new Error('Missing tool result fixture')
+  expect(snapshot.nodes).toContainEqual({ kind: 'tool-result', content: result.data.message.content, isError })
+  expect(conversationMarkdown(snapshot.title, snapshot.nodes)).toContain(isError ? '## Tool result (error)\n\npermission denied' : '## Tool result\n\nwritten')
+  expect(snapshot.producedFiles).toEqual(isError ? [] : [{ turn: 1, paths: ['output.txt'] }])
+  expect(release).toHaveBeenCalledOnce()
+})
+
+it('releases the cold presenter after conversion fails', async () => {
+  const f = fixture()
+  const release = vi.fn(async () => {})
+  f.source.presenter = async () => ({ present: () => undefined, [Symbol.asyncDispose]: release })
+  // An inspection implementation failure must still end the acquired lease.
+  Object.defineProperty(f.events, Symbol.iterator, { value: () => { throw new Error('conversion failed') } })
+  await expect(readSessionConversation(f.source, 'root', f.signal)).rejects.toThrow('conversion failed')
+  expect(release).toHaveBeenCalledOnce()
+})

@@ -169,7 +169,10 @@ export class Session {
                 };
             }
             else {
-                if (content.some(part => part.type === 'image')) {
+                if (content.some(part => part.type === 'file')) {
+                    result = { ok: false, error: { code: 'attachment-error', message: 'File receipts require an ordinary Session.', details: { reason: 'SUBAGENT_FILE_RECEIPT_UNSUPPORTED' } } };
+                }
+                else if (content.some(part => part.type === 'image')) {
                     result = {
                         ok: false,
                         error: {
@@ -714,6 +717,9 @@ export class Session {
     windowTailSeq() {
         const tail = this.events[this.events.length - 1];
         return tail === undefined ? null : tail.seq;
+    }
+    recordedEvents() {
+        return Object.freeze(this.events.map((event, index) => Object.freeze({ event, view: this.views[index] })));
     }
     buildSnapshot() {
         if (this.pendingCache === null || this.pendingCache.rev !== this.pendingRev) {

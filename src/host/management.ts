@@ -37,10 +37,18 @@ import { assertCredentialFreeUrl, PluginMarketplace, redactMarketplaceUrl } from
 import { installerSecrets, redactInstallerText } from './installer-output.ts'
 import { killHostJob, type HostJobRegistry } from '../client/job-control.ts'
 import { conversationMarkdown } from '../client/conversation-markdown.ts'
-import { keyBindingsIssue, sanitizeKeyBindings } from '../client/keymap.ts'
+import { keyBindingsSchema } from './key-bindings-schema.ts'
 import { ui } from '../client/locale.ts'
 import { collectFastfetch, collectFastfetchLogo } from './fastfetch.ts'
 import { exportSession, sessionExportSource, readSessionConversation } from './session-export.ts'
+import { readPrivacySnapshot } from './privacy.ts'
+import { createSessionManagementPorts } from './session-management-bridge.ts'
+import { createOptionalManagementPorts } from './optional-management-bridge.ts'
+import { createWavSpeechPort } from './wav-speech-port.ts'
+import { createNativeIntakePort } from './native-intake-bridge.ts'
+import { createFileIntakeManagement } from './file-intake-management.ts'
+import { createContinuedQuestionPorts } from './continued-question-bridge.ts'
+import type {} from './terminal-extensions.ts'
 
 const MARKETPLACE_NAMESPACE = 'tui-plugin-marketplace'
 const APPEARANCE_NAMESPACE = TUI_APPEARANCE_SETTINGS_NAMESPACE
@@ -246,6 +254,8 @@ export const WelcomeSettingsSchema = z.object({
 })
 
 export const BehaviorSettingsSchema = z.object({
+  workProcessDisplay: z.union(['compact', 'standard', 'detailed', 'verbose', 'normal', 'expanded']).loose()
+    .description(localeDescription({ zh: '工作过程显示；留空保留现有终端偏好。', en: 'Work-process display; leave unset to preserve existing terminal preferences.' })),
   toolCards: z.union(['collapsed', 'expanded', 'hidden'])
     .default(DEFAULT_TUI_BEHAVIOR.toolCards)
     .description(localeDescription({
@@ -335,11 +345,7 @@ export const BehaviorSettingsSchema = z.object({
       zh: '连续同向滚轮刻度加速滚动。',
       en: 'Accelerate consecutive same-direction wheel detents.',
     })),
-  keyBindings: z.transform(z.dict(z.string()), (value) => {
-    const issue = keyBindingsIssue(value)
-    if (issue !== undefined) throw new Error(issue)
-    return sanitizeKeyBindings(value)
-  }).default({})
+  keyBindings: keyBindingsSchema().default({})
     .description(localeDescription({
       zh: '覆盖默认快捷键；键为绑定 id，值为 Ctrl+P 这类组合。空对象表示使用默认键位。',
       en: 'Override default shortcuts; keys are binding ids and values are chords such as Ctrl+P. An empty object uses the defaults.',
@@ -625,7 +631,16 @@ export function createTuiManagementBridge(ctx: Context, cwd: string): TuiManagem
     return exportSession(ctx, sessionId, includeDescendants, signal ?? new AbortController().signal)
   }
 
+  const terminalExtensions = ctx.get('seekttyExtensions')
   return {
+    ...createSessionManagementPorts(ctx),
+    ...(terminalExtensions === undefined ? {} : { terminalExtensions }),
+    ...createOptionalManagementPorts(ctx),
+    ...createNativeIntakePort(ctx),
+    wavSpeech: { forScope: (scope, current) => createWavSpeechPort(ctx, scope, current) },
+    ...createFileIntakeManagement(ctx),
+    ...createContinuedQuestionPorts(ctx),
+    privacy: { snapshot: () => Promise.resolve(readPrivacySnapshot(ctx)) },
     sessionExport: {
       download: downloadSessionLog,
       markdown: async (sessionId, signal) => {

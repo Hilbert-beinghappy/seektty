@@ -1,4 +1,5 @@
 /** Harness-owned live configuration for the terminal welcome form. */
 import { WelcomeSettingsSchema } from '../management.ts'
-export const Config = WelcomeSettingsSchema.volatile()
+import { liveKnownFields } from './live-fields.ts'
+export const Config = liveKnownFields(WelcomeSettingsSchema)
 export function apply(): void {}

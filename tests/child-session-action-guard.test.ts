@@ -3,7 +3,7 @@ import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
 import type { HarnessTuiCapabilities } from '../src/client/capabilities.ts'
 
 describe('child Session action guard', () => {
-  it.each(['new', 'resume', 'sessions', 'fork', 'archive'])(
+  it.each(['new', 'resume', 'sessions', 'fork', 'archive', 'descendants'])(
     'blocks /%s until the child view is closed',
     async (command) => {
       const capabilities = {

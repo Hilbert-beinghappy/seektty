@@ -1,4 +1,5 @@
 /** Harness-owned live configuration for the terminal behavior form. */
 import { BehaviorSettingsSchema } from '../management.ts'
-export const Config = BehaviorSettingsSchema.volatile()
+import { liveKnownFields } from './live-fields.ts'
+export const Config = liveKnownFields(BehaviorSettingsSchema)
 export function apply(): void {}

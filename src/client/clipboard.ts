@@ -9,6 +9,8 @@ import type { TuiClipboardFallback } from '@deepseek-ai/dsh-tui-protocol'
 export const OSC52_BYTE_LIMIT = 100_000
 /** Hung platform clipboard helpers must not pin the TUI input thread. */
 export const CLIPBOARD_DEADLINE_MS = 2_000
+/** Exit confirmation after force termination must not hang clipboard fallback. */
+export const CLIPBOARD_TERMINATION_MS = 250
 /** Clipboard reads are bounded before decoding so a platform helper cannot exhaust memory. */
 export const CLIPBOARD_READ_BYTE_LIMIT = 1_000_000
 
@@ -22,6 +24,8 @@ export interface ClipboardWriteResult {
 export interface ClipboardSpawnResult {
   readonly status: number | null
   readonly error?: Error
+  /** A writer may still be alive; starting another writer could lose its result. */
+  readonly unsafeToFallback?: boolean
 }
 
 export interface ClipboardReadSpawnResult extends ClipboardSpawnResult {
@@ -144,23 +148,61 @@ function defaultSpawn(
       ...(childEnv === undefined ? {} : { env: childEnv }),
     })
     let settled = false
+    let exited = false
+    let failure: Error | undefined
+    let terminationTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (result: ClipboardSpawnResult): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearTimeout(terminationTimer)
       resolve(result)
     }
+    const stopWriter = (error: Error): void => {
+      if (settled || failure !== undefined) return
+      failure = error
+      clearTimeout(timer)
+      // An exit event is enough: close may be held by inherited pipe handles.
+      if (exited || (child.exitCode !== null && child.exitCode !== undefined) || child.signalCode != null) {
+        finish({ status: null, error })
+        return
+      }
+      terminationTimer = setTimeout(() => {
+        finish({ status: null, error: new Error('Clipboard writer exit could not be confirmed'), unsafeToFallback: true })
+      }, CLIPBOARD_TERMINATION_MS)
+      // SIGTERM permits userland cleanup to write after the fallback succeeds.
+      // SIGKILL plus observed exit prevents that writer from running again.
+      try { child.kill('SIGKILL') } catch { /* the confirmation deadline still fails closed */ }
+      child.stdin?.destroy()
+    }
     const timer = setTimeout(() => {
-      child.kill()
+      stopWriter(new Error(`clipboard deadline exceeded after ${String(deadlineMs)}ms`))
       kill?.(writer.command)
-      finish({
-        status: null,
-        error: new Error(`clipboard deadline exceeded after ${String(deadlineMs)}ms`),
-      })
     }, deadlineMs)
-    child.on('error', (error) => { finish({ status: null, error }) })
-    child.on('close', (status) => { finish({ status }) })
-    child.stdin?.end(input)
+    child.on('error', (error) => {
+      // ENOENT/failed spawn has no process to terminate. A kill error during
+      // termination does not prove exit; retain the bounded confirmation wait.
+      if (failure === undefined && child.pid === undefined) finish({ status: null, error })
+      else if (failure === undefined) stopWriter(error)
+    })
+    child.on('exit', () => {
+      exited = true
+      if (failure !== undefined) finish({ status: null, error: failure })
+    })
+    child.on('close', (status) => {
+      exited = true
+      finish(failure === undefined ? { status } : { status: null, error: failure })
+    })
+    // A helper can close its read end before a large write completes. Keep
+    // this listener after settlement too: a late EPIPE must never reach the TUI.
+    child.stdin?.on('error', (error) => {
+      stopWriter(error)
+    })
+    try {
+      child.stdin?.end(input)
+    } catch (error) {
+      stopWriter(error instanceof Error ? error : new Error('clipboard write failed'))
+    }
   })
 }
 
@@ -183,6 +225,7 @@ async function spawnWithDeadline(
           resolve({
             status: null,
             error: new Error(`clipboard deadline exceeded after ${String(deadlineMs)}ms`),
+            unsafeToFallback: true,
           })
         }, deadlineMs)
       }),
@@ -325,6 +368,9 @@ export async function writeClipboard(text: string, options: ClipboardWriteOption
   }
   for (const candidate of FALLBACKS[options.platform] ?? []) {
     const result = await spawnWithDeadline(candidate, input, options)
+    if (result.unsafeToFallback) {
+      throw new Error(ui('未能确认剪贴板进程退出；复制结果未知，请重试或使用 /export', 'Clipboard writer exit was not confirmed; the copy outcome is unknown. Retry or use /export'))
+    }
     if (result.error === undefined && result.status === 0) {
       succeeded.push(candidate.method)
       return { finalMethod: candidate.method, succeeded }

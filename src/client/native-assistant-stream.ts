@@ -1,4 +1,4 @@
-/** dsh 0.1.5-rc.1 transient assistant projection; never consumes durable Session seqs. */
+/** dsh 0.2.0-rc.2 transient assistant projection; never consumes durable Session seqs. */
 import { z } from 'zod'
 import type { SessionAssistantStreamBaseline, SessionAssistantStreamFrame } from '@deepseek-ai/dsh-api-session-controller'
 import type { PartialAssistant } from '../../vendor/client-runtime/client/sessions/conversation.js'
@@ -14,6 +14,7 @@ const textChunk = base.extend({ text: z.string() })
 export class NativeAssistantStream {
   private revision = -1
   private attemptId: string | undefined
+  private readonly retiredAttempts = new Set<string>()
   private nextIndex = 0
   private accumulator: PartialAccumulator | undefined
   private settlementSeq: number | undefined
@@ -27,6 +28,7 @@ export class NativeAssistantStream {
 
   baseline(value: SessionAssistantStreamBaseline): void {
     const active = value.activeAttempt
+    if (active !== undefined && this.retiredAttempts.has(active.attemptId)) return
     if (active !== undefined && active.startedAfterSeq < this.startedAfterSeq) return
     const restarted = active !== undefined && active.attemptId !== this.attemptId
       && active.startedAfterSeq > this.startedAfterSeq && value.revision <= this.revision
@@ -45,6 +47,7 @@ export class NativeAssistantStream {
       this.accumulator = previous
       throw error
     }
+    if (this.attemptId !== undefined && this.attemptId !== active?.attemptId) this.retiredAttempts.add(this.attemptId)
     this.revision = value.revision
     if (restarted) this.activationGeneration += 1
     if (active !== undefined) this.startedAfterSeq = active.startedAfterSeq
@@ -54,8 +57,9 @@ export class NativeAssistantStream {
   }
 
   accept(frame: SessionAssistantStreamFrame): void {
+    if (this.retiredAttempts.has(frame.attemptId)) return
     if (frame.type === 'start') {
-      // rc.1 recreates continuable child Agents with revision 1. The durable
+      // rc.2 recreates continuable child Agents with revision 1. The durable
       // start position distinguishes that activation from an old replayed start.
       if (frame.startedAfterSeq < this.startedAfterSeq) return
       const restarted = frame.revision === 1 && frame.attemptId !== this.attemptId
@@ -64,6 +68,7 @@ export class NativeAssistantStream {
       if (restarted && this.revision >= 0) this.activationGeneration += 1
       this.startedAfterSeq = frame.startedAfterSeq
       this.revision = frame.revision
+      if (this.attemptId !== undefined && this.attemptId !== frame.attemptId) this.retiredAttempts.add(this.attemptId)
       this.attemptId = frame.attemptId
       this.nextIndex = 0
       this.settlementSeq = undefined
@@ -82,6 +87,7 @@ export class NativeAssistantStream {
       return
     }
     this.revision = frame.revision
+    this.retiredAttempts.add(frame.attemptId)
     if (frame.outcome.kind === 'abandoned') this.accumulator = undefined
     else this.settlementSeq = frame.outcome.seq
   }

@@ -1,7 +1,7 @@
 /** Read a PNG bitmap from the platform clipboard when paste is not a file path. */
 
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, fstatSync, mkdirSync, openSync, readSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto'
 export const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 /** Hung pngpaste/wl-paste/xclip must not pin the TUI input thread. */
 export const CLIPBOARD_IMAGE_DEADLINE_MS = 2_000
+/** Bound clipboard PNG bytes before buffering stdout or reading a captured file. */
+export const CLIPBOARD_IMAGE_BYTE_LIMIT = 20 * 1024 * 1024
 
 export interface ClipboardImageSpawnResult {
   readonly status: number | null
@@ -23,6 +25,8 @@ export interface ClipboardImageCaptureOptions {
   readonly writeFile?: (path: string, bytes: Buffer) => void
   readonly readFile?: (path: string) => Buffer
   readonly deadlineMs?: number
+  readonly maxBytes?: number
+  readonly unlink?: (path: string) => void
 }
 
 export interface ClipboardImageWorkspaceOptions {
@@ -38,6 +42,7 @@ export interface ClipboardImageWorkspace {
 
 export interface ClipboardImageCleanupOptions {
   readonly readFile?: (path: string) => Buffer
+  readonly maxBytes?: number
   readonly chmod?: (path: string, mode: number) => void
   readonly unlink?: (path: string) => void
   readonly rmdir?: (path: string) => void
@@ -102,6 +107,7 @@ function defaultSpawn(
   command: string,
   args: readonly string[],
   deadlineMs: number,
+  maxBytes: number,
 ): Promise<ClipboardImageSpawnResult> {
   return new Promise((resolve) => {
     const child = spawn(command, [...args], {
@@ -109,21 +115,41 @@ function defaultSpawn(
       windowsHide: true,
     })
     const chunks: Buffer[] = []
-    child.stdout?.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+    let bytes = 0
     let settled = false
+    let failed = false
     const finish = (result: ClipboardImageSpawnResult): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      chunks.length = 0
       resolve(result)
     }
+    const fail = (): void => {
+      if (settled || failed) return
+      failed = true
+      chunks.length = 0
+      child.stdout?.destroy()
+      // Wait for close before allowing another file-writing helper to start,
+      // so a timed-out process cannot recreate a file after capture cleanup.
+      child.kill('SIGKILL')
+    }
     const timer = setTimeout(() => {
-      child.kill()
-      finish({ status: null, stdout: Buffer.alloc(0) })
+      fail()
     }, deadlineMs)
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled || failed) return
+      bytes += chunk.byteLength
+      if (bytes > maxBytes) { fail(); return }
+      chunks.push(chunk)
+    })
+    child.stdout?.on('error', fail)
     child.on('error', () => { finish({ status: null, stdout: Buffer.alloc(0) }) })
     child.on('close', (status) => {
-      finish({ status, stdout: Buffer.concat(chunks) })
+      if (settled) return
+      finish(failed
+        ? { status: null, stdout: Buffer.alloc(0) }
+        : { status, stdout: Buffer.concat(chunks, bytes) })
     })
   })
 }
@@ -134,7 +160,9 @@ async function spawnWithDeadline(
   options: ClipboardImageCaptureOptions,
 ): Promise<ClipboardImageSpawnResult> {
   const deadlineMs = options.deadlineMs ?? CLIPBOARD_IMAGE_DEADLINE_MS
-  if (options.spawn === undefined) return defaultSpawn(command, args, deadlineMs)
+  if (options.spawn === undefined) {
+    return defaultSpawn(command, args, deadlineMs, options.maxBytes ?? CLIPBOARD_IMAGE_BYTE_LIMIT)
+  }
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -156,6 +184,27 @@ async function spawnWithDeadline(
  */
 export function isPng(bytes: Buffer): boolean {
   return bytes.length >= PNG_MAGIC.length && bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)
+}
+
+function readBoundedFile(path: string, maxBytes: number): Buffer {
+  const fd = openSync(path, 'r')
+  try {
+    const stat = fstatSync(fd)
+    if (!stat.isFile() || stat.size > maxBytes) throw new Error('clipboard image exceeds byte limit')
+    // Read one extra byte to detect growth after fstat without an unbounded
+    // readFile allocation. A shrinking file simply yields its available bytes.
+    const buffer = Buffer.alloc(Math.min(stat.size + 1, maxBytes + 1))
+    let bytes = 0
+    while (bytes < buffer.length) {
+      const count = readSync(fd, buffer, bytes, buffer.length - bytes, null)
+      if (count === 0) break
+      bytes += count
+    }
+    if (bytes > maxBytes || bytes > stat.size) throw new Error('clipboard image exceeds byte limit')
+    return buffer.subarray(0, bytes)
+  } finally {
+    closeSync(fd)
+  }
 }
 
 /**
@@ -181,13 +230,16 @@ export function readCapturedClipboardImage(
   workspace: ClipboardImageWorkspace,
   options: ClipboardImageCleanupOptions = {},
 ): Buffer {
-  const readFile = options.readFile ?? (path => readFileSync(path))
+  const maxBytes = options.maxBytes ?? CLIPBOARD_IMAGE_BYTE_LIMIT
+  const readFile = options.readFile ?? (path => readBoundedFile(path, maxBytes))
   const chmod = options.chmod ?? ((path, mode) => { chmodSync(path, mode) })
   const unlink = options.unlink ?? ((path) => { unlinkSync(path) })
   const rmdir = options.rmdir ?? ((path) => { rmdirSync(path) })
   try {
     chmod(workspace.dest, 0o600)
-    return readFile(workspace.dest)
+    const bytes = readFile(workspace.dest)
+    if (bytes.byteLength > maxBytes) throw new Error('clipboard image exceeds byte limit')
+    return bytes
   } finally {
     cleanupClipboardImageWorkspace(workspace, { unlink, rmdir })
   }
@@ -214,20 +266,28 @@ export function cleanupClipboardImageWorkspace(
  * @returns dest when a PNG was written, otherwise undefined.
  */
 export async function captureClipboardImage(options: ClipboardImageCaptureOptions): Promise<string | undefined> {
+  const maxBytes = options.maxBytes ?? CLIPBOARD_IMAGE_BYTE_LIMIT
   const writeFile = options.writeFile ?? ((path, bytes) => { writeFileSync(path, bytes, { mode: 0o600 }) })
-  const readFile = options.readFile ?? (path => readFileSync(path))
+  const readFile = options.readFile ?? (path => readBoundedFile(path, maxBytes))
+  const unlink = options.unlink ?? ((path: string) => { unlinkSync(path) })
+  const cleanup = (): void => {
+    try { unlink(options.dest) } catch { /* a failed helper may not have created a file */ }
+  }
   for (const candidate of commandsFor(options.platform, options.dest)) {
-    const result = await spawnWithDeadline(candidate.command, candidate.args, options)
-    if (result.status !== 0) continue
-    if (candidate.stdoutToFile) {
-      if (!isPng(result.stdout)) continue
-      writeFile(options.dest, result.stdout)
-      return options.dest
-    }
+    cleanup()
+    let captured = false
     try {
-      if (isPng(readFile(options.dest))) return options.dest
+      const result = await spawnWithDeadline(candidate.command, candidate.args, options)
+      if (result.status !== 0 || result.stdout.byteLength > maxBytes) continue
+      const bytes = candidate.stdoutToFile ? result.stdout : readFile(options.dest)
+      if (bytes.byteLength > maxBytes || !isPng(bytes)) continue
+      if (candidate.stdoutToFile) writeFile(options.dest, bytes)
+      captured = true
+      return options.dest
     } catch {
       continue
+    } finally {
+      if (!captured) cleanup()
     }
   }
   return undefined

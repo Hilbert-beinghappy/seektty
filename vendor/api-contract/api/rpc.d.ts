@@ -28,6 +28,7 @@ export interface RpcErrorDetailsMap {
         issues: ZodIssue[];
     };
     'cancelled': {};
+    'ASK_TIMED_OUT': {};
     'session-not-found': {
         sessionId: SessionId;
     };

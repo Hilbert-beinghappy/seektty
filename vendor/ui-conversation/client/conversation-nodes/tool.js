@@ -22,7 +22,7 @@ function rootCall(match) {
 function rootResult(match, previous) {
     if (match.event.type !== 'tool/result')
         return undefined;
-    const result = match.event.data.message.content[0];
+    const result = match.event.data.message;
     return {
         kind: 'tool-result',
         seq: match.event.seq,
@@ -231,4 +231,3 @@ export const toolDefinition = {
 export function registerToolConversationNode(ctx) {
     ctx.conversationEvents.register(toolDefinition);
 }
-//# sourceMappingURL=tool.js.map

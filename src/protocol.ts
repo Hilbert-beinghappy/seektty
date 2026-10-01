@@ -293,6 +293,7 @@ export type TuiScrollbarVisibility = 'always' | 'hidden'
 /** Complete behavior value owned by the SeekTTY Settings namespace. */
 export interface TuiBehaviorSettings {
   readonly toolCards: TuiToolCardDisplay
+  readonly workProcessDisplay?: 'compact' | 'standard' | 'detailed' | 'verbose'
   readonly showReasoning: boolean
   readonly desktopNotifications: boolean
   readonly followTerminalTitle: boolean
@@ -516,7 +517,70 @@ export interface TuiProducedFileGroup {
 }
 
 /** Host-owned services intentionally exposed to the terminal management UI. */
+export interface TuiPrivacyEntry {
+  readonly channel: 'session-log' | 'feedback-otel'
+  readonly entryId: string
+  readonly active: boolean
+  readonly policy: 'enabled' | 'disabled' | 'feedback-only' | 'unknown'
+  readonly maxBytes?: number
+}
+
+export interface TuiPrivacySnapshot {
+  readonly profile: string
+  readonly entries: readonly TuiPrivacyEntry[]
+}
+
 export interface TuiManagementBridge {
+  /** SeekTTY-specific opt-in contributions loaded by the ordinary Harness Cordis loader. */
+  readonly terminalExtensions?: import('./terminal-extensions.ts').TerminalExtensionPort
+  /** Exact live ordinary-Agent Files intake; all receipt authority remains in Harness. */
+  readonly fileReceipts?: {
+    forSession(sessionId: string): { owner(): unknown; reason(): string | undefined; referencesReason(): string | undefined; readonly remote: import('./client/file-attachments.ts').FileAttachmentRemote }
+  }
+  readonly continuedQuestions?: {
+    gate(sessionId: string): import('./host/continued-question-support.ts').ContinuedQuestionHostGate
+    readonly remote: import('./client/continued-question-view.ts').ContinuedQuestionRemote
+    attachWait?(sessionId: string, callId: string, signal: AbortSignal): AsyncIterable<{ readonly remainingMs: number }>
+  }
+  readonly wavSpeech?: {
+    forScope(scope: import('./client/optional-view-lifetime.ts').OptionalViewScope,
+      current: () => import('./client/optional-view-lifetime.ts').OptionalViewScope): import('./client/speech-contract.ts').WavSpeechPort
+  }
+  readonly intake?: {
+    available(endpoint: string): boolean
+    readonly model: import('./client/model-information.ts').ModelInformationRemote
+    account(): import('./client/account-handoff.ts').AccountRemote
+    callbackOrigin(): string | undefined
+  }
+  readonly optionalViews?: {
+    mcp(sessionId: string): import('./client/mcp-resource-view.ts').McpResourcePort
+    team(sessionId: string): import('./client/team-view.ts').TeamBoardPort
+    descendants(open: import('./client/subagent-catalog-view.ts').SubagentDescendantPort['open']): import('./client/subagent-catalog-view.ts').SubagentDescendantPort
+    scheduleMethods(): ReadonlySet<string> | undefined
+    readonly schedule: import('./client/schedule-view.ts').ScheduleRemote
+  }
+  /** Live same-process Host state; absence means the launcher did not mount this bridge. */
+  readonly sessionManagement?: {
+    snapshot(): import('@deepseek-ai/dsh-api-workspace-controller/types').WorkspaceBaseline | undefined
+    subscribe(listener: () => void): () => void
+    methods(): ReadonlySet<string> | undefined
+  }
+  readonly artifacts?: {
+    available(endpoint: string): boolean
+    readonly read: import('./client/host-file-controller.ts').HostFilePorts['read']
+    readonly stat?: NonNullable<import('./client/host-file-controller.ts').HostFilePorts['stat']>
+    readonly readBytes?: NonNullable<import('./client/host-file-controller.ts').HostFilePorts['readBytes']>
+    readonly list?: NonNullable<import('./client/host-file-controller.ts').HostFilePorts['list']>
+    readonly changes?: NonNullable<import('./client/host-file-controller.ts').HostFilePorts['changes']>
+    gate?(method: import('./client/host-file-controller.ts').HostFileMethod, sessionId: string): { readonly available: boolean; readonly reason?: string }
+    workspaceRoot?(sessionId: string): string | undefined
+    openReason?(sessionId: string): string | undefined
+    prepareRoot?(sessionId: string, signal: AbortSignal): Promise<void>
+    subscribe?(listener: () => void): () => void
+    summary(sessionId: string, seq: number): unknown | undefined
+    diff(sessionId: string, seq: number, index: number, signal: AbortSignal): Promise<unknown | undefined>
+  }
+  readonly privacy?: { snapshot(): Promise<TuiPrivacySnapshot> }
   readonly sessionExport: {
     download(sessionId: string, includeDescendants: boolean, signal?: AbortSignal): Promise<TuiSessionExport>
     markdown(sessionId: string, signal?: AbortSignal): Promise<TuiSessionExport>

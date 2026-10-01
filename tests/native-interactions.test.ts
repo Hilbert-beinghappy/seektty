@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { NativeInteractions } from '../src/host/native-interactions.ts'
 import type { RpcRequest, MuxFrame } from '../vendor/api-contract/api/index.js'
+import { muxFrameSchema } from '../vendor/api-contract/api/events.schema.js'
 
 function fixture() {
   const interactions = new NativeInteractions()
@@ -11,6 +12,34 @@ function fixture() {
 }
 
 describe('native human interaction bridge', () => {
+  it('fails closed when a terminal sink throws, withdraws the wait, and still settles if withdrawal throws', async () => {
+    const f = fixture()
+    f.interactions.subscribe(() => { throw new Error('broken terminal') })
+    await expect(f.interactions.approval({ agent: f.agent, toolName: 'fixture' }, async () => 'allowed-once')).resolves.toBe('unavailable')
+    const replay: RpcRequest<MuxFrame>[] = []
+    f.interactions.replay('root', frame => replay.push(frame))
+    expect(replay).toEqual([])
+    expect(f.frames.at(-1)?.payload).toMatchObject({ type: 'approval/resolved', outcome: 'unavailable' })
+    f.interactions.dispose()
+  })
+  it('round-trips localized copy through the actual frame schema and replays a snapshot; cancel rejects late answers', async () => {
+    const f = fixture()
+    const displayReason = { en: 'Auto review denied this call: raw\u001b[2J', zh: 'Auto review 拒绝了此调用：原文' }
+    const abort = new AbortController()
+    const pending = f.interactions.approval({ agent: f.agent, toolName: 'fixture', reason: 'audit', displayReason, signal: abort.signal }, async () => 'unavailable')
+    const request = f.frames[0]!
+    expect(muxFrameSchema.parse(request.payload)).toMatchObject({ reason: 'audit', displayReason })
+    displayReason.zh = 'mutated'
+    const replay: RpcRequest<MuxFrame>[] = []
+    f.interactions.replay('foreign', frame => replay.push(frame)); expect(replay).toEqual([])
+    f.interactions.replay('root', frame => replay.push(frame))
+    expect(replay[0]?.payload).toMatchObject({ displayReason: { zh: 'Auto review 拒绝了此调用：原文' } })
+    abort.abort(); await expect(pending).resolves.toBe('cancelled')
+    if (request.payload.type !== 'approval/requested') throw new Error('expected approval')
+    expect(f.interactions.respond({ type: 'client-response', rpcId: request.rpcId, result: { ok: true,
+      value: { sessionId: 'root', approvalId: request.payload.approvalId, outcome: 'allowed-once' } } })).toEqual({ accepted: false, reason: 'not-pending' })
+    f.interactions.dispose()
+  })
   it('only accepts the exact approval and rejects cross-session and duplicate answers', async () => {
     const f = fixture()
     const next = vi.fn(async () => 'unavailable' as const)

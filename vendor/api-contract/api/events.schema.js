@@ -36,13 +36,13 @@ export const muxFrameSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('session/assistant-baseline'), sessionId: sessionIdSchema, baseline: z.unknown() }),
     z.object({ type: z.literal('session/event'), sessionId: sessionIdSchema, event: sessionEventSchema, view: toolEventViewSchema.optional() }),
     z.object({ type: z.literal('session/subscribed'), sessionId: sessionIdSchema, lastSeq: z.number().int() }),
-    z.object({ type: z.literal('approval/requested'), sessionId: sessionIdSchema, approvalId: approvalRequestIdSchema, toolName: z.string(), callId: z.string().optional(), reason: z.string().optional() }),
+    z.object({ type: z.literal('approval/requested'), sessionId: sessionIdSchema, approvalId: approvalRequestIdSchema, toolName: z.string(), callId: z.string().optional(), reason: z.string().optional(), displayReason: z.object({ en: z.string() }).catchall(z.string()).optional() }),
     z.object({ type: z.literal('approval/resolved'), sessionId: sessionIdSchema, approvalId: approvalRequestIdSchema, outcome: z.union([z.literal('allowed-once'), z.literal('rejected'), z.literal('cancelled'), z.literal('unavailable')]) }),
     // Non-empty by wire contract: the user-questions service rejects empty
     // batches at ask() (EMPTY_QUESTIONS), so an empty frame is host breakage
     // and must fail loud here, not reach the composer.
-    z.object({ type: z.literal('question/requested'), sessionId: sessionIdSchema, questions: z.array(askUserQuestionItemSchema).min(1) }),
-    z.object({ type: z.literal('question/resolved'), sessionId: sessionIdSchema, questionRpcId: rpcIdSchema, outcome: z.union([z.literal('answered'), z.literal('cancelled')]) }),
+    z.object({ type: z.literal('question/requested'), sessionId: sessionIdSchema, questions: z.array(askUserQuestionItemSchema).min(1), wait: z.object({ callId: z.string(), timed: z.boolean().optional() }).optional() }),
+    z.object({ type: z.literal('question/resolved'), sessionId: sessionIdSchema, questionRpcId: rpcIdSchema, outcome: z.union([z.literal('answered'), z.literal('cancelled'), z.literal('timed-out')]) }),
     z.object({
         type: z.literal('session/queue'),
         sessionId: sessionIdSchema,

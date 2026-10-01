@@ -35,6 +35,7 @@ import {
 } from './attachment-restore.ts'
 import { HarnessAutocompleteProvider } from './autocomplete.ts'
 import { commandOf, TuiActions } from './actions.ts'
+import { TerminalInputExtensions } from './terminal-input-extensions.ts'
 import { dispatchComposerSubmit } from './clarify-composer.ts'
 import {
   applyTranscriptEscape,
@@ -112,6 +113,9 @@ import {
 } from './mouse-activation.ts'
 import { ContextMenuController, mouseContextActions } from './mouse-context-menu.ts'
 import type { ContextActionNode, ContextTarget } from './context-actions.ts'
+import { safeArtifactUrl } from './artifact-view.ts'
+import { fetchTitleGestureAction, fetchTitleActionReason, runFetchTitleAction, type FetchTitleAction, type FetchTitlePorts } from './fetch-title-target.ts'
+import { openSafeUrl, safeUrlOpenReason } from './safe-url-opener.ts'
 import { emptyHitMap, finalizeHitMap, nativePresentedHitMap, HitMapBuilder, type HitRegion } from './mouse-hit-map.ts'
 import {
   autocompleteTargetId,
@@ -298,6 +302,29 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }
     const capabilities = client.capabilities
     let stopping: Promise<void> | undefined
+    const urlLifetime = new AbortController()
+    const fetchPorts: FetchTitlePorts = {
+      safeUrl: safeArtifactUrl,
+      capability: action => {
+        if (stopping !== undefined || !capabilities.managementState().ready) return { available: false, reason: 'Current Session is not ready' }
+        const reason = action === 'open' ? safeUrlOpenReason() : undefined
+        return reason === undefined ? { available: true } : { available: false, reason }
+      },
+      open: openSafeUrl,
+      copy: async href => { await writeClipboard(href, { fallback: liveBehavior.get().clipboardFallback,
+        platform: process.platform, writeOsc52: sequence => { terminal.write(sequence) } }) },
+    }
+    const fetchTitleReason = (key: string, action: FetchTitleAction): string | undefined => {
+      const target = transcript.fetchTitleTarget(key)
+      return target === undefined ? 'Fetch title is no longer visible; refresh' : fetchTitleActionReason(target, action, fetchPorts, target)
+    }
+    const fetchTitleAction = async (key: string, action: FetchTitleAction): Promise<void> => {
+      const target = transcript.fetchTitleTarget(key)
+      if (target === undefined) throw new Error('Fetch title is no longer visible; refresh')
+      const generation = capabilities.managementState().generation
+      await runFetchTitleAction(target, action, fetchPorts, () => capabilities.managementState().generation === generation
+        ? transcript.fetchTitleTarget(key) : undefined, urlLifetime.signal)
+    }
     repaintBackground = () => {
       if (stopping !== undefined) return
       // Adapt cached foregrounds at the canvas boundary; no transcript rebuild,
@@ -309,6 +336,12 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const profile = options.profile ?? 'tui'
     const contextBar = new ContextBar(profile, options.cwd)
     const editor = new PromptEditor(tui)
+    const inputExtensions = new TerminalInputExtensions(editor, () => ({
+      sessionId: capabilities.active()?.sessionId ?? '', displayTitle: capabilities.active()?.summary.displayTitle ?? '',
+      generation: capabilities.managementState().generation, ready: stopping === undefined && capabilities.managementState().ready,
+      locked: editor.disableSubmit || childView.isOpen(),
+    }))
+    client.ctx.effect(() => () => inputExtensions.dispose(), 'tui: guarded input plugin actions')
     const historyLimit = liveBehavior.get().composerHistoryLimit
     let { entries: composerHistory, revision: composerHistoryRevision } =
       composerHistoryFromDocuments(settingsDocuments, historyLimit)
@@ -420,6 +453,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       liveBehavior.get().showReasoning,
       liveBehavior.get().toolOutputLineLimit,
       liveBehavior.get().diffContextLines,
+      liveBehavior.get().workProcessDisplay,
     )
     transcript.setScrollbarVisibility(liveBehavior.get().scrollbarVisibility)
     let syntax: SyntaxHighlighter | undefined
@@ -566,7 +600,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         for (const region of transcript.scrollbarHitRegions(slots.transcript)) {
           builder.add(region)
         }
-        for (const region of transcript.controlHitRegions(slots.transcript)) {
+        for (const region of transcript.controlHitRegions(slots.transcript, fetchPorts)) {
           builder.add(region)
         }
         const composerOrigin = { col: slots.composer.col, row: slots.composer.row }
@@ -841,7 +875,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     const updateStatus = (): void => {
       if (stopping !== undefined) return
       performanceProbe.markStatus()
-      editor.setDraftAttachments(capabilities.draftAttachments())
+      editor.setDraftAttachments([...capabilities.draftAttachments(), ...capabilities.draftFiles().map(item => item.file)])
       const chrome = sessionChrome.of(latestSessionId)
       const snapshot = active?.session.getSnapshot()
       if (snapshot?.running === true) {
@@ -898,6 +932,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (goal !== null && goal !== undefined) facts.push(ui('目标', 'Goal'))
       const attachmentCount = capabilities.draftAttachments().length
       if (attachmentCount > 0) facts.push(ui(`图片 ${String(attachmentCount)}`, `Images ${String(attachmentCount)}`))
+      const fileCount = capabilities.draftFiles().length
+      if (fileCount > 0) facts.push(ui(`文件 ${String(fileCount)}`, `Files ${String(fileCount)}`))
       const noticeView = notices.view()
       status.setDetail(pickStatusLine({
         ...(snapshot.removed
@@ -1021,54 +1057,70 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
     }).closed
 
     const close = (outcome: TuiSurfaceOutcome): Promise<void> => {
-      historyLoadController?.abort()
-      detachFatalGuards()
-      detachFatalGuards = () => undefined
-      detachSuspendGuards()
-      detachSuspendGuards = () => undefined
-      if (stopping !== undefined) return stopping
+      if (stopping !== undefined) {
+        // A fatal guard may interrupt an ordinary stop. Wake both output and
+        // worker waits without starting another cleanup or completion callback.
+        if (outcome.kind === 'exit' && outcome.code !== 0) {
+          nativeOutput?.dispose()
+          try { transcript.dispose() } catch { /* the original cleanup reports failures */ }
+        }
+        return stopping
+      }
       const closingNative = nativeOutput !== undefined && nativeOutputActive
-      if (!closingNative) restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
-      else stopTuiRenderingSync()
-      stopping = (async () => {
-        const failures: unknown[] = []
+      urlLifetime.abort()
+      const closingEpoch = nativeOutput?.epoch()
+      const failures: unknown[] = []
+      let drainingNative = closingNative
+      // Publish the one-shot latch before restoration or other synchronous
+      // callbacks can re-enter stop(). Fatal guards remain until cleanup ends.
+      stopping = Promise.resolve().then(async () => {
         if (nativeOutput && closingNative) {
           try {
-            await (async () => {
+            const completed = await withCleanupTimeout(async () => {
+              const current = (): boolean => drainingNative && nativeOutput.epoch() === closingEpoch
               await nativeOutput.drain()
-              if (liveBehavior.get().mouseMode !== 'native') return
+              if (!current() || (outcome.kind === 'exit' && outcome.code !== 0)) return true
+              if (liveBehavior.get().mouseMode !== 'native') return true
               transcript.finishNativeHistory()
               const finalCanvas = new CanvasLineCache(false)
-              while (true) {
+              while (current()) {
                 transcript.render(terminal.columns)
                 const batch = transcript.takeNativeHistoryBatch()
                 if (!batch) {
-                  if (await transcript.waitNativePreparation()) continue
+                  const prepared = await transcript.waitNativePreparation()
+                  if (!current()) return true
+                  if (prepared) continue
                   break
                 }
                 const success = await nativeOutput.frame(finalCanvas.render(batch.lines, terminal.columns), [], terminal.columns, terminal.rows, null)
-                if (!success) break
+                if (!current() || !success) break
                 batch.acknowledge()
                 await new Promise<void>(resolve => setImmediate(resolve))
               }
-              await nativeOutput.drain()
-            })()
+              if (current()) await nativeOutput.drain()
+              return true
+            })
+            if (completed !== true) failures.push(new Error('Native history cleanup deadline exceeded'))
           } catch (error) { failures.push(error) }
-          restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
         }
+        // Cancellation fences late output acknowledgements before disposing
+        // preparations wakes the abandoned drain loop.
+        drainingNative = false
+        nativeOutput?.dispose()
+        try {
+          restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+        } catch (error) { failures.push(error) }
         if (elapsedTimer !== undefined) {
           clearInterval(elapsedTimer)
           elapsedTimer = undefined
         }
-        notices.dispose()
-        contextMenu.close()
-        overlays.dispose()
-        mouseController.dispose()
-        welcome.dispose()
-        transcript.dispose()
-        agentTree.dispose()
-        setCodeHighlighter(undefined)
-        try { syntax?.dispose() } catch (error) { failures.push(error) }
+        for (const dispose of [
+          () => notices.dispose(), () => contextMenu.close(), () => overlays.dispose(),
+          () => mouseController.dispose(), () => welcome.dispose(), () => transcript.dispose(),
+          () => agentTree.dispose(), () => setCodeHighlighter(undefined), () => syntax?.dispose(),
+        ]) {
+          try { dispose() } catch (error) { failures.push(error) }
+        }
         try { unsubscribeActive() } catch (error) { failures.push(error) } finally {
           performanceProbe.changeSubscriptions(-1)
         }
@@ -1082,15 +1134,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         } catch (error) {
           failures.push(error)
         }
-        if (nativeOutput) {
-          try { await withCleanupTimeout(() => nativeOutput.drain()) } catch (error) { failures.push(error) }
-        }
         try {
           await withCleanupTimeout(() => client.ctx.fiber.dispose())
         } catch (error) {
           failures.push(error)
         }
         try { reportPerformance() } catch { /* optional diagnostics must not break cleanup */ }
+        detachFatalGuards()
+        detachFatalGuards = () => undefined
         resolveClosed(failures.length === 0 ? outcome : { kind: 'exit', code: 1 })
         if (failures.length > 0) {
           const error = failures.length === 1 && failures[0] instanceof Error
@@ -1098,7 +1149,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
             : new AggregateError(failures, 'multiple terminal cleanup operations failed')
           try { internals.reportCleanupError(error) } catch { /* diagnostics must not break cleanup */ }
         }
-      })()
+      })
+      historyLoadController?.abort()
+      detachSuspendGuards()
+      detachSuspendGuards = () => undefined
+      // Restore cooked input and terminal protocols before any worker/sink wait.
+      // The final native-history flush uses its explicit sink after TUI writes stop.
+      setNativeOutputMode(false)
+      try {
+        restoreSurfaceTerminalSync(terminalSession, process.stdin, chunk => { process.stdout.write(chunk) }, terminal)
+      } catch (error) { failures.push(error) }
       return stopping
     }
 
@@ -1269,6 +1329,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           behavior.showReasoning,
           behavior.toolOutputLineLimit,
           behavior.diffContextLines,
+          behavior.workProcessDisplay,
         )
         transcript.refreshPresentation()
         tui.invalidate()
@@ -1286,7 +1347,21 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         renderWhileOpen()
       },
       composerText: () => editor.getText(),
+      captureInsertion: () => inputExtensions.captureInsertion(),
+      insertExtensionText: (text, capture, signal) => {
+        const applied = inputExtensions.insertText(escapeTerminalText(text), capture, signal)
+        if (applied) { focusEditor(); renderWhileOpen() }
+        return applied
+      },
       canChangeSession: () => !childView.isOpen(),
+      fetchTitleReason,
+      fetchTitleAction,
+      ...(safeUrlOpenReason() === undefined ? { openUrl: (href: string, signal: AbortSignal) => openSafeUrl(href, AbortSignal.any([signal, urlLifetime.signal])) } : {}),
+      openCatalogChild: address => {
+        const root = capabilities.active()?.sessionId
+        if (root === undefined || childView.isOpen()) return false
+        return openAgentChild(address.childSessionId, root)
+      },
       interactionModeBlockReason,
       openTranscript: () => {
         transcriptFocused = true
@@ -1495,7 +1570,14 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           restoreDeferredPrompt(text)
           return false
         }
-        const content = capabilities.promptContent(text)
+        let draft: ReturnType<typeof capabilities.capturePrompt>
+        try { draft = capabilities.capturePrompt(text) }
+        catch (error) {
+          setNotice(error instanceof Error ? error.message : String(error), 'error')
+          restoreDeferredPrompt(text)
+          return false
+        }
+        const content = draft.content
         if (content.length === 0) return false
         const failed = await noticeAfterFailedPrompt(current.session, content, mode)
         if (failed !== undefined) {
@@ -1503,7 +1585,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
           restoreDeferredPrompt(text)
           return false
         }
-        capabilities.clearAttachments()
+        capabilities.acceptPrompt(draft)
         dismissNotice()
         updateStatus()
         return true
@@ -1561,7 +1643,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       // inside dispatchComposerSubmit after that classify step.
       dispatchComposerSubmit(editor.losslessSubmitText(raw), {
         followLatest: () => { transcript.followLatest() },
-        draftAttachmentCount: () => capabilities.draftAttachments().length,
+        draftAttachmentCount: () => capabilities.draftAttachments().length + capabilities.draftFiles().length,
         addToHistory: (text) => {
           editor.addToHistory(text)
           composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
@@ -1662,6 +1744,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const optionId = region.action.kind === 'overlay' ? region.action.optionId : undefined
       const contextTarget: ContextTarget | undefined = region.action.kind === 'overlay' && region.action.optionId !== undefined
         ? overlays.contextTarget(region.action.optionId)
+        : region.action.kind === 'transcript' && region.action.command === 'fetch-title' && region.action.targetKey !== undefined
+          ? { kind: 'fetch-title', targetKey: region.action.targetKey }
         : region.action.kind === 'transcript' && region.action.command === 'toggle' && region.action.targetKey !== undefined
           ? { kind: 'tool-card', targetKey: region.action.targetKey }
           : region.action.kind === 'transcript' && region.action.command === 'toggle-reasoning' && region.action.targetKey !== undefined
@@ -1671,10 +1755,11 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
               ? { kind: 'agent-tree', sessionId: region.action.sessionId, part: region.action.command }
               : region.action.kind === 'chrome' && ['model', 'reasoning', 'mode', 'permission', 'detail'].includes(region.action.commandId)
                 ? { kind: 'chrome', commandId: region.action.commandId }
-                : undefined
+                : composer ? { kind: 'text', surface: 'composer' } : undefined
       const localMenu = optionId === undefined ? undefined : overlays.contextMenu(optionId)
       const objectMenu = localMenu ?? (contextTarget === undefined ? undefined : actions.contextMenuFor(contextTarget))
       const objectMenuSnapshot = JSON.stringify(objectMenu)
+      const urlGeneration = capabilities.managementState().generation
       const safeObjectNodes = objectMenu?.nodes.filter(node => node.kind !== 'action' || node.danger !== true) ?? []
       const dangerousObjectNodes = objectMenu?.nodes.filter(node => node.kind === 'action' && node.danger === true) ?? []
       const nodes: readonly ContextActionNode[] = objectMenu === undefined
@@ -1690,6 +1775,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       const composerText = editor.getText()
       const composerCursor = editorMouseApi(editor).getCursor()
       const valid = (): boolean => stopping === undefined && active?.session === owner
+        && (contextTarget?.kind !== 'fetch-title' || capabilities.managementState().generation === urlGeneration)
         && overlays.activeGeneration() === pageGeneration && overlays.allowsContextMenu()
         && (optionId === undefined || JSON.stringify(overlays.contextTarget(optionId)) === JSON.stringify(contextTarget))
         && (contextTarget?.kind !== 'agent-tree' || agentTree.node(contextTarget.sessionId as SessionId) !== undefined)
@@ -1708,7 +1794,8 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       if (selected === undefined || selected.id === 'close' || !valid()) return
       const textAction = ['copy', 'undo', 'cut', 'delete', 'select-all', 'paste'].includes(selected.id)
       if (!textAction && contextTarget !== undefined) {
-        if (contextTarget.kind === 'tool-card') transcript.pointerToggleTool(contextTarget.targetKey)
+        if (contextTarget.kind === 'fetch-title') await actions.executeContext({ target: contextTarget, actionId: selected.id })
+        else if (contextTarget.kind === 'tool-card') transcript.pointerToggleTool(contextTarget.targetKey)
         else if (contextTarget.kind === 'reasoning') transcript.pointerToggleReasoning(contextTarget.targetKey)
         else if (contextTarget.kind === 'agent-tree') {
           const sessionId = contextTarget.sessionId as SessionId
@@ -1917,16 +2004,16 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       focusEditor()
     }
 
-    const openAgentChild = (sessionId: SessionId): void => {
-      const rootSessionId = agentTree.owningRootId()
-      if (rootSessionId === undefined) return
+    const openAgentChild = (sessionId: SessionId, viewedRoot = agentTree.owningRootId()): boolean => {
+      const rootSessionId = viewedRoot
+      if (rootSessionId === undefined) return false
       const presentation = capabilities.subagentPresentation()
       const continuation = presentation.continuation(sessionId)
       const composerMode = continuation.support === 'supported' && continuation.value.state === 'available'
         ? 'continuable' as const
         : 'read-only' as const
       const parent = capabilities.active()
-      const selected = agentTree.selectedNode()
+      const selected = agentTree.node(sessionId)
       const opened = childView.openChildView({
         parentSessionId: rootSessionId,
         childSessionId: sessionId,
@@ -1954,7 +2041,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       })
       if (!opened) {
         setNotice(ui('子 Agent 地址已失效，请刷新后重试', 'The subagent address is stale; refresh and try again'), 'warning')
-        return
+        return false
       }
       capabilities.clearAttachments()
       editor.setText('')
@@ -1965,6 +2052,7 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       agentTree.suspend()
       transcriptFocused = composerMode === 'read-only'
       tui.setFocus(composerMode === 'read-only' ? transcript : editor)
+      return true
     }
 
     const applyHoverPresentation = (region: HitRegion | undefined): boolean => {
@@ -2003,6 +2091,9 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
       clearTranscriptPointerGesture()
       const region = semantic.region
       if (semantic.suppressed) return
+      if (region?.action.kind === 'transcript' && region.action.command === 'fetch-title'
+        && (semantic.count !== 1 || fetchTitleGestureAction('url', { kind: 'click', button: semantic.button,
+          modifiers: semantic.modifiers, dragged: false }) === undefined)) return
       if (contextMenu.handleClick(semantic, (point, target) => {
         if (target !== undefined) void openMouseContextMenu({ ...semantic, point, region: target })
       })) return
@@ -2070,12 +2161,20 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         if (origin !== undefined) transcript.handleScrollbarClick(region, semantic.point, origin)
         return
       }
+      if (region?.action.kind === 'transcript' && region.action.command === 'fetch-title' && region.action.targetKey !== undefined) {
+        void fetchTitleAction(region.action.targetKey, 'open').catch((error: unknown) => { setNotice(capabilityError(error), 'error') })
+        return
+      }
       if (region?.action.kind === 'transcript' && region.action.command === 'toggle' && region.action.targetKey !== undefined) {
         transcript.pointerToggleTool(region.action.targetKey)
         return
       }
       if (region?.action.kind === 'transcript' && region.action.command === 'toggle-reasoning' && region.action.targetKey !== undefined) {
         transcript.pointerToggleReasoning(region.action.targetKey)
+        return
+      }
+      if (region?.action.kind === 'transcript' && region.action.command === 'toggle-process' && region.action.targetKey !== undefined) {
+        transcript.toggleProcess(region.action.targetKey)
         return
       }
       if (region?.action.kind === 'transcript' && region.action.command === 'example' && region.action.targetKey !== undefined) {
@@ -2419,6 +2518,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         refresh()
         return { consume: true }
       }
+      if (matchesBinding('workProcessDisplay', payload)) {
+        void actions.execute('display', 'cycle')
+        return { consume: true }
+      }
       if (matchesBinding('previousTurn', payload) || matchesBinding('nextTurn', payload)) {
         if (!transcriptFocused) {
           transcriptFocused = true
@@ -2447,10 +2550,10 @@ export async function startTuiSurface(options: TuiStartOptions): Promise<TuiSurf
         return { consume: true }
       }
       if (!matchesBinding('interrupt', payload)) return undefined
-      if (editor.getText() !== '' || capabilities.draftAttachments().length > 0) {
+      if (editor.getText() !== '' || capabilities.draftAttachments().length > 0 || capabilities.draftFiles().length > 0) {
         setNotice(clearIdleComposerDraft(
           editor,
-          () => { capabilities.clearAttachments() },
+          () => { capabilities.clearPendingAttachments() },
           (text) => {
             composerHistory = rememberComposerHistory(composerHistory, text, historyLimit)
             persistComposerHistory(composerHistory)

@@ -69,3 +69,25 @@ describe('dsh 0.1.5-rc.1 terminal to native Remote contract', () => {
     expect(f.invoke).not.toHaveBeenCalled()
   })
 })
+
+it('passes the published Preset roster without adding trust or authoring metadata', async () => {
+  const f = fixture()
+  const roster = { presets: [{ id: 'standard', isDefault: true, name: 'Standard' },
+    { id: 'broken', isDefault: false, broken: 'activation failed' }] }
+  f.invoke.mockResolvedValueOnce(roster)
+  await expect(f.call('agentPreset.list', {})).resolves.toBe(roster)
+  expect(f.invoke).toHaveBeenCalledExactlyOnceWith({ namespace: 'agentPresets', method: 'list', args: {}, signal: f.signal })
+})
+
+it('reads Preset YAML verbatim and selects through the registry Agent identity', async () => {
+  const f = fixture()
+  const document = { agentPreset: 'review', content: '- plugin: !!js import("tools")\n' }
+  f.invoke.mockResolvedValueOnce(document)
+  await expect(f.call('agentPreset.read', { agentPreset: 'review' })).resolves.toBe(document)
+  expect(f.invoke).toHaveBeenLastCalledWith({ namespace: 'agentPresets', method: 'read', args: { agentPreset: 'review' }, signal: f.signal })
+  f.invoke.mockResolvedValueOnce('review')
+  await expect(f.call('agentPreset.select', { sessionId: 'blank', agentPreset: 'review' })).resolves.toEqual({ agentPreset: 'review' })
+  expect(f.invoke).toHaveBeenLastCalledWith({ namespace: 'agentPresets', method: 'select', args: { agentId: 'blank', agentPreset: 'review' }, signal: f.signal })
+  await f.call('agentPreset.openDocument', { agentPreset: 'review' })
+  expect(f.invoke).toHaveBeenLastCalledWith({ namespace: 'settings', method: 'openSettingsDocument', args: {}, signal: f.signal })
+})

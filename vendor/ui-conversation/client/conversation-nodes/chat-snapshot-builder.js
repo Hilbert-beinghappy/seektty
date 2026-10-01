@@ -1,4 +1,5 @@
 import { isRunningTool } from "../contract/chat-nodes.js";
+import { NativeProcessSnapshotAdapter } from '../../../ui-chat-process/snapshot-adapter.js';
 const EMPTY_KEYS = [];
 const EMPTY_TURNS = [];
 const EMPTY_LIST = [];
@@ -336,6 +337,7 @@ function partialContributionChanged(previous, next) {
 }
 /** Incremental keyed Chat builder registered under the `chat` target. */
 export class ChatSnapshotBuilder {
+    process = new NativeProcessSnapshotAdapter();
     store = new MutableChatNodeStore();
     locations = new MutableChatLocationIndex();
     legacy = new LegacySliceBuilder();
@@ -370,16 +372,17 @@ export class ChatSnapshotBuilder {
             this.locations.rebuild(this.order, this.store);
         }
         this.locations.touch(contentOnly);
-        return this.snapshot(input.timeline, this.legacy.apply(input.upserts, input.timeline));
+        return this.snapshot(input.timeline, this.legacy.apply(input.upserts, input.timeline), input.upserts);
     }
-    snapshot(timeline, legacy = this.legacy.replace(EMPTY_LIST, timeline)) {
-        return {
+    snapshot(timeline, legacy = this.legacy.replace(EMPTY_LIST, timeline), upserts) {
+        const snapshot = {
             order: this.order,
             nodes: this.store,
             locations: this.locations,
             timeline,
             legacy,
         };
+        return { ...snapshot, workProcess: upserts === undefined ? this.process.replace(snapshot) : this.process.apply(snapshot, upserts) };
     }
 }
 function locationIdentity(location) {

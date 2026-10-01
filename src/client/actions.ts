@@ -2,6 +2,7 @@
 
 import { visibleWidth, type OverlayOptions } from '@mariozechner/pi-tui'
 import { chmodSync } from 'node:fs'
+import { TERMINAL_CONTRACT_TARGET } from '../dsh-compat.ts'
 import {
   LOCALE_SETTINGS_NAMESPACE,
   type BuiltInLocaleId as LocaleId,
@@ -30,6 +31,8 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { canonicalTuiCommandName, capabilityError, HarnessTuiCapabilities, type TuiCommandCandidate, type TuiDraftAttachment, type TuiModelOption, type TuiPermissionOption, type TuiToolOption } from './capabilities.ts'
 import { behaviorFromSettings, behaviorSettings } from './behavior.ts'
+import { fileAttachmentLines, referencePromptText } from './file-attachments.ts'
+import { cycleWorkProcessMode, normalizeWorkProcessMode, WORK_PROCESS_MODES, workProcessSettingsMutation } from './work-process-display.ts'
 import { agentPresetCopy } from './agent-preset-copy.ts'
 import { lastFencedCode } from './copy-content.ts'
 import { queueListChoiceOrder } from './queue-order.ts'
@@ -44,6 +47,23 @@ import {
 } from './keymap.ts'
 import { pluginFailureDetail } from './error-advice.ts'
 import { trajectoryRequestDetail } from './trajectory-detail.ts'
+import { sessionBrowserCommand } from './session-browser.ts'
+import { HostFileController } from './host-file-controller.ts'
+import { WorkspaceFileObserver } from './workspace-file-observer.ts'
+import { workspaceFileView, hostWorkspaceFilesView } from './workspace-file-view.ts'
+import { artifactViewCommand, type ArtifactViewController, type ArtifactViewKind } from './artifact-view.ts'
+import { mcpResourceCommand } from './mcp-resource-view.ts'
+import { teamBoardCommand } from './team-view.ts'
+import { scheduleCommand } from './schedule-view.ts'
+import { subagentCatalogCommand, type SubagentDescendantPort } from './subagent-catalog-view.ts'
+import { domainCommand, domainProgress, OptionalViewLifetime } from './optional-view-lifetime.ts'
+import { WavSpeechController } from './wav-speech.ts'
+import { wavSpeechCommand } from './wav-speech-view.ts'
+import { modelImageAdmission, modelInformationLines } from './model-information.ts'
+import { ManagementInterrupted } from './management-lifetime.ts'
+import { accountInformationLines } from './account-handoff.ts'
+import type { FetchTitleAction } from './fetch-title-target.ts'
+import { continuedQuestionCommand } from './continued-question-view.ts'
 import { isStoppableJob, jobElapsedMs, jobKillNotice } from './job-control.ts'
 import { relativeTime, sortSessionsByUpdatedAt } from './relative-time.ts'
 import type {
@@ -87,6 +107,7 @@ import {
 } from './settings.ts'
 import { toolApprovalPreview, type Transcript } from './transcript.ts'
 import { composeApprovalDetail } from './approval-preview.ts'
+import { pluginDisplayIdentity } from './experimental-package.ts'
 import { pnpmCommand } from '../pnpm-compat.ts'
 import {
   appearanceFromSettings,
@@ -151,6 +172,7 @@ import type {
   ContextTarget,
 } from './context-actions.ts'
 import { contextActionMenu } from './context-action-registry.ts'
+import type { TerminalInsertion } from './terminal-input-extensions.ts'
 
 /** Surface callbacks kept separate from Harness business actions. */
 export interface TuiActionHost {
@@ -172,11 +194,17 @@ export interface TuiActionHost {
   workspacePath?(): string
   setEditor(text: string): void
   composerText?(): string
+  captureInsertion?(): TerminalInsertion
+  insertExtensionText?(text: string, capture: TerminalInsertion, signal: AbortSignal): boolean
   canChangeSession?(): boolean
   interactionModeBlockReason?(mode: TuiMouseMode): string | undefined
   openTranscript?(): void
   replayTranscript?(): void
   openAgentTree?(): Promise<boolean>
+  openCatalogChild?: SubagentDescendantPort['open']
+  fetchTitleReason?(key: string, action: FetchTitleAction): string | undefined
+  fetchTitleAction?(key: string, action: FetchTitleAction): Promise<void>
+  openUrl?(href: string, signal: AbortSignal): Promise<void>
   interactionOrigin?(sessionId: SessionId): string | undefined
   copy(text: string): void
   close(code: number): void
@@ -371,7 +399,7 @@ function findMarketplaceSource(
 }
 
 function pluginIdentity(plugin: TuiPluginEntry): string {
-  return `${plugin.name}${plugin.version === undefined ? '' : `@${plugin.version}`}`
+  return pluginDisplayIdentity(plugin, ui('zh', 'en'))
 }
 
 function pluginDescription(plugin: TuiPluginEntry): string {
@@ -468,8 +496,10 @@ function credentialWriteFailure(ref: string): string {
 
 /** TUI-local actions. Every durable operation delegates to HarnessTuiCapabilities. */
 export class TuiActions {
+  private recordedViewer?: ArtifactViewController
   private readonly handledInteractions = new Set<string>()
   private interactionChain: Promise<void> = Promise.resolve()
+  private displayWrites: Promise<void> = Promise.resolve()
 
   /** @param capabilities - Harness-backed compatibility controller. */
   constructor(
@@ -515,6 +545,11 @@ export class TuiActions {
         case 'profile': await this.profile(args); break
         case 'mode': await this.mode(); break
         case 'model': await this.model(); break
+        case 'model-info': await this.modelInformation(); break
+        case 'account': await this.account(); break
+        case 'speech': await this.wavSpeech(args, this.host.overlays); break
+        case 'input-activities': await this.inputActivity(undefined, this.host.overlays); break
+        case 'questions': await continuedQuestionCommand(this.capabilities.continuedQuestions(), this.host.overlays); break
         case 'effort': await this.reasoningEffort(); break
         case 'language': await this.language(args); break
         case 'theme': await this.theme(args); break
@@ -523,8 +558,11 @@ export class TuiActions {
         case 'queue': await this.queue(); break
         case 'steer': await this.steer(args); break
         case 'attach': await this.attach(args); break
+        case 'attach-file': await this.attachFile(args); break
+        case 'file-references': await this.fileReferences(args); break
         case 'attachments': await this.attachments(); break
         case 'settings': await this.settings(args); break
+        case 'privacy': await this.privacy(); break
         case 'keymap': await this.keymap(args); break
         case 'mouse': await this.mouse(args); break
         case 'transcript': await this.transcriptCommand(args); break
@@ -534,13 +572,37 @@ export class TuiActions {
         case 'clarify': await this.clarifyComposer(this.clarifyTransaction(args)); break
         case 'restart': await this.restart(); break
         case 'tools': await this.tools(args); break
+        case 'display': await this.workProcessDisplay(args); break
+        case 'processes': await this.processDisclosure(); break
         case 'files': await this.files(); break
+        case 'plans': await this.recordedArtifacts('plan'); break
+        case 'review': await this.recordedArtifacts('review'); break
         case 'jobs': await this.jobs(); break
-        case 'subagents': await this.subagents(); break
+        case 'descendants':
+        case 'subagents':
+          if (name === 'descendants' || args === 'descendants') {
+            if (!this.sessionChangeAllowed()) break
+            if (this.host.openCatalogChild === undefined) throw new Error('Frozen-parent child navigation is unavailable')
+            await subagentCatalogCommand(this.capabilities.descendants(address => this.host.openCatalogChild!(address)), this.host.overlays)
+          } else await this.subagents()
+          break
+        case 'fetch-url': {
+          const target = this.host.transcript.focusedFetchTitleTarget()
+          if (target === undefined) throw new Error('Focus a visible collapsed fetch tool first')
+          const menu = this.contextMenuFor({ kind: 'fetch-title', targetKey: target.targetKey })
+          if (menu !== undefined) {
+            const choice = await this.host.overlays.select({ title: menu.title, choices: menu.nodes.flatMap(node => node.kind === 'action'
+              ? [{ id: node.id, label: node.label, ...(node.disabledReason === undefined ? {} : { disabledReason: node.disabledReason }) }] : []) })
+            if (choice !== undefined) await this.executeContext({ target: menu.target, actionId: choice.id })
+          }
+          break
+        }
         case 'trajectory': await this.trajectory(); break
         case 'feedback': await this.feedback(args); break
         case 'skills': await this.skills(); break
-        case 'mcp': await this.mcp(); break
+        case 'mcp': if (args === 'resources') await mcpResourceCommand(this.capabilities.mcpResources(), this.host.overlays); else await this.mcp(); break
+        case 'team': await teamBoardCommand(this.capabilities.teamBoard(), this.host.overlays); break
+        case 'schedules': await scheduleCommand(this.capabilities.schedules(), this.host.overlays); break
         case 'status': await this.status(); break
         case 'pending': this.retryPending(); break
         case 'help': await this.help(); break
@@ -559,15 +621,37 @@ export class TuiActions {
 
   /** Resolve the current action tree for one semantic pointer target. */
   contextMenuFor(target: ContextTarget): ContextActionMenu | undefined {
+    if (target.kind === 'text' && target.surface === 'composer') {
+      try {
+        const capture = this.host.captureInsertion?.(), port = this.capabilities.managementBridge?.()?.terminalExtensions
+        if (capture === undefined || port === undefined) return undefined
+        const rows = port.inputActivities(capture.target)
+        if (rows.length === 0) return undefined
+        return { title: ui('输入插件', 'Input activities'), target, nodes: rows.map(row => ({ kind: 'action',
+          id: `seektty-input:${row.revision}:${row.id}`, label: row.label,
+          ...(row.description === undefined ? {} : { description: row.description }),
+          ...(row.disabledReason === undefined ? {} : { disabledReason: row.disabledReason }),
+          ...(row.danger === undefined ? {} : { danger: row.danger }) })) }
+      } catch { return undefined }
+    }
+    if (target.kind === 'fetch-title' && this.host.transcript.fetchTitleTarget(target.targetKey) === undefined) return undefined
     if (target.kind === 'session' && this.capabilities.sessionTarget(idOf(target.sessionId)) === undefined) return undefined
     if (target.kind === 'workspace' && !this.capabilities.listWorkspaces().some(candidate => candidate.workspaceId === target.workspaceId)) return undefined
     if (target.kind === 'queue-item' && !this.capabilities.active()?.session.getSnapshot().queue.some(candidate => candidate.id === target.itemId)) return undefined
     if (target.kind === 'job' && !this.capabilities.jobs().some(candidate => candidate.id === target.jobId)) return undefined
     return contextActionMenu(target, {
+      ...(target.kind === 'session' ? { sessionExtensions: this.capabilities.managementBridge?.()?.terminalExtensions?.sessionActions({
+        sessionId: target.sessionId, displayTitle: this.capabilities.sessionTarget(idOf(target.sessionId))?.summary.displayTitle ?? target.sessionId,
+      }) ?? [] } : {}),
       ...(target.kind === 'job'
         ? { jobStoppable: isStoppableJob(this.capabilities.jobs().find(job => job.id === target.jobId)?.status ?? '') }
         : {}),
+      ...(target.kind === 'file' ? { fileOpenReason: this.capabilities.producedFileOpenReason === undefined ? 'Native Host desktop mapping not confirmed' : this.capabilities.producedFileOpenReason() } : {}),
       ...(target.kind === 'theme' ? { customTheme: target.themeId.startsWith('custom:') } : {}),
+      ...(target.kind === 'fetch-title' ? {
+        urlOpenReason: this.host.fetchTitleReason?.(target.targetKey, 'open') ?? (this.host.fetchTitleAction === undefined ? 'No URL opener is attached' : undefined),
+        urlCopyReason: this.host.fetchTitleReason?.(target.targetKey, 'copy') ?? (this.host.fetchTitleAction === undefined ? 'No URL copy action is attached' : undefined),
+      } : {}),
     })
   }
 
@@ -592,7 +676,18 @@ export class TuiActions {
     actionId: string,
     overlays: OverlayPrompts,
   ): Promise<void> {
-    if (target.kind === 'text') return
+    if (target.kind === 'text') {
+      if (target.surface === 'composer' && actionId.startsWith('seektty-input:')) await this.inputActivity(actionId, overlays)
+      return
+    }
+    if (target.kind === 'fetch-title') {
+      if (actionId === 'toggle') this.host.transcript.pointerToggleTool(target.targetKey)
+      else if (actionId === 'open-url' || actionId === 'copy-url') {
+        if (this.host.fetchTitleAction === undefined) throw new Error('URL action is unavailable')
+        await this.host.fetchTitleAction(target.targetKey, actionId === 'open-url' ? 'open' : 'copy')
+      }
+      return
+    }
     if (target.kind === 'session') {
       const sessionId = idOf(target.sessionId)
       const session = this.capabilities.sessionTarget(sessionId)
@@ -609,6 +704,35 @@ export class TuiActions {
       else if (actionId === 'export-descendants') await this.exportSessionZip(sessionId, true, '', overlays)
       else if (actionId === 'export-markdown') await this.exportMarkdown('', sessionId, overlays)
       else if (actionId === 'archive') await this.archive(sessionId, overlays)
+      else if (actionId.startsWith('seektty-extension:')) {
+        const port = this.capabilities.managementBridge().terminalExtensions
+        if (port === undefined) throw new Error('No terminal extension loader is mounted')
+        const target = { sessionId, displayTitle: session.summary.displayTitle }
+        const row = port.sessionActions(target).find(row => `seektty-extension:${row.revision}:${row.id}` === actionId)
+        if (row === undefined) throw new Error('Terminal extension changed; reopen the menu')
+        if (row.disabledReason !== undefined) throw new Error(row.disabledReason)
+        if (row.danger && !await overlays.confirm(row.label, row.description ?? row.label)) return
+        // Progress can wait behind another overlay. Its scope must cover the
+        // explicit target as well as the active root, through dispatch and reply.
+        const source = this.capabilities.terminalExtensionSource()
+        const targetIsCurrent = () => {
+          const latest = this.capabilities.sessionTarget(sessionId)
+          return latest !== undefined && latest.session === session.session
+        }
+        const lifetime = new OptionalViewLifetime({
+          getSnapshot: () => { const state = source.getSnapshot(); return { ...state, ready: state.ready && targetIsCurrent() } },
+          subscribe: listener => source.subscribe(listener),
+        })
+        const notice = await domainProgress(overlays, row.label, signal => lifetime.run(signal, async current => {
+          const latest = this.capabilities.sessionTarget(sessionId)
+          if (latest === undefined || latest.session !== session.session) throw new Error('Session target changed or is no longer available')
+          current.throwIfAborted()
+          const result = await port.runSessionAction({ sessionId, displayTitle: latest.summary.displayTitle }, row.id, row.revision, current)
+          if (!targetIsCurrent()) throw new ManagementInterrupted(true, 'Session target changed or is no longer available')
+          return result
+        }, true))
+        if (notice !== undefined && notice !== '') this.host.notice(notice, 'info')
+      }
       return
     }
     if (target.kind === 'workspace') {
@@ -664,15 +788,21 @@ export class TuiActions {
     }
     if (target.kind === 'file') {
       if (actionId === 'view') {
-        const content = await this.capabilities.readProducedFile(target.path)
-        await overlays.detail({ title: target.path, content, options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 } })
+        await this.overlayFlow(overlays, async navigation => {
+          const options = await this.capabilities.hostFiles(navigation.signal)
+          await workspaceFileView(new WorkspaceFileObserver(target.path, options, navigation.signal), target.path, navigation)
+        })
       } else if (actionId === 'copy-path') {
-        this.host.copy(this.capabilities.producedFilePath(target.path))
-        this.host.notice(ui('已复制产出文件路径', 'Produced-file path copied'), 'success')
+        await this.overlayFlow(overlays, async navigation => {
+          const options = await this.capabilities.hostFiles(navigation.signal), files = new HostFileController(options)
+          try { const info = await files.stat(target.path, navigation.signal); await this.host.copy(info.absolutePath)
+            this.host.notice(ui('已复制 Host 文件路径', 'Host file path copied'), 'success')
+          } finally { files.dispose() }
+        })
       } else if (actionId === 'open-external') {
         const confirmed = await overlays.confirm(
-          ui(`使用外部程序打开 ${target.path}？`, `Open ${target.path} with an external program?`),
-          ui('绝对路径将交给编辑器或系统程序；该程序不受 Agent 权限限制。', 'The absolute path is passed to an editor or system application outside Agent permission controls.'),
+          ui(`使用 Host 外部程序打开 ${target.path}？`, `Open ${target.path} with a Host external program?`),
+          ui('Host 将验证桌面路径映射；外部程序不受 Agent 工具审批限制。', 'The Host verifies its desktop path mapping; the external program is outside Agent tool approval controls.'),
           ui('打开', 'Open'),
         )
         if (confirmed) await this.capabilities.openProducedFile(target.path)
@@ -726,6 +856,52 @@ export class TuiActions {
     throw new Error(ui('该目标已变化，请重新打开右键菜单', 'The target changed; reopen the context menu'))
   }
 
+  /** Published optional WAV service; explicit draft insertion reuses the composer capture owner. */
+  private async wavSpeech(args: string, overlays: OverlayPrompts): Promise<void> {
+    if (args.trim() !== '' && args.trim() !== 'wav') throw new Error('Use /speech wav; no microphone or format conversion is provided')
+    const factory = this.capabilities.managementBridge().wavSpeech
+    if (factory === undefined || this.host.captureInsertion === undefined || this.host.insertExtensionText === undefined) throw new Error('WAV speech/composer bridge is unavailable')
+    const source = this.capabilities.terminalExtensionSource(), scope = source.getSnapshot()
+    const page = new AbortController()
+    const controller = new WavSpeechController(factory.forScope(scope, () => source.getSnapshot()), source, {
+      read: () => { const capture = this.host.captureInsertion!(); return { revision: capture.draftRev, text: capture.target.draft, capture } },
+      insert: (text, revision, opaque) => {
+        const capture = opaque as TerminalInsertion | undefined
+        return capture !== undefined && capture.draftRev === revision && this.host.insertExtensionText!(text, capture, page.signal)
+      },
+    })
+    try { await wavSpeechCommand(controller, overlays) }
+    finally { page.abort(); controller.dispose() }
+  }
+
+  /** Explicitly installed input plugins produce guarded draft text, never an automatic prompt. */
+  private async inputActivity(actionId: string | undefined, overlays: OverlayPrompts): Promise<void> {
+    const port = this.capabilities.managementBridge().terminalExtensions
+    const capture = this.host.captureInsertion?.()
+    if (port === undefined || capture === undefined || this.host.insertExtensionText === undefined) throw new Error('Terminal input activities are unavailable')
+    const lifetime = new OptionalViewLifetime(this.capabilities.terminalExtensionSource())
+    const scopeKey = lifetime.key()
+    const rows = port.inputActivities(capture.target)
+    if (rows.length === 0) { this.host.notice(ui('没有已加载的终端输入插件', 'No terminal input activities are loaded'), 'info'); return }
+    const choice = actionId ?? (await overlays.select({ title: ui('输入插件 · 仅插入草稿', 'Input activities · insert into draft'), choices: rows.map(row => ({
+      id: `seektty-input:${row.revision}:${row.id}`, label: row.label,
+      ...(row.description === undefined ? {} : { description: row.description }),
+      ...(row.disabledReason === undefined ? {} : { disabledReason: row.disabledReason }),
+    })) }))?.id
+    if (choice === undefined) return
+    const row = rows.find(row => `seektty-input:${row.revision}:${row.id}` === choice)
+    if (row === undefined) throw new Error('Terminal input activity changed; reopen the menu')
+    if (row.disabledReason !== undefined) throw new Error(row.disabledReason)
+    if (row.danger && !await overlays.confirm(row.label, row.description ?? row.label)) return
+    if (lifetime.key() !== scopeKey) throw new Error('Session changed; reopen input activities')
+    const value = await domainProgress(overlays, row.label, signal => lifetime.run(signal,
+      current => port.runInputActivity(capture.target, row.id, row.revision, current)))
+    // Progress has released its modal owner before restoring composer focus.
+    if (value === undefined) return
+    const applied = lifetime.key() === scopeKey && this.host.insertExtensionText(value, capture, new AbortController().signal)
+    if (!applied) this.host.notice(ui('草稿或会话已变化，插件结果未插入', 'Draft or Session changed; plugin result was not inserted'), 'warning')
+  }
+
   private async settingsConflict(
     error: TuiSettingsConflictError,
     overlays: OverlayPrompts = this.host.overlays,
@@ -759,9 +935,10 @@ export class TuiActions {
   async commandPalette(): Promise<void> {
     try {
       const catalog = await this.capabilities.commandCatalog()
+      const warnings = this.capabilities.commandCatalogWarnings?.() ?? []
       const choice = await this.host.overlays.select({
         title: ui('命令面板', "Command palette"),
-        detail: ui('选择要使用的功能', "Choose a command"),
+        detail: [ui('选择要使用的功能', "Choose a command"), ...warnings].join('\n'),
         choices: catalog.map(command => ({
           id: command.name,
           label: `/${command.name}`,
@@ -837,6 +1014,10 @@ export class TuiActions {
   }
 
   private async sessions(query: string): Promise<void> {
+    if ((query === '' || ['active', 'all', 'archived'].includes(query)) && this.capabilities.sessionBrowser !== undefined) {
+      await sessionBrowserCommand(this.capabilities.sessionBrowser(), query, this.host.overlays)
+      return
+    }
     let sessionHitsHaveMore = false
     const readChoices = async (): Promise<OverlayChoice[]> => {
       const current = this.capabilities.active()?.sessionId
@@ -929,8 +1110,8 @@ export class TuiActions {
       ui('归档', "Archive"),
     )
     if (!confirmed) return
-    await this.capabilities.archiveSession(targetSessionId)
-    this.host.notice(ui('会话已归档；当前不能在这里恢复', "Session archived; archived sessions cannot be resumed here"), 'success')
+    await overlays.progress({ title: ui('归档会话', 'Archive Session'), work: async (_report, signal) => this.capabilities.archiveSession(targetSessionId, signal) })
+    this.host.notice(ui('会话已归档；可用 /sessions archived 恢复', 'Session archived; restore it with /sessions archived'), 'success')
   }
 
   private async exportSession(args: string, targetSessionId = this.capabilities.active()?.sessionId): Promise<void> {
@@ -1404,7 +1585,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           const copy = agentPresetCopy(mode)
           return {
             id: mode.id,
-            label: `${currentMark(mode.current)}${copy.label}${mode.trust === 'user' ? ui(' · 用户', " · user") : ''}`,
+            label: `${currentMark(mode.current)}${copy.label}`,
             description: copy.description ?? (mode.isDefault ? ui('部署默认模式', "Deployment default") : mode.id),
             ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
           }
@@ -2577,13 +2758,28 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     if (args === '') throw new Error(ui('用法：/steer <消息>', "Usage: /steer <message>"))
     const active = this.capabilities.active()
     if (active === undefined) return
-    const result = await active.session.prompt(this.capabilities.promptContent(args), 'steer')
+    const draft = this.capabilities.capturePrompt(args)
+    const result = await active.session.prompt(draft.content, 'steer')
     if (!result.ok) throw new Error(ui(`引导失败：${result.error.message}`, `Steering failed: ${result.error.message}`))
-    this.capabilities.clearAttachments()
+    this.capabilities.acceptPrompt(draft)
     this.host.notice(ui('引导已接受', "Steering accepted"), 'success')
   }
 
   private async attach(args: string): Promise<void> {
+    if (typeof this.capabilities.modelInformation === 'function') {
+      const sessionId = this.capabilities.active()?.sessionId
+      const admission = await domainProgress(this.host.overlays, ui('检查图片能力', 'Inspect image capability'), async signal => {
+        try { return modelImageAdmission(await this.capabilities.modelInformation(signal)) }
+        catch (error) {
+          signal.throwIfAborted()
+          if (error instanceof ManagementInterrupted || this.capabilities.active()?.sessionId !== sessionId) throw error
+          return { allowed: true, support: 'unknown' as const }
+        }
+      })
+      if (admission === undefined || this.capabilities.active()?.sessionId !== sessionId) return
+      if (!admission.allowed) throw new Error(ui('当前模型的已声明输入能力不包含图片。', 'The current model explicitly does not support image input.'))
+      if (admission.support === 'unknown') this.host.notice(ui('当前模型的图片能力未知；继续使用既有图片路径，不保证模型可处理。', 'Image support is unknown for the current model; the existing image path remains available without a support guarantee.'), 'info')
+    }
     const path = args.trim()
     if (path !== '') {
       await this.noticeAttachment(await this.capabilities.addAttachment(path))
@@ -2605,12 +2801,102 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     }
   }
 
+  private async attachFile(args: string): Promise<void> {
+    const reason = this.capabilities.fileIntakeReason()
+    if (reason !== undefined) throw new Error(reason)
+    const owner = this.capabilities.active()?.sessionId, generation = this.capabilities.managementState().generation
+    const path = args || await this.host.overlays.input({ title: ui('添加文件', 'Attach file'),
+      placeholder: ui('工作区相对路径或绝对路径', 'Workspace-relative or absolute path') })
+    if (path === undefined || path.trim() === '') return
+    if (owner !== this.capabilities.active()?.sessionId || generation !== this.capabilities.managementState().generation) throw new Error('File draft owner changed; select the file again')
+    const staged = await domainProgress(this.host.overlays, ui('上传并暂存文件 · 终端限额 8 MiB/个、16 MiB/草稿、8 个', 'Stage file · terminal limits: 8 MiB/file, 16 MiB/draft, 8 files'),
+      signal => this.capabilities.addFile(path, signal))
+    if (staged === undefined) {
+      this.host.notice(ui('本次文件未加入草稿；若上传已开始，Host 可能已保存文件。取消不撤销上传，也不会自动重试。',
+        'This file was not added to the draft. If upload started, Host may have saved it; cancellation does not revoke upload or retry automatically.'), 'warning')
+      return
+    }
+    this.host.notice(ui(`已加入文件 ${staged.file.name} · ${staged.file.bytes} B；音视频也以保存文件句柄发送，不保证原生模态支持。`,
+      `Added file ${staged.file.name} · ${staged.file.bytes} B; audio/video also use saved-file handles, without a native-modality guarantee.`), 'success')
+  }
+
+  private async fileReferences(args: string): Promise<void> {
+    const reason = this.capabilities.fileReferenceReason()
+    if (reason !== undefined) throw new Error(reason)
+    const owner = this.capabilities.active()?.sessionId, generation = this.capabilities.managementState().generation
+    const query = args || await this.host.overlays.input({ title: ui('Host 文件引用', 'Host file references'), placeholder: ui('文件或目录搜索词', 'File or directory query') })
+    if (query === undefined) return
+    const current = () => owner === this.capabilities.active()?.sessionId && generation === this.capabilities.managementState().generation
+    if (!current()) throw new Error('File reference scope changed')
+    const references = await domainProgress(this.host.overlays, ui('查找 Host 文件引用', 'Find Host file references'), signal => this.capabilities.fileReferences(query, signal))
+    if (references === undefined) return
+    await this.overlayFlow(this.host.overlays, async navigation => {
+      await navigation.selectPage({ title: ui('Host 文件引用', 'Host file references'),
+        detail: ui('引用不会上传目录或递归读取；音视频引用不保证模型原生支持。', 'References do not upload directories or read recursively; audio/video references do not guarantee native model support.'),
+        choices: references.map((item, index) => ({ id: String(index), label: item.path, description: item.kind })) }, async selected => {
+        if (!current()) throw new Error('File reference scope changed')
+        const candidate = references[Number(selected.id)]
+        if (candidate === undefined) throw new Error('File reference no longer exists')
+        const choice = await navigation.select({ title: candidate.path, choices: [
+          { id: 'insert', label: ui('插入路径引用', 'Insert path reference') },
+          { id: 'copy', label: ui('复制路径', 'Copy path') },
+          { id: 'open', label: ui('通过 Host 打开', 'Open through Host'), description: ui('需要确认；不上传所选文件', 'Requires consent; does not upload this file') },
+        ] })
+        if (!current()) throw new Error('File reference scope changed')
+        if (choice?.id === 'insert') {
+          const text = this.host.composerText?.() ?? ''
+          // End the modal owner before setEditor restores composer focus.
+          navigation.finish()
+          this.host.setEditor(`${text}${text === '' || /\s$/u.test(text) ? '' : ' '}${referencePromptText(candidate)}`)
+          this.host.notice(ui('已插入路径引用', 'Path reference inserted'), 'success')
+        } else if (choice?.id === 'copy') {
+          await this.host.copy(candidate.path)
+          this.host.notice(ui('已复制路径', 'Path copied'), 'success')
+        } else if (choice?.id === 'open') {
+          const opened = await domainProgress(navigation, ui('通过 Host 打开文件', 'Open file through Host'), signal => this.capabilities.openFileReference(candidate.path,
+            async (path, consentSignal) => { const accepted = await navigation.confirm(ui(`使用外部程序打开 ${path}？`, `Open ${path} with an external program?`),
+              ui('外部程序不受 Agent 权限控制。', 'External programs operate outside Agent permission controls.'), ui('打开', 'Open')); consentSignal.throwIfAborted(); return accepted }, signal))
+          if (opened === true) this.host.notice(ui('Host 已确认打开请求', 'Host confirmed the open request'), 'success')
+        }
+      })
+    })
+  }
+
   private noticeAttachment(attachment: TuiDraftAttachment): void {
     const dimensions = attachment.width === undefined ? '' : ` · ${attachment.width}×${attachment.height}`
     this.host.notice(ui(`已加入 ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`, `Added ${attachment.name} · ${attachment.mediaType} · ${attachment.bytes} B${dimensions}`), 'success')
   }
 
   private async attachments(): Promise<void> {
+    const files = this.capabilities.draftFiles()
+    if (files.length > 0) {
+      const owner = this.capabilities.active()!.sessionId
+      const generation = this.capabilities.managementState().generation
+      await this.overlayFlow(this.host.overlays, async navigation => {
+        const choices = () => [{ id: '__clear__', label: ui('清空当前图片和文件选择', 'Clear current image and file selections') },
+          ...this.capabilities.draftFiles().map(item => ({ id: item.receiptId, label: item.file.name, description: `${item.file.bytes} B · file handle` }))]
+        await navigation.selectPage({ title: ui('待发送附件', 'Pending attachments'), choices: choices(),
+          detail: ui('清除或移除只改变本地草稿选择，不删除 Host 已保存的文件。', 'Clear/remove changes the local draft selection; it does not delete files already saved by Host.') }, async selected => {
+          const valid = () => owner === this.capabilities.active()?.sessionId && generation === this.capabilities.managementState().generation
+          if (!valid()) throw new Error('File draft owner changed; reopen /attachments')
+          if (selected.id === '__clear__') {
+            const images = this.capabilities.draftAttachments(), captured = this.capabilities.draftFiles()
+            if (!await navigation.confirm(ui('清空待发送附件？', 'Clear pending attachments?'), ui('只移除草稿选择。', 'Only draft selections are removed.'), ui('清空', 'Clear'))) return
+            if (!valid()) throw new Error('File draft owner changed; reopen /attachments')
+            this.capabilities.acceptPrompt({ sessionId: owner, content: captured.map(item => ({ type: 'file', receiptId: item.receiptId })), images })
+          } else {
+            const item = this.capabilities.draftFiles().find(candidate => candidate.receiptId === selected.id)
+            if (item === undefined) throw new Error('File is no longer staged')
+            const action = await navigation.select({ title: item.file.name, choices: [{ id: 'details', label: ui('文件句柄详情', 'File handle details') }, { id: 'remove', label: ui('移除草稿选择', 'Remove draft selection') }] })
+            if (!valid()) throw new Error('File draft owner changed; reopen /attachments')
+            if (action?.id === 'details') await navigation.detail({ title: item.file.name, content: fileAttachmentLines(item.file).join('\n') })
+            else if (action?.id === 'remove') this.capabilities.removeFileReceipt(item.receiptId, owner)
+          }
+          navigation.updateChoices(choices()); this.host.refresh()
+        })
+      })
+      return
+    }
     const items = this.capabilities.draftAttachments()
     if (items.length === 0) {
       this.host.notice(ui('没有待发送图片', "No images waiting to be sent"), 'info')
@@ -2627,6 +2913,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async settings(args: string, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    if (args === 'privacy') { await this.privacy(overlays); return }
     const bridge = this.capabilities.managementBridge().settings
     const documents = visibleSettingsDocuments(await bridge.describe())
     if (documents.length === 0) throw new Error(ui('当前 Profile 未注册任何 Settings 命名空间', "The current Profile has no registered Settings namespaces"))
@@ -2646,6 +2933,32 @@ The directory, user files, and all session logs are kept; sessions become ungrou
       if (args !== '') await this.settingsNamespace(navigation, args)
       await root
     }, { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 })
+  }
+
+  private async privacy(overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    const service = this.capabilities.managementBridge().privacy
+    if (service === undefined) throw new Error(ui('当前 Host 不提供上传策略快照', 'This Host does not provide an upload policy snapshot'))
+    const snapshot = await service.snapshot()
+    const rows = snapshot.entries.map(entry => {
+      const label = entry.channel === 'session-log'
+        ? ui('DeepSeek 会话日志', 'DeepSeek session logs') : ui('OpenTelemetry 反馈会话', 'OpenTelemetry feedback sessions')
+      const state = !entry.active ? ui('未运行', 'Inactive') : ({
+        enabled: ui('已启用', 'Enabled'), disabled: ui('已关闭', 'Disabled'),
+        'feedback-only': ui('仅明确反馈授权', 'Explicit feedback only'), unknown: ui('未知', 'Unknown'),
+      })[entry.policy]
+      return `${label} · ${entry.entryId}: ${state}${entry.maxBytes === undefined ? '' : ` · ${entry.maxBytes} bytes`}`
+        + (entry.channel === 'session-log' && entry.active ? `\n/settings ${entry.entryId}` : '')
+    })
+    await overlays.detail({
+      title: ui('隐私与会话上传', 'Privacy and session uploads'),
+      content: [ui(`当前 Profile：${snapshot.profile}`, `Current Profile: ${snapshot.profile}`), ...rows,
+        ...(rows.length === 0 ? [ui('本 Host 未观察到上述通道实例；不能据此断言其他上传通道已关闭。', 'These channel instances were not observed in this Host; this does not establish that other upload channels are disabled.')] : []),
+        ui('会话日志可随 DeepSeek Provider 请求包含工作目录和事件正文。关闭仅影响后续请求，不撤回已上传或已准备的请求；重新启用可能补发未确认后缀。', 'Session logs can accompany DeepSeek Provider requests with the working directory and event bodies. Disabling affects future requests, not uploaded or already prepared requests; re-enabling can send unaccepted suffixes.'),
+        ui('OpenTelemetry 默认 FEEDBACK_ONLY；明确反馈可授权上传会话上下文。mode 不是当前官方 live Settings 字段，须通过 Profile 配置并重启改变；不要把日志开关当作它的开关。', 'OpenTelemetry defaults to FEEDBACK_ONLY; explicit feedback can authorize session context upload. Its mode is not an official live Settings field: change Profile config and restart. The log switch does not control it.'),
+        ui('Desktop 产品分析是独立通道，需要在 Desktop 中核查。DSH_TELEMETRY_DISABLED 不是所有通道的统一开关。以上实际状态不代表用户已上传。', 'Desktop product analytics is a separate channel to audit in Desktop. DSH_TELEMETRY_DISABLED is not a unified switch. The states above do not establish that data was uploaded.'),
+      ].join('\n\n'),
+      options: { width: '95%', maxHeight: '90%', anchor: 'center', margin: 1 },
+    })
   }
 
   private settingsCategoryRows(
@@ -4239,6 +4552,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
             content: ui(
               [
                 `Harness：${status.hostVersion}`,
+                `终端合同受测目标：${TERMINAL_CONTRACT_TARGET.tested} · Session V${TERMINAL_CONTRACT_TARGET.sessionFormat}（不代表本次运行验收）`,
                 `Node：${status.nodeVersion}`,
                 `系统：${status.platform}/${status.architecture}`,
                 `pnpm：${report.pnpm ?? '不可用'}`,
@@ -4252,6 +4566,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
               ].join('\n'),
               [
                 `Harness: ${status.hostVersion}`,
+                `Terminal contract target: ${TERMINAL_CONTRACT_TARGET.tested} · Session V${TERMINAL_CONTRACT_TARGET.sessionFormat} (not a live acceptance result)`,
                 `Node: ${status.nodeVersion}`,
                 `System: ${status.platform}/${status.architecture}`,
                 `pnpm: ${report.pnpm ?? 'unavailable'}`,
@@ -4358,9 +4673,52 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     }, options)
   }
 
+  private async workProcessDisplay(args: string): Promise<void> {
+    const save = async (choice: string) => {
+      const settings = this.capabilities.managementBridge().settings
+      const document = behaviorSettings(await settings.describe(TUI_BEHAVIOR_SETTINGS_NAMESPACE, { bypassCache: true }))
+      const next = choice === 'cycle' ? cycleWorkProcessMode((document.value as Record<string, unknown>).workProcessDisplay)
+        : choice === 'terminal-default' ? choice : normalizeWorkProcessMode(choice)
+      if (next === undefined || next !== choice && choice !== 'cycle') throw new Error('Use /display compact|standard|detailed|verbose|terminal-default|cycle')
+      const field = settingsFields(document).find(candidate => candidate.path.length === 1 && candidate.path[0] === 'workProcessDisplay')
+      const mutation = workProcessSettingsMutation(document, next, field !== undefined && !field.disabled)
+      const updated = await settings.mutate(mutation.namespace, mutation.ops, mutation.expectedRevision)
+      await this.settingsChanged(updated, ui('工作过程显示', 'Work-process display'))
+    }
+    let choice = args
+    if (choice === '') {
+      const selected = await this.host.overlays.select({ title: ui('工作过程显示', 'Work-process display'),
+        choices: [...WORK_PROCESS_MODES.map(id => ({ id, label: id })),
+          { id: 'terminal-default', label: ui('现有终端偏好（不设置模式）', 'Existing terminal preferences (unset mode)') }] })
+      if (selected === undefined) return
+      choice = selected.id
+    }
+    const job = this.displayWrites.then(() => save(choice))
+    this.displayWrites = job.catch(() => {})
+    await job
+  }
+
+  private async processDisclosure(): Promise<void> {
+    const owner = this.capabilities.active()?.sessionId
+    const generation = this.capabilities.managementState().generation
+    await this.overlayFlow(this.host.overlays, async navigation => {
+      const choices = () => this.host.transcript.processControls().map(control => ({ id: control.id,
+        label: control.label, description: control.open ? ui('已展开', 'Expanded') : ui('已折叠', 'Collapsed') }))
+      await navigation.selectPage({ title: ui('工作过程展开', 'Process disclosure'), choices: choices(),
+        detail: ui('仅控制当前视图；全局模式使用 /display。原生终端通过重新回放显示更改。', 'Current view only; use /display for the global mode. Native terminals replay to show changes.') }, async selected => {
+          if (owner !== this.capabilities.active()?.sessionId || generation !== this.capabilities.managementState().generation) {
+            navigation.finish()
+            throw new Error('Current process view changed; reopen /processes')
+          }
+          this.host.transcript.toggleProcess(selected.id)
+          navigation.updateChoices(choices())
+        })
+    })
+  }
+
   private async files(): Promise<void> {
     const groups = await this.capabilities.producedFileGroups()
-    if (groups.length === 0) {
+    if (groups.length === 0 && this.capabilities.artifactViewer === undefined) {
       this.host.notice(ui('本会话没有生成文件', 'This session has not produced any files'), 'info')
       return
     }
@@ -4369,33 +4727,33 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       await navigation.selectPage({
         title: ui('产出文件', 'Produced files'),
         detail: ui('查看、复制或打开本会话生成的文件', 'View, copy, or open files produced in this session'),
-        choices: groups.flatMap(group => group.paths.map(path => ({
+        choices: [...(this.capabilities.hostFiles === undefined ? [] : [{ id: '__host_files__', label: ui('Host 工作区文件', 'Host workspace files'), description: ui('目录、文本／二进制与文件变化监听', 'Directories, text/binary pages and file observation') }]), ...(this.capabilities.artifactViewer === undefined ? [] : [{ id: '__recorded_artifacts__', label: ui('已记录的交付与附件', 'Recorded deliveries and attachments'), description: ui('Host 文件分页与原始附件引用', 'Host file pages and original attachment references') }]), ...groups.flatMap(group => group.paths.map(path => ({
           id: path,
           label: path,
           description: ui(`第 ${String(group.turn)} 轮`, `Turn ${String(group.turn)}`),
           contextTarget: { kind: 'file' as const, path },
-        }))),
+        })))],
         options,
       }, async (selected) => {
+        if (selected.id === '__host_files__') { await hostWorkspaceFilesView(await this.capabilities.hostFiles(navigation.signal), navigation); return }
+        if (selected.id === '__recorded_artifacts__') { await this.recordedArtifacts('files', navigation); return }
         const action = await navigation.select({
           title: selected.label,
           choices: [
             { id: 'view', label: ui('在 TUI 内查看', 'View in TUI'), description: ui('用只读详情页打开文本文件', 'Open a text file in a read-only detail page') },
             { id: 'copy', label: ui('复制绝对路径', 'Copy absolute path') },
-            { id: 'open', label: ui('用外部程序打开', 'Open with an external program'), description: ui('使用编辑器或系统默认程序', 'Use the editor or the system default program') },
+            { id: 'open', label: ui('用 Host 外部程序打开', 'Open with a Host external program'), ...(this.capabilities.producedFileOpenReason?.() === undefined ? {} : { disabledReason: this.capabilities.producedFileOpenReason()! }) },
           ],
           searchable: false,
         })
         if (action?.id === 'view') {
-          const content = await this.capabilities.readProducedFile(selected.id)
-          await navigation.detail({
-            title: selected.label,
-            content,
-            options,
-          })
+          const files = await this.capabilities.hostFiles(navigation.signal)
+          await workspaceFileView(new WorkspaceFileObserver(selected.id, files, navigation.signal), selected.label, navigation)
         } else if (action?.id === 'copy') {
-          this.host.copy(this.capabilities.producedFilePath(selected.id))
-          this.host.notice(ui('已复制产出文件路径', "Produced-file path copied"), 'success')
+          const files = new HostFileController(await this.capabilities.hostFiles(navigation.signal))
+          try { const info = await files.stat(selected.id, navigation.signal); await this.host.copy(info.absolutePath)
+            this.host.notice(ui('已复制 Host 文件路径', 'Host file path copied'), 'success')
+          } finally { files.dispose() }
         } else if (action?.id === 'open') {
           const confirmed = await navigation.confirm(
             ui(`使用外部程序打开 ${selected.label}？`, `Open ${selected.label} with an external program?`),
@@ -4403,7 +4761,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
             ui('打开', "Open"),
           )
           if (confirmed) {
-            await this.capabilities.openProducedFile(selected.id)
+            await this.capabilities.openProducedFile(selected.id, navigation.signal)
             this.host.notice(ui(`已打开 ${selected.id}`, `Opened ${selected.id}`), 'success')
           }
         }
@@ -4596,7 +4954,10 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
 
   private async trajectory(): Promise<void> {
     const trajectory = this.capabilities.trajectory()
-    if (trajectory === undefined) throw new Error(ui('当前 Profile 未提供 Trajectory 投影', "The current Profile does not provide a Trajectory projection"))
+    if (trajectory === undefined) {
+      if (this.capabilities.artifactViewer !== undefined) { await this.recordedArtifacts('trajectory'); return }
+      throw new Error(ui('当前 Profile 未提供 Trajectory 投影', "The current Profile does not provide a Trajectory projection"))
+    }
     const choices: OverlayChoice[] = trajectory.requests.map((request, index) => ({
       id: `request:${index}`,
       label: `${request.purpose} · ${request.status} · #${request.startSeq}`,
@@ -4609,6 +4970,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       description: call.callId,
       contextTarget: { kind: 'trajectory' as const, id: `call:${call.callId}` },
     })))
+    if (this.capabilities.artifactViewer !== undefined) choices.unshift({ id: '__recorded_artifacts__', label: ui('已记录的工具结果与附件', 'Recorded tool results and attachments'), description: ui('保留工具正文、错误和溢出引用', 'Preserves tool content, errors, and spill references') })
     if (choices.length === 0) {
       this.host.notice(ui('当前会话还没有请求或工具轨迹', "The current session has no model-request or tool trajectory yet"), 'info')
       return
@@ -4621,6 +4983,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         choices,
         options,
       }, async (selected) => {
+        if (selected.id === '__recorded_artifacts__') { await this.recordedArtifacts('trajectory', navigation); return }
         const value = selected.id.startsWith('request:')
           ? trajectory.requests[Number(selected.id.slice('request:'.length))]
           : trajectory.runningCalls.find(call => `call:${call.callId}` === selected.id)
@@ -4631,6 +4994,12 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         })
       })
     }, options)
+  }
+
+  private async recordedArtifacts(kind: ArtifactViewKind, overlays: OverlayPrompts = this.host.overlays): Promise<void> {
+    this.recordedViewer ??= this.capabilities.artifactViewer({ copy: text => this.host.copy(text),
+      ...(this.host.openUrl === undefined ? {} : { open: (href, signal) => this.host.openUrl!(href, signal) }) })
+    await artifactViewCommand(this.recordedViewer, kind, overlays)
   }
 
   private async feedback(args: string): Promise<void> {
@@ -4742,7 +5111,9 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     const tools = this.capabilities.toolCatalog().filter(tool => tool.name.startsWith('mcp__'))
     const plugins = inventory.filter(item => item.moduleName.toLowerCase().includes('mcp'))
     const settings = documents.filter(document => document.namespace.toLowerCase().includes('mcp'))
-    if (tools.length + plugins.length + settings.length === 0) {
+    const resourceView = this.capabilities.managementBridge().optionalViews === undefined ? undefined : this.capabilities.mcpResources()
+    const resourcesReason = resourceView?.reason('list_mcp_resources')
+    if (tools.length + plugins.length + settings.length === 0 && resourceView === undefined) {
       this.host.notice(ui('当前 Profile 没有可见 MCP 工具、实例或 Settings；可用 /plugin 安装扩展', "The current Profile has no visible MCP tools, instances, or Settings; use /plugin to install an extension"), 'info')
       return
     }
@@ -4752,6 +5123,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         title: 'MCP',
         detail: ui('查看 MCP 工具、实例和设置。MCP 可能在独立进程或远端服务中运行，不受 Agent 沙箱保护。', "View MCP tools, instances, and Settings. MCP may run in a separate process or remote service outside the Agent sandbox."),
         choices: [
+          ...(resourceView === undefined ? [] : [{ id: '__resources__', label: ui('资源与资源模板', 'Resources and resource templates'), ...(resourcesReason === undefined ? {} : { disabledReason: resourcesReason }) }]),
           ...tools.map(tool => ({
             id: `tool:${tool.name}`,
             label: ui(`工具 · ${tool.name}`, `Tool · ${tool.name}`),
@@ -4773,6 +5145,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         ],
         options,
       }, async (selected) => {
+        if (selected.id === '__resources__' && resourceView !== undefined) { await mcpResourceCommand(resourceView, navigation); return }
         if (selected.id.startsWith('settings:')) {
           await this.settings(selected.id.slice('settings:'.length), navigation)
           return
@@ -4831,6 +5204,72 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         }
       })
     }, options)
+  }
+
+  private async modelInformation(): Promise<void> {
+    const info = await domainProgress(this.host.overlays, ui('模型信息', 'Model information'), signal => this.capabilities.modelInformation(signal))
+    if (info !== undefined) await this.host.overlays.detail({ title: ui('模型信息', 'Model information'), content: modelInformationLines(info).join('\n'), footer: ui('未知信息保持未知；不会为填充信息发起模型发现或模型请求。', 'Missing metadata remains unknown; this view does not initiate discovery or model requests.') })
+  }
+
+  private async account(): Promise<void> {
+    const { source, controller, callbackOrigin } = this.capabilities.accountView()
+    const lifetime = new OptionalViewLifetime(source)
+    const key = lifetime.key()
+    const stop = source.subscribe(() => {
+      try { if (lifetime.key() !== key) controller.reconnect({}) }
+      catch { controller.reconnect({}) }
+    })
+    let requestedSignIn = false
+    try {
+      await domainCommand(this.host.overlays, ui('官方账号', 'Official account'), async () => {
+        await domainProgress(this.host.overlays, 'Official account state', signal => lifetime.run(signal, current => controller.refresh(current)))
+        while (lifetime.key() === key) {
+          const origin = callbackOrigin()
+          const url = controller.loginUrl
+          const lateError = controller.lateCancellationError
+          const choice = await this.host.overlays.select({ title: ui('官方账号', 'Official account'),
+            detail: [...accountInformationLines(controller.snapshot, controller.balanceSnapshot), ...(lateError === undefined ? [] : [String(lateError)])].join('\n'),
+            choices: [
+              { id: 'refresh', label: ui('刷新账号状态', 'Refresh account state') },
+              { id: 'balance', label: ui('查看余额', 'Inspect balance') },
+              { id: 'sign-in', label: ui('浏览器登录', 'Sign in using browser'), ...(origin === undefined ? { disabledReason: ui('官方 HTTP 回调服务未监听', 'Official HTTP callback service is not listening') } : {}) },
+              { id: 'copy-login', label: ui('复制登录链接', 'Copy sign-in URL'), ...(url === undefined ? { disabledReason: ui('没有待浏览器确认的登录链接', 'No browser sign-in URL is pending') } : {}) },
+              { id: 'cancel', label: ui('取消登录尝试', 'Cancel sign-in attempt'), ...(!requestedSignIn && controller.snapshot?.attempt == null ? { disabledReason: ui('没有已观察或已发起的登录尝试', 'No observed or dispatched sign-in attempt') } : {}) },
+              { id: 'sign-out', label: ui('退出官方账号', 'Sign out of official account') },
+            ],
+          })
+          if (choice === undefined || lifetime.key() !== key) return
+          if (choice.disabledReason !== undefined) continue
+          if (choice.id === 'copy-login') {
+            if (url !== undefined) this.host.copy(url)
+            continue
+          }
+          if (choice.id === 'sign-in') {
+            const currentOrigin = callbackOrigin()
+            if (currentOrigin === undefined || currentOrigin !== origin) throw new Error('Official callback service changed; refresh required')
+            requestedSignIn = true
+            await domainProgress(this.host.overlays, 'Start official sign-in', signal => lifetime.run(signal, current => controller.startSignIn(currentOrigin, current), true))
+            if (controller.loginUrl !== undefined && lifetime.key() === key) await this.host.overlays.detail({ title: 'Browser sign-in', content: controller.loginUrl, footer: ui('复制此链接到浏览器完成登录。关闭页面不等于取消官方登录尝试。', 'Copy this URL to your browser to complete sign-in. Closing the view does not cancel the official attempt.') })
+          } else if (choice.id === 'cancel') {
+            const requested = await domainProgress(this.host.overlays, 'Request sign-in cancellation', signal => lifetime.run(signal, async current => { await controller.cancelSignIn(current); return true }, true))
+            if (requested === true) this.host.notice(ui('已记录取消请求；仅刷新到官方结果才可确认。', 'Cancellation request recorded; refresh official state to confirm the outcome.'), 'info')
+          } else if (choice.id === 'balance') {
+            await domainProgress(this.host.overlays, 'Official account balance', signal => lifetime.run(signal, current => controller.refreshBalance(current)))
+          } else if (choice.id === 'sign-out') {
+            if (!await this.host.overlays.confirm('Sign out of official account', 'Host owns credential removal and cancellation of account-backed tasks.')) continue
+            if (lifetime.key() !== key) return
+            const signedOut = await domainProgress(this.host.overlays, 'Sign out of official account', signal => lifetime.run(signal, current => controller.signOut(async consentSignal => {
+              consentSignal.throwIfAborted()
+              const confirmed = await this.host.overlays.confirm('Account tasks are running', 'Sign out and allow Host to cancel those tasks?')
+              consentSignal.throwIfAborted(); return confirmed
+            }, current), true))
+            if (signedOut === true && controller.snapshot?.status === 'signed-out') this.host.notice(ui('官方已确认退出账号', 'Official account sign-out confirmed'), 'success')
+          } else {
+            await domainProgress(this.host.overlays, 'Official account state', signal => lifetime.run(signal, current => controller.refresh(current)))
+          }
+        }
+      })
+    } finally { stop(); controller.dispose() }
   }
 
   private async mcpTargetDetail(
@@ -4936,6 +5375,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         title: ui('状态与统计', "Status and statistics"),
         detail: [
           `Harness ${status.hostVersion} · Node ${status.nodeVersion} · ${status.platform}/${status.architecture}`,
+          ui(`终端合同受测目标：${TERMINAL_CONTRACT_TARGET.tested} · Session V${TERMINAL_CONTRACT_TARGET.sessionFormat}`, `Terminal contract target: ${TERMINAL_CONTRACT_TARGET.tested} · Session V${TERMINAL_CONTRACT_TARGET.sessionFormat}`),
           `Profile ${status.profile} · ${status.running ? ui('运行中', 'running') : ui('空闲', 'idle')}`,
           status.workspace,
           `${status.session} · ${status.mode} · ${status.model} · ${status.permission}`,
@@ -4998,6 +5438,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     const call = snapshot?.runningCalls?.find(candidate => candidate.callId === wait.payload.callId)
     const composed = composeApprovalDetail({
       ...(wait.payload.reason === undefined ? {} : { reason: wait.payload.reason }),
+      ...(wait.payload.displayReason === undefined ? {} : { displayReason: wait.payload.displayReason }),
       fallback: ui(`调用 ${wait.payload.callId ?? wait.payload.approvalId}`, `Invoke ${wait.payload.callId ?? wait.payload.approvalId}`),
       preview: toolApprovalPreview(call),
     })
@@ -5043,13 +5484,56 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
     const questions = wait.payload.questions
     const options = { width: '95%', maxHeight: '90%', anchor: 'bottom-center', margin: 1 } as const
     await this.overlayFlow(this.host.overlays, async (navigation) => {
+      const claim = new AbortController()
+      const release = () => claim.abort()
+      navigation.signal.addEventListener('abort', release, { once: true })
+      let settled = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let ticker: ReturnType<typeof setInterval> | undefined
+      let stream: AsyncIterator<{ readonly remainingMs: number }> | undefined
+      const cancel = async () => { if (!settled) await this.capabilities.cancelQuestion(wait) }
+      try {
+        if (wait.payload.wait?.timed === true) {
+          stream = this.capabilities.attachQuestionWait(wait, claim.signal)[Symbol.asyncIterator]()
+          const first = await stream.next()
+          if (first.done || navigation.signal.aborted) { settled = true; navigation.finish(); return }
+          const remaining = first.value.remainingMs
+          if (!Number.isSafeInteger(remaining) || remaining < 0 || remaining > 2147483647) throw new Error('Native question wait returned an invalid remaining duration')
+          const deadline = Date.now() + remaining
+          const status = () => navigation.setStatus?.(ui(
+            `前景作答剩余 ${Math.ceil(Math.max(0, deadline - Date.now()) / 1000)} 秒 · 超时后可用 /questions 续答`,
+            `Foreground answer: ${Math.ceil(Math.max(0, deadline - Date.now()) / 1000)}s remaining · continue later with /questions`,
+          ))
+          status()
+          ticker = setInterval(status, 250)
+          timer = setTimeout(() => {
+            if (settled || navigation.signal.aborted) return
+            settled = true
+            void this.capabilities.timeoutQuestion(wait).then(
+              () => this.host.notice(ui('前景等待已结束；待后台问题出现后用 /questions 续答', 'Foreground wait ended; use /questions once the continued question appears'), 'info'),
+              error => this.host.notice(error instanceof Error ? error.message : String(error), 'error'),
+            )
+            // Ending the visible deadline also releases the native claim even if the receipt carrier stalls.
+            navigation.finish()
+          }, remaining)
+          void stream.next().then(() => {
+            if (claim.signal.aborted) return
+            settled = true
+            navigation.finish()
+          }, error => {
+            if (claim.signal.aborted) return
+            settled = true
+            this.host.notice(error instanceof Error ? error.message : String(error), 'error')
+            navigation.finish()
+          })
+        }
       let index = 0
       while (index < questions.length) {
         const question = questions[index]
         if (question === undefined) break
         if (navigation.signal.aborted) {
           this.host.transcript.followLatest()
-          await this.capabilities.cancelQuestion(wait)
+          await cancel()
           return
         }
         const planReview = question.intent?.kind === 'plan-review' ? question.intent : undefined
@@ -5068,7 +5552,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
         const resolveEscape = async (): Promise<boolean> => {
           if (navigation.signal.aborted) {
             this.host.transcript.followLatest()
-            await this.capabilities.cancelQuestion(wait)
+            await cancel()
             return false
           }
           const decision = escapeHandled ?? await this.confirmQuestionEscape(
@@ -5080,7 +5564,7 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
           escapeHandled = undefined
           if (decision === 'cancel') {
             this.host.transcript.followLatest()
-            await this.capabilities.cancelQuestion(wait)
+            await cancel()
             return false
           }
           if (decision === 'skip') {
@@ -5170,12 +5654,21 @@ ${source.credentialRef === undefined ? ui('无 Credential Ref', "No Credential R
       }
       if (navigation.signal.aborted) {
         this.host.transcript.followLatest()
-        await this.capabilities.cancelQuestion(wait)
+        await cancel()
         return
       }
       this.host.transcript.followLatest()
+      if (settled) return
+      settled = true
       await this.capabilities.answerQuestion(wait, { answers })
       this.host.notice(questionBatchSummary(answers), 'info')
+      } finally {
+        clearTimeout(timer); clearInterval(ticker)
+        claim.abort()
+        navigation.signal.removeEventListener('abort', release)
+        navigation.setStatus?.('')
+        if (stream !== undefined) await stream.return?.()
+      }
     }, options)
   }
 

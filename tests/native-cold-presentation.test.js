@@ -47,28 +47,35 @@ it('restores produced files and tool cards for a cold session through its record
   expect(f.dispose).toHaveBeenCalledOnce()
   expect(f.release).toHaveBeenCalledOnce()
 
-  await using selected = await toolPresenterScope(f.ctx, 'cold', signal)
-  const scope = selected.scope
-  expect(presentToolEvent(f.ctx, f.call, f.events, scope)).toMatchObject({ for: 'call', view: { card: 'generic', kind: 'edit' } })
-  expect(presentToolEvent(f.ctx, f.result, f.events, scope)).toEqual({ for: 'result', view: { card: 'generic', text: 'written' } })
+  const selected = await toolPresenterScope(f.ctx, 'cold', signal)
+  try {
+    const scope = selected.scope
+    expect(presentToolEvent(f.ctx, f.call, f.events, scope)).toMatchObject({ for: 'call', view: { card: 'generic', kind: 'edit' } })
+    expect(presentToolEvent(f.ctx, f.result, f.events, scope)).toEqual({ for: 'result', view: { card: 'generic', text: 'written' } })
+  } finally { await selected[Symbol.asyncDispose]() }
+  expect(f.release).toHaveBeenCalledTimes(2)
 })
 
 it('uses an existing live Agent scope without reading or mounting the cold preset', async () => {
   const f = fixture()
   const live = { id: 'cold' }
   f.services.agents.get.mockReturnValue(live)
-  await using selected = await toolPresenterScope(f.ctx, 'cold', new AbortController().signal)
-  expect(selected.scope).toBe(live)
-  expect(f.ctx.sessionQuery.observeSession).not.toHaveBeenCalled()
-  expect(f.services.agentPresets.acquireScope).not.toHaveBeenCalled()
+  const selected = await toolPresenterScope(f.ctx, 'cold', new AbortController().signal)
+  try {
+    expect(selected.scope).toBe(live)
+    expect(f.ctx.sessionQuery.observeSession).not.toHaveBeenCalled()
+    expect(f.services.agentPresets.acquireScope).not.toHaveBeenCalled()
+  } finally { await selected[Symbol.asyncDispose]() }
 })
 
 it('retains generic history when the recorded preset is unavailable and releases the observation', async () => {
   const f = fixture()
   f.services.agentPresets.acquireScope.mockRejectedValue(new Error('Preset removed'))
-  await using selected = await toolPresenterScope(f.ctx, 'cold', new AbortController().signal)
-  expect(selected.scope).toBeUndefined()
-  expect(f.dispose).toHaveBeenCalledOnce()
+  const selected = await toolPresenterScope(f.ctx, 'cold', new AbortController().signal)
+  try {
+    expect(selected.scope).toBeUndefined()
+    expect(f.dispose).toHaveBeenCalledOnce()
+  } finally { await selected[Symbol.asyncDispose]() }
 })
 
 it('does not swallow cancellation while waiting for a standing preset scope', async () => {
@@ -79,4 +86,14 @@ it('does not swallow cancellation while waiting for a standing preset scope', as
   await expect(toolPresenterScope(f.ctx, 'cold', abort.signal)).rejects.toBe(reason)
   expect(f.release).toHaveBeenCalledOnce()
   expect(f.dispose).toHaveBeenCalledOnce()
+})
+
+it('releases a cold scope when its presenter throws and never resumes an Agent', async () => {
+  const f = fixture()
+  f.ctx.tools.get.mockImplementation(() => { throw new Error('presenter unavailable') })
+  const snapshot = await readSessionConversation(sessionExportSource(f.ctx), 'cold', new AbortController().signal)
+  expect(snapshot.producedFiles).toEqual([])
+  expect(snapshot.nodes).toContainEqual({ kind: 'tool-result', content: f.result.data.message.content, isError: false })
+  expect(f.release).toHaveBeenCalledOnce()
+  expect(f.services.agents.get).toHaveBeenCalledWith('cold')
 })
