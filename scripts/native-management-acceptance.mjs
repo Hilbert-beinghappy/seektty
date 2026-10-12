@@ -16,6 +16,7 @@ import { spawn } from 'node-pty'
 import xterm from '@xterm/headless'
 import { load } from 'js-yaml'
 import { stockDshTarget, verifyStockDsh } from './stock-dsh-version.mjs'
+import { releaseExitedPty } from './helpers/exited-pty.mjs'
 
 const { Terminal } = xterm
 const repository = resolve(import.meta.dirname, '..')
@@ -139,7 +140,9 @@ export async function managementAcceptance({ interactive = false } = {}) {
     await command('/exit')
     const until = Date.now() + 10000; while (!exited && Date.now() < until) await delay(50)
     assert.equal(exited?.exitCode, 0, 'clean PTY exit')
+    await writes
     assert.doesNotMatch(raw, /ZodError|Connection lost|Reconnecting|cannot get property .* without inject/u)
+    releaseExitedPty(child)
     terminal.dispose()
   }
   try {
@@ -209,6 +212,7 @@ export async function managementAcceptance({ interactive = false } = {}) {
       await welcomeDraft('Saved management heading')
       await escape(); await key('\u001b[B'.repeat(5) + '\r')
       await state(value => value['seektty-welcome']?.customRows?.some(row => row.text === 'Saved management heading'), 'welcome draft saved')
+      await wait(() => !/╭─ Welcome page/u.test(screen()), 'welcome editor save completed')
       pass('03-settings-welcome-save')
 
       await command('/theme light'); await state(value => value['seektty-appearance']?.theme === 'light', 'light theme saved')
@@ -355,7 +359,8 @@ export async function managementAcceptance({ interactive = false } = {}) {
   } catch (error) {
     report.status = 'failed'; report.failure = String(error.stack ?? error); if (terminal) report.failureScreen = snapshot('failure'); save(); throw error
   } finally {
-    if (child && !exited) child.kill(); terminal?.dispose(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); save()
+    if (child && !exited) child.kill(); else if (child) releaseExitedPty(child)
+    terminal?.dispose(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); save()
   }
   console.log(JSON.stringify({ report: join(root, 'report.json'), steps: report.steps.length }))
 }
