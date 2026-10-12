@@ -17,13 +17,16 @@ import { pathToFileURL } from 'node:url'
 import crossSpawn from 'cross-spawn'
 import { spawn } from 'node-pty'
 import xterm from '@xterm/headless'
+import { verifyStockDsh } from './stock-dsh-version.mjs'
+import { releaseExitedPty } from './helpers/exited-pty.mjs'
 
 const { Terminal } = xterm
 
 const { DSH_BIN, DSH_ENTRY, SEEKTTY_SPEC } = process.env
 assert(DSH_BIN && DSH_ENTRY && SEEKTTY_SPEC, 'Set DSH_BIN, DSH_ENTRY and SEEKTTY_SPEC')
+const stock = verifyStockDsh(DSH_BIN)
+assert.equal(realpathSync(DSH_ENTRY), realpathSync(stock.entry), 'DSH_ENTRY must identify the verified official CLI behind DSH_BIN')
 const officialRequire = createRequire(realpathSync(DSH_ENTRY))
-assert.equal(realpathSync(DSH_BIN), realpathSync(DSH_ENTRY), 'DSH_BIN and DSH_ENTRY must identify the same official CLI')
 const exportRequire = createRequire(officialRequire.resolve('@deepseek-ai/dsh-session-log-export'))
 const { unzipSync, strFromU8 } = exportRequire('fflate')
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'seektty-native-acceptance-')))
@@ -218,9 +221,10 @@ function createPty(label, sessionId) {
     assert.equal(exit.exitCode, 0, screen())
     await writes
     assert.doesNotMatch(raw, /ZodError|连接已断开|正在重连|Connection lost|Reconnecting|cannot get property .* without inject/u)
+    releaseExitedPty(child)
     pass(`${label}-exit`, { exitCode: exit.exitCode, terminalBytes: Buffer.byteLength(raw) })
   }
-  return { screen, snapshot, wait, command, ready, reply, close, write: text => child.write(text), dispose: () => { if (!exit) child.kill(); terminal.dispose() } }
+  return { screen, snapshot, wait, command, ready, reply, close, write: text => child.write(text), dispose: () => { if (!exit) child.kill(); else releaseExitedPty(child); terminal.dispose() } }
 }
 
 let pty
@@ -332,7 +336,7 @@ export function apply(ctx) {
   await delay(150)
   const markdownPath = join(workspace, 'session.md')
   await pty.command('/export md session.md')
-  await pty.wait(() => existsSync(markdownPath), 'Markdown export')
+  await pty.wait(() => existsSync(markdownPath) && /已保存会话 Markdown|Saved session Markdown/u.test(pty.screen()), 'Markdown export committed')
   const markdown = readFileSync(markdownPath, 'utf8')
   for (const text of ['stream fixture', 'LOCAL_STREAM_DONE', 'LOCAL_WRITE_DONE', 'LOCAL_IMAGE_DONE']) assert(markdown.includes(text), `Markdown must contain ${text}`)
   pass('markdown-export', { path: markdownPath })
@@ -375,7 +379,7 @@ export function apply(ctx) {
   await delay(150)
   await pty.reply('resume fixture', 'LOCAL_RESUME_DONE', 'resume-new-turn')
   await pty.command('/export md resumed.md')
-  await pty.wait(() => existsSync(join(workspace, 'resumed.md')), 'resumed Markdown export')
+  await pty.wait(() => existsSync(join(workspace, 'resumed.md')) && /已保存会话 Markdown|Saved session Markdown/u.test(pty.screen()), 'resumed Markdown export committed')
   const resumedMarkdown = readFileSync(join(workspace, 'resumed.md'), 'utf8')
   for (const text of ['LOCAL_STREAM_DONE', 'LOCAL_IMAGE_DONE', 'LOCAL_RESUME_DONE']) assert(resumedMarkdown.includes(text))
   pass('resume-export-history', { path: join(workspace, 'resumed.md') })
