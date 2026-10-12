@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { verifyStockDsh } from './stock-dsh-version.mjs'
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 2) {
   assert(process.argv[i]?.startsWith('--') && process.argv[i + 1], 'Use --suite, --candidate, --sha256, --dsh-bin, --dsh-entry and --out')
@@ -28,8 +29,8 @@ assert.equal(digest(), expected, 'Candidate digest changed before acceptance')
 const output = resolve(args.get('--out'))
 mkdirSync(output, { recursive: true })
 const root = mkdtempSync(join(output, suite + '-'))
-const env = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT'].filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]))
-for (const key of ['HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR', 'DSH_HOME']) {
+const env = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'TMP', 'TEMP', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT'].filter(k => process.env[k] !== undefined).map(k => [k, process.env[k]]))
+for (const key of ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR', 'DSH_HOME']) {
   env[key] = join(root, key.toLowerCase())
   mkdirSync(env[key], { mode: 0o700 })
 }
@@ -37,16 +38,20 @@ Object.assign(env, {
   DSH_BIN: realpathSync(args.get('--dsh-bin')), DSH_ENTRY: realpathSync(args.get('--dsh-entry')),
   SEEKTTY_SPEC: candidate, SEEKTTY_UPDATE: 'off', DSH_TELEMETRY_DISABLED: '1',
 })
-assert.equal(env.DSH_BIN, env.DSH_ENTRY, 'CLI shim and entry must resolve to the same official CLI')
+const stock = verifyStockDsh(env.DSH_BIN)
+assert.equal(env.DSH_ENTRY, realpathSync(stock.entry), 'Entry must identify the verified official CLI behind the shim')
 if (args.has('--pnpm-entry')) {
   env.SEEKTTY_PNPM_ENTRY = realpathSync(args.get('--pnpm-entry'))
   // Stock/packed launcher spawn pnpm by name; a fresh XDG cache must not let
   // machine Corepack choose a different or unmaterialized package manager.
   const bin = join(root, 'bin'); mkdirSync(bin)
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
-  writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(env.SEEKTTY_PNPM_ENTRY)} "$@"\n`)
-  chmodSync(join(bin, 'pnpm'), 0o700)
-  env.PATH = `${bin}:${env.PATH ?? ''}`
+  const pnpmShim = join(bin, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm')
+  writeFileSync(pnpmShim, process.platform === 'win32'
+    ? `@"${process.execPath}" "${env.SEEKTTY_PNPM_ENTRY}" %*\r\n`
+    : `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(env.SEEKTTY_PNPM_ENTRY)} "$@"\n`)
+  chmodSync(pnpmShim, 0o700)
+  env.PATH = bin + (process.platform === 'win32' ? ';' : ':') + (env.PATH ?? '')
 }
 const manifest = { suite, candidate, candidateSha256: expected, dshEntry: env.DSH_ENTRY, evidenceDirectory: root, startedAt: new Date().toISOString(), status: 'running' }
 const report = join(root, 'wrapper-report.json')

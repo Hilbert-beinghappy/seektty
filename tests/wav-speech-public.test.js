@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { TuiActions } from '../src/client/actions.ts'
 import { PromptEditor } from '../src/client/chrome.ts'
 import { TerminalInputExtensions } from '../src/client/terminal-input-extensions.ts'
@@ -11,7 +12,7 @@ const stock = process.env.SEEKTTY_OFFICIAL_NODE_MODULES
 const cleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 async function fixture(confirmations, selection = ['fixture-asr', 'wav', 'en', undefined]) {
-  const root = await mkdtemp('/tmp/seektty-speech-public-'); cleanup.push(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'seektty-speech-public-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const path = join(root, 'synthetic.wav'); await writeFile(path, waveFixture())
   const native = await officialWavSpeechFixture(stock); cleanup.push(native.dispose)
   const scoped = scopedSource(), editor = new PromptEditor({ terminal: { rows: 24 }, requestRender: vi.fn() })

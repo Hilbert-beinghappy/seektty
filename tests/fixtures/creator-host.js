@@ -31,7 +31,7 @@ export async function creatorHost(nodeModules, root) {
     let approval = 'rejected'
     const asks = []; ctx.on('approval/request', request => { asks.push(request); return approval })
     await ctx.plugin(Loader, { baseUrl: pathToFileURL(join(root, 'package.json')).href })
-    await ctx.loader.create({ id: 'include', name: require.resolve('@deepseek-ai/cordis-plugin-include'), config: { path: join(root, 'entries.yml'), patches: patch } })
+    await ctx.loader.create({ id: 'include', name: pathToFileURL(require.resolve('@deepseek-ai/cordis-plugin-include')).href, config: { path: pathToFileURL(join(root, 'entries.yml')).href, patches: patch } })
     await ctx.loader.await()
     await ctx.plugin(PluginManager, PluginManager.Config({})); const manager = ctx.get('pluginManager')
     new CordisInspectRegistryService(ctx, 100)
@@ -45,8 +45,8 @@ export async function creatorHost(nodeModules, root) {
         const restarted = new Context()
         try {
           await restarted.plugin(Loader, { baseUrl: pathToFileURL(join(root, 'package.json')).href })
-          await restarted.loader.create({ id: 'include', name: require.resolve('@deepseek-ai/cordis-plugin-include'),
-            config: { path: join(root, 'entries.yml'), patches: readProfilePatches('dsh', ctx.get('profileContext')) } })
+          await restarted.loader.create({ id: 'include', name: pathToFileURL(require.resolve('@deepseek-ai/cordis-plugin-include')).href,
+            config: { path: pathToFileURL(join(root, 'entries.yml')).href, patches: readProfilePatches('dsh', ctx.get('profileContext')) } })
           await restarted.loader.await()
           const entry = [...restarted.loader.entries()].find(row => row.options.id === 'synthetic-entry')
           if (!entry) throw new Error('Restart lost the persisted plugin entry')

@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
-import { describe, expect, it, vi } from 'vitest'
+import { spawn as nodeSpawn } from 'node:child_process'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { lastFencedCode, copyTargets } from '../src/client/copy-content.ts'
 import {
   CLIPBOARD_READ_BYTE_LIMIT,
@@ -11,6 +12,12 @@ import {
   readClipboardText,
   writeClipboard,
 } from '../src/client/clipboard.ts'
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
+afterEach(() => { vi.mocked(nodeSpawn).mockReset() })
 
 const UTF8_CORPUS = [
   'plain text',
@@ -68,19 +75,16 @@ describe('clipboard fallback', () => {
   })
 
   it('survives a real helper exiting before reading a 5 MB input and uses the next writer', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'seektty-clipboard-test-'))
     const input = 'x'.repeat(5 * 1024 * 1024)
-    try {
-      writeFileSync(join(dir, 'wl-copy'), `#!${process.execPath}\nprocess.exit(0)\n`, { mode: 0o700 })
-      writeFileSync(join(dir, 'xclip'), `#!${process.execPath}\nlet bytes = 0; process.stdin.on('data', chunk => { bytes += chunk.length }); process.stdin.on('end', () => process.exit(bytes === ${String(input.length)} ? 0 : 1))\n`, { mode: 0o700 })
-      vi.stubEnv('PATH', dir)
-      await expect(writeClipboard(input, {
-        platform: 'linux', fallback: 'auto', writeOsc52: () => undefined,
-      })).resolves.toEqual({ finalMethod: 'xclip', succeeded: ['xclip'] })
-    } finally {
-      vi.unstubAllEnvs()
-      rmSync(dir, { recursive: true, force: true })
-    }
+    const { spawn: realSpawn } = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+    // Keep real child pipes and early exit behavior without requiring executable shebangs on Windows.
+    vi.mocked(nodeSpawn)
+      .mockImplementationOnce((_command, _args, options) => realSpawn(process.execPath, ['-e', 'process.exit(0)'], options))
+      .mockImplementationOnce((_command, _args, options) => realSpawn(process.execPath, ['-e', `let bytes = 0; process.stdin.on('data', chunk => { bytes += chunk.length }); process.stdin.on('end', () => process.exit(bytes === ${String(input.length)} ? 0 : 1))`], options))
+    await expect(writeClipboard(input, {
+      platform: 'linux', fallback: 'auto', writeOsc52: () => undefined,
+    })).resolves.toEqual({ finalMethod: 'xclip', succeeded: ['xclip'] })
+    expect(vi.mocked(nodeSpawn).mock.calls.map(([command]) => command)).toEqual(['wl-copy', 'xclip'])
   })
 
   it('handles real ENOENT helpers without losing an existing OSC 52 write', async () => {

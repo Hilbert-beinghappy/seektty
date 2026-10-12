@@ -16,9 +16,9 @@ for (const row of readdirSync(stock)) {
     mkdirSync(join(modules, row))
     for (const name of readdirSync(join(stock, row))) {
       if (names.includes(name)) continue
-      symlinkSync(join(stock, row, name), join(modules, row, name))
+      symlinkSync(join(stock, row, name), join(modules, row, name), process.platform === 'win32' ? 'junction' : 'dir')
     }
-  } else symlinkSync(join(stock, row), join(modules, row))
+  } else symlinkSync(join(stock, row), join(modules, row), process.platform === 'win32' ? 'junction' : 'dir')
 }
 const receipts = []
 for (const short of names) {

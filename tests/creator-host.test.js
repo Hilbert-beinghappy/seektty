@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { creatorHost } from './fixtures/creator-host.js'
 const stock = process.env.SEEKTTY_OFFICIAL_NODE_MODULES
@@ -25,7 +26,7 @@ describe.skipIf(!stock)('explicit Creator composition over published rc.2 Host s
     expect(manager.disabled.__jsExpr).toBe("!ctx.get('profileContext')")
     const skill = creator.config.plugins.find(row => row.id === 'skill-filesystem')
     const expression = skill.config.customSkillDirs[0].__jsExpr
-    const skillDir = new Function('baseUrl', `return (${expression})`)(new URL(`file://${join(stock, '..', 'fixture.cjs')}`).href)
+    const skillDir = new Function('baseUrl', `return (${expression})`)(pathToFileURL(join(stock, '..', 'fixture.cjs')).href)
     expect(skillDir).toBe(join(dirname(h.require.resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills'))
     expect(readdirSync(skillDir).length).toBeGreaterThan(0)
     expect(creator.config.plugins.find(row => row.id === 'tool-cordis')).toBeDefined()
@@ -48,7 +49,7 @@ describe.skipIf(!stock)('explicit Creator composition over published rc.2 Host s
     h.approve('allowed-once'); const rows = await h.run('plugin_manager', { action: 'list_plugins' })
     expect(rows.isError, JSON.stringify(rows)).toBe(false)
     const entry = JSON.parse(rows.value).entries.find(row => row.patchId === 'synthetic-entry')
-    expect(entry).toBeDefined()
+    expect(entry, JSON.stringify(rows)).toBeDefined()
     const changed = await h.run('plugin_manager', { action: 'set_plugin', target: entry.entryId, enabled: false })
     expect(changed.isError).toBe(false); expect(JSON.parse(changed.value)).toMatchObject({ changed: true, application: 'restart-required' })
     expect(h.patch()).toContain('disabled: true')

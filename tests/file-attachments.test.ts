@@ -67,20 +67,28 @@ describe('generic attachment receipts', () => {
   })
   it.each(['cancel', 'timeout', 'reconnect'] as const)('releases pending budgets and ignores late receipts after %s', async mode => {
     let finish!: (value: ReturnType<typeof ok<FileUploadValue>>) => void
-    const upload = vi.fn(() => new Promise<ReturnType<typeof ok<FileUploadValue>>>(resolve => { finish = resolve }))
+    let entered!: () => void
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const upload = vi.fn(() => new Promise<ReturnType<typeof ok<FileUploadValue>>>(resolve => { finish = resolve; entered() }))
     const controller = new FileAttachmentController({ fileUploads: { upload } }, sessionId, true, budget, 80)
-    const abort = new AbortController()
-    const pending = controller.addPath(await file(), abort.signal)
-    const rejected = expect(pending).rejects.toThrow(mode === 'timeout' ? 'timed out' : 'cancelled')
-    await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce())
-    if (mode === 'cancel') abort.abort(new Error('cancelled'))
-    if (mode === 'reconnect') controller.reconnect({}, 'next-session' as SessionId, true)
-    await rejected
-    finish(ok(receipt(6))); await new Promise(resolve => setTimeout(resolve, 0))
-    expect(controller.draft).toEqual([])
-    controller.reconnect({ fileUploads: { upload: async () => ok(receipt(6)) } }, sessionId, true)
-    await controller.addPath(join(root, '中文 clip.mp4'))
-    expect(controller.bytes).toBe(6)
+    const path = await file(), abort = new AbortController()
+    // Control the deadline only after actual filesystem intake reaches the carrier.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const pending = controller.addPath(path, abort.signal)
+      const rejected = expect(pending).rejects.toThrow(mode === 'timeout' ? 'timed out' : 'cancelled')
+      await ready
+      expect(upload).toHaveBeenCalledOnce()
+      if (mode === 'timeout') await vi.advanceTimersByTimeAsync(80)
+      if (mode === 'cancel') abort.abort(new Error('cancelled'))
+      if (mode === 'reconnect') controller.reconnect({}, 'next-session' as SessionId, true)
+      await rejected
+      finish(ok(receipt(6))); await new Promise<void>(resolve => setImmediate(resolve))
+      expect(controller.draft).toEqual([])
+      controller.reconnect({ fileUploads: { upload: async () => ok(receipt(6)) } }, sessionId, true)
+      await controller.addPath(path)
+      expect(controller.bytes).toBe(6)
+    } finally { controller.dispose(); vi.useRealTimers() }
   })
   it('surfaces Remote rejection, thrown carrier errors and malformed receipts', async () => {
     const path = await file()

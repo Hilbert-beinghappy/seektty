@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { workspaceFilePublicHost } from './fixtures/workspace-file-public-host.js'
 import { createSessionManagementPorts } from '../src/host/session-management-bridge.ts'
 import { HostFileController } from '../src/client/host-file-controller.ts'
@@ -11,7 +12,7 @@ const stock = process.env.SEEKTTY_STOCK_NODE_MODULES ?? process.env.SEEKTTY_OFFI
 const cleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 it('public bridge resolves the canonical Host root through the real official lookup and retains actual file ports', async () => {
-  const root = await mkdtemp('/tmp/seektty-host-files-public-'); cleanup.push(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'seektty-host-files-public-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   await writeFile(join(root, '正文.txt'), 'actual Host content\nsecond\n')
   const native = await workspaceFilePublicHost(stock, root); cleanup.push(native.close)
   const bridge = createSessionManagementPorts(native.ctx).artifacts
@@ -31,7 +32,7 @@ it('public bridge resolves the canonical Host root through the real official loo
   await expect(files.read('正文.txt', signal)).rejects.toThrow(/descriptor|not confirmed/)
 })
 it('Host root preparation rejects unknown scope and late Session cwd changes without publishing an alias', async () => {
-  const root = await mkdtemp('/tmp/seektty-host-files-public-'); cleanup.push(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'seektty-host-files-public-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'other'))
   const native = await workspaceFilePublicHost(stock, root); cleanup.push(native.close)
   const bridge = createSessionManagementPorts(native.ctx).artifacts, signal = new AbortController().signal
@@ -59,7 +60,7 @@ it('file context copies only native canonical identity, awaits clipboard, and ne
 })
 
 it('a cancelled delayed Host root resolution returns promptly and cannot publish its late root', async () => {
-  const root = await mkdtemp('/tmp/seektty-host-files-public-'); cleanup.push(() => rm(root, { recursive: true, force: true }))
+  const root = await mkdtemp(join(tmpdir(), 'seektty-host-files-public-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const native = await workspaceFilePublicHost(stock, root); cleanup.push(native.close)
   const bridge = createSessionManagementPorts(native.ctx).artifacts, abort = new AbortController()
   let release

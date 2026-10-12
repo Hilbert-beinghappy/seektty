@@ -29,8 +29,13 @@ describe('bounded canonical WAV intake', () => {
     await expect(withTemporaryWave(path, 4096, 120, new AbortController().signal, async (audio, seconds, copy) => {
       expect(seconds).toBe(0.1); expect(audio).toEqual(waveFixture())
       expect(await readFile(copy)).toEqual(audio)
-      expect((await stat(copy)).mode & 0o777).toBe(0o600)
-      expect((await stat(join(copy, '..'))).mode & 0o777).toBe(0o700)
+      const file = await stat(copy), directory = await stat(join(copy, '..'))
+      expect(file.isFile()).toBe(true); expect(directory.isDirectory()).toBe(true)
+      // Windows reports DOS attributes here, not POSIX owner/group permissions.
+      if (process.platform !== 'win32') {
+        expect(file.mode & 0o777).toBe(0o600)
+        expect(directory.mode & 0o777).toBe(0o700)
+      }
       throw new Error('inert inference refused')
     }, root)).rejects.toThrow('inference refused')
     expect(await readdir(root)).toEqual(['selected.wav'])

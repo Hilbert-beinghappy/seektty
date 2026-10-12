@@ -1,6 +1,6 @@
 # Clean terminal-adapter release snapshot
 
-Release branch: `codex/seektty-rc2-terminal-release`. Source snapshot: **07d9558915b81abe2c82e501a7722ca134bcc601**, directly parented by PR211 head **00dba96f32fc2e02bcd8544c325c4e1bb8a97a67**. Draft PR base remains `codex/adapt-dsh-0.2.0-rc.2`, avoiding the duplicate compatibility update while PR211 is open. No push or PR was performed.
+Initial release branch: `codex/seektty-rc2-terminal-release`. Source snapshot: **07d9558915b81abe2c82e501a7722ca134bcc601**, directly parented by the original PR211 head **00dba96f32fc2e02bcd8544c325c4e1bb8a97a67**. At preparation time, the draft base was `codex/adapt-dsh-0.2.0-rc.2`, avoiding the duplicate compatibility update while PR211 was open; no push or PR had yet been performed. PR211 has since merged and PR212 now targets `main`; see [the 2026-10-13 integration and fresh candidate verification](pr212-main-integration-2026-10-13.md). The evidence below records the initial snapshot and its later CI follow-ups.
 
 The earlier integration branch remains at294396d5aeb4be3eaa10be68874e12cda67ed3a2, and its original205207c package remains preserved. The release snapshot does not carry its65 intermediate development commits. Subsequent acceptance-document commits change no package content. Temporary release-staging objects were retained in a private local ref rather than deleted; they are outside the proposed release history.
 
