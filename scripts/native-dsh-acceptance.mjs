@@ -5,6 +5,7 @@
 // DSH_BIN=official shim DSH_ENTRY=official lib/bin.js SEEKTTY_SPEC=candidate.tgz
 // Evidence remains in the printed temporary directory, including on failure.
 import assert from 'node:assert/strict'
+import { messagesFixtureReply } from './helpers/messages-fixture.mjs'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -16,13 +17,16 @@ import { pathToFileURL } from 'node:url'
 import crossSpawn from 'cross-spawn'
 import { spawn } from 'node-pty'
 import xterm from '@xterm/headless'
+import { verifyStockDsh } from './stock-dsh-version.mjs'
+import { releaseExitedPty } from './helpers/exited-pty.mjs'
 
 const { Terminal } = xterm
 
 const { DSH_BIN, DSH_ENTRY, SEEKTTY_SPEC } = process.env
 assert(DSH_BIN && DSH_ENTRY && SEEKTTY_SPEC, 'Set DSH_BIN, DSH_ENTRY and SEEKTTY_SPEC')
+const stock = verifyStockDsh(DSH_BIN)
+assert.equal(realpathSync(DSH_ENTRY), realpathSync(stock.entry), 'DSH_ENTRY must identify the verified official CLI behind DSH_BIN')
 const officialRequire = createRequire(realpathSync(DSH_ENTRY))
-assert.equal(realpathSync(DSH_BIN), realpathSync(DSH_ENTRY), 'DSH_BIN and DSH_ENTRY must identify the same official CLI')
 const exportRequire = createRequire(officialRequire.resolve('@deepseek-ai/dsh-session-log-export'))
 const { unzipSync, strFromU8 } = exportRequire('fflate')
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'seektty-native-acceptance-')))
@@ -57,6 +61,8 @@ Object.assign(env, {
 let requestCount = 0
 const requests = []
 const toolResults = []
+const resultText = result => typeof result.content === 'string' ? result.content
+  : (result.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n')
 const aborted = new Set()
 const marker = join(workspace, 'approval-marker.txt')
 const scenarios = [
@@ -71,7 +77,14 @@ const scenarios = [
 ]
 const server = createServer(async (req, res) => {
   try {
-    if (req.method !== 'POST' || !req.url?.endsWith('/chat/completions')) {
+    if (req.method === 'POST' && req.url?.endsWith('/files')) {
+      let bytes = 0; for await (const chunk of req) bytes += chunk.length
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ id: 'file-local-fixture', type: 'file', filename: 'fixture.png', mime_type: 'image/png', size_bytes: bytes, created_at: new Date().toISOString(), downloadable: true }))
+      return
+    }
+    const messagesApi = req.url?.endsWith('/messages')
+    if (req.method !== 'POST' || (!messagesApi && !req.url?.endsWith('/chat/completions'))) {
       res.writeHead(404); res.end(); return
     }
     let body = ''
@@ -82,10 +95,10 @@ const server = createServer(async (req, res) => {
     // prompt. Select the latest fixture prompt, rather than that reminder.
     const lastUserIndex = data.messages?.findLastIndex(message => message.role === 'user' && [...scenarios.map(([prompt]) => prompt), 'cancel fixture'].some(prompt => JSON.stringify(message.content).includes(prompt))) ?? -1
     const userText = JSON.stringify(data.messages?.[lastUserIndex]?.content ?? '')
-    const results = data.messages?.slice(lastUserIndex + 1).filter(message => message.role === 'tool') ?? []
+    const results = data.messages?.slice(lastUserIndex + 1).flatMap(message => message.role === 'tool' ? [message] : Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_result') : []) ?? []
     const scenario = scenarios.find(([prompt]) => userText.includes(prompt))
     const slow = userText.includes('cancel fixture')
-    const record = { n, model: data.model, stream: data.stream, messages: data.messages?.length, scenario: slow ? 'cancel fixture' : scenario?.[0] ?? 'title', image: userText.includes('image_url') }
+    const record = { n, model: data.model, stream: data.stream, messages: data.messages?.length, scenario: slow ? 'cancel fixture' : scenario?.[0] ?? 'title', image: userText.includes('image_url') || userText.includes('file-local-fixture') || userText.includes('base64') }
     requests.push(record)
     appendFileSync(join(root, 'requests.jsonl'), JSON.stringify(record) + '\n')
     if (results.length) {
@@ -101,6 +114,14 @@ const server = createServer(async (req, res) => {
       if (userText.includes('subagent tool fixture')) tool = { name: 'subagent', arguments: { description: 'Fixture child reply', prompt: 'Return LOCAL_CHILD_FIXTURE only.', run_in_background: false } }
     }
     const content = data.tools?.length ? scenario?.[1] ?? 'LOCAL_FIXTURE_DONE' : 'Local native acceptance'
+    if (messagesApi) {
+      if (tool) assert(data.tools?.some(candidate => candidate.name === tool.name), `Native model catalog did not expose ${tool.name}`)
+      let completed = false
+      res.on('close', () => { if (!completed) aborted.add(n) })
+      await messagesFixtureReply(res, data, { id: `fixture-${n}`, content, tool, slow })
+      completed = true
+      return
+    }
     if (!data.stream) {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ id: `fixture-${n}`, object: 'chat.completion', created: 1, model: data.model, choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }))
@@ -193,9 +214,10 @@ function createPty(label, sessionId) {
     assert.equal(exit.exitCode, 0, screen())
     await writes
     assert.doesNotMatch(raw, /ZodError|连接已断开|正在重连|Connection lost|Reconnecting|cannot get property .* without inject/u)
+    releaseExitedPty(child)
     pass(`${label}-exit`, { exitCode: exit.exitCode, terminalBytes: Buffer.byteLength(raw) })
   }
-  return { screen, snapshot, wait, command, ready, reply, close, write: text => child.write(text), dispose: () => { if (!exit) child.kill(); terminal.dispose() } }
+  return { screen, snapshot, wait, command, ready, reply, close, write: text => child.write(text), dispose: () => { if (!exit) child.kill(); else releaseExitedPty(child); terminal.dispose() } }
 }
 
 let pty
@@ -203,7 +225,6 @@ try {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const port = server.address().port
   report.modelEndpoint = `http://127.0.0.1:${port}/v1`
-  writeFileSync(join(home, 'settings.yaml'), `llm-deepseek:\n  apiKeyEnv: SEEKTTY_NATIVE_FIXTURE_KEY\n  baseURL: http://127.0.0.1:${port}/v1\n  retryPolicy:\n    mode: normal\n    maxRetries: 0\n`)
   const toolsUrl = pathToFileURL(officialRequire.resolve('@deepseek-ai/dsh-tools')).href
   writeFileSync(join(root, 'approval-fixture.mjs'), `import { defineTool } from ${JSON.stringify(toolsUrl)};
 import { writeFileSync } from 'node:fs';
@@ -224,11 +245,17 @@ export function apply(ctx) {
   const install = crossSpawn.sync(DSH_BIN, ['plugin', '--profile', 'tui', 'add', '--config.enable-global-virtual-store=false', resolve(SEEKTTY_SPEC)], { cwd: workspace, env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 180_000 })
   writeFileSync(join(root, 'install.log'), `${install.stdout ?? ''}\n${install.stderr ?? ''}`)
   assert.equal(install.status, 0, `Native plugin install failed: ${install.error ?? install.stderr}`)
+  writeFileSync(join(home, 'profiles', 'tui', 'cordis.patch.yml'), `- id: llm-deepseek\n  config:\n    apiKeyEnv: SEEKTTY_NATIVE_FIXTURE_KEY\n    baseURL: http://127.0.0.1:${port}/v1\n    retryPolicy:\n      mode: normal\n      maxRetries: 0\n`)
   pass('native-plugin-install', { log: join(root, 'install.log') })
 
   pty = createPty('first')
   await pty.ready()
   pass('standard-preset-boot', { screen: pty.snapshot('boot') })
+  await pty.command('/permission read-only')
+  await pty.wait(() => /权限已切换为只读|Permission changed to Read only/u.test(pty.screen()), 'native read-only selection')
+  await pty.command('/permission workspace-write')
+  await pty.wait(() => /权限已切换为工作区|Permission changed to Workspace/u.test(pty.screen()), 'native workspace permission selection')
+  pass('native-permission-catalog-and-selection', { screen: pty.snapshot('permissions') })
   await pty.reply('stream fixture', 'LOCAL_STREAM_DONE', 'stream')
 
   await pty.command('cancel fixture')
@@ -256,7 +283,7 @@ export function apply(ctx) {
   await pty.wait(() => /Choose fixture color/u.test(pty.screen()) && /Blue/u.test(pty.screen()), 'native question overlay')
   pty.snapshot('question-open')
   pty.write('\r')
-  await pty.wait(() => toolResults.some(record => record.scenario === 'question tool fixture' && record.results.some(result => result.content.includes('"selected":["Blue"]'))) && pty.screen().includes('LOCAL_QUESTION_DONE'), 'Blue response reached native tool')
+  await pty.wait(() => toolResults.some(record => record.scenario === 'question tool fixture' && record.results.some(result => resultText(result).includes('"selected":["Blue"]'))) && pty.screen().includes('LOCAL_QUESTION_DONE'), 'Blue response reached native tool')
   pass('question-blue', { screen: pty.snapshot('question-blue'), results: join(root, 'tool-results.jsonl') })
   await delay(500)
 
@@ -271,14 +298,14 @@ export function apply(ctx) {
     await delay(120)
     pty.write('\r')
     const outcome = allow ? 'allowed-once' : 'rejected'
-    await pty.wait(() => toolResults.slice(before).some(record => record.results.some(result => result.content.includes(`"outcome":"${outcome}"`))) && !/生成中|Ctrl\+C (?:停止|stop)/u.test(pty.screen()), `native approval ${outcome}`)
+    await pty.wait(() => toolResults.slice(before).some(record => record.results.some(result => resultText(result).includes(`"outcome":"${outcome}"`))) && !/生成中|Ctrl\+C (?:停止|stop)/u.test(pty.screen()), `native approval ${outcome}`)
     assert.equal(existsSync(marker), allow)
     if (allow) assert.equal(readFileSync(marker, 'utf8'), 'APPROVAL_SERVICE_FIXTURE_ONLY\n')
     pass(`approval-${outcome}`, { screen: pty.snapshot(`approval-${outcome}`) })
   }
 
   await pty.reply('subagent tool fixture', 'LOCAL_SUBAGENT_DONE', 'subagent')
-  assert(toolResults.some(record => record.scenario === 'subagent tool fixture' && record.results.some(result => result.content.includes('LOCAL_CHILD_FIXTURE'))), 'Native child reply must reach its parent tool result')
+  assert(toolResults.some(record => record.scenario === 'subagent tool fixture' && record.results.some(result => resultText(result).includes('LOCAL_CHILD_FIXTURE'))), 'Native child reply must reach its parent tool result')
   pass('subagent-child-result', { results: join(root, 'tool-results.jsonl') })
 
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC', 'base64')
@@ -302,7 +329,7 @@ export function apply(ctx) {
   await delay(150)
   const markdownPath = join(workspace, 'session.md')
   await pty.command('/export md session.md')
-  await pty.wait(() => existsSync(markdownPath), 'Markdown export')
+  await pty.wait(() => existsSync(markdownPath) && /已保存会话 Markdown|Saved session Markdown/u.test(pty.screen()), 'Markdown export committed')
   const markdown = readFileSync(markdownPath, 'utf8')
   for (const text of ['stream fixture', 'LOCAL_STREAM_DONE', 'LOCAL_WRITE_DONE', 'LOCAL_IMAGE_DONE']) assert(markdown.includes(text), `Markdown must contain ${text}`)
   pass('markdown-export', { path: markdownPath })
@@ -345,7 +372,7 @@ export function apply(ctx) {
   await delay(150)
   await pty.reply('resume fixture', 'LOCAL_RESUME_DONE', 'resume-new-turn')
   await pty.command('/export md resumed.md')
-  await pty.wait(() => existsSync(join(workspace, 'resumed.md')), 'resumed Markdown export')
+  await pty.wait(() => existsSync(join(workspace, 'resumed.md')) && /已保存会话 Markdown|Saved session Markdown/u.test(pty.screen()), 'resumed Markdown export committed')
   const resumedMarkdown = readFileSync(join(workspace, 'resumed.md'), 'utf8')
   for (const text of ['LOCAL_STREAM_DONE', 'LOCAL_IMAGE_DONE', 'LOCAL_RESUME_DONE']) assert(resumedMarkdown.includes(text))
   pass('resume-export-history', { path: join(workspace, 'resumed.md') })

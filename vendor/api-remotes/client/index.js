@@ -1,4 +1,5 @@
 /** Platform-neutral assembly of generated Host Remote contributions. */
+import permissionRemote from '@deepseek-ai/dsh-permission-presets/remote';
 import commandsRemote from '@deepseek-ai/dsh-commands/remote';
 import goalsRemote from '@deepseek-ai/dsh-goal/remote';
 import dynamicRemote from '@deepseek-ai/dsh-cordis-host-runner/remote';
@@ -15,7 +16,7 @@ export async function apply(ctx) {
     const disposers = [];
     try {
         for (const contribution of [
-            commandsRemote, goalsRemote, dynamicRemote, pluginInventoryRemote, messageFeedbackRemote,
+            commandsRemote, goalsRemote, dynamicRemote, pluginInventoryRemote, messageFeedbackRemote, permissionRemote,
         ]) {
             disposers.push(await ctx.remote.$mount(contribution));
         }

@@ -76,21 +76,17 @@ export async function dispatchTerminalRequest(
   }
   if (method === 'agentPreset.list') {
     const roster = record.parse(await call('agentPresets', 'list'))
-    return { ...roster, hasDocument: await call('settings', 'canOpenAgentPresetDirectory') }
+    const settings = record.parse(await call('settings', 'describe'))
+    return { ...roster, authorable: false, hasDocument: settings.hasDocument === true }
   }
   if (method === 'agentPreset.select') {
     return { agentPreset: await call('agentPresets', 'select', { agentId: p.sessionId, agentPreset: p.agentPreset }) }
   }
   if (method === 'agentPreset.read') return call('agentPresets', 'read', p)
-  if (method === 'agentPreset.copy') {
-    await call('agentPresets', 'copy', { from: p.from, id: p.agentPreset, name: p.name })
-    return { agentPreset: p.agentPreset }
+  if (method === 'agentPreset.copy' || method === 'agentPreset.remove') {
+    throw new Error('Agent presets are declared in the Harness profile patch; edit the native Settings document')
   }
-  if (method === 'agentPreset.remove') {
-    await call('agentPresets', 'deletePreset', { id: p.agentPreset })
-    return {}
-  }
-  if (method === 'agentPreset.openDocument') return call('settings', 'openAgentPresetDirectory', p)
+  if (method === 'agentPreset.openDocument') return call('settings', 'openSettingsDocument')
   if (method === 'subagent.list') return call('subagents', 'list', p)
   if (method === 'subagent.prompt') return call('subagents', 'prompt', { request: p })
   if (method === 'subagent.interrupt') return call('subagents', 'interruptByParent', p)

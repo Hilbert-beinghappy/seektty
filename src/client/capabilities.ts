@@ -103,7 +103,7 @@ export interface TuiModeOption {
   readonly id: string
   readonly label: string
   readonly description?: string
-  readonly trust: 'system' | 'user'
+  readonly trust?: 'system' | 'user'
   readonly current: boolean
   readonly isDefault: boolean
   readonly disabledReason?: string
@@ -499,6 +499,10 @@ export class HarnessTuiCapabilities {
   private readonly attachments: TuiDraftAttachment[] = []
   private readonly subagentPresentationAdapter: SubagentPresentationCapabilities
   private readonly rootSessionCatalogProjector = new RootSessionCatalogProjector()
+  private permissionOptions: PermissionSelectValue['options'] | undefined
+  private permissionDefaultOptions: PermissionSelectValue['options'] | undefined
+  private permissionGeneration = 0
+  private readonly permissionListeners = new Set<() => void>()
   private modelGeneration = 0
   private providerGeneration = 0
 
@@ -516,6 +520,9 @@ export class HarnessTuiCapabilities {
     private readonly management?: TuiManagementBridge,
   ) {
     this.subagentPresentationAdapter = createSubagentPresentationCapabilities(ctx.sessions)
+    const refreshPermissions = () => { void this.refreshPermissions() }
+    ctx.remote.$on('permission-presets/catalog-changed', refreshPermissions)
+    refreshPermissions()
     ctx.remote.$on('commands/change', () => { this.commandCatalogs.clear() })
     ctx.remote.$on('agent-preset/selected', (sessionId: SessionId) => {
       this.dropCommandCatalog(sessionId)
@@ -530,6 +537,9 @@ export class HarnessTuiCapabilities {
       this.invalidateProviders()
     })
     ctx.on('connection/reset', () => {
+      this.permissionOptions = undefined
+      this.permissionDefaultOptions = undefined
+      refreshPermissions()
       this.commandCatalogs.clear()
       this.invalidateModels()
       this.invalidateProviders()
@@ -651,9 +661,11 @@ export class HarnessTuiCapabilities {
       }
       listener(active, active.session.getSnapshot())
     }
+    this.permissionListeners.add(bind)
     const stopList = this.ctx.sessions.list.subscribe(bind)
     bind()
     return () => {
+      this.permissionListeners.delete(bind)
       stopSession()
       stopList()
     }
@@ -773,7 +785,7 @@ export class HarnessTuiCapabilities {
       id: preset.id,
       label: preset.name ?? preset.id,
       ...(preset.description === undefined ? {} : { description: preset.description }),
-      trust: preset.trust,
+      ...(preset.trust === undefined ? {} : { trust: preset.trust }),
       current: active.summary.agentPreset === preset.id,
       isDefault: preset.isDefault,
       ...(preset.broken === undefined ? {} : { disabledReason: preset.broken }),
@@ -902,15 +914,16 @@ export class HarnessTuiCapabilities {
   }
 
   /**
-   * Read the dynamic permission directory from the official Session projection.
+   * Read native current selection with the separate live permission catalog.
    * @returns Host-ordered permission choices with conservative risk metadata.
    */
-  listPermissions(): readonly TuiPermissionOption[] {
+  listPermissions(forNewSessions = false): readonly TuiPermissionOption[] {
     const value = this.permissionValue(this.requireActive().session)
     if (value === undefined) {
       throw new Error(ui('当前 Profile 未提供权限投影', 'The current Profile does not provide a permission projection'))
     }
-    return value.options
+    const options = forNewSessions ? this.permissionDefaultOptions ?? value.options : value.options
+    return options
       .filter(option => option.value !== 'custom')
       .map(option => ({
         id: option.value,
@@ -1838,7 +1851,27 @@ export class HarnessTuiCapabilities {
 
   private permissionValue(session: SessionFace): PermissionSelectValue | undefined {
     const value = session.projections.faceOf('permissions').getSnapshot()
-    return isPermissionSelect(value) ? value : undefined
+    if (typeof value !== 'object' || value === null || !('currentValue' in value) || typeof value.currentValue !== 'string') return undefined
+    const options = this.permissionOptions ?? (isPermissionSelect(value) ? value.options : [])
+    return { currentValue: value.currentValue, options }
+  }
+
+  private async refreshPermissions(): Promise<void> {
+    const generation = ++this.permissionGeneration
+    // Retained test/optional clients may not compose the permission service.
+    const service = this.ctx.remote.permissionPresets
+    if (service === undefined) return
+    this.permissionOptions = undefined
+    this.permissionDefaultOptions = undefined
+    try {
+      const result = await service.catalog()
+      if (generation !== this.permissionGeneration || !result.ok) return
+      this.permissionOptions = result.value.options
+      this.permissionDefaultOptions = result.value.defaultOptions
+    } catch {
+      // Preserve the native current selection; an unavailable catalog offers no switch targets.
+    }
+    if (generation === this.permissionGeneration) for (const listener of this.permissionListeners) listener()
   }
 
   private invalidateModels(): void {

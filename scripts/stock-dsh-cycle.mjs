@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { verifyStockDsh } from './stock-dsh-version.mjs'
+import { moduleFileIdentity, physicalModuleIdentity } from './module-file-identity.mjs'
 
 const dsh = process.env.DSH_BIN?.trim()
 const pluginSpec = process.env.SEEKTTY_SPEC?.trim()
@@ -136,9 +137,9 @@ function assertOfficialModuleIdentity() {
   const overlay = join(home, 'identity-probe.patch.yml')
   const names = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-api-session-controller']
   const officialRequire = createRequire(stock.entry)
-  const expected = Object.fromEntries(names.map(name => [name, realpathSync(officialRequire.resolve(name))]))
+  const expected = Object.fromEntries(names.map(name => [name, moduleFileIdentity(officialRequire.resolve(name))]))
   writeFileSync(probe, `
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Service } from '@deepseek-ai/cordis';
 import { SessionStore } from '@deepseek-ai/dsh-session';
@@ -150,8 +151,10 @@ export function apply(ctx) {
     || !(ctx.sessionController instanceof SessionController) || !(ctx.sessionController instanceof Service)) {
     throw new Error('Official Host service identity split');
   }
-  const actual = Object.fromEntries(${JSON.stringify(names)}.map(name => [name, realpathSync(fileURLToPath(import.meta.resolve(name)))]));
-  if (JSON.stringify(actual) !== ${JSON.stringify(JSON.stringify(expected))}) throw new Error('Official Host resolution identity split: ' + JSON.stringify(actual));
+  const identity = ${physicalModuleIdentity.toString()};
+  const paths = Object.fromEntries(${JSON.stringify(names)}.map(name => [name, realpathSync(fileURLToPath(import.meta.resolve(name)))]));
+  const actual = Object.fromEntries(${JSON.stringify(names)}.map(name => [name, identity(statSync, paths[name])]));
+  if (JSON.stringify(actual) !== ${JSON.stringify(JSON.stringify(expected))}) throw new Error('Official Host resolution identity split: ' + JSON.stringify({ paths, actual, expected: ${JSON.stringify(expected)} }));
   console.log('SEEKTTY_OFFICIAL_IDENTITY_OK');
 }
 `)

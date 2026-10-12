@@ -34,7 +34,7 @@ describe('profile plugin snapshot (task 5.3)', () => {
 
 // New dsh templates carry lifecycle policy beside their bundle list.
 describe('native Profile template lifecycle', () => {
-  it('preserves the official template bundles and patch reload policy when creating a Profile', () => {
+  it('preserves the official template bundles when creating a Profile', () => {
     const home = mkdtempSync(join(tmpdir(), 'seektty-template-'))
     const manager = new ProfilePluginManager({ profile: 'tui', installAnchor: home, home })
     const templateName = Object.keys(PROFILE_TEMPLATES).find(name => name !== 'tui')!
@@ -42,6 +42,6 @@ describe('native Profile template lifecycle', () => {
     manager.createProfile(templateName)
     const manifest = JSON.parse(readFileSync(join(home, 'profiles', templateName, 'package.json'), 'utf8'))
     expect(manifest.dsh.profile.bundles).toEqual(template.bundles)
-    expect(manifest.dsh.profile.patchReload).toBe(template.patchReload)
+    expect(manifest.dsh.profile).not.toHaveProperty('patchReload')
   })
 })

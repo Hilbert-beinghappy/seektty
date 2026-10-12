@@ -14,7 +14,7 @@ type Inspection = Awaited<ReturnType<SessionController['inspect']>>
 type CallPresenter = (name: string, args: unknown) => ToolCallView | undefined
 export interface SessionExportSource {
   inspect(id: SessionId, signal: AbortSignal): Promise<Inspection>
-  presenter(id: SessionId, signal: AbortSignal): Promise<CallPresenter>
+  presenter(id: SessionId, signal: AbortSignal): Promise<{ present: CallPresenter } & AsyncDisposable>
 }
 
 /** Presentation reads never resume an Agent or change its credentials. */
@@ -22,8 +22,9 @@ export function sessionExportSource(ctx: Context): SessionExportSource {
   return {
     inspect: (id, signal) => ctx.sessionController.inspect(id, signal),
     presenter: async (id, signal) => {
-      const scope = await toolPresenterScope(ctx, id, signal)
-      return (name, args) => ctx.tools.get(name, scope)?.presentCall?.(args)
+      const lease = await toolPresenterScope(ctx, id, signal)
+      return { present: (name, args) => ctx.tools.get(name, lease.scope)?.presentCall?.(args),
+        [Symbol.asyncDispose]: () => lease[Symbol.asyncDispose]() }
     },
   }
 }
@@ -46,7 +47,7 @@ export function sessionConversation(inspection: Inspection, presentCall: CallPre
     } else if (event.type === 'assistant/message') {
       nodes.push({ kind: 'assistant', blocks: toAssistantBlocks(event.data.message.content) })
     } else if (event.type === 'tool/result') {
-      const result = event.data.message.content[0]
+      const result = event.data.message
       const call = calls.get(String(event.data.message.source.callId))
       if (result.isError === true || call === undefined) continue
       if (call.card !== 'diff' && !(call.card === 'generic' && call.kind === 'edit')) continue
@@ -86,7 +87,7 @@ export async function readSessionConversation(source: SessionExportSource, rawId
   const inspection = await source.inspect(SessionId(rawId), signal)
   signal.throwIfAborted()
   if (inspection.meta.id !== rawId) throw new Error('Session export identity mismatch')
-  const presentCall = await source.presenter(inspection.meta.id, signal)
+  await using presenter = await source.presenter(inspection.meta.id, signal)
   signal.throwIfAborted()
-  return sessionConversation(inspection, presentCall)
+  return sessionConversation(inspection, presenter.present)
 }

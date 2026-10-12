@@ -578,7 +578,7 @@ function validateCodec(codec, subject) {
     if (codec.mode === 'src-json')
         return;
     validateNonempty(`${subject} type symbol`, codec.typeSymbol);
-    if (typeof codec.schema.parse !== 'function') {
+    if (typeof (codec.create?.() ?? codec.schema)?.parse !== 'function') {
         throw new Error(`typert: ${subject} strict codec has no parse() method`);
     }
 }

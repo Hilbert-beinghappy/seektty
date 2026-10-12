@@ -1,6 +1,7 @@
-/** Native dsh 0.1.5-rc.1 controllers behind the terminal's retained view contract. */
-import { SessionStore } from '@deepseek-ai/dsh-session'
-import type { Context } from '@deepseek-ai/cordis'
+/** Native dsh 0.2.0-rc.2 controllers behind the terminal's retained view contract. */
+import { SessionStore, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Context, Events } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-job-controller'
 import type { SessionAddress, SessionFollowFrame, SessionProjectionBaseline } from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-api-gateway'
@@ -22,6 +23,14 @@ import { terminalFailure } from './native-errors.ts'
 import { NativeInteractions } from './native-interactions.ts'
 import { presentToolEvent } from './tool-presentation.ts'
 import { toolPresenterScope } from './tool-presenter-scope.ts'
+
+/** Project the 0.2.0-rc.2 flat tool message into the retained terminal card contract. */
+export function terminalSessionEvent(event: SessionEvent) {
+  if (event.type !== 'tool/result') return event
+  return { ...event, data: { ...event.data, message: { ...event.data.message,
+    content: [{ type: 'tool-result', content: event.data.message.content, isError: event.data.message.isError === true }],
+  } } }
+}
 
 /** A cancellable single-consumer queue; closing releases a pending read. */
 export class TerminalStream<T> implements AsyncIterable<T> {
@@ -96,11 +105,11 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
 
   private async historyEntries(sessionId: ReturnType<typeof sessionIdSchema.parse>, records: readonly { event: unknown }[], signal: AbortSignal) {
     const events = records.map(record => sessionEventSchema.parse(record.event))
-    const scope = events.some(event => event.type === 'tool/call' || event.type === 'tool/result')
+    await using lease = events.some(event => event.type === 'tool/call' || event.type === 'tool/result')
       ? await toolPresenterScope(this.ctx, sessionId, signal) : undefined
     return events.map(event => {
-      const view = presentToolEvent(this.ctx, event, events, scope)
-      return { event, ...(view === undefined ? {} : { view }) }
+      const view = presentToolEvent(this.ctx, event, events, lease?.scope)
+      return { event: terminalSessionEvent(event), ...(view === undefined ? {} : { view }) }
     })
   }
 
@@ -164,7 +173,7 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
     for (const entry of API_REMOTE_FORWARDED_EVENTS) {
       if (entry.mode !== 'emit') continue
       const event = entry.event
-      disposers.push(this.ctx.on(event, (...args: unknown[]) => push({ type: 'host/remote-event', event, args })))
+      disposers.push(this.ctx.on(event as keyof Events, (...args: unknown[]) => push({ type: 'host/remote-event', event, args })))
     }
     const pump = (async () => {
       for await (const frame of this.ctx.workspaceController.follow(lifetime)) {
@@ -209,15 +218,32 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
     }
     const pumps: Promise<void>[] = []
     const track = (task: Promise<void>) => { pumps.push(task.catch(error => { if (!lifetime.aborted) queue.close(error) })) }
+    const projection = (sessionId: string, key: string, value: unknown, seq: number) => {
+      if (key === 'inbox') {
+        const inbox = z.object({ 'next-turn': z.array(z.record(z.string(), z.unknown())),
+          'next-step': z.array(z.record(z.string(), z.unknown())) }).parse(value)
+        pushQueue({ type: 'session/queue', sessionId, items: [
+          ...inbox['next-turn'].map(message => ({ id: message.id, placement: 'queued', message })),
+          ...inbox['next-step'].map(message => ({ id: message.id, placement: 'steering', message })),
+        ] })
+      }
+      if (seq >= 0) push({ type: 'session/projection', sessionId, key, value, seq })
+    }
     const project = (sessionId: string, projections: SessionProjectionBaseline) => {
       for (const [key, value] of Object.entries(projections.values)) {
-        if (projections.asOfSeq >= 0) push({ type: 'session/projection', sessionId, key, value, seq: projections.asOfSeq })
+        projection(sessionId, key, value, projections.asOfSeq)
       }
     }
     const follow = (address: SessionAddress) => {
       const sessionId = address.kind === 'session' ? address.sessionId : address.childSessionId
       if (follows.has(sessionId)) return
       follows.add(sessionId)
+      const jobs = this.ctx.get('jobController')
+      if (jobs !== undefined) track((async () => {
+        for await (const frame of jobs.list({ sessionId: sessionIdSchema.parse(sessionId) }, lifetime)) {
+          pushJobs({ type: 'session/jobs', sessionId, jobs: frame.jobs })
+        }
+      })())
       track((async () => {
         for await (const frame of this.ctx.sessionController.follow({ address, assistantStream: true }, lifetime)) {
           if (frame.type === 'snapshot') {
@@ -233,10 +259,10 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
             if (frame.assistantStream !== undefined) push({ type: 'session/assistant-baseline', sessionId, baseline: frame.assistantStream })
           } else if (frame.type === 'event') {
             const event = sessionEventSchema.parse(frame.event)
-            const scope = event.type === 'tool/call' || event.type === 'tool/result'
+            await using lease = event.type === 'tool/call' || event.type === 'tool/result'
               ? await toolPresenterScope(this.ctx, sessionId, lifetime) : undefined
-            const view = presentToolEvent(this.ctx, event, this.hostSessions().get(sessionId)?.snapshotEvents() ?? [], scope)
-            push({ type: 'session/event', sessionId, event, ...(view === undefined ? {} : { view }) })
+            const view = presentToolEvent(this.ctx, event, this.hostSessions().get(sessionId)?.snapshotEvents() ?? [], lease?.scope)
+            push({ type: 'session/event', sessionId, event: terminalSessionEvent(event), ...(view === undefined ? {} : { view }) })
           }
           else if (frame.type === 'assistant-stream') push({ type: 'session/assistant-stream', sessionId, frame: frame.frame })
         }
@@ -254,12 +280,8 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
     track((async () => {
       for await (const frame of this.ctx.sessionController.control(lifetime)) {
         if (frame.type === 'baseline') {
-          for (const [sessionId, items] of Object.entries(frame.value.queues)) pushQueue({ type: 'session/queue', sessionId, items })
-          for (const [sessionId, jobs] of Object.entries(frame.value.jobs)) pushJobs({ type: 'session/jobs', sessionId, jobs })
           for (const [sessionId, value] of Object.entries(frame.value.projections)) project(sessionId, value)
-        } else if (frame.type === 'queue') pushQueue({ ...frame, type: 'session/queue' })
-        else if (frame.type === 'jobs') pushJobs({ ...frame, type: 'session/jobs' })
-        else if (frame.type === 'projection' && frame.seq >= 0) push({ ...frame, type: 'session/projection' })
+        } else if (frame.type === 'projection') projection(frame.sessionId, frame.key, frame.value, frame.seq)
       }
     })())
     const abort = () => queue.close()

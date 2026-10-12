@@ -15,7 +15,7 @@ function fixture() {
   writeFileSync(join(bundle, 'cordis.patch.yml'), '[]\n')
   writeProfileManifest(manager.dir, { name: 'dsh-profile-tui',
     dependencies: { 'seektty-profile-fixture': 'file:./fixture-bundle' },
-    dsh: { profile: { bundles: ['seektty-profile-fixture'], patchReload: 'live' } },
+    dsh: { profile: { bundles: ['seektty-profile-fixture'] } },
   })
   return { home, manager, bundle }
 }

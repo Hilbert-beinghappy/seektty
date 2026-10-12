@@ -5,7 +5,7 @@ import { chmodSync } from 'node:fs'
 import {
   LOCALE_SETTINGS_NAMESPACE,
   type BuiltInLocaleId as LocaleId,
-} from '@deepseek-ai/dsh-client-locale'
+} from '../compat/locale-contract.ts'
 import type {
   QuestionResponsePayload, SessionId, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-remotes/node-client'
@@ -1399,7 +1399,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
     await this.overlayFlow(overlays, async (navigation) => {
       await navigation.selectPage({
         title: ui('Agent 模式', "Agent mode"),
-        detail: ui('选择当前会话的工作模式；用户创建的模式会单独标记', "Choose the current session mode; user-created modes are marked separately"),
+        detail: ui('选择当前会话的 Harness 预设', "Choose a Harness preset for the current session"),
         choices: modes.map((mode) => {
           const copy = agentPresetCopy(mode)
           return {
@@ -3051,6 +3051,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
           description: ui('完全访问仍需确认；不会修改当前会话', "Full access still requires confirmation; does not change the current session"),
         }]
       case 'agent-presets':
+      case 'agent-preset-registry':
         return [{
           id: '__settings_default_mode__',
           label: ui('选择新会话默认模式…', "Choose default mode for new sessions…"),
@@ -3156,7 +3157,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   private async editDefaultPermission(overlays: OverlayPrompts, document: TuiSettingsDocument): Promise<void> {
     const field = settingsFields(document).find(candidate => candidate.path.length === 1 && candidate.path[0] === 'defaultPreset')
     if (field === undefined) throw new Error(ui('当前设置没有默认权限选项；仍可使用下方通用控件', "This Settings namespace has no dedicated default-permission field; use the generic controls below"))
-    const options = this.capabilities.listPermissions()
+    const options = this.capabilities.listPermissions(true)
     const selected = await overlays.select({
       title: ui('新会话默认权限', "Default permission for new sessions"),
       detail: ui('保存后只影响未来创建的会话；当前会话权限保持不变', "Affects only future sessions; the current session permission is unchanged"),
@@ -3186,7 +3187,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
   }
 
   private async editDefaultMode(overlays: OverlayPrompts, document: TuiSettingsDocument): Promise<void> {
-    const field = settingsFields(document).find(candidate => candidate.path.length === 1 && candidate.path[0] === 'default')
+    const field = settingsFields(document).find(candidate => candidate.path.length === 1 && (candidate.path[0] === 'default' || candidate.path[0] === 'selectedDefault'))
     if (field === undefined) throw new Error(ui('当前设置没有默认模式选项；仍可使用下方通用控件', "This Settings namespace has no dedicated default-mode field; use the generic controls below"))
     const modes = await this.capabilities.listModes()
     const selected = await overlays.select({
@@ -3197,7 +3198,7 @@ The directory, user files, and all session logs are kept; sessions become ungrou
         return {
           id: mode.id,
           label: `${field.value === mode.id ? ui('当前默认 · ', "Current default · ") : ''}${copy.label}`,
-          description: `${mode.trust === 'system' ? ui('系统', "System") : ui('用户', "User")}${copy.description === undefined ? '' : ` · ${copy.description}`}`,
+          description: copy.description ?? mode.id,
           ...(mode.disabledReason === undefined ? {} : { disabledReason: mode.disabledReason }),
         }
       }),
