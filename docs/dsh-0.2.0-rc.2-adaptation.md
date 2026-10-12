@@ -68,6 +68,8 @@ The terminal runner now verifies the actual official CLI behind its executable s
 
 Both native runners release the input socket and output worker left alive by natural ConPTY exit in the pinned `node-pty` `1.1.0`. This acceptance-only cleanup runs after the child exit event and output drain, is idempotent, and rejects an unaudited dependency version or internal shape. It does not signal an already exited process or change the packaged application.
 
+Windows CI also exposed the stock module-identity probe comparing the Runner's long path with its `RUNNER~1` alias. The probe now compares filesystem device/file IDs and retains the independent native service-instance and shadow-package checks. Regression cases accept aliases of the same physical file, reject distinct same-content copies and invalid identities, and exercise the function embedded in the Loader probe. No content-hash fallback weakens the ownership check.
+
 ### Windows results
 
 Validation used Windows, pnpm `11.7.0`, Node `22.23.3`, and the same packaged candidate for every lifecycle and PTY journey. An additional full check used the workstation's Node `26.1.0`.
@@ -79,7 +81,8 @@ SHA-256: `e0a6059ba5dd795c1b625675336d2c2296f77c10679fcf92168a1284053208de`.
 | Check | Observed result |
 | --- | --- |
 | Frozen install | Passed without changing the committed lockfile |
-| Full check on Node 22 and Node 26 | Each passed typecheck, 179 files / 1551 tests / 1 existing skip, build, and 36-entry pack check |
+| Final full check on Node 22 | Passed typecheck, 180 files / 1554 tests / 1 existing skip, build, and 36-entry pack check |
+| Earlier full check on Node 26 | Passed typecheck, 179 files / 1551 tests / 1 existing skip, build, and 36-entry pack check before the three alias-regression tests were added |
 | Final focused contracts on Node 22 | Five files / 42 tests passed for cold presentation, native rc.2 contracts, multiplexing, permissions, and packaging |
 | Official stock Host | Unmodified CLI and 278 installed dsh packages verified at exactly `0.2.0-rc.2` |
 | Stock lifecycle on Node 22 | Candidate install, boot, remove, reinstall, official module identity, detached worker, and packed launcher checks passed; command exited 0 |
