@@ -83,6 +83,11 @@ export const SURFACE_KEYMAP: readonly SurfaceKeyBinding[] = [
     match: data => matchesKey(data, Key.ctrl('t')),
   },
   {
+    id: 'workProcessDisplay', group: 'transcript', keys: [],
+    zh: '循环工作过程显示（默认未绑定）', en: 'Cycle work-process display (unbound by default)',
+    match: () => false,
+  },
+  {
     id: 'settings',
     group: 'commands',
     keys: ['F2', 'Ctrl+,', 'Cmd+,'],
@@ -493,7 +498,7 @@ export function bindingKeysLabel(id: string): string {
   const binding = byId.get(id)
   if (binding === undefined) return id
   const override = overrides[id]
-  return override === undefined ? binding.keys.join(' / ') : formatChord(override)
+  return override === undefined ? binding.keys.length === 0 ? ui('未绑定', 'Unbound') : binding.keys.join(' / ') : formatChord(override)
 }
 
 /**

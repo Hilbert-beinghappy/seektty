@@ -4,6 +4,26 @@ import { composeApprovalDetail } from '../src/client/approval-preview.ts'
 import { toolApprovalPreview } from '../src/client/transcript.ts'
 
 describe('approval overlay copy (review #16)', () => {
+  it.each(['reason', 'displayReason'] as const)('strips all SGR and control strings from %s without modifying its source', field => {
+    const raw = 'Looks safe\u001b[8m\u001b[7m\u001b[38;2;0;0;0m\u001b[48:2::0:0:0m\u001b]8;;https://invalid\u0007\u009b8m'
+    const options: Parameters<typeof composeApprovalDetail>[0] = { ...(field === 'reason' ? { reason: raw } : { displayReason: { en: raw } }),
+      fallback: 'call', preview: 'DANGEROUS_COMMAND_VISIBLE', locale: 'en' }
+    expect(composeApprovalDetail(options).detail).toBe('Looks safe\n\nDANGEROUS_COMMAND_VISIBLE')
+    expect(field === 'reason' ? options.reason : options.displayReason?.en).toBe(raw)
+  })
+  it('selects localized display copy without replacing the audited reason, with English fallback', () => {
+    const displayReason = { en: 'Auto review denied this call: 保留理由', zh: 'Auto review 拒绝了此调用：保留理由' }
+    const options = { reason: 'Audited English reason', displayReason, fallback: 'call', preview: '' }
+    expect(composeApprovalDetail({ ...options, locale: 'zh' }).detail).toBe(displayReason.zh)
+    expect(composeApprovalDetail({ ...options, locale: 'fr' }).detail).toBe(displayReason.en)
+    expect(options.reason).toBe('Audited English reason')
+  })
+  it('sanitizes terminal control strings and bounds one long reason while retaining full safe copy', () => {
+    const composed = composeApprovalDetail({ displayReason: { en: `reason\u001b]52;c;secret\u0007${'x'.repeat(1500)}\u001b[2J` },
+      fallback: 'call', preview: '', locale: 'en' })
+    expect(composed.detail.length).toBeLessThanOrEqual(1200)
+    expect(composed.full).toBe(`reason${'x'.repeat(1500)}`)
+  })
   it('embeds the full shell command', () => {
     const call = {
       callId: 'call-1',

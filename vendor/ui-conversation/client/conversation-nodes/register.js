@@ -10,6 +10,7 @@ import { registerToolConversationNode } from "./tool.js";
 import { registerTurnErrorConversationNode } from "./turn-error.js";
 import { registerTurnMaxTokensConversationNode } from "./turn-max-tokens.js";
 import { registerTurnTailConversationNode } from "./turn-tail.js";
+import { turnProcessDefinition } from '../../../ui-chat-process/turn-process.js';
 /**
  * Register the Chat business Definitions and target builder contributed by this package.
  * @param ctx - owning UI Conversation context.
@@ -18,6 +19,8 @@ export function registerConversationNodes(ctx) {
     registerInboxConversationNodes(ctx);
     registerMessageConversationNode(ctx);
     registerAssistantConversationNode(ctx);
+    // The terminal's vendored registry predates the uiConversation namespace; Definition bytes stay native.
+    ctx.conversationEvents.register(turnProcessDefinition);
     registerToolConversationNode(ctx);
     registerCommandConversationNode(ctx);
     registerCompactionConversationNode(ctx);

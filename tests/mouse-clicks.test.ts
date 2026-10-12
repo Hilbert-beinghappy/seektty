@@ -27,12 +27,19 @@ describe('click matrix ownership', () => {
     expect(overlays).toContain("mouseExecute: 'focus-only'")
   })
 
-  it('does not register OSC 8 hit regions or launch URLs from mouse reports', () => {
+  it('keeps OSC 8 inert and routes explicit fetch title gestures through the guarded action', () => {
     const surface = readFileSync(resolve(root, 'src/client/surface.ts'), 'utf8')
     const hitMap = readFileSync(resolve(root, 'src/client/mouse-hit-map.ts'), 'utf8')
     const controller = readFileSync(resolve(root, 'src/client/mouse-controller.ts'), 'utf8')
     expect(surface).not.toMatch(/role:\s*'link'/u)
-    expect(surface).not.toMatch(/OSC 8|openPath|openUrl|xdg-open/u)
+    expect(surface).not.toMatch(/OSC 8|xdg-open/u)
+    expect(surface).toContain('safeUrl: safeArtifactUrl')
+    expect(surface).toContain('fetchTitleGestureAction')
+    expect(surface).toContain('semantic.suppressed')
+    expect(surface).toContain('semantic.count !== 1')
+    expect(surface).toContain('capabilities.managementState().generation === generation')
+    expect(surface).toContain('runFetchTitleAction(target, action, fetchPorts')
+    expect(surface).toContain("region.action.command === 'fetch-title'")
     expect(controller).not.toMatch(/openPath|openUrl|launch/u)
     expect(hitMap).toContain("'link'")
     expect(surface).not.toContain("command: 'open-link'")

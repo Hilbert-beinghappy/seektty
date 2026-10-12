@@ -21,10 +21,17 @@ export interface MarkdownSteeringNode {
   readonly content: readonly unknown[]
 }
 
+export interface MarkdownToolResultNode {
+  readonly kind: 'tool-result'
+  readonly content: readonly unknown[]
+  readonly isError: boolean
+}
+
 export type MarkdownConversationNode =
   | MarkdownUserNode
   | MarkdownAssistantNode
   | MarkdownSteeringNode
+  | MarkdownToolResultNode
   | { readonly kind: string }
 
 function contentBlockText(block: unknown): string {
@@ -77,6 +84,10 @@ export function conversationMarkdown(
     } else if (node.kind === 'steering' && 'content' in node) {
       const section = userSection('Steering', node.content)
       if (section !== undefined) sections.push(section)
+    } else if (node.kind === 'tool-result' && 'content' in node && 'isError' in node) {
+      const section = userSection(node.isError ? 'Tool result (error)' : 'Tool result', node.content)
+      if (section !== undefined) sections.push(section)
+      else sections.push(`## ${node.isError ? 'Tool result (error)' : 'Tool result'}`)
     } else if (node.kind === 'assistant' && 'blocks' in node) {
       const section = assistantSection(node)
       if (section !== undefined) sections.push(section)

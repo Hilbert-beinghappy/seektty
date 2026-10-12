@@ -18,35 +18,72 @@ import { sessionIdSchema, sessionHistoryRequestSchema, sessionEventSchema } from
 import { subagentHistoryRequestSchema } from '../../vendor/api-contract/api/subagents.schema.js'
 import { hostFrameSchema, muxFrameSchema } from '../../vendor/api-contract/api/events.schema.js'
 import type { RpcRequest, HostFrame, MuxFrame } from '../../vendor/api-contract/api/index.js'
+import { readNativeSubagentCatalog } from './native-subagent-catalog.ts'
 import { dispatchTerminalRequest, type TerminalDomainReads } from './native-api-dispatch.ts'
 import { terminalFailure } from './native-errors.ts'
 import { NativeInteractions } from './native-interactions.ts'
 import { presentToolEvent } from './tool-presentation.ts'
 import { toolPresenterScope } from './tool-presenter-scope.ts'
 
-/** Project the 0.2.0-rc.2 flat tool message into the retained terminal card contract. */
-export function terminalSessionEvent(event: SessionEvent) {
-  if (event.type !== 'tool/result') return event
-  return { ...event, data: { ...event.data, message: { ...event.data.message,
-    content: [{ type: 'tool-result', content: event.data.message.content, isError: event.data.message.isError === true }],
-  } } }
+/** Preserve the published dsh 0.2.0-rc.2 event, including top-level tool content/isError. */
+export function terminalSessionEvent(event: SessionEvent): SessionEvent {
+  return event
 }
 
-/** A cancellable single-consumer queue; closing releases a pending read. */
+export class TerminalStreamOverflowError extends Error {
+  readonly code = 'TERMINAL_STREAM_OVERFLOW'
+  constructor() { super('Terminal stream buffer exceeded its limit; reconnect to resynchronize') }
+}
+
+export interface TerminalStreamLimits {
+  readonly maxItems?: number
+  readonly maxBytes?: number
+  readonly onOverflow?: () => void
+}
+
+/** A bounded single-consumer queue. Overflow fails the generation, never drops an event silently. */
 export class TerminalStream<T> implements AsyncIterable<T> {
-  private items: T[] = []
+  private items: { value: T; bytes: number }[] = []
+  private bytes = 0
   private wake: (() => void) | undefined
   private closed = false
   private failure: unknown
-  push(value: T): void { if (!this.closed) { this.items.push(value); this.wake?.() } }
-  close(error?: unknown): void { this.closed = true; this.failure = error; this.wake?.() }
-  async *[Symbol.asyncIterator](): AsyncGenerator<T> {
-    while (true) {
-      while (this.items.length > 0) yield this.items.shift()!
-      if (this.closed) { if (this.failure !== undefined) throw this.failure; return }
-      await new Promise<void>(resolve => { this.wake = resolve })
-      this.wake = undefined
+  private reading = false
+  private readonly maxItems: number
+  private readonly maxBytes: number
+  constructor(private readonly limits: TerminalStreamLimits = {}) {
+    this.maxItems = limits.maxItems ?? 1024
+    this.maxBytes = limits.maxBytes ?? 8 * 1024 * 1024
+    if (!Number.isSafeInteger(this.maxItems) || this.maxItems < 1
+      || !Number.isSafeInteger(this.maxBytes) || this.maxBytes < 1) throw new Error('Invalid stream buffer limits')
+  }
+  push(value: T): void {
+    if (this.closed) return
+    const bytes = Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8')
+    if (this.items.length >= this.maxItems || this.bytes + bytes > this.maxBytes) {
+      this.close(new TerminalStreamOverflowError())
+      this.limits.onOverflow?.()
+      return
     }
+    this.items.push({ value, bytes }); this.bytes += bytes; this.wake?.()
+  }
+  close(error?: unknown): void {
+    if (this.closed) return
+    this.closed = true; this.failure = error
+    this.items = []; this.bytes = 0; this.wake?.()
+  }
+  async *[Symbol.asyncIterator](): AsyncGenerator<T> {
+    if (this.reading) throw new Error('Terminal stream permits only one consumer')
+    this.reading = true
+    try {
+      while (true) {
+        if (this.closed) { if (this.failure !== undefined) throw this.failure; return }
+        const item = this.items.shift()
+        if (item !== undefined) { this.bytes -= item.bytes; yield item.value; continue }
+        await new Promise<void>(resolve => { this.wake = resolve })
+        this.wake = undefined
+      }
+    } finally { this.close(); this.wake = undefined }
   }
 }
 
@@ -104,19 +141,23 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
   }
 
   private async historyEntries(sessionId: ReturnType<typeof sessionIdSchema.parse>, records: readonly { event: unknown }[], signal: AbortSignal) {
+    signal.throwIfAborted()
     const events = records.map(record => sessionEventSchema.parse(record.event))
     await using lease = events.some(event => event.type === 'tool/call' || event.type === 'tool/result')
       ? await toolPresenterScope(this.ctx, sessionId, signal) : undefined
-    return events.map(event => {
+    signal.throwIfAborted()
+    const entries = events.map(event => {
       const view = presentToolEvent(this.ctx, event, events, lease?.scope)
       return { event: terminalSessionEvent(event), ...(view === undefined ? {} : { view }) }
     })
+    signal.throwIfAborted()
+    return entries
   }
 
   private async snapshot(address: SessionAddress, signal: AbortSignal, maxMessages?: number) {
     for await (const frame of this.ctx.sessionController.follow({ address, assistantStream: true, ...(maxMessages === undefined ? {} : { maxMessages }) }, signal)) {
       if (frame.type !== 'snapshot') throw new Error('Session follow did not start with its authoritative snapshot')
-      this.cursors.set(address.kind === 'session' ? address.sessionId : address.childSessionId, frame.cursor)
+      signal.throwIfAborted()
       return frame
     }
     throw new Error('Session follow ended before its baseline')
@@ -135,8 +176,11 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
       return { events: await this.historyEntries(id, page.records, signal), hasMore: page.hasMore }
     }
     const page = await this.snapshot(address, signal, p.maxMessages)
+    const events = await this.historyEntries(id, page.records, signal)
+    signal.throwIfAborted()
+    this.cursors.set(id, page.cursor)
     for (const follow of this.followRequests) follow(address)
-    return { events: await this.historyEntries(id, page.records, signal), hasMore: page.hasMore, projections: page.projections, assistantStream: page.assistantStream }
+    return { events, hasMore: page.hasMore, projections: page.projections, assistantStream: page.assistantStream }
   }
 
   async readModels(payload: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown> {
@@ -150,6 +194,10 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
     return { current, routable: catalog.routableProviders.includes(current.provider), groups: catalog.groups, failures: catalog.failures }
   }
 
+  async readSubagents(payload: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown> {
+    return readNativeSubagentCatalog(this.ctx, payload, signal)
+  }
+
   async readWorkspaces(signal: AbortSignal): Promise<unknown> {
     for await (const frame of this.ctx.workspaceController.follow(signal)) {
       if (frame.type !== 'baseline') throw new Error('Workspace follow did not start with a baseline')
@@ -160,8 +208,8 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
 
   override async *openHost(_payload: unknown, signal: AbortSignal, onOpen?: () => void): AsyncIterable<RpcRequest<HostFrame>> {
     signal.throwIfAborted()
-    const queue = new TerminalStream<RpcRequest<HostFrame>>()
     const scope = new AbortController()
+    const queue = new TerminalStream<RpcRequest<HostFrame>>({ onOverflow: () => scope.abort() })
     const lifetime = AbortSignal.any([signal, scope.signal])
     const push = (payload: unknown) => queue.push({ rpcId: RpcId(randomUUID()), payload: hostFrameSchema.parse(payload) })
     const disposers = [
@@ -195,14 +243,15 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
 
   override async *openMux(_payload: unknown, signal: AbortSignal, onOpen?: () => void): AsyncIterable<RpcRequest<MuxFrame>> {
     signal.throwIfAborted()
-    const queue = new TerminalStream<RpcRequest<MuxFrame>>()
     const scope = new AbortController()
+    const queue = new TerminalStream<RpcRequest<MuxFrame>>({ onOverflow: () => scope.abort() })
     const lifetime = AbortSignal.any([signal, scope.signal])
     const push = (payload: unknown) => queue.push({ rpcId: RpcId(randomUUID()), payload: muxFrameSchema.parse(payload) })
     const pushInteraction = (request: RpcRequest<MuxFrame>) => queue.push(request)
     const disposeInteractions = this.interactions.subscribe(pushInteraction)
     const follows = new Set<string>()
     const queueBaselines = new Map<string, Extract<MuxFrame, { type: 'session/queue' }>>()
+    const inboxWatermarks = new Map<string, number>()
     const jobBaselines = new Map<string, Extract<MuxFrame, { type: 'session/jobs' }>>()
     const pushJobs = (value: unknown) => {
       const frame = muxFrameSchema.parse(value)
@@ -220,6 +269,9 @@ export class NativeTerminalApi extends AbstractApiClient implements TerminalDoma
     const track = (task: Promise<void>) => { pumps.push(task.catch(error => { if (!lifetime.aborted) queue.close(error) })) }
     const projection = (sessionId: string, key: string, value: unknown, seq: number) => {
       if (key === 'inbox') {
+        const watermark = inboxWatermarks.get(sessionId)
+        if (watermark !== undefined && seq <= watermark) return
+        inboxWatermarks.set(sessionId, seq)
         const inbox = z.object({ 'next-turn': z.array(z.record(z.string(), z.unknown())),
           'next-step': z.array(z.record(z.string(), z.unknown())) }).parse(value)
         pushQueue({ type: 'session/queue', sessionId, items: [

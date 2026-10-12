@@ -468,3 +468,34 @@ pnpm test:clarify-doctor
 ```
 
 The development adaptation has not been published to the npm Registry; use the local-package installation above.
+
+### Optional native capabilities (Harness 0.2.0-rc.2)
+
+The package includes explicit companion bundles under `optional/`: `creator`,
+`browser-playwright-mcp`, `browser-chrome-devtools-mcp`, `browser-stagehand-native`,
+`computer-cua-mcp`, and `computer-cua-native`. Install the selected local companion
+through the native Profile plugin manager (for example `/plugins` → add bundle →
+the installed SeekTTY directory's `optional/creator`). These choices keep the
+main bundle's defaults. Choose one Browser or Computer backend per profile;
+Stagehand needs its own supported model/key, and Cua/browser applications own
+installation and OS permissions. Cancellation cannot undo completed OS actions.
+
+For WAV transcription, explicitly install/enable the official
+`@deepseek-ai/dsh-experimental-voice-input-bundle@0.2.0-rc.2`, then run `/speech wav`.
+The terminal accepts 16kHz mono PCM16 WAV up to 4MiB/120s (or smaller Host limits).
+Model preparation and transcript insertion each require confirmation. A transcript
+replaces the captured composer selection and supports undo; it never sends a message
+automatically. This is a WAV file entry; microphone recording and React components
+are not provided by the terminal. Merely opening the command does not download models.
+
+`/files` includes Host workspace browsing and observed text/binary file views.
+Host references use the Host filesystem; local uploads remain the receipt flow.
+Unavailable file watching is shown as manual refresh. Published Host file reads are
+path based: canonical checks provide best-effort validation, not an atomic sandbox
+against concurrent filesystem replacement. An unmapped remote path cannot be opened
+with a local desktop program.
+
+Ordinary Cordis plugins may register explicit terminal Session actions and draft
+input activities with the mounted `seekttyExtensions` service. These are terminal
+contracts; Web React menu slots/components are not auto-loaded. `/input-activities`
+uses guarded draft insertion and never sends the plugin output automatically.

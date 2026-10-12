@@ -94,19 +94,20 @@ afterEach(() => {
 })
 
 describe('tool output folding', () => {
-  it('keeps the first N lines and appends a remaining-line footer', () => {
+  it('keeps bounded head and tail lines with an exact middle omission marker', () => {
     const lines = Array.from({ length: 250 }, (_, index) => `line-${String(index + 1)}`)
     const folded = foldLineBlock(lines.join('\n'), 200)
     expect(folded.omitted).toBe(50)
     expect(folded.text.split('\n')).toEqual([
-      ...lines.slice(0, 200),
-      '还有 50 行',
+      ...lines.slice(0, 100),
+      '… 省略中间 50 行 …',
+      ...lines.slice(-100),
     ])
     expect(foldLineBlock(lines.join('\n'), 0).omitted).toBe(0)
     expect(foldLineBlock(lines.join('\n'), 0).text).toBe(lines.join('\n'))
     expect(foldLineBlock('line-1\n', 1)).toEqual({ text: 'line-1\n', omitted: 0 })
     expect(foldLineBlock('line-1\nline-2\n', 1).omitted).toBe(1)
-    expect(foldLineBlock('line-1\nline-2\n', 1).text).toContain('还有 1 行')
+    expect(foldLineBlock('line-1\nline-2\n', 1).text).toBe('… 省略中间 1 行 …\nline-2\n')
   })
 
   it('folds expanded shell output using the behavior default of 200 lines', () => {
@@ -119,8 +120,8 @@ describe('tool output folding', () => {
     transcript.update(snapshot([tool(output)]))
     const rendered = stripAnsi(transcript.render(80).join('\n'))
     expect(rendered).toContain('line-1')
-    expect(rendered).toContain('line-200')
-    expect(rendered).not.toContain('line-201')
-    expect(rendered).toContain('还有 50 行')
+    expect(rendered).toContain('line-250')
+    expect(rendered).not.toContain('line-101\n')
+    expect(rendered).toContain('省略中间 50 行')
   })
 })

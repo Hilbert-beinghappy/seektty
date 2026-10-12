@@ -11,7 +11,7 @@ export interface ToolPresenterLease extends AsyncDisposable {
   readonly scope: ToolPresenterScope
 }
 
-/** A preset's standing scope restores cold presentation without creating an Agent. */
+/** A leased preset scope restores cold presentation without creating an Agent. */
 export async function toolPresenterScope(ctx: Context, sessionId: SessionId, signal: AbortSignal): Promise<ToolPresenterLease> {
   signal.throwIfAborted()
   const unleased = (scope: ToolPresenterScope): ToolPresenterLease => ({ scope, async [Symbol.asyncDispose]() {} })

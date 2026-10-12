@@ -16,6 +16,7 @@ export const rpcIdSchema = z.string();
 export const rpcErrorSchema = z.discriminatedUnion('code', [
     z.object({ code: z.literal('bad-request'), message: z.string(), details: z.object({ issues: z.array(z.custom()) }) }),
     z.object({ code: z.literal('cancelled'), message: z.string(), details: z.object({}) }),
+    z.object({ code: z.literal('ASK_TIMED_OUT'), message: z.string(), details: z.object({}) }),
     z.object({ code: z.literal('session-not-found'), message: z.string(), details: z.object({ sessionId: z.string() }) }),
     z.object({ code: z.literal('model-unavailable'), message: z.string(), details: z.object({ provider: z.string(), model: z.string() }) }),
     z.object({ code: z.literal('session-conflict'), message: z.string(), details: z.object({ sessionId: z.string(), requestedCwd: z.string(), existingCwd: z.string().optional() }) }),

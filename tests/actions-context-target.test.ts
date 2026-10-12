@@ -68,7 +68,7 @@ describe('targeted Session context actions', () => {
     await h.actions.executeContext({ target: { kind: 'session', sessionId: h.target }, actionId: 'archive' })
     expect(h.renameSession).toHaveBeenCalledWith(h.target, 'renamed')
     expect(h.forkSession).toHaveBeenCalledWith(h.target)
-    expect(h.archiveSession).toHaveBeenCalledWith(h.target)
+    expect(h.archiveSession).toHaveBeenCalledWith(h.target, expect.any(AbortSignal))
     expect(h.renameSession).not.toHaveBeenCalledWith(h.current, expect.anything())
   })
 

@@ -1,0 +1,26 @@
+{
+  "name": "seektty-browser-stagehand-native",
+  "version": "1.2.6",
+  "private": true,
+  "type": "module",
+  "description": "Explicit optional browser-stagehand-native composition for SeekTTY on official Harness 0.2.0-rc.2",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "minimum": "0.2.0-rc.2",
+      "tested": "0.2.0-rc.2"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-browser-use": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-experimental-browser-use-stagehand-native": "0.2.0-rc.2"
+  }
+}

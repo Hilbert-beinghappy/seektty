@@ -20,6 +20,7 @@ describe('semantic context action registry', () => {
     [{ kind: 'plugin', pluginId: 'p1' }, ['details', 'update', 'remove']],
     [{ kind: 'file', path: 'a.txt' }, ['view', 'copy-path', 'open-external']],
     [{ kind: 'mcp-instance', id: 'm1' }, ['details', 'doctor', 'settings']],
+    [{ kind: 'fetch-title', targetKey: 'call' }, ['open-url', 'copy-url', 'toggle']],
   ] as const)('maps %s to the expected existing actions', (target, expected) => {
     expect(actionIds(contextActionMenu(target as ContextTarget)!.nodes)).toEqual(expected)
   })

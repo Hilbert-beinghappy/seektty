@@ -1,4 +1,4 @@
-/** In-process terminal answerer for native dsh 0.1.5-rc.1 waterfalls. */
+/** In-process terminal answerer for native dsh 0.2.0-rc.2 waterfalls. */
 import { randomUUID } from 'node:crypto'
 import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-questions/types'
@@ -45,13 +45,15 @@ export class NativeInteractions {
       const finish = (outcome: ApprovalOutcome) => {
         if (!this.pending.delete(rpcId)) return
         request.signal?.removeEventListener('abort', cancel)
-        this.emit({ rpcId, payload: { type: 'approval/resolved', sessionId, approvalId, outcome } })
+        // A broken terminal observer must not retain a grantable wait or strand the Host audit pair.
+        try { this.emit({ rpcId, payload: { type: 'approval/resolved', sessionId, approvalId, outcome } }) } catch {}
         resolve(outcome)
       }
       const cancel = () => finish('cancelled')
       const envelope: RpcRequest<MuxFrame> = { rpcId, payload: { type: 'approval/requested', sessionId, approvalId,
         toolName: request.toolName, ...(request.callId === undefined ? {} : { callId: request.callId }),
-        ...(request.reason === undefined ? {} : { reason: request.reason }) } }
+        ...(request.reason === undefined ? {} : { reason: request.reason }),
+        ...(request.displayReason === undefined ? {} : { displayReason: Object.freeze({ ...request.displayReason }) }) } }
       this.pending.set(rpcId, { request: envelope, cancel, reply: response => {
         if (!response.result.ok) return false
         const value = approvalResponsePayloadSchema.safeParse(response.result.value)
@@ -60,28 +62,32 @@ export class NativeInteractions {
         return true
       } })
       request.signal?.addEventListener('abort', cancel, { once: true })
-      this.emit(envelope)
+      try { this.emit(envelope) } catch { finish('unavailable') }
     })
   }
 
   questions(request: QuestionsInput, next: () => Promise<AskUserQuestionAnswer>): Promise<AskUserQuestionAnswer> {
     if (this.sinks.size === 0 || request.agent === undefined) return next()
-    if (request.signal?.aborted) return Promise.reject(new UserQuestionError('Question cancelled', 'ASK_ABORTED'))
+    if (request.signal?.aborted) return Promise.reject(questionAbort(request.signal))
     const sessionId = request.agent.id
     const rpcId = RpcId(randomUUID())
     return new Promise((resolve, reject) => {
-      const finish = (answer?: AskUserQuestionAnswer) => {
+      const finish = (answer?: AskUserQuestionAnswer, error = new UserQuestionError('Question cancelled', 'ASK_ABORTED')) => {
         if (!this.pending.delete(rpcId)) return
         request.signal?.removeEventListener('abort', cancel)
         this.emit({ rpcId, payload: { type: 'question/resolved', sessionId, questionRpcId: rpcId,
-          outcome: answer === undefined ? 'cancelled' : 'answered' } })
-        if (answer === undefined) reject(new UserQuestionError('Question cancelled', 'ASK_ABORTED'))
+          outcome: answer !== undefined ? 'answered' : error.code === 'ASK_TIMED_OUT' ? 'timed-out' : 'cancelled' } })
+        if (answer === undefined) reject(error)
         else resolve(answer)
       }
-      const cancel = () => finish()
-      const envelope: RpcRequest<MuxFrame> = { rpcId, payload: { type: 'question/requested', sessionId, questions: request.questions } }
+      const cancel = () => finish(undefined, request.signal?.aborted ? questionAbort(request.signal) : undefined)
+      const envelope: RpcRequest<MuxFrame> = { rpcId, payload: { type: 'question/requested', sessionId, questions: request.questions,
+        ...(request.wait === undefined ? {} : { wait: request.wait }) } }
       this.pending.set(rpcId, { request: envelope, cancel, reply: response => {
         if (!response.result.ok) {
+          if (response.result.error.code === 'ASK_TIMED_OUT' && request.wait?.timed === true) {
+            finish(undefined, new UserQuestionError('Foreground question timed out', 'ASK_TIMED_OUT')); return true
+          }
           if (response.result.error.code !== 'cancelled') return false
           cancel(); return true
         }
@@ -104,4 +110,9 @@ export class NativeInteractions {
       this.emit(envelope)
     })
   }
+}
+
+function questionAbort(signal: AbortSignal): UserQuestionError {
+  return signal.reason instanceof UserQuestionError && signal.reason.code === 'ASK_TIMED_OUT'
+    ? signal.reason : new UserQuestionError('Question cancelled', 'ASK_ABORTED')
 }

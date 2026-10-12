@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import z from '@deepseek-ai/schemastery'
 import { TuiActions, type TuiActionHost } from '../src/client/actions.ts'
 import type { HarnessTuiCapabilities, TuiModelOption } from '../src/client/capabilities.ts'
 import type {
@@ -8,6 +9,8 @@ import type {
   SelectOverlayRequest,
 } from '../src/client/overlays.ts'
 import type { Transcript } from '../src/client/transcript.ts'
+
+const providerSettingsSchema = z.object({ providers: z.dict(z.object({ baseURL: z.string(), models: z.array(z.object({ id: z.string() })) })) }).toJSON()
 
 function prompts(select: OverlayPrompts['select']): OverlayPrompts {
   return {
@@ -129,7 +132,7 @@ describe('separate model and reasoning controls', () => {
     const listModels = vi.fn().mockResolvedValue({ options: [target], failures: [], routable: true })
     const namespace = {
       ns: 'llm-pi-ai',
-      schema: {},
+      schema: providerSettingsSchema,
       value: { providers: { acme: { models: [{ id: 'model' }] } } },
       user: { providers: { acme: { models: [{ id: 'model' }] } } },
       base: {},
@@ -183,7 +186,7 @@ describe('separate model and reasoning controls', () => {
       finish: vi.fn(),
     } satisfies OverlayNavigation
     const namespace = {
-      ns: 'llm-pi-ai', schema: {},
+      ns: 'llm-pi-ai', schema: providerSettingsSchema,
       value: { providers: { acme: { models: [{ id: 'missing-model' }] } } },
       user: { providers: { acme: { models: [{ id: 'missing-model' }] } } },
       base: {}, applies: 'live', secrets: [], revision: 1,

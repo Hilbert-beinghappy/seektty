@@ -94,6 +94,8 @@ export declare class ProjectionValueStore {
      * clear newer values).
      * @param baseline - the response's projections block.
      */
+    applyCached(values: Partial<SessionProjectionMap>): void;
+    clear(): void;
     seed(baseline: ProjectionsBaseline): void;
     /**
      * Drop rows past a mux-generation baseline (`session/subscribed.lastSeq`):

@@ -31,6 +31,8 @@ export class HarnessAutocompleteProvider implements AutocompleteProvider {
     try {
       const catalog = await this.capabilities.commandCatalog(options.signal)
       if (options.signal.aborted) return null
+      const warnings = this.capabilities.commandCatalogWarnings?.() ?? []
+      if (warnings.length > 0) this.onError(warnings.join('\n'))
       const commands: SlashCommand[] = catalog.map(command => ({
         name: command.name,
         description: escapeTerminalText(translateUiText(command.description)),

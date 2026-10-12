@@ -202,12 +202,28 @@ export function validProviderCredentialRef(ref: string): boolean {
   return CREDENTIAL_REF.test(ref)
 }
 
-/** Read the custom-route protocol union from the installed llm-pi-ai schema. */
-export function providerProtocolChoices(namespace: SettingsNamespaceView | undefined): readonly string[] {
+/** Recognize editable Provider fields at the exact Host directory address, regardless of instance name. */
+export function providerProfileSchema(namespace: SettingsNamespaceView | undefined, path: readonly string[]) {
+  if (namespace === undefined) return undefined
+  try {
+    const profile = nodeAtPath(rehydrateSchema(namespace.schema), path)
+    const fields = profile?.dict
+    if (profile?.type !== 'object' || fields?.baseURL?.type !== 'string'
+      || fields.models?.type !== 'array' || fields.models.inner?.type !== 'object'
+      || fields.models.inner.dict?.id?.type !== 'string') return undefined
+    if (fields.apiKeyEnv !== undefined && fields.apiKeyEnv.type !== 'string') return undefined
+    if (fields.displayName !== undefined && fields.displayName.type !== 'string') return undefined
+    if (fields.api !== undefined && (fields.api.type !== 'union' || fields.api.list?.some(node => typeof node.value !== 'string'))) return undefined
+    return profile
+  } catch { return undefined }
+}
+
+/** Read protocol choices from the supported schema at its native settingsPath. */
+export function providerProtocolChoices(namespace: SettingsNamespaceView | undefined, path: readonly string[] = ['providers', PROTOCOL_PROBE_ROUTE]): readonly string[] {
   if (namespace === undefined) return []
   let node
   try {
-    node = nodeAtPath(rehydrateSchema(namespace.schema), ['providers', PROTOCOL_PROBE_ROUTE, 'api'])
+    node = nodeAtPath(rehydrateSchema(namespace.schema), [...path, 'api'])
   } catch {
     return []
   }
@@ -375,6 +391,8 @@ export async function saveProviderConfig(
     readonly ops: readonly SettingsPathOpView[]
     readonly expectedRevision: number
     readonly credential?: { readonly ref: string; readonly value: string }
+    readonly credentialSettingsPath?: readonly string[]
+    readonly credentialMustBeUnconfigured?: boolean
   },
 ): Promise<ProviderSaveResult> {
   let namespace: SettingsNamespaceView | undefined
@@ -397,6 +415,26 @@ export async function saveProviderConfig(
     }
   }
   if (request.credential !== undefined) {
+    if (request.credentialSettingsPath !== undefined) {
+      // Settings reconciliation can remount a Provider or redirect its Ref.
+      // Re-read the exact instance and address after it completes, before writing a key.
+      try {
+        const [settings, credentials] = await Promise.all([
+          api.settings.describe({}), api.credentials.describe({ refs: [request.credential.ref] }),
+        ])
+        const instances = settings.result.ok ? settings.result.value.namespaces.filter(row => row.ns === request.ns) : []
+        const credential = credentials.result.ok ? credentials.result.value.credentials[request.credential.ref] : undefined
+        if (instances.length !== 1 || getPath(instances[0]!.value, request.credentialSettingsPath) !== request.credential.ref
+          || credential === undefined || !credential.writable
+          || (request.credentialMustBeUnconfigured === true && credential.configured)) return {
+          ok: false, stage: 'credential', code: 'credential-target-changed', settingsCommitted: request.ops.length > 0,
+          ...(namespace === undefined ? {} : { namespace }),
+        }
+      } catch {
+        return { ok: false, stage: 'credential', code: 'credential-target-unavailable', settingsCommitted: request.ops.length > 0,
+          ...(namespace === undefined ? {} : { namespace }) }
+      }
+    }
     try {
       const response = await api.credentials.set(request.credential)
       if (!response.result.ok) return {

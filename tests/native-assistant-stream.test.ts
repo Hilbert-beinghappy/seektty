@@ -93,3 +93,31 @@ it('rebaselines a restarted activation and ignores retired activation baselines 
   stream.accept({ ...chunk(3, 1), attemptId: next })
   expect(stream.snapshot()?.blocks).toEqual([{ kind: 'text', text: 'newhello' }])
 })
+
+it('ignores late chunks and end markers from a retired activation without resetting current text', () => {
+  const stream = start()
+  stream.accept(chunk(20))
+  const next = LlmAttemptId('current-attempt')
+  stream.accept({ type: 'start', attemptId: next, revision: 1, startedAfterSeq: SessionSeq(9), turn: 2, step: 1 })
+  stream.accept({ ...chunk(), attemptId: next })
+  const before = stream.snapshot()
+  stream.accept(chunk(21, 1))
+  stream.accept({ type: 'end', attemptId, revision: 22, index: 2, outcome: { kind: 'abandoned' } })
+  expect(stream.snapshot()).toBe(before)
+  expect(() => stream.accept({ ...chunk(3, 1), attemptId: LlmAttemptId('unknown') })).toThrow('matching baseline')
+  stream.accept({ ...chunk(3, 1), attemptId: next })
+  expect(stream.snapshot()?.blocks).toEqual([{ kind: 'text', text: 'hellohello' }])
+})
+
+it('ignores late frames after a committed terminal marker while waiting for durable settlement', () => {
+  const stream = start()
+  stream.accept(chunk())
+  stream.accept({ type: 'end', attemptId, revision: 3, index: 1,
+    outcome: { kind: 'committed', eventType: 'assistant/message', seq: 9 } })
+  const before = stream.snapshot()
+  stream.accept(chunk(4, 1))
+  stream.baseline({ revision: 100, activeAttempt: { attemptId, startedAfterSeq: -1, turn: 1, step: 2, nextIndex: 0, stream: [] } })
+  expect(stream.snapshot()).toBe(before)
+  stream.settle(9)
+  expect(stream.snapshot()).toBeNull()
+})

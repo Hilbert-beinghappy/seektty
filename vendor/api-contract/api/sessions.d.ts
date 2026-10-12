@@ -1,3 +1,4 @@
+import type { Branded } from '@deepseek-ai/dsh-brand';
 import type { SessionAssistantStreamBaseline } from '@deepseek-ai/dsh-api-session-controller'
 /**
  * sessions domain contract. Method signatures are the source of truth:
@@ -92,6 +93,9 @@ export type PromptContentPart = {
     mediaType: ImageMediaType;
     data: string;
     name?: string;
+} | {
+    type: 'file';
+    receiptId: Branded<'file-upload-receipt-id'>;
 };
 /** Complete model selection for one session. */
 export interface ModelSelection {
@@ -209,17 +213,11 @@ export interface SessionSummary {
      */
     agentPreset?: string;
     /**
-     * Projection baseline for this row, with zero log loads: attached sessions
-     * read the registry's live watermark cut; cold sessions read the persisted
-     * projection cache's stored rows — as stale as that session's last durable
-     * checkpoint (`asOfSeq` says exactly how stale), never wrong, and directly
-     * seedable into the client's per-session value store under its
-     * higher-seq-wins rule (a list baseline can never overwrite a newer push
-     * frame). Absent when no value is available (no registry, no cache row for
-     * a cold session, or a fail-soft cache read miss); a listing client treats
-     * absence as "no title yet", exactly like a blank session.
+     * Partial list hints: only kind=sequenced shares live watermarks. Cached
+     * values fill missing keys without a comparable sequence. Unknown or
+     * absent kinds are ignored, preserving listing availability.
      */
-    projections?: SessionProjectionsBlock;
+    projections?: SessionProjectionsBlock & { readonly kind?: string };
 }
 /** One session-content search result; display metadata stays owned by `session.list`. */
 export interface SessionSearchItem {

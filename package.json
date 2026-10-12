@@ -59,6 +59,9 @@
     "assets/seektty-onboarding-light.png",
     "assets/seektty-onboarding-dark.png",
     "cordis.patch.yml",
+    "optional/*.patch.yml",
+    "optional/*/package.json",
+    "optional/*/cordis.patch.yml",
     "README.md",
     "README.zh.md",
     "LICENSE",
@@ -107,6 +110,7 @@
     "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
     "@deepseek-ai/dsh-api-settings-controller": "0.2.0-rc.2",
     "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-files": "0.2.0-rc.2",
     "@deepseek-ai/dsh-app-boot": "0.2.0-rc.2",
     "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
     "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
@@ -277,6 +281,9 @@
     "@deepseek-ai/dsh-api-workspace-controller": {
       "optional": true
     },
+    "@deepseek-ai/dsh-api-workspace-files": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-api-settings-controller": {
       "optional": true
     },
@@ -375,6 +382,7 @@
     "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
     "@deepseek-ai/dsh-api-settings-controller": "0.2.0-rc.2",
     "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-files": "0.2.0-rc.2",
     "@deepseek-ai/dsh-app-boot": "0.2.0-rc.2",
     "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
     "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
@@ -441,6 +449,9 @@
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.0-rc.2",
     "@deepseek-ai/dsh-ptc-runtime-node": "0.2.0-rc.2",
     "@deepseek-ai/dsh-config-editor": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-api-job-controller": "0.2.0-rc.2"
+    "@deepseek-ai/dsh-api-job-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-fs-local": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-experimental-speech-to-text": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-experimental-api-speech-to-text": "0.2.0-rc.2"
   }
 }

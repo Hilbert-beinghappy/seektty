@@ -518,6 +518,9 @@ function matches(record, filter) {
         && (filter.face === undefined || record.face === filter.face);
 }
 function validateInvocation(descriptor) {
+    if (!['direct', 'context'].includes(descriptor.invocation?.kind)) {
+        throw new Error('typert: unknown invocation kind');
+    }
     validateNonempty('invocation id', descriptor.id);
     validateSegment('invocation service key', descriptor.service);
     validateWireName('invocation namespace', descriptor.namespace);
@@ -528,6 +531,9 @@ function validateInvocation(descriptor) {
     validateCodec(descriptor.result, `${descriptor.id} result`);
     const wires = new Set();
     for (const parameter of descriptor.parameters) {
+        if (!['json', 'lookup'].includes(parameter.source)) {
+            throw new Error('typert: unknown parameter source');
+        }
         validateWireName('parameter name', parameter.name);
         validateWireName('parameter wire field', parameter.wire);
         if (wires.has(parameter.wire)) {
@@ -577,6 +583,7 @@ function validateInvocation(descriptor) {
 function validateCodec(codec, subject) {
     if (codec.mode === 'src-json')
         return;
+    if (codec.mode !== 'strict') throw new Error(`typert: ${subject} unknown codec mode`);
     validateNonempty(`${subject} type symbol`, codec.typeSymbol);
     if (typeof (codec.create?.() ?? codec.schema)?.parse !== 'function') {
         throw new Error(`typert: ${subject} strict codec has no parse() method`);
@@ -597,4 +604,3 @@ function validateNonempty(subject, value) {
         throw new Error(`typert: invalid ${subject} — must be nonempty`);
 }
 export default TypertRegistry;
-//# sourceMappingURL=service.js.map

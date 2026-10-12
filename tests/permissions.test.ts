@@ -142,6 +142,26 @@ it('refreshes the process catalog without advancing the durable selection waterm
 })
 
 describe('permission UI', () => {
+  it.each(['zh', 'en'] as const)('shows advertised Auto as experimental and cancellation leaves Host permissions unchanged (%s)', async locale => {
+    setUiLocale(locale)
+    const h = harness(undefined, true)
+    h.options.push({ value: 'auto', name: 'Auto' })
+    const stop = h.capabilities.subscribeActive(() => {})
+    await vi.waitFor(() => expect(h.capabilities.listPermissions().some(option => option.id === 'auto')).toBe(true))
+    const option = h.capabilities.listPermissions().find(option => option.id === 'auto')!
+    expect(option.needsConfirmation).toBe(true)
+    expect(option.label).toContain(locale === 'zh' ? '实验性' : 'Experimental')
+    expect(option.description).toContain('token')
+    expect(h.capabilities.listPermissions(true).map(option => option.id)).not.toContain('auto')
+    const pending = h.actions.execute('permission', 'auto')
+    try {
+      await vi.waitFor(() => expect(h.text()).toContain(option.label))
+      expect(h.text()).toContain(locale === 'zh' ? '放行不安全操作' : 'unsafe actions')
+      h.key('\u001b'); await pending
+      expect(h.execute).not.toHaveBeenCalled()
+      expect(h.capabilities.listPermissions().find(option => option.current)?.id).toBe('workspace-write')
+    } finally { h.overlays.dispose(); await pending; stop() }
+  })
   it.each(['zh', 'en'] as const)('switches both ways and reports already-current state (%s)', async locale => {
     setUiLocale(locale)
     const h = harness()

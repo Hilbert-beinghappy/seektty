@@ -368,6 +368,7 @@ export class SessionManager {
         this.listInflight = (async () => {
             try {
                 const { result } = await this.api.sessions.list({});
+                if (this.listMutations !== mutations) return;
                 if (result.ok) {
                     const baseline = this.listPhase === 'pending'
                         ? result.value.items
@@ -404,16 +405,19 @@ export class SessionManager {
                     // store (cold titles surface without opening the session). Per-key
                     // apply, not seed(): the list block is a partial baseline — the
                     // cold cache serves only version-matching keys — so an absent key
-                    // must not clear; higher-seq-wins still keeps a stale list block
-                    // from overwriting a newer push frame or tail baseline.
+                    // must not clear. Only sequenced hints share the live sequence
+                    // domain; cached hints never outrank authoritative values.
                     for (const s of result.value.items) {
                         const block = s.projections;
                         if (block === undefined)
                             continue;
                         const store = this.projectionStore(s.sessionId);
-                        const values = block.values;
-                        for (const key of Object.keys(values))
-                            store.apply(key, values[key], block.asOfSeq);
+                        if (block.kind === 'cached') store.applyCached(block.values);
+                        else if (block.kind === 'sequenced') {
+                            for (const key of Object.keys(block.values))
+                                store.apply(key, block.values[key], block.asOfSeq);
+                        }
+                        // Unknown and legacy kinds have no established ordering domain.
                     }
                 }
                 else {
@@ -422,15 +426,18 @@ export class SessionManager {
                 }
             }
             catch (error) {
+                if (this.listMutations !== mutations) return;
                 this.listState = 'error';
                 const folded = transportError(error);
                 /* v8 ignore next -- the `? null` arm is unreachable: transportError always returns ok:false. */
                 this.listError = folded.ok ? null : folded.error;
             }
             finally {
-                this.listMutations = null;
-                this.listInflight = null;
-                this.notifier.markDirty();
+                if (this.listMutations === mutations) {
+                    this.listMutations = null;
+                    this.listInflight = null;
+                    this.notifier.markDirty();
+                }
             }
         })();
         return this.listInflight;
@@ -808,6 +815,11 @@ export class SessionManager {
      * request with its live rpcId.
     */
     handleDisconnected() {
+        // End the old generation before any replacement stream can replay.
+        for (const store of this.projectionStores.values()) store.clear();
+        this.listMutations = null;
+        this.listInflight = null;
+        this.notifier.markDirty();
         if (this.pendingInteractions.size > 0) {
             this.pendingInteractions.clear();
             this.notifier.markDirty();

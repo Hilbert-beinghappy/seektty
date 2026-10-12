@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { messagesFixtureReply } from './helpers/messages-fixture.mjs'
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -51,12 +51,22 @@ const pass = (step, evidence = {}) => {
 console.log(JSON.stringify({ evidenceDirectory: root }))
 // Use only OS/process-launch variables. In particular, do not inherit provider
 // API keys, endpoint overrides, NODE_OPTIONS, or a personal DSH_HOME.
-const env = Object.fromEntries(['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT']
+const env = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'LANG', 'LC_ALL', 'TMPDIR', 'TMP', 'TEMP', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT']
   .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]))
 Object.assign(env, {
   DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', SEEKTTY_UPDATE: 'off',
   SEEKTTY_NATIVE_FIXTURE_KEY: 'fixture-only-not-a-real-key', TERM: 'xterm-256color',
 })
+const pnpmEntry = process.env.SEEKTTY_PNPM_ENTRY
+assert(pnpmEntry && existsSync(pnpmEntry), 'Set SEEKTTY_PNPM_ENTRY to the installed pnpm CLI entry')
+const bin = join(root, 'bin'); mkdirSync(bin)
+const quote = value => `'${value.replaceAll("'", "'\\''")}'`
+const pnpmShim = join(bin, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm')
+writeFileSync(pnpmShim, process.platform === 'win32'
+  ? `@"${process.execPath}" "${pnpmEntry}" %*\r\n`
+  : `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(pnpmEntry)} "$@"\n`)
+chmodSync(pnpmShim, 0o700)
+env.PATH = bin + (process.platform === 'win32' ? ';' : ':') + (env.PATH ?? '')
 
 let requestCount = 0
 const requests = []

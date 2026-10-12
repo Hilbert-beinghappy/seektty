@@ -51,6 +51,16 @@ ApiProxyService or the old Host business implementation. The terminal adapter
 must delegate state and operations to the official dsh 0.2.0-rc.2 controllers.
 The upstream license is retained in `vendor/api-contract/LICENSE`.
 
+## Native Chat process projections
+
+`vendor/ui-chat-process/` retains eight pure business regions from the MIT-licensed
+`@deepseek-ai/dsh-client-ui-chat@0.2.0-rc.2` npm distribution (DeepSeek).
+The published assistant, Turn-process and process-group reducers are retained;
+only imports and the published identity brand helper are adapted to the existing
+terminal runtime. Source integrity and region hashes are in `provenance.json`;
+the upstream license is retained alongside the modules and reproduced below.
+No browser surface or Host state owner is introduced.
+
 ## DeepSeek Harness license
 
 The following notice applies to the DeepSeek-derived code described above,

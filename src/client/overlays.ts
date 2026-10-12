@@ -179,6 +179,7 @@ export interface OverlayNavigation<TResult = void> extends OverlayPrompts {
     onSelect: (choice: OverlayChoice) => void | Promise<void>,
   ): void
   updateChoices(choices: readonly OverlayChoice[], notice?: string): void
+  setStatus?(text: string): void
   back(): void
   finish(value?: TResult): void
 }
@@ -1070,6 +1071,8 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
   private lastWidth = 0
   private lastHeight = 0
   private footerHits: readonly HitRegion[] = []
+  private status = ''
+  setStatus(text: string): void { this.status = text; this.tui.requestRender() }
   private hoveredFooter: OverlayFooterCommand | undefined
 
   private textPage(component: Component): OverlayTextSelection {
@@ -1117,6 +1120,7 @@ class NavigationOverlay<TResult> implements Component, OverlayNavigation<TResult
       (component as Component & { focused: boolean }).focused = this.focused
     }
     const body = component.render(width)
+    if (this.status !== '') body.splice(Math.max(0, body.length - 1), 0, color.muted(truncateToWidth(escapeTerminalText(this.status), width, '…')))
     const footer = renderOverlayFooter(this.footerActions(entry), width, this.hoveredFooter)
     const footerRow = Math.max(0, body.length - 1)
     this.footerHits = footer.hits.map(hit => ({ ...hit, rect: { ...hit.rect, row: footerRow + hit.rect.row } }))

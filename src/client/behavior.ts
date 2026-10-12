@@ -17,6 +17,7 @@ import {
 } from '@deepseek-ai/dsh-tui-protocol'
 import { sanitizeKeyBindings } from './keymap.ts'
 import { ui } from './locale.ts'
+import { normalizeWorkProcessMode } from './work-process-display.ts'
 
 const TOOL_CARDS = new Set<TuiToolCardDisplay>(['collapsed', 'expanded', 'hidden'])
 const CLIPBOARD_FALLBACK = new Set<TuiClipboardFallback>(['auto', 'osc52', 'off'])
@@ -118,6 +119,7 @@ export function normalizeBehavior(value: unknown): TuiBehaviorSettings {
   const record = recordOf(value)
   return {
     toolCards: toolCardsOf(record.toolCards),
+    ...(normalizeWorkProcessMode(record.workProcessDisplay) === undefined ? {} : { workProcessDisplay: normalizeWorkProcessMode(record.workProcessDisplay)! }),
     showReasoning: booleanOf(record.showReasoning, DEFAULT_TUI_BEHAVIOR.showReasoning),
     desktopNotifications: booleanOf(
       record.desktopNotifications,

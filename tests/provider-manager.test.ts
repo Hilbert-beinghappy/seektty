@@ -195,6 +195,23 @@ function overlayHarness(options: {
 beforeEach(() => { setUiLocale('zh') })
 
 describe('shared Provider manager', () => {
+  it('reports a lost credential reply as unknown without offering a retry or rendering the key', async () => {
+    const { api, mutate, set } = apiHarness()
+    set.mockRejectedValue(new Error('reply lost after possible credential commit'))
+    const secret = 'synthetic-secret-no-render'
+    const { overlays, rendered } = overlayHarness({
+      selections: ['__add__', 'openai-completions', '__add__', '__done__', undefined],
+      inputs: ['unknown-route', '', 'https://fixture.invalid/v1', 'unknown_key', 'model-a', '', '', ''],
+      secrets: [secret], confirms: [true, true],
+    })
+    const notices: string[] = []
+    await manageProviders(overlays, api, { notice: message => { notices.push(message) } })
+    expect(mutate).toHaveBeenCalledOnce()
+    expect(set).toHaveBeenCalledOnce()
+    expect(overlays.confirm).toHaveBeenCalledOnce()
+    expect(notices.join('\n')).toContain('结果未知')
+    expect(rendered.join('\n') + notices.join('\n')).not.toContain(secret)
+  })
   it('creates a custom Provider with one path mutation and one credential write', async () => {
     const { api, mutate, set } = apiHarness()
     const secret = 'secret-that-must-not-render'

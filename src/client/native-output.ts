@@ -40,6 +40,8 @@ export function streamSink(stream: Writable): NativeSink {
 /** One transaction at a time. Cancellation drops only work not yet handed to the sink. */
 export class NativeOutput {
   private chain: Promise<void> = Promise.resolve()
+  private disposed = false
+  private readonly disposeWaiters = new Set<() => void>()
   private failure: Error | undefined
   private generation = 0
   private anchor = false
@@ -56,25 +58,57 @@ export class NativeOutput {
   reset(preserveViewport = false): void { this.generation++; this.presented = undefined; if (!preserveViewport) this.anchor = false }
   invalidateLayout(): void { this.anchor = false; this.presented = undefined }
   presentedFrame(): Readonly<{ epoch: number; width: number; height: number; tailRow: number }> | undefined { return this.presented }
-  drain(): Promise<void> { return this.chain.then(() => { if (this.failure) throw this.failure }) }
+  drain(): Promise<void> {
+    return this.untilDisposed(this.chain.then(() => { if (this.failure) throw this.failure }), undefined)
+  }
+
+  /** Stop queued work and release waiters; bytes already handed to the sink cannot be recalled. */
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.reset()
+    for (const resolve of this.disposeWaiters) resolve()
+    this.disposeWaiters.clear()
+  }
+
+  private untilDisposed<T>(work: Promise<T>, cancelled: T): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const cancel = (): void => { resolve(cancelled) }
+      if (this.disposed) cancel()
+      else this.disposeWaiters.add(cancel)
+      // Remove settled waiters during a long-lived session, and keep handling
+      // the in-flight sink's eventual rejection after disposal.
+      void work.then(value => {
+        this.disposeWaiters.delete(cancel)
+        resolve(value)
+      }, error => {
+        this.disposeWaiters.delete(cancel)
+        reject(error)
+      })
+    })
+  }
 
   enqueue(task: () => Promise<void>, generation?: number): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false)
     let accepted = false
     const run = this.chain.then(async () => {
+      if (this.disposed) return
       if (this.failure) return
       if (generation !== undefined && generation !== this.generation) { this.metrics.cancelled++; return }
-      await task(); accepted = true
+      await task(); accepted = !this.disposed
     })
     this.chain = run.catch((error: unknown) => {
+      if (this.disposed) return
       this.failure = error instanceof Error ? error : new Error(String(error))
       this.invalidateLayout()
       this.onError(this.failure)
     })
-    return this.chain.then(() => accepted)
+    return this.untilDisposed(this.chain.then(() => accepted), false)
   }
 
   private async write(bytes: string): Promise<void> {
-    await this.sink(bytes)
+    await this.untilDisposed(this.sink(bytes), undefined)
+    if (this.disposed) return
     this.metrics.writes++; this.metrics.bytes += Buffer.byteLength(bytes)
   }
 
@@ -113,6 +147,7 @@ export class NativeOutput {
         }
         if (changed === '' && cursorCode === this.previousCursor) { publish(); return }
         await this.write('\x1b[?2026h' + changed + cursorCode + '\x1b[?2026l')
+        if (this.disposed) return
         this.previousTail = viewport; this.previousCursor = cursorCode
         this.metrics.frames++
         publish()
@@ -128,6 +163,7 @@ export class NativeOutput {
       bytes += viewport.join('\r\n') + cursorCode
       bytes += '\x1b[?2026l'
       await this.write(bytes)
+      if (this.disposed) return
       this.anchor = generation === this.generation; this.size = size
       this.tailRow = tailRow
       this.previousTail = viewport; this.previousCursor = cursorCode

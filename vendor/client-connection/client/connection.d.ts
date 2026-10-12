@@ -11,7 +11,7 @@ export interface ConnectionConfig {
     /** Cap on waiting for both streams' onOpen before onConnected, in ms. The strict handshake
      *  waits for mux+host stream establishment plus describe; a carrier that never
      *  fires onOpen (misbehaving proxy) must not wedge the connection forever — on timeout the
-     *  generation proceeds as connected and the live-gap repair path covers stragglers. */
+     *  generation fails and retries without publishing connected. */
     streamOpenTimeoutMs?: number;
 }
 /** Coarse connection state for the UI: 'connected' after each generation's handshake,
@@ -41,6 +41,7 @@ export declare class ConnectionController {
     private generation;
     private attempt;
     private current;
+    private lifetime;
     private running;
     private lastState;
     private readonly config;
@@ -61,4 +62,3 @@ export declare class ConnectionController {
     /** Sink exception isolation: a business-layer throw is logged only, never affecting pump or reconnect semantics. */
     private callSink;
 }
-//# sourceMappingURL=connection.d.ts.map

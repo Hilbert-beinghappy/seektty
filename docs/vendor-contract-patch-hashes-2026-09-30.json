@@ -1,0 +1,142 @@
+{
+  "baseline": "00dba96f32fc2e02bcd8544c325c4e1bb8a97a67",
+  "testedHost": "0.2.0-rc.2",
+  "files": [
+    {
+      "path": "vendor/api-contract/api/agent-presets.d.ts",
+      "baselineSha256": "acaac7c519eb5b3aabd97c0068f2fa4249397fc5867b50893bf5683a7c405f13",
+      "patchedSha256": "f77c1723ce0314d2f51948fc3663133bf949e25eceecd16997509995c5c38685"
+    },
+    {
+      "path": "vendor/api-contract/api/agent-presets.schema.js",
+      "baselineSha256": "770e93e79a435010d9d971fe0503951674fb2c828f9084bab9d318a064ad3940",
+      "patchedSha256": "fb230e8245c141d10e4a458381364b4d0458d94bcb1409e4ad4444975cfd5438"
+    },
+    {
+      "path": "vendor/api-contract/api/sessions.d.ts",
+      "baselineSha256": "54fd08d311873576133cc3d41d4f31f39e5d0e2fca89b03de3fd3646acd9b72b",
+      "patchedSha256": "4ae841c82070ebcc7875bacae0a622f03c38b8c5030df2b4cbfd719151bfad28"
+    },
+    {
+      "path": "vendor/api-contract/api/sessions.schema.d.ts",
+      "baselineSha256": "88293e4877d11aa93f9f32066d921e2e7d725ddfc5da51822be80527514b74ae",
+      "patchedSha256": "5edf086d585d4cc4888dd6c442142c4115c9668f7a479d00daca00ecb582586f"
+    },
+    {
+      "path": "vendor/api-contract/api/sessions.schema.js",
+      "baselineSha256": "2be76bbdb0f676d1a2efae21f72ee1a1d22c9a035b43cc1e2d285d83811322cf",
+      "patchedSha256": "87448c60443b983ef9209665037ab1784718538411cb4284f1ae6b6a92e1f9cf"
+    },
+    {
+      "path": "vendor/api-gateway/client/index.js",
+      "baselineSha256": "88791f6ebd891a597c78753b456978a0481f942b24c901f68cff29749723a09c",
+      "patchedSha256": "b73ea2f7d5ffab22c30f69e15e07595174690eefd2aad88214ad3f6ff187da18"
+    },
+    {
+      "path": "vendor/client-connection/client/connection.d.ts",
+      "baselineSha256": "5e0f0f81bfbad15a26161cc305e77b21cf46269d76459895ac21c19535b4a3c6",
+      "patchedSha256": "3ee6c674350664929fc6643957d93f79df32704f9346afda5c8e058895b6c977"
+    },
+    {
+      "path": "vendor/client-connection/client/connection.js",
+      "baselineSha256": "4a0110bf0b15636cd51a8e641d72147bb3427e6aa32792b7d5f1d423d20f3f4d",
+      "patchedSha256": "93f78bf4284633824aa7221ed1c384f005f63d9f83427e9dcc5198f6b239f898"
+    },
+    {
+      "path": "vendor/client-runtime/client/contract/session.d.ts",
+      "baselineSha256": "87aaa2a8679e9e354e69af39cb120bb21dcac605133e7ae22a77af777930284f",
+      "patchedSha256": "f2b7256fbf70b1e22cf241ba478f3fcea375d76c45eebec7fe8b4b603127f74a"
+    },
+    {
+      "path": "vendor/client-runtime/client/sessions/manager.js",
+      "baselineSha256": "fe08344e55db6721853dda380a129b310edcaa409090c97d1743dc7b0ae4e751",
+      "patchedSha256": "52e9dbe562d45285c1b75f37f2c3c1829a433ec0feebfcf72a36de823980e84d"
+    },
+    {
+      "path": "vendor/client-runtime/client/sessions/projection-store.d.ts",
+      "baselineSha256": "6e4b3568f6ad36fd9a87c021cbdf6a27d21c1e4a3af041448627809f06b76849",
+      "patchedSha256": "3c00b16532242b0d36c98c3d253c085e46c5ca54913091ead96c78b704669d30"
+    },
+    {
+      "path": "vendor/client-runtime/client/sessions/projection-store.js",
+      "baselineSha256": "0c1e785727b6ea86b93b3ace8661cfcdeb878c6beab55f1acd9a3dfd58dc4bb4",
+      "patchedSha256": "a69e44318abcab865f5b3891e598e67c4ff37c113db382e94957803488001bcd"
+    },
+    {
+      "path": "vendor/client-runtime/client/sessions/session.d.ts",
+      "baselineSha256": "d2b82d1efc26fb13dbe7192e939b66c7b57ac4e910ecd4e9f85fba1e0ed39ae3",
+      "patchedSha256": "1cab8408294be608d26471c23d0e29386a3bd7cd76bc47914f9d81e19a2fd3e5"
+    },
+    {
+      "path": "vendor/client-runtime/client/sessions/session.js",
+      "baselineSha256": "8607cbf6a7a8d0ff2bfa96ee925a87e8f128c7aa1d397df3e44647486f796529",
+      "patchedSha256": "74be7599c899baf14f64d68337d2f8f22d94f085e28fdc0a72eadcdeddc83bac"
+    },
+    {
+      "path": "vendor/typert-registry/service.js",
+      "baselineSha256": "bb2a58169a233bb69d6e6c432e2ab85c482ea7645cc9437d1b0eaa0c6b6826f0",
+      "patchedSha256": "7e4e567f5560b35829cdbb68398defc7db4e67e44517b48fb32090e067fc6bc0"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/command.js",
+      "baselineSha256": "fcdb285fcf2378fd84cac766ba73ae844c081324a8bfa61eab977b1cf139d61b",
+      "patchedSha256": "c8f6ba314596a243831c2ab596c5b025c51a4329e4bc9224ee2876b03212c952"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/message.js",
+      "baselineSha256": "4abcd9054e2f6d14c0f3a3db782c62339df55e009c7922aea8445fb9b6e6fe5b",
+      "patchedSha256": "0087fe6e692c28e3dd982a07dd256564fbd8c95836030f79c723786cc5c427b7"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/tool.js",
+      "baselineSha256": "16967504fd8b7e2c664fa64b1d44575ac54b3aad404d64904badd5fe43b7201a",
+      "patchedSha256": "8237767e373293a5d5acf3edc8ca92d19331f16eee8116b82fdfb6589177c46d"
+    },
+    {
+      "path": "vendor/api-contract/api/events.d.ts",
+      "baselineSha256": "d3dfa37daea716bf988a22df88d84d41eee46ca9587d9742998bd724d0bac609",
+      "patchedSha256": "43f06831baa3fa64ae57aad92f84c007edfa370e7e6147fe7f0234322aea3132"
+    },
+    {
+      "path": "vendor/api-contract/api/events.schema.js",
+      "baselineSha256": "5b16af94ee3e72f5211d48ce5fe87f73c984fe99f60342cd5a934eaf7f2c7c05",
+      "patchedSha256": "c3db3a1b9011af752703912dd4e523eb2e7765178374dd87b5477dedd0fbdba5"
+    },
+    {
+      "path": "vendor/api-contract/api/rpc.d.ts",
+      "baselineSha256": "3a261a54ede8f996a027150ad0cf821754f61be472307e9e9bee7fdca205c944",
+      "patchedSha256": "cd2256984e8bccdd60fa405499b437cb1db8e292b08f167ee64e9fe81d45af5d"
+    },
+    {
+      "path": "vendor/api-contract/api/rpc.schema.js",
+      "baselineSha256": "12f58a797dba8877d3556f80750115884c6e276f96f41bc09ec5b0a1b30a5c43",
+      "patchedSha256": "9d7bdfc0767ac783610ff927af3187a8111186305d3db0855f2285c24f0f810f"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/assistant.js",
+      "baselineSha256": "b510550680e8fcb0b8c0d78cfa38497b8ce725a8eefad2cf07ffadbd0409dd7c",
+      "patchedSha256": "a9d28024cc22f5228ea086d739b7fae1bd7921182bdcf083d46adb1b32df851c"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/assistant.d.ts",
+      "baselineSha256": "f23b637255504ba77e23f4aec4ea09a3de72880a9b6bccfda196fa70c80a3369",
+      "patchedSha256": "292f456cc28c2c36cb70f0efaead759e1b48acac679127e02b75c958b861b56d"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/chat-snapshot-builder.js",
+      "baselineSha256": "6e4806cc22c8decac63e1b6f69749c96514b936ee44c295252f22ddc92e15676",
+      "patchedSha256": "be0bb2ac9a01d3e204a36037622d4803a70dc2f68496d08a3ea58d1aa0e08cd9"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/common.js",
+      "baselineSha256": "5d3dfc24406ea6c9f9cd40f1dd1f0d53ca62254d2f0d0e23af6088b4e72c41f1",
+      "patchedSha256": "a5b4e813d95e0bc72e61e345f2779067cd1acdbf409716c0dcbbe4d4010457bf"
+    },
+    {
+      "path": "vendor/ui-conversation/client/conversation-nodes/register.js",
+      "baselineSha256": "dbd6c4aa943ba3790bc6c2d76661605057d0bf2ca1ad5f168668a730e585d2cb",
+      "patchedSha256": "5439c7ff94a956a198ab5b9f460fee9c2777a2f021aabdc3d8b70ac4f7daa95f"
+    }
+  ],
+  "nativeProcessProvenance": "vendor/ui-chat-process/provenance.json"
+}

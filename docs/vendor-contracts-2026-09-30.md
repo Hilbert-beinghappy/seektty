@@ -1,0 +1,9 @@
+# Terminal retained contracts and native rc.2
+
+The patch starts from trusted commit 00dba96f32fc2e02bcd8544c325c4e1bb8a97a67. It does not import changes from the paused A/C worktrees. Per-file baseline and patched SHA256 values are in vendor-contract-patch-hashes-2026-09-30.json. This is local patch provenance, not a claim that every retained vendor file is copied from the rc.2 distribution. Historical origins and MIT notices remain in THIRD_PARTY_NOTICES.md.
+
+Published @deepseek-ai/dsh-agent-preset-registry@0.2.0-rc.2 list/read codecs are tested directly against retained schemas: no trust, authorable, or hasDocument fields are invented. Host names and descriptions stay unchanged because stable ids do not establish authorship. Retained copy/remove endpoints remain explicitly unsupported; opening documents uses native Profile settings. Tool results consume flat V4 content/isError, and compaction sources use compact-checkpoint, as published by dsh-compaction/lib/invariant.js. Future projection domains remain opaque. Unknown descriptor invocation, source, and codec forms fail before RPC; successful replies are validated.
+
+Connection readiness requires both stream-open callbacks and a successful describe under one deadline. Stop aborts lifetime and generation, retry sleep is cancellable, immediate restart fences the old loop, late onOpen/frames are ignored, and reentrant stop cannot publish a description. A carrier that ignores abort may retain its own resources; this adapter fences its frames but cannot forcibly dispose that external carrier.
+
+Validation: Node 24.20.0, isolated HOME/XDG/DSH_HOME. Focused native/V4/gateway/history/connection/preset regression tests and typecheck passed; actual counts are recorded in the integration progress record. Synthetic fixtures only, no real model request or Session data. Final built lib, immutable package, stock lifecycle, PTY, and optional plugin combinations still require final integration acceptance.

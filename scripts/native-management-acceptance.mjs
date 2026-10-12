@@ -43,9 +43,9 @@ export async function managementAcceptance({ interactive = false } = {}) {
     return Object.fromEntries(rows.filter(row => row.id && row.config && Object.keys(row.config).length).map(row => [row.id, row.config]))
   }
   const record = (name, extra = {}) => { report.steps.push({ name, status: 'passed', ...extra }); save(); console.log(JSON.stringify({ passed: name, ...extra })) }
-  const env = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT']
+  const env = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'TMP', 'TEMP', 'USER', 'LOGNAME', 'SHELL', 'SystemRoot', 'ComSpec', 'PATHEXT']
     .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]))
-  Object.assign(env, { HOME: userHome, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', SEEKTTY_UPDATE: 'off',
+  Object.assign(env, { HOME: userHome, USERPROFILE: userHome, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', SEEKTTY_UPDATE: 'off',
     SEEKTTY_MANAGEMENT_OFFICIAL_KEY: 'fixture-official-only', TERM: 'xterm-256color', LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' })
   const pnpmEntry = process.env.SEEKTTY_PNPM_ENTRY ?? process.env.npm_execpath
   assert(pnpmEntry && existsSync(pnpmEntry), 'Set SEEKTTY_PNPM_ENTRY to the installed pnpm CLI entry')

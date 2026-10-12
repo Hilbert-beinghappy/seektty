@@ -12,13 +12,12 @@ it('keeps worker locale constants equal to the installed official contract', () 
   expect(terminalLocale.LOCALE_SETTINGS_NAMESPACE).toBe(officialLocale.LOCALE_SETTINGS_NAMESPACE)
 })
 
-it('projects a native flat tool result without changing the durable Host message', () => {
+it('preserves a native flat tool result without changing the durable Host message', () => {
   const message = createToolResultMessage({ callId: ToolCallId('call'), content: [{ type: 'text', text: 'failure' }], isError: true })
-  const event = { type: 'tool/result', seq: SessionSeq(0), time: 1, surfaceOp: 'append', data: { turn: 1, step: 1, message } } as SessionEvent
+  const event = { type: 'tool/result', seq: SessionSeq(0), time: 1, surfaceOp: 'append', data: { turn: 1, step: 1, message } } satisfies SessionEvent
   const before = JSON.stringify(event)
-  expect(terminalSessionEvent(event)).toMatchObject({ data: { message: { content: [{
-    type: 'tool-result', content: [{ type: 'text', text: 'failure' }], isError: true,
-  }] } } })
+  expect(terminalSessionEvent(event)).toBe(event)
+  expect(terminalSessionEvent(event)).toMatchObject({ data: { message: { content: [{ type: 'text', text: 'failure' }], isError: true } } })
   expect(JSON.stringify(event)).toBe(before)
 })
 

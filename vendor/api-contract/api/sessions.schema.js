@@ -37,7 +37,7 @@ export const sessionSummarySchema = z.object({
     origin: z.literal('subagent').optional(),
     cwd: z.string().optional(),
     agentPreset: z.string().optional(),
-    projections: z.lazy(() => sessionProjectionsBlockSchema).optional(),
+    projections: z.lazy(() => sessionProjectionHintsSchema).optional(),
 });
 /** session.list request payload (cursor is a reserved seat, unimplemented in v1). */
 export const sessionListRequestSchema = z.object({
@@ -162,6 +162,12 @@ export const sessionProjectionsBlockSchema = z.object({
     asOfSeq: z.number().int().min(-1),
     values: z.record(z.string(), z.unknown()),
 });
+/** List hints keep their source domain; unknown/legacy kinds remain non-authoritative. */
+export const sessionProjectionHintsSchema = z.object({
+    kind: z.string().optional(),
+    asOfSeq: z.number().int().min(-1),
+    values: z.record(z.string(), z.unknown()),
+});
 /** Host-side validation for the persisted Session-list projection. */
 export const sessionListMetadataProjectionSchema = z.object({
     blank: z.boolean(),
@@ -222,6 +228,7 @@ export const imageMediaTypeSchema = z.union([
 export const promptContentPartSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('text'), text: z.string() }),
     z.object({ type: z.literal('image'), mediaType: imageMediaTypeSchema, data: z.string(), name: z.string().optional() }),
+    z.object({ type: z.literal('file'), receiptId: z.string().min(1) }),
 ]);
 /** session.prompt request payload, including optional browser-local request provenance. */
 export const sessionPromptRequestSchema = z.object({

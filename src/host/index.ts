@@ -13,13 +13,15 @@ import { translateUiText, ui } from '../client/locale.ts'
 import { isActiveFiber, resetUnknownFiberWarnings } from './fiber-state.ts'
 import { createTuiManagementBridge } from './management.ts'
 import { TUI_STARTUP_SERVICE, type TuiStartupValues } from './startup.ts'
+import { TerminalExtensionRegistry } from './terminal-extensions.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-runner'
 
 /** Host services required before the terminal can assemble its Client Runtime. */
 export const inject = [
-  'agents', 'agentPresets', 'tools', 'sessionQuery', 'sessionController', 'jobController', 'workspaceController', 'typertGateway', 'connection', 'settings', 'credentials', 'profilePluginManager', 'tuiMarketplaceProviders', TUI_STARTUP_SERVICE,
+  'configEditor', 'profileContext',
+  'agents', 'agentPresets', 'tools', 'sessionQuery', 'sessionController', 'jobController', 'workspaceController', 'workspaceFiles', 'typertGateway', 'connection', 'settings', 'credentials', 'profilePluginManager', 'tuiMarketplaceProviders', TUI_STARTUP_SERVICE,
 ]
 
 /** Structural launch values crossing the Host/Client TypeScript-program boundary. */
@@ -101,6 +103,9 @@ async function run(ctx: Context): Promise<void> {
  * @param ctx - assembled Harness Host context.
  */
 export function apply(ctx: Context): void {
+  // Publish before loader.await(): explicitly installed plugins can inject this
+  // service and register effects without depending on private Client modules.
+  new TerminalExtensionRegistry(ctx)
   void run(ctx).catch((error: unknown) => {
     if (!isActive(ctx)) return
     internals.stderr.write(`deepseek: ${translateUiText(error instanceof Error ? error.message : String(error))}\n`)

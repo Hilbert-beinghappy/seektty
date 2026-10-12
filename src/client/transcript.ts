@@ -57,6 +57,7 @@ import {
 } from './theme.ts'
 import { syntaxLanguageForPath } from './syntax-highlighter.ts'
 import { foldLineBlock } from './tool-output-limit.ts'
+import { autoReviewDenial } from './auto-review-presentation.ts'
 import { unifiedHunks } from './line-diff.ts'
 import { DEFAULT_TUI_BEHAVIOR } from '@deepseek-ai/dsh-tui-protocol'
 import { HeightIndex } from './height-index.ts'
@@ -73,6 +74,8 @@ import {
   type ScrollbarModel,
 } from './scrollbar.ts'
 import type { CellRect, HitRegion } from './mouse-hit-map.ts'
+import { fetchTitleUrl, fetchTitleLayout, fetchTitleActionReason, type FetchTitlePresentation, type FetchTitlePorts, type FetchTitleTarget } from './fetch-title-target.ts'
+import { safeArtifactUrl } from './artifact-view.ts'
 import {
   anchorAtCell,
   compareAnchors,
@@ -92,6 +95,9 @@ import {
 import { componentSelectionLines } from './pi-tui-adapters.ts'
 import { NativeHistory, stableParagraphEnd, fencedCodeRange, type NativeReceipt, type NativeSourceToken } from './native-history.ts'
 import { NativeMarkdownPreparation, NATIVE_MARKDOWN_THRESHOLD, type NativeMarkdownWorkerFactory } from './native-markdown.ts'
+import { nativeProcessSnapshot } from '../../vendor/ui-chat-process/snapshot-adapter.js'
+import { normalizeWorkProcessMode, workProcessPolicy, type WorkProcessMode, type WorkProcessTurnDisclosure } from './work-process-display.ts'
+import { workProcessLayout, type WorkProcessControl } from './work-process-layout.ts'
 
 const PULSE_FRAME_MS = 160
 
@@ -177,8 +183,10 @@ type TranscriptRow = ({
   readonly welcome?: boolean
   /** Tool-card identity for per-card expand in focus mode. */
   readonly toolKey?: string
+  readonly fetchTitle?: { readonly title: string; readonly start: number; readonly presentations: readonly FetchTitlePresentation[]; readonly expanded: boolean }
   /** Reasoning-region identity for pointer-only presentation toggles. */
   readonly reasoningKey?: string
+  readonly processKey?: string
 }
 
 export type NativePreparedRow = Extract<TranscriptRow, { format: 'plain' | 'code' | 'markdown' }>
@@ -298,6 +306,7 @@ function wrappedSourceProjections(
   visualLines: readonly string[],
   displayStartCell: number,
   finalJoiner: string,
+  sourceRange?: (start: number, end: number, line: number) => void,
 ): SelectionLineProjection[] {
   const semanticSource = stripCopyDecorations(source)
   const projections: SelectionLineProjection[] = []
@@ -306,6 +315,7 @@ function wrappedSourceProjections(
     const visibleText = stripCopyDecorations(visualLine).trimEnd()
     const found = visibleText === '' ? cursor : semanticSource.indexOf(visibleText, cursor)
     const start = found >= cursor ? found : cursor
+    sourceRange?.(start, start + visibleText.length, projections.length)
     if (projections.length > 0) {
       const previous = projections[projections.length - 1]
       if (previous !== undefined) {
@@ -704,6 +714,9 @@ const PRODUCT_TOOL_TITLES: Readonly<Record<string, { readonly zh: string; readon
 }
 
 function toolTitle(node: ToolResultNode | RunningToolCall): string {
+  if ('kind' in node && autoReviewDenial(node) !== undefined) {
+    return `${node.call?.name ?? node.callId} · ${ui('Auto review · 实验性 · 已拒绝', 'Auto review · Experimental · Denied')}`
+  }
   const name = 'kind' in node ? node.call?.name : node.name
   const productTitle = name === undefined ? undefined : PRODUCT_TOOL_TITLES[name]
   if (productTitle !== undefined) return ui(productTitle.zh, productTitle.en)
@@ -833,6 +846,11 @@ function settledInvocationDetails(node: ToolResultNode, context: number): ToolDe
 function viewDetails(node: ToolResultNode, context: number): ToolDetail[] {
   const result = node.resultView
   const details = settledInvocationDetails(node, context)
+  const denial = autoReviewDenial(node)
+  if (denial !== undefined) {
+    details.push({ kind: 'plain', text: ui('Auto review 拒绝了此调用；工具正文未执行。', 'Auto review denied this call; the tool body was not executed.') })
+    if (denial.reason !== undefined) details.push({ kind: 'plain', text: denial.reason })
+  }
   if (result?.card === 'terminal') {
     if (result.output !== undefined) details.push({ kind: 'plain', text: result.output })
     if (result.exitCode !== undefined) details.push({
@@ -900,6 +918,12 @@ function viewDetails(node: ToolResultNode, context: number): ToolDetail[] {
     details.push(...contentDetails(node.content))
   } else {
     details.push(...contentDetails(node.content))
+  }
+  // Presenter summaries may omit a failed tool's native body; retain that evidence.
+  if (node.isError) {
+    for (const detail of contentDetails(node.content)) {
+      if (detail.text !== '' && !details.some(existing => existing.text.includes(detail.text))) details.push(detail)
+    }
   }
   if (node.meta !== undefined) {
     details.push({ kind: 'code', text: jsonText(node.meta), language: 'json', caption: ui('元数据', 'Metadata') })
@@ -971,6 +995,14 @@ function toolBlockRows(
   const prefix = depth === 0 ? '◆ ' : `${'  '.repeat(depth)}↳ `
   const key = callKey(block, cardKey)
   const expanded = toolCardExpanded(preferences, key)
+  const title = toolTitle(block)
+  const titleStart = stripCopyDecorations(`${toolFocusMark(preferences, key)}${prefix}`).length
+  const presentations: FetchTitlePresentation[] = [
+    { for: 'call', view: block.callView },
+    ...('kind' in block ? [{ for: 'result' as const, view: block.resultView }] : []),
+  ]
+  const titleMetadata = depth === 0 && key !== undefined
+    ? { fetchTitle: { title, start: titleStart, presentations, expanded } } : {}
   if ('kind' in block) {
     const duration = block.callTime === null ? '' : ` · ${toolDurationText(Math.max(0, block.time - block.callTime))}`
     const failed = settledToolFailed(block)
@@ -982,6 +1014,7 @@ function toolBlockRows(
         format: 'plain',
         text: `${toolFocusMark(preferences, key)}${prefix}${color.accent(toolTitle(block))}${failed ? ` · ${color.danger(ui('失败', 'Failed'))}` : ''}${duration}`,
         ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
+        ...titleMetadata,
       },
       ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
       ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
@@ -995,6 +1028,7 @@ function toolBlockRows(
       pulse: 'marker',
       liveDurationSince: block.time,
       ...(depth === 0 && key !== undefined ? { toolKey: key } : {}),
+      ...titleMetadata,
     },
     ...details.map(detail => detailRow(foldDetail(detail, preferences.toolOutputLineLimit), depth)),
     ...block.subCalls.flatMap(child => toolBlockRows(child, preferences, depth + 1)),
@@ -1421,8 +1455,13 @@ interface TranscriptBlockLines {
 }
 
 interface TranscriptPointerControl {
-  readonly kind: 'tool' | 'reasoning' | 'example'
+  readonly kind: 'tool' | 'reasoning' | 'example' | 'process'
   readonly id: string
+  readonly fetch?: {
+    readonly title: NonNullable<TranscriptRow['fetchTitle']>
+    readonly renderedLine: string
+    readonly cells: { readonly start: number; readonly width: number; readonly sourceStart: number; readonly sourceEnd: number }
+  }
 }
 
 interface TranscriptBlock {
@@ -1479,6 +1518,8 @@ export interface TranscriptPresentationSnapshot {
   readonly collapsedTools: readonly string[]
   readonly expandedReasoning: readonly string[]
   readonly collapsedReasoning: readonly string[]
+  readonly processTurns?: readonly WorkProcessTurnDisclosure[]
+  readonly processGroups?: readonly string[]
 }
 
 export type TranscriptRestoreResult = 'exact' | 'nearest' | 'session-mismatch'
@@ -1536,6 +1577,10 @@ export class Transcript implements Component, Focusable {
   private sessionId: string | undefined
   private toolVisibility: ToolVisibility = 'collapsed'
   private reasoningVisible = false
+  private workProcessMode: WorkProcessMode | undefined
+  private readonly processTurns = new Map<number, WorkProcessTurnDisclosure>()
+  private readonly processGroups = new Set<string>()
+  private currentProcessControls: readonly WorkProcessControl[] = []
   private toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit
   private diffContextLines = DEFAULT_TUI_BEHAVIOR.diffContextLines
   private emptyState = true
@@ -1577,11 +1622,11 @@ export class Transcript implements Component, Focusable {
   private lastViewportMaps: readonly ViewportCellMap[] = []
   private selection: TextSelection | undefined
   private readonly lineControls = new Map<string, readonly (TranscriptPointerControl | undefined)[]>()
-  private lastPointerControls: readonly {
-    readonly row: number
-    readonly kind: 'tool' | 'reasoning' | 'example'
-    readonly id: string
-  }[] = []
+  private lastPointerControls: readonly (TranscriptPointerControl & { readonly row: number })[] = []
+  private fetchSignature = ''
+  private fetchGeneration = 0
+  private fetchViewport = ''
+  private readonly fetchTargets = new Map<string, FetchTitleTarget>()
   private hoveredRegionId: string | undefined
   private emptyScrollPrimed = false
   private nativeMode = false
@@ -1987,7 +2032,11 @@ export class Transcript implements Component, Focusable {
     reasoning: boolean,
     toolOutputLineLimit = DEFAULT_TUI_BEHAVIOR.toolOutputLineLimit,
     diffContextLines = DEFAULT_TUI_BEHAVIOR.diffContextLines,
+    workProcessMode?: WorkProcessMode,
   ): void {
+    const nextMode = normalizeWorkProcessMode(workProcessMode)
+    if (nextMode !== this.workProcessMode && this.nativeTailEnabled) this.resetNativeHistory()
+    this.workProcessMode = nextMode
     this.toolVisibility = tools
     this.reasoningVisible = reasoning
     this.toolOutputLineLimit = toolOutputLineLimit
@@ -2024,6 +2073,8 @@ export class Transcript implements Component, Focusable {
       collapsedTools: [...this.collapsedTools],
       expandedReasoning: [...this.expandedReasoning],
       collapsedReasoning: [...this.collapsedReasoning],
+      processTurns: [...this.processTurns.values()],
+      processGroups: [...this.processGroups],
     }
   }
 
@@ -2038,6 +2089,9 @@ export class Transcript implements Component, Focusable {
     for (const key of snapshot.collapsedTools) this.collapsedTools.add(key)
     for (const key of snapshot.expandedReasoning) this.expandedReasoning.add(key)
     for (const key of snapshot.collapsedReasoning) this.collapsedReasoning.add(key)
+    this.processTurns.clear(); this.processGroups.clear()
+    for (const value of snapshot.processTurns ?? []) this.processTurns.set(value.turn, value)
+    for (const key of snapshot.processGroups ?? []) this.processGroups.add(key)
     const keys = this.blocks.map(block => block.key)
     const exact = snapshot.viewportAnchor.blockKey === '' || keys.includes(snapshot.viewportAnchor.blockKey)
     this.viewportAnchor = exact
@@ -2115,11 +2169,17 @@ export class Transcript implements Component, Focusable {
   }
 
   /** Visible tool titles and empty-session examples from the last viewport. */
-  controlHitRegions(origin: CellRect): HitRegion[] {
+  controlHitRegions(origin: CellRect, fetchPorts?: FetchTitlePorts): HitRegion[] {
     const inset = origin.width >= SCROLLBAR_MIN_WIDTH ? 2 : 0
     const bar = this.showsScrollbar(origin.width) ? 1 : 0
     const width = Math.max(1, origin.width - inset - bar)
-    return this.lastPointerControls.map((control) => ({
+    const signature = JSON.stringify([this.sessionId, this.viewportState?.start, width, origin, this.lastPointerControls.map(control => [control.row, control.id,
+      control.fetch === undefined ? undefined : [control.fetch.title, control.fetch.cells]])])
+    if (signature !== this.fetchSignature) { this.fetchSignature = signature; this.fetchGeneration++ }
+    this.fetchViewport = JSON.stringify(this.viewportState?.start)
+    this.fetchTargets.clear()
+    return this.lastPointerControls.flatMap((control): HitRegion[] => {
+      const base: HitRegion = {
       id: `transcript:${control.kind}:${control.id}`,
       rect: { col: origin.col + inset, row: origin.row + control.row, width, height: 1 },
       zIndex: 11,
@@ -2131,10 +2191,42 @@ export class Transcript implements Component, Focusable {
         kind: 'transcript',
         command: control.kind === 'tool'
           ? 'toggle'
-          : control.kind === 'reasoning' ? 'toggle-reasoning' : 'example',
+          : control.kind === 'reasoning' ? 'toggle-reasoning' : control.kind === 'process' ? 'toggle-process' : 'example',
         targetKey: control.id,
       },
-    }))
+      }
+      if (control.fetch === undefined) return [base]
+      const layout = fetchTitleLayout({ title: control.fetch.title.title, presentations: control.fetch.title.presentations,
+        safeUrl: safeArtifactUrl, renderedLine: control.fetch.renderedLine, titleCells: control.fetch.cells,
+        rect: base.rect, expanded: control.fetch.title.expanded, targetKey: control.id,
+        scopeId: this.sessionId ?? '', generation: this.fetchGeneration })
+      if (layout.link === undefined) return [base]
+      const target = layout.link.target
+      this.fetchTargets.set(control.id, target)
+      const enabled = fetchPorts !== undefined && fetchTitleActionReason(target, 'open', fetchPorts, target) === undefined
+      return [...layout.toggles.map((rect, index) => ({ ...base, id: `${base.id}:toggle:${control.fetch!.cells.sourceStart}:${index}`, rect })),
+        { ...base, id: `transcript:fetch:${control.id}:${control.fetch.cells.sourceStart}`, rect: layout.link.rect,
+          role: 'link', enabled: true, activation: enabled ? 'direct' : 'none',
+          action: { kind: 'transcript', command: 'fetch-title', targetKey: control.id } }]
+    })
+  }
+
+  /** Current resident presenter target; no captured href survives a changed viewport. */
+  fetchTitleTarget(key: string): FetchTitleTarget | undefined {
+    // Native scrollback is terminal-owned; expose only explicit tool focus, never invented mouse cells.
+    if (this.nativeMode && this.toolFocus && this.toolKeys()[this.toolCursor] === key) {
+      const title = this.blocks.flatMap(block => block.rows).find(row => row.toolKey === key)?.fetchTitle
+      const url = title === undefined ? undefined : fetchTitleUrl(title.title, title.presentations, safeArtifactUrl)
+      return url === undefined || this.sessionId === undefined ? undefined : {
+        ...url, targetKey: key, scopeId: this.sessionId, generation: 1_000_000_000 + this.blockGeneration,
+      }
+    }
+    return this.fetchViewport === JSON.stringify(this.viewportState?.start)
+      && this.lastPointerControls.some(control => control.id === key && control.fetch !== undefined) ? this.fetchTargets.get(key) : undefined
+  }
+
+  focusedFetchTitleTarget(): FetchTitleTarget | undefined {
+    return this.toolFocus ? this.fetchTitleTarget(this.toolKeys()[this.toolCursor] ?? '') : undefined
   }
 
   /** Set a visual-only transcript target hover without changing keyboard focus or card state. */
@@ -2180,6 +2272,27 @@ export class Transcript implements Component, Focusable {
       this.collapsedReasoning.delete(key)
       this.expandedReasoning.add(key)
     }
+    this.update(this.snapshot, this.imageLoader)
+    this.requestRender()
+    return true
+  }
+
+  processControls(): readonly WorkProcessControl[] { return this.currentProcessControls }
+  toggleProcess(id: string): boolean {
+    const control = this.currentProcessControls.find(value => value.id === id)
+    if (control === undefined || this.snapshot === undefined) return false
+    if (control.kind === 'turn') {
+      const turn = Number(id.slice('turn:'.length))
+      const evidence = nativeProcessSnapshot(this.snapshot.chat)?.evidence.get(turn)
+      if (evidence?.spec === undefined) return false
+      if (control.open) this.processTurns.delete(turn)
+      else this.processTurns.set(turn, { turn, answerStep: evidence.spec.answerStep ?? 0 })
+    } else {
+      const key = id.slice('group:'.length)
+      if (control.open) this.processGroups.delete(key)
+      else this.processGroups.add(key)
+    }
+    if (this.nativeTailEnabled) this.resetNativeHistory()
     this.update(this.snapshot, this.imageLoader)
     this.requestRender()
     return true
@@ -2347,6 +2460,7 @@ export class Transcript implements Component, Focusable {
    * @param imageLoader - authenticated reader for references in this Session.
    */
   update(snapshot: ConversationSnapshot, imageLoader?: TranscriptImageLoader): void {
+    this.fetchTargets.clear()
     this.snapshot = snapshot
     const sessionId = String(snapshot.sessionId)
     if (sessionId !== this.sessionId) {
@@ -2363,6 +2477,7 @@ export class Transcript implements Component, Focusable {
       this.expandedReasoning.clear()
       this.collapsedReasoning.clear()
       this.reasoningStates.clear()
+      this.processTurns.clear(); this.processGroups.clear(); this.currentProcessControls = []
       this.toolCursor = 0
       this.nodeCache.clear()
       this.viewportAnchor = { blockKey: '', lineOffset: 0, followLatest: true }
@@ -2407,6 +2522,10 @@ export class Transcript implements Component, Focusable {
       }
       return node === undefined || node.visibility !== 'visible' ? [] : [node]
     })
+    const process = workProcessLayout(visibleNodes, nativeProcessSnapshot(snapshot.chat),
+      this.workProcessMode === undefined ? undefined : workProcessPolicy(this.workProcessMode),
+      this.processTurns, this.processGroups, this.search !== undefined)
+    this.currentProcessControls = process.controls
     if (this.nativeTailEnabled) {
       const order = visibleNodes.map(node => node.key)
       const current = new Set(order)
@@ -2488,7 +2607,14 @@ export class Transcript implements Component, Focusable {
         blocks.push(block)
       }
     }
-    for (const node of visibleNodes) {
+    for (const entry of process.entries) {
+      if ('control' in entry) {
+        const control = entry.control
+        take(`__process__:${control.id}`, JSON.stringify(control), () => [{ format: 'plain',
+          text: color.muted(`${control.open ? '▾' : '▸'} ${escapeTerminalText(control.label)}`), processKey: control.id, gapBefore: true }])
+        continue
+      }
+      const node = entry.node
       const step = assistantStepData(node.data)
       const sourceToken = structuralToken({ kind: node.kind, data: node.data, deliverables: deliverablesFingerprint(node) })
       const fingerprint = nodeFingerprint(node, preferences, sourceToken)
@@ -2782,6 +2908,8 @@ export class Transcript implements Component, Focusable {
         ? { kind: 'tool', id: row.toolKey }
         : row?.reasoningKey !== undefined
           ? { kind: 'reasoning', id: row.reasoningKey }
+        : row?.processKey !== undefined
+          ? { kind: 'process', id: row.processKey }
         : row?.exampleId !== undefined
           ? { kind: 'example', id: row.exampleId }
           : undefined
@@ -2814,6 +2942,19 @@ export class Transcript implements Component, Focusable {
       }
       for (let lineIndex = start; lineIndex < lines.length; lineIndex += 1) {
         controls[lineIndex] = control
+      }
+      if (row?.format === 'plain' && row.fetchTitle !== undefined && control !== undefined) {
+        const title = row.fetchTitle
+        wrappedSourceProjections(row.text, rendered, 0, '', (sourceStart, sourceEnd, lineIndex) => {
+          const from = Math.max(sourceStart, title.start)
+          const to = Math.min(sourceEnd, title.start + title.title.length)
+          if (from >= to) return
+          const source = stripCopyDecorations(row.text)
+          controls[start + lineIndex] = { ...control, fetch: { title, renderedLine: rendered[lineIndex] ?? '', cells: {
+            start: visibleWidth(source.slice(sourceStart, from)), width: visibleWidth(source.slice(from, to)),
+            sourceStart: from - title.start, sourceEnd: to - title.start,
+          } } }
+        })
       }
     }
     const resolvedProjections = projections.map((projection, index) => ({
@@ -3077,7 +3218,7 @@ export class Transcript implements Component, Focusable {
   ): { readonly lines: readonly string[]; readonly maps: readonly ViewportCellMap[] } {
     const start = this.viewportState?.start
     const maps: ViewportCellMap[] = []
-    const pointerControls: { readonly row: number; readonly kind: 'tool' | 'reasoning' | 'example'; readonly id: string }[] = []
+    const pointerControls: (TranscriptPointerControl & { readonly row: number })[] = []
     if (start === undefined) {
       this.lastViewportMaps = maps
       this.lastPointerControls = pointerControls
@@ -3107,7 +3248,7 @@ export class Transcript implements Component, Focusable {
         })
       }
       const control = this.lineControls.get(block.key)?.[lineOffset]
-      if (control !== undefined) pointerControls.push({ row, kind: control.kind, id: control.id })
+      if (control !== undefined) pointerControls.push({ ...control, row })
       lineOffset += 1
       if (lineOffset >= (copy?.lineStarts.length ?? 1)) {
         blockIndex += 1
@@ -3308,12 +3449,14 @@ export class Transcript implements Component, Focusable {
     this.search = undefined
     this.searchIndex = undefined
     this.lastFullLines = []
+    if (this.workProcessMode !== undefined && this.snapshot !== undefined) this.update(this.snapshot, this.imageLoader)
     this.requestRender()
     return true
   }
 
   private beginSearch(): void {
     this.search = { input: new Input(), query: '', composing: true, matchIndex: 0 }
+    if (this.workProcessMode !== undefined && this.snapshot !== undefined) this.update(this.snapshot, this.imageLoader)
     this.ensureSearchIndex()
     this.requestRender()
   }

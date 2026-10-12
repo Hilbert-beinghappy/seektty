@@ -12,6 +12,12 @@ export const DSH_COMPATIBILITY: DshCompatibility = {
   tested: '0.2.0-rc.2',
 }
 
+/** Retained terminal adapters are audited against one published Host contract. */
+export const TERMINAL_CONTRACT_TARGET = Object.freeze({
+  tested: DSH_COMPATIBILITY.tested,
+  sessionFormat: 4,
+})
+
 /**
  * Audited public subagent fields for the exact tested dsh release. Runtime
  * feature detection remains authoritative; this inventory is diagnostics and

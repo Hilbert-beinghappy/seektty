@@ -3,11 +3,13 @@
 import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { getImageDimensions } from '@mariozechner/pi-tui'
+import { autoPermissionPresentation } from './auto-review-presentation.ts'
 import type {
   IApiClient,
   JobView,
   ModelReasoningEffort,
   ModelSelection,
+  PromptContentPart,
   QuestionResponsePayload,
   SessionId,
   SessionModels,
@@ -56,9 +58,26 @@ import {
 } from './subagent-presentation.ts'
 import {
   RootSessionCatalogProjector,
+  projectRootSessions,
   rootCatalogRevision,
   type RootCatalogResult,
 } from './root-session-catalog.ts'
+import { SessionBrowserController } from './session-browser.ts'
+import { HostFileController, containedHostPath, type HostFileOptions } from './host-file-controller.ts'
+import { ArtifactViewController } from './artifact-view.ts'
+import { McpResourceController } from './mcp-resource-view.ts'
+import { TeamBoardController } from './team-view.ts'
+import { ScheduleController } from './schedule-view.ts'
+import { SubagentCatalogController, type SubagentDescendantPort } from './subagent-catalog-view.ts'
+import { ContinuedQuestionController, type ContinuedQuestionSource } from './continued-question-view.ts'
+import type { OptionalViewSource } from './optional-view-lifetime.ts'
+import { OptionalViewLifetime } from './optional-view-lifetime.ts'
+import { ModelInformationController, type ModelInformation } from './model-information.ts'
+import { AccountHandoffController } from './account-handoff.ts'
+import { PACKAGE_VERSION } from '../dsh-compat.ts'
+import { configuredModelEvidence } from './configured-model-evidence.ts'
+import { ManagementInterrupted } from './management-lifetime.ts'
+import { FileAttachmentController, type StagedFile, type FileReferenceCandidate } from './file-attachments.ts'
 
 /** A command shown by the terminal's merged slash directory. */
 export interface TuiCommandCandidate {
@@ -103,7 +122,6 @@ export interface TuiModeOption {
   readonly id: string
   readonly label: string
   readonly description?: string
-  readonly trust?: 'system' | 'user'
   readonly current: boolean
   readonly isDefault: boolean
   readonly disabledReason?: string
@@ -265,12 +283,18 @@ export function shortFunctionDescription(description: string, fallback: string):
 export function tuiCommands(): readonly TuiCommandCandidate[] {
   return Object.freeze([
     { name: 'new', description: ui('新建会话', 'New session'), source: 'TUI', behavior: 'local' },
-    { name: 'sessions', description: ui('查看或搜索会话', 'View or search sessions'), argumentHint: ui('[搜索词]', '[query]'), source: 'TUI', behavior: 'local' },
+    { name: 'sessions', description: ui('查看或搜索会话', 'View or search sessions'), argumentHint: ui('[active|all|archived|搜索词]', '[active|all|archived|query]'), source: 'TUI', behavior: 'local' },
     { name: 'model', description: ui('切换 Provider 和模型', 'Switch Provider and model'), source: 'TUI', behavior: 'local' },
     { name: 'effort', description: ui('切换当前模型的推理强度', 'Change current model reasoning effort'), source: 'TUI', behavior: 'local' },
     { name: 'mode', description: ui('切换模式', 'Switch mode'), source: 'TUI', behavior: 'local' },
     { name: 'permission', description: ui('切换权限', 'Switch permission'), argumentHint: ui('[权限]', '[permission]'), source: 'Host + TUI', behavior: 'local' },
     { name: 'workspace', description: ui('管理工作区', 'Manage workspaces'), argumentHint: ui('[子命令|路径]', '[subcommand|path]'), source: 'TUI', behavior: 'local' },
+    { name: 'display', description: ui('工作过程四种显示模式', 'Four work-process display modes'), source: 'TUI', behavior: 'local' },
+    { name: 'processes', description: ui('展开或折叠当前工作过程', 'Expand or collapse current processes'), source: 'TUI', behavior: 'local' },
+    { name: 'model-info', description: ui('查看模型能力信息', 'Inspect model capability information'), source: 'TUI', behavior: 'local' },
+    { name: 'account', description: ui('官方账号与登录', 'Official account and sign-in'), source: 'TUI', behavior: 'local' },
+    { name: 'speech', description: ui('选择 WAV 转写并确认插入草稿（实验性）', 'Transcribe a WAV and confirm draft insertion (experimental)'), argumentHint: '[wav]', source: 'TUI', behavior: 'local' },
+    { name: 'input-activities', description: ui('运行已安装的输入插件（仅插入草稿）', 'Run an installed input activity (draft insertion only)'), source: 'TUI', behavior: 'local' },
     { name: 'rename', description: ui('重命名当前会话', 'Rename current session'), argumentHint: ui('<标题>', '<title>'), source: 'TUI', behavior: 'local' },
     { name: 'fork', description: ui('从当前会话创建分支', 'Fork current session'), source: 'TUI', behavior: 'local' },
     { name: 'archive', description: ui('归档当前会话', 'Archive current session'), source: 'TUI', behavior: 'local' },
@@ -283,9 +307,12 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'queue', description: ui('管理排队消息', 'Manage queued messages'), source: 'TUI', behavior: 'local' },
     { name: 'steer', description: ui('发送引导消息', 'Send steering message'), argumentHint: ui('<消息>', '<message>'), source: 'TUI', behavior: 'local' },
     { name: 'attach', description: ui('添加图片', 'Attach image'), argumentHint: ui('[图片路径]', '[image-path]'), source: 'TUI', behavior: 'local' },
-    { name: 'attachments', description: ui('管理待发送图片', 'Manage pending images'), source: 'TUI', behavior: 'local' },
+    { name: 'attach-file', description: ui('添加通用文件（音视频为文件句柄）', 'Attach a file (audio/video use file handles)'), argumentHint: '[path]', source: 'TUI', behavior: 'local' },
+    { name: 'file-references', description: ui('选择 Host 文件或目录引用', 'Select a Host file or directory reference'), argumentHint: '[query]', source: 'TUI', behavior: 'local' },
+    { name: 'attachments', description: ui('管理待发送图片和文件', 'Manage pending images and files'), source: 'TUI', behavior: 'local' },
     { name: 'pending', description: ui('处理待审批或待回答事项', 'Handle pending approvals or questions'), source: 'TUI', behavior: 'local' },
     { name: 'settings', description: ui('打开设置', 'Open Settings'), argumentHint: '[namespace]', source: 'TUI', behavior: 'local' },
+    { name: 'privacy', description: ui('查看会话上传策略', 'Inspect session upload policies'), source: 'TUI', behavior: 'local' },
     { name: 'keymap', description: ui('自定义快捷键', 'Customize shortcuts'), argumentHint: '[binding [chord|reset]]', source: 'TUI', behavior: 'local' },
     { name: 'mouse', description: ui('切换完整模式或终端原生模式', 'Switch full or terminal-native mode'), argumentHint: '[full|native|toggle]', source: 'TUI', behavior: 'local' },
     { name: 'transcript', description: ui('查看对话或回放到终端历史', 'View the transcript or replay it to terminal scrollback'), argumentHint: '[replay]', source: 'TUI', behavior: 'local' },
@@ -294,11 +321,18 @@ export function tuiCommands(): readonly TuiCommandCandidate[] {
     { name: 'restart', description: ui('重启并恢复当前会话', 'Restart and resume current session'), source: 'TUI', behavior: 'local' },
     { name: 'tools', description: ui('查看工具', 'View tools'), argumentHint: '[display]', source: 'TUI', behavior: 'local' },
     { name: 'files', description: ui('查看本会话生成文件', 'View files produced this session'), source: 'TUI', behavior: 'local' },
+    { name: 'plans', description: ui('查看计划与待办记录', 'Inspect recorded plans and todos'), source: 'TUI', behavior: 'local' },
+    { name: 'review', description: ui('查看 Host 变更记录', 'Inspect Host change records'), source: 'TUI', behavior: 'local' },
     { name: 'jobs', description: ui('查看后台任务', 'View background jobs'), source: 'TUI', behavior: 'local' },
     { name: 'subagents', description: ui('查看子 Agent', 'View subagents'), source: 'TUI', behavior: 'local' },
+    { name: 'descendants', description: ui('查看完整后代目录', 'Inspect the Host descendant catalog'), source: 'TUI', behavior: 'local' },
+    { name: 'fetch-url', description: ui('打开或复制已选工具的网址', 'Open or copy the focused fetch tool URL'), source: 'TUI', behavior: 'local' },
+    { name: 'questions', description: ui('查看超时后待回答的问题', 'Answer continued native questions'), source: 'TUI', behavior: 'local' },
     { name: 'trajectory', description: ui('查看执行轨迹', 'View execution trajectory'), source: 'TUI', behavior: 'local' },
     { name: 'skills', description: ui('查看 Skills', 'View Skills'), source: 'TUI', behavior: 'local' },
     { name: 'mcp', description: ui('查看 MCP', 'View MCP'), source: 'TUI', behavior: 'local' },
+    { name: 'team', description: ui('查看实验性 Team 看板', 'Inspect experimental Team board'), source: 'TUI', behavior: 'local' },
+    { name: 'schedules', description: ui('管理原生计划任务', 'Manage native schedules'), source: 'TUI', behavior: 'local' },
     { name: 'status', description: ui('查看状态和统计', 'View status and statistics'), source: 'TUI', behavior: 'local' },
     { name: 'help', description: ui('查看帮助', 'View help'), source: 'TUI', behavior: 'local' },
     { name: 'exit', description: ui('退出', 'Exit'), source: 'TUI', behavior: 'local' },
@@ -492,11 +526,22 @@ function workspaceFor(
  * cancellable catalog caches and draft images; every durable read/write goes
  * through the mounted Harness API, Remote, Session, or Workspace face.
  */
+export interface TuiPromptDraft {
+  readonly sessionId: SessionId
+  readonly content: PromptContentPart[]
+  readonly images: readonly TuiDraftAttachment[]
+}
+/** Explicit terminal admission budgets; these are not Host/model capacity metadata. */
+export const TUI_FILE_DRAFT_BUDGET = Object.freeze({ maxFileBytes: 8 * 1024 * 1024, maxTotalBytes: 16 * 1024 * 1024, maxFiles: 8 })
 export class HarnessTuiCapabilities {
+  private questionController: ContinuedQuestionController | undefined
   private readonly commandCatalogs = new Map<string, Promise<readonly TuiCommandCandidate[]>>()
+  private readonly commandWarnings = new Map<string, readonly string[]>()
   private readonly modelCatalogs = new Map<SessionId, SessionModels>()
   private readonly modelLoads = new Map<SessionId, Promise<SessionModels>>()
   private readonly attachments: TuiDraftAttachment[] = []
+  private readonly fileDrafts = new Map<SessionId, FileAttachmentController>()
+  private readonly fileOwners = new Map<SessionId, unknown>()
   private readonly subagentPresentationAdapter: SubagentPresentationCapabilities
   private readonly rootSessionCatalogProjector = new RootSessionCatalogProjector()
   private permissionOptions: PermissionSelectValue['options'] | undefined
@@ -505,6 +550,8 @@ export class HarnessTuiCapabilities {
   private readonly permissionListeners = new Set<() => void>()
   private modelGeneration = 0
   private providerGeneration = 0
+  private managementGeneration = 0
+  private browserController?: SessionBrowserController
 
   /**
    * @param ctx - isolated Harness Client Context.
@@ -520,10 +567,22 @@ export class HarnessTuiCapabilities {
     private readonly management?: TuiManagementBridge,
   ) {
     this.subagentPresentationAdapter = createSubagentPresentationCapabilities(ctx.sessions)
+    ctx.effect?.(() => {
+      let selected = ctx.sessions.list.getSnapshot().current
+      const stopSelection = ctx.sessions.list.subscribe(() => {
+        const current = ctx.sessions.list.getSnapshot().current
+        if (current !== selected) { selected = current; this.managementGeneration += 1; this.dropCommandCatalog() }
+      })
+      const stopDescription = this.connectionHandle()?.hostDescription.subscribe(() => {
+        this.managementGeneration += 1; this.dropCommandCatalog()
+        if (this.connectionHandle()?.hostDescription.getSnapshot() === undefined) this.dropFileReceipts()
+      })
+      return () => { stopSelection(); stopDescription?.(); this.dropFileReceipts() }
+    }, 'tui: optional view selection generation')
     const refreshPermissions = () => { void this.refreshPermissions() }
     ctx.remote.$on('permission-presets/catalog-changed', refreshPermissions)
     refreshPermissions()
-    ctx.remote.$on('commands/change', () => { this.commandCatalogs.clear() })
+    ctx.remote.$on('commands/change', () => { this.dropCommandCatalog() })
     ctx.remote.$on('agent-preset/selected', (sessionId: SessionId) => {
       this.dropCommandCatalog(sessionId)
       this.invalidateModels()
@@ -537,10 +596,12 @@ export class HarnessTuiCapabilities {
       this.invalidateProviders()
     })
     ctx.on('connection/reset', () => {
+      this.dropFileReceipts()
+      this.managementGeneration += 1
       this.permissionOptions = undefined
       this.permissionDefaultOptions = undefined
       refreshPermissions()
-      this.commandCatalogs.clear()
+      this.dropCommandCatalog()
       this.invalidateModels()
       this.invalidateProviders()
       this.rootSessionCatalogProjector.clear()
@@ -564,6 +625,240 @@ export class HarnessTuiCapabilities {
       ))
     }
     return this.management
+  }
+
+  /** One authoritative selection/connection source shared by optional native views. */
+  managementState(): { readonly ready: boolean; readonly generation: number } {
+    const value = this.optionalViewSource().getSnapshot()
+    return { ready: value.ready, generation: this.managementGeneration }
+  }
+
+  /** A fresh scope observation for one explicitly invoked terminal plugin activity. */
+  terminalExtensionSource(): OptionalViewSource { return this.optionalViewSource() }
+
+  private optionalViewSource(): OptionalViewSource {
+    const description = this.connectionHandle()?.hostDescription
+    const selected = this.active()?.sessionId
+    return {
+      getSnapshot: () => {
+        const active = this.active()
+        return { sessionId: active?.sessionId ?? '', generation: this.managementGeneration,
+          ready: active?.sessionId === selected && description?.getSnapshot() !== undefined && this.ctx.sessions.list.getSnapshot().phase === 'ready' && active?.session.getSnapshot().openState === 'open' }
+      },
+      subscribe: listener => {
+        const stop = this.subscribeActive(() => listener())
+        const stopDescription = description?.subscribe(() => { this.managementGeneration += 1; listener() })
+        const stopReset = this.ctx.on('connection/reset', listener)
+        return () => { stop(); stopDescription?.(); stopReset?.() }
+      },
+    }
+  }
+
+  mcpResources(): McpResourceController {
+    const bridge = this.managementBridge().optionalViews
+    if (bridge === undefined) throw new Error('MCP resource Host bridge is unavailable')
+    return new McpResourceController(this.optionalViewSource(), bridge.mcp(this.requireActive().sessionId))
+  }
+
+  teamBoard(): TeamBoardController {
+    const bridge = this.managementBridge().optionalViews
+    if (bridge === undefined) throw new Error('Experimental Team Host bridge is unavailable')
+    return new TeamBoardController(this.optionalViewSource(), bridge.team(this.requireActive().sessionId))
+  }
+
+  schedules(): ScheduleController {
+    const bridge = this.managementBridge().optionalViews
+    if (bridge === undefined) throw new Error('Native Schedule Host bridge is unavailable')
+    return new ScheduleController(this.optionalViewSource(), bridge.schedule, () => bridge.scheduleMethods())
+  }
+
+  descendants(open: SubagentDescendantPort['open']): SubagentCatalogController {
+    const bridge = this.managementBridge().optionalViews
+    if (bridge === undefined) throw new Error('Host descendant catalog bridge is unavailable')
+    const port = bridge.descendants(open)
+    return new SubagentCatalogController(this.optionalViewSource(), { ...port, prepare: async (address, signal) => {
+      signal.throwIfAborted()
+      const result = await this.subagentPresentationAdapter.listDirectChildren(address.parentSessionId, { refresh: true })
+      signal.throwIfAborted()
+      if (result.support !== 'supported' || result.value.state !== 'ready'
+        || !result.value.children.some(row => row.address?.parentSessionId === address.parentSessionId
+          && row.address.childSessionId === address.childSessionId && row.address.mode === address.mode)) {
+        throw new Error('Descendant direct-parent address changed or is unavailable')
+      }
+    } })
+  }
+
+  continuedQuestions(): ContinuedQuestionController {
+    if (this.questionController !== undefined) return this.questionController
+    const bridge = this.managementBridge().continuedQuestions
+    if (bridge === undefined) throw new Error('Native continued-question bridge is unavailable')
+    const description = this.connectionHandle()?.hostDescription
+    const source: ContinuedQuestionSource = {
+      getSnapshot: () => {
+        const active = this.active()
+        const gate = active === undefined ? undefined : bridge.gate(active.sessionId)
+        return { sessionId: active?.sessionId ?? '', generation: this.managementGeneration,
+          ready: active !== undefined && description?.getSnapshot() !== undefined && this.ctx.sessions.list.getSnapshot().phase === 'ready'
+            && active.session.getSnapshot().openState === 'open',
+          projection: active?.session.projections.faceOf('userQuestions').getSnapshot(),
+          liveRoot: gate?.liveRoot, ...(gate?.liveRootReason === undefined ? {} : { liveRootReason: gate.liveRootReason }) }
+      },
+      subscribe: listener => {
+        let owner: SessionFace | undefined
+        let stopProjection: (() => void) | undefined
+        const stopActive = this.subscribeActive(active => {
+          if (active?.session !== owner) {
+            stopProjection?.(); owner = active?.session
+            stopProjection = owner?.projections.faceOf('userQuestions').subscribe(listener)
+          }
+          listener()
+        })
+        const stopDescription = description?.subscribe(listener)
+        const stopReset = this.ctx.on('connection/reset', listener)
+        return () => { stopActive(); stopProjection?.(); stopDescription?.(); stopReset?.() }
+      },
+    }
+    const controller = new ContinuedQuestionController(source, bridge.remote,
+      () => { const active = this.active(); return active === undefined ? undefined : bridge.gate(active.sessionId).methods })
+    this.questionController = controller
+    this.ctx.effect(() => () => controller.dispose(), 'tui: continued question observations')
+    return controller
+  }
+
+  private localCommands(): readonly TuiCommandCandidate[] {
+    const views = this.management?.optionalViews
+    const active = this.active()
+    const ready = this.connectionHandle()?.hostDescription.getSnapshot() !== undefined && active?.session.getSnapshot().openState === 'open'
+    return tuiCommands().filter(command => {
+      if (command.name === 'team') return ready && views !== undefined && active !== undefined && views.team(active.sessionId).reason() === undefined
+      if (command.name === 'schedules') return ready && views?.scheduleMethods()?.has('schedule/catalog') === true
+      if (command.name === 'descendants') return ready && views !== undefined && views.descendants(() => false).reason() === undefined
+      if (command.name === 'account') return ready && this.accountAvailable()
+      if (command.name === 'questions') return ready && active !== undefined
+        && this.management?.continuedQuestions?.gate(active.sessionId).methods?.has('userQuestions/answer') === true
+      return true
+    })
+  }
+
+  accountAvailable(): boolean {
+    return this.management?.intake?.account().account !== undefined
+  }
+
+  accountView(): { source: OptionalViewSource; controller: AccountHandoffController; callbackOrigin(): string | undefined } {
+    const intake = this.managementBridge().intake
+    if (intake === undefined || !this.accountAvailable()) throw new Error('Official account capability is unavailable')
+    const source = this.optionalViewSource()
+    new OptionalViewLifetime(source).scope()
+    const controller = new AccountHandoffController(intake.account(), { version: PACKAGE_VERSION, locale: uiLocale(), timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60 })
+    return { source, controller, callbackOrigin: () => intake.callbackOrigin() }
+  }
+
+  async modelInformation(signal: AbortSignal): Promise<ModelInformation> {
+    const intake = this.managementBridge().intake
+    if (intake === undefined || !intake.available('session/modelCatalog')) throw new Error('Native model catalog is unavailable')
+    const source = this.optionalViewSource()
+    const observedModelGeneration = this.modelGeneration
+    const controller = new ModelInformationController(intake.model)
+    try {
+      return await new OptionalViewLifetime(source).run(signal, async current => {
+        await controller.refresh(current)
+        const directory = await this.loadModels()
+        const evidence = await configuredModelEvidence(this.api, directory.current).catch(() => undefined)
+        current.throwIfAborted()
+        if (this.modelGeneration !== observedModelGeneration) throw new ManagementInterrupted(false, 'Model directory changed; refresh required')
+        if (evidence !== undefined) controller.setEvidence(evidence)
+        return controller.info(directory.current)
+      })
+    } finally { controller.dispose() }
+  }
+
+  /** Native archive/pin baseline plus the current complete Session directory. */
+  sessionBrowser(): SessionBrowserController {
+    if (this.browserController !== undefined) return this.browserController
+    const bridge = this.managementBridge().sessionManagement
+    if (bridge === undefined) throw new Error('The launcher does not provide native Session management')
+    const description = this.connectionHandle()?.hostDescription
+    const snapshot = () => {
+      const sessions = this.ctx.sessions.list.getSnapshot()
+      const workspace = bridge.snapshot()
+      const rows = sessions.ids.flatMap(id => sessions.byId[id] ?? [])
+      const roots = projectRootSessions(rows, rootCatalogRevision(rows)).roots
+      return {
+        sessions: roots, archivedSessionIds: workspace?.archivedSessionIds ?? [],
+        pinnedSessionIds: workspace?.pinnedSessionIds ?? [],
+        ...(workspace === undefined ? {} : { sessionOrder: workspace.items.flatMap(row => row.sessionIds) }),
+        ready: description?.getSnapshot() !== undefined && sessions.phase === 'ready' && workspace !== undefined,
+        generation: this.managementGeneration,
+      }
+    }
+    this.browserController = new SessionBrowserController({
+      source: { getSnapshot: snapshot, subscribe: listener => {
+        const stops = [this.ctx.sessions.list.subscribe(listener), bridge.subscribe(listener)]
+        if (description !== undefined) stops.push(description.subscribe(() => { this.managementGeneration += 1; listener() }))
+        return () => { for (const stop of stops) stop() }
+      } },
+      methods: () => bridge.methods(),
+      remote: {
+        archiveSession: request => this.ctx.remote.workspace.archiveSession(request),
+        unarchiveSession: request => this.ctx.remote.workspace.unarchiveSession(request),
+        pinSession: request => this.ctx.remote.workspace.pinSession(request),
+        unpinSession: request => this.ctx.remote.workspace.unpinSession(request),
+        cancel: async request => {
+          const { result } = await this.api.sessions.cancel(request)
+          if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+          return { ok: true, value: result.value }
+        },
+      },
+      open: id => this.openSession(id),
+    })
+    return this.browserController
+  }
+
+  /** The viewer shares the current Runtime window; it never requests a parallel history fold. */
+  artifactViewer(links: { copy(text: string): void; open?(href: string, signal: AbortSignal): Promise<void> }): ArtifactViewController {
+    const bridge = this.managementBridge().artifacts
+    const description = this.connectionHandle()?.hostDescription
+    const initialId = this.active()?.sessionId
+    if (initialId !== undefined && bridge?.prepareRoot !== undefined) void bridge.prepareRoot(initialId, AbortSignal.timeout(10_000)).catch(() => {})
+    const source = {
+      getSnapshot: () => {
+        const active = this.active()
+        const state = active?.session.getSnapshot()
+        return {
+          sessionId: active?.sessionId ?? '' as SessionId,
+          generation: this.managementGeneration,
+          ready: description?.getSnapshot() !== undefined && state?.openState === 'open' && active?.session.recordedEvents !== undefined,
+          events: active?.session.recordedEvents?.().map(({ event, view }) => ({ ...event, ...(view === undefined ? {} : { view }) })) ?? [],
+          projections: { plan: active?.session.projections.faceOf('plan').getSnapshot(), todos: active?.session.projections.faceOf('todos').getSnapshot() },
+          ...(active === undefined || bridge?.workspaceRoot?.(active.sessionId) === undefined ? {} : { hostWorkspacePath: bridge.workspaceRoot(active.sessionId)! }),
+          hasMoreHistory: state?.hasMore ?? true,
+        }
+      },
+      subscribe: (listener: () => void) => {
+        let projectionStops: (() => void)[] = []
+        let selected: SessionId | undefined
+        const stop = this.subscribeActive(active => {
+          if (selected !== active?.sessionId) {
+            for (const dispose of projectionStops) dispose()
+            selected = active?.sessionId
+            if (selected !== undefined && bridge?.prepareRoot !== undefined) void bridge.prepareRoot(selected, AbortSignal.timeout(10_000)).catch(() => {})
+            projectionStops = active === undefined ? [] : ['plan', 'todos'].map(key => active.session.projections.faceOf(key).subscribe(listener))
+          }
+          listener()
+        })
+        const stopDescription = description?.subscribe(() => { this.managementGeneration += 1; listener() })
+        const stopFiles = bridge?.subscribe?.(listener)
+        return () => { stop(); stopDescription?.(); stopFiles?.(); for (const dispose of projectionStops) dispose() }
+      },
+    }
+    const viewer = new ArtifactViewController({ source, links,
+      ...(bridge === undefined ? {} : { files: bridge, review: bridge }),
+      capability: endpoint => bridge === undefined ? undefined : endpoint.startsWith('workspaceFiles/')
+        ? bridge.gate?.(endpoint.slice('workspaceFiles/'.length) as import('./host-file-controller.ts').HostFileMethod, this.active()?.sessionId ?? '') ?? { available: false, reason: 'Authenticated Host file gate is unavailable' }
+        : { available: bridge.available(endpoint) },
+    })
+    this.ctx.effect(() => () => viewer.dispose(), 'tui: recorded artifact viewer')
+    return viewer
   }
 
   /** Official configuration faces used by the shared Provider manager. */
@@ -716,20 +1011,32 @@ export class HarnessTuiCapabilities {
   commandCatalog(signal?: AbortSignal): Promise<readonly TuiCommandCandidate[]> {
     signal?.throwIfAborted()
     const sessionId = this.active()?.sessionId
-    if (sessionId === undefined) return Promise.resolve(tuiCommands())
+    if (sessionId === undefined) return Promise.resolve(this.localCommands())
     const key = `${sessionId}:${uiLocale()}`
     const existing = this.commandCatalogs.get(key)
-    const request = existing ?? this.readCommandCatalog(sessionId)
-      .catch((error: unknown) => {
-        this.commandCatalogs.delete(key)
-        throw error
-      })
+    let request: Promise<readonly TuiCommandCandidate[]>
+    request = existing ?? this.readCommandCatalog(sessionId).then(({ commands, warnings }) => {
+      // A reset or explicit refresh invalidates an in-flight directory too.
+      if (this.commandCatalogs.get(key) !== request) return this.localCommands()
+      this.commandWarnings.set(key, warnings)
+      if (warnings.length > 0) this.commandCatalogs.delete(key) // Retry degraded sources on next use.
+      return commands
+    }).catch((error: unknown) => {
+      if (this.commandCatalogs.get(key) === request) this.commandCatalogs.delete(key)
+      throw error
+    })
     if (existing === undefined) this.commandCatalogs.set(key, request)
     if (signal === undefined) return request
     return request.then((catalog) => {
       signal.throwIfAborted()
       return catalog
     })
+  }
+
+  /** Diagnostics for the current directory; unavailable sources never remove local commands. */
+  commandCatalogWarnings(): readonly string[] {
+    const sessionId = this.active()?.sessionId
+    return sessionId === undefined ? [] : this.commandWarnings.get(`${sessionId}:${uiLocale()}`) ?? []
   }
 
   /**
@@ -763,11 +1070,15 @@ export class HarnessTuiCapabilities {
   private dropCommandCatalog(sessionId?: SessionId): void {
     if (sessionId === undefined) {
       this.commandCatalogs.clear()
+      this.commandWarnings.clear()
       return
     }
     const prefix = `${sessionId}:`
     for (const key of this.commandCatalogs.keys()) {
       if (key.startsWith(prefix)) this.commandCatalogs.delete(key)
+    }
+    for (const key of this.commandWarnings.keys()) {
+      if (key.startsWith(prefix)) this.commandWarnings.delete(key)
     }
   }
 
@@ -785,7 +1096,6 @@ export class HarnessTuiCapabilities {
       id: preset.id,
       label: preset.name ?? preset.id,
       ...(preset.description === undefined ? {} : { description: preset.description }),
-      ...(preset.trust === undefined ? {} : { trust: preset.trust }),
       current: active.summary.agentPreset === preset.id,
       isDefault: preset.isDefault,
       ...(preset.broken === undefined ? {} : { disabledReason: preset.broken }),
@@ -927,8 +1237,7 @@ export class HarnessTuiCapabilities {
       .filter(option => option.value !== 'custom')
       .map(option => ({
         id: option.value,
-        label: option.name,
-        ...(option.description === undefined ? {} : { description: option.description }),
+        ...autoPermissionPresentation(option, ui('zh', 'en')),
         current: option.value === value.currentValue,
         needsConfirmation: this.permissionNeedsConfirmation(option.value),
       }))
@@ -1108,9 +1417,8 @@ export class HarnessTuiCapabilities {
   }
 
   /** Archive the current session through Workspace Runtime. */
-  async archiveSession(targetSessionId = this.requireActive().sessionId): Promise<void> {
-    this.requireSessionTarget(targetSessionId)
-    await this.ctx.workspaces.archiveSession(targetSessionId)
+  async archiveSession(targetSessionId = this.requireActive().sessionId, signal = new AbortController().signal): Promise<void> {
+    await this.sessionBrowser().mutate('archive', targetSessionId, signal)
   }
 
   /**
@@ -1281,24 +1589,101 @@ export class HarnessTuiCapabilities {
     this.attachments.splice(0)
   }
 
-  /**
-   * Build the next official prompt payload from text and temporary image bytes.
-   * @param text - current editor text.
-   * @returns the official multimodal prompt content array.
-   */
-  promptContent(text: string): Array<
-    { type: 'text'; text: string }
-    | { type: 'image'; mediaType: TuiDraftAttachment['mediaType']; data: string; name: string }
-  > {
+  /** True authority is supplied by the native Files/Agent composition, not the global upload descriptor. */
+  fileIntakeReason(): string | undefined {
+    const active = this.active()
+    if (active === undefined) return 'No Session is open'
+    const state = this.optionalViewSource().getSnapshot()
+    if (!state.ready) return 'Host disconnected or Session not ready'
+    return this.management?.fileReceipts?.forSession(active.sessionId).reason() ??
+      (this.management?.fileReceipts === undefined ? 'Native Files intake bridge is unavailable' : undefined)
+  }
+  fileReferenceReason(): string | undefined {
+    const active = this.active()
+    if (active === undefined || !this.optionalViewSource().getSnapshot().ready) return 'Host disconnected or Session not ready'
+    return this.management?.fileReceipts?.forSession(active.sessionId).referencesReason() ??
+      (this.management?.fileReceipts === undefined ? 'Native file references bridge is unavailable' : undefined)
+  }
+  private fileController(upload = true): FileAttachmentController {
+    const active = this.requireActive(), reason = upload ? this.fileIntakeReason() : this.fileReferenceReason()
+    if (reason !== undefined) throw new Error(reason)
+    this.validateFileOwner(active.sessionId)
+    let controller = this.fileDrafts.get(active.sessionId)
+    if (controller === undefined) {
+      const port = this.management!.fileReceipts!.forSession(active.sessionId)
+      controller = new FileAttachmentController(port.remote, active.sessionId, true, TUI_FILE_DRAFT_BUDGET)
+      this.fileDrafts.set(active.sessionId, controller)
+      this.fileOwners.set(active.sessionId, port.owner())
+    }
+    return controller
+  }
+  private dropFileReceipts(): void {
+    for (const controller of this.fileDrafts.values()) controller.dispose()
+    this.fileDrafts.clear(); this.fileOwners.clear()
+  }
+  private validateFileOwner(id: SessionId): void {
+    if (!this.fileDrafts.has(id)) return
+    const owner = this.management?.fileReceipts?.forSession(id).owner()
+    if (owner !== this.fileOwners.get(id)) {
+      this.fileDrafts.get(id)?.dispose(); this.fileDrafts.delete(id); this.fileOwners.delete(id)
+    }
+  }
+  draftFiles(): readonly StagedFile[] {
+    const id = this.active()?.sessionId
+    if (id !== undefined) this.validateFileOwner(id)
+    return id === undefined ? [] : this.fileDrafts.get(id)?.draft ?? []
+  }
+  removeFileReceipt(receiptId: StagedFile['receiptId'], sessionId = this.requireActive().sessionId): void {
+    if (this.active()?.sessionId !== sessionId) throw new Error('File draft owner changed; reopen /attachments')
+    this.fileDrafts.get(sessionId)?.remove(receiptId)
+  }
+  clearPendingAttachments(): void {
+    this.clearAttachments()
+    const id = this.active()?.sessionId
+    if (id !== undefined) this.fileDrafts.get(id)?.clear()
+  }
+  async addFile(rawPath: string, signal: AbortSignal): Promise<StagedFile> {
+    const active = this.requireActive(), controller = this.fileController()
+    const path = resolveHarnessUserPath(rawPath.trim(), active.workspacePath)
+    if (rawPath.trim() === '') throw new Error('File path cannot be empty')
+    const lifetime = new OptionalViewLifetime(this.optionalViewSource())
+    return lifetime.run(signal, current => controller.addPath(path, current), true)
+  }
+  async fileReferences(query: string, signal: AbortSignal): Promise<readonly FileReferenceCandidate[]> {
+    const controller = this.fileController(false), lifetime = new OptionalViewLifetime(this.optionalViewSource())
+    return lifetime.run(signal, current => controller.references(query, current))
+  }
+  async openFileReference(path: string, confirm: (path: string, signal: AbortSignal) => Promise<boolean>, signal: AbortSignal): Promise<boolean> {
+    const active = this.requireActive(), controller = this.fileController(false)
+    const resolved = resolveHarnessUserPath(path, active.workspacePath)
+    return new OptionalViewLifetime(this.optionalViewSource()).run(signal,
+      current => controller.openPath(resolved, confirm, current), true)
+  }
+
+  /** Assemble native text/image parts and exact opaque file receipts for the current ordinary Session. */
+  promptContent(text: string): PromptContentPart[] {
+    const files = this.draftFiles()
+    if (files.length > 0) {
+      const reason = this.fileIntakeReason()
+      if (reason !== undefined) throw new Error(reason)
+    }
     return [
       ...(text === '' ? [] : [{ type: 'text' as const, text }]),
-      ...this.attachments.map(item => ({
-        type: 'image' as const,
-        mediaType: item.mediaType,
-        data: item.data,
-        name: item.name,
-      })),
+      ...this.attachments.map(item => ({ type: 'image' as const, mediaType: item.mediaType, data: item.data, name: item.name })),
+      ...files.map(item => ({ type: 'file' as const, receiptId: item.receiptId })),
     ]
+  }
+  capturePrompt(text: string): TuiPromptDraft {
+    return { sessionId: this.requireActive().sessionId, content: this.promptContent(text), images: this.draftAttachments() }
+  }
+  /** Clear only drafts captured by a confirmed prompt; later uploads/another Session remain selected. */
+  acceptPrompt(draft: TuiPromptDraft): void {
+    const controller = this.fileDrafts.get(draft.sessionId)
+    for (const part of draft.content) if (part.type === 'file') controller?.remove(part.receiptId)
+    if (this.active()?.sessionId === draft.sessionId) {
+      const captured = new Set(draft.images)
+      this.attachments.splice(0, this.attachments.length, ...this.attachments.filter(image => !captured.has(image)))
+    }
   }
 
   /**
@@ -1475,36 +1860,44 @@ export class HarnessTuiCapabilities {
     return flattenProducedFiles(await this.producedFileGroups())
   }
 
-  /**
-   * Read one produced file for in-TUI inspection.
-   * @param path - Workspace-relative or absolute file path.
-   * @returns UTF-8 text when the file looks like text.
-   */
-  async readProducedFile(path: string): Promise<string> {
-    const absolute = this.producedFilePath(path)
-    const file = await stat(absolute)
-    if (file.size > 200_000) throw new Error(ui('文件超过 200 KB，请用外部程序打开', 'File exceeds 200 KB; open it with an external program'))
-    const bytes = await readFile(absolute)
-    if (bytes.includes(0)) throw new Error(ui('该文件不是可在 TUI 内查看的文本', 'This file is not text that can be viewed in the TUI'))
-    return bytes.toString('utf8')
+  /** Explicit Host references use the same native file scope as recorded artifacts. */
+  async hostFiles(signal: AbortSignal): Promise<HostFileOptions> {
+    const bridge = this.managementBridge().artifacts, source = this.optionalViewSource()
+    const initial = source.getSnapshot()
+    if (!initial.ready || bridge?.prepareRoot === undefined || bridge.workspaceRoot === undefined || bridge.gate === undefined) throw new Error('Authenticated Host workspace file bridge is unavailable')
+    await bridge.prepareRoot(initial.sessionId, signal)
+    const current = source.getSnapshot()
+    if (!current.ready || current.sessionId !== initial.sessionId || current.generation !== initial.generation) throw new Error('Session changed while resolving Host file scope')
+    signal.throwIfAborted()
+    return { files: bridge, source: {
+      getSnapshot: () => { const state = source.getSnapshot(), root = bridge.workspaceRoot!(state.sessionId)
+        return { ...state, sessionId: state.sessionId as SessionId, ready: state.ready && root !== undefined, ...(root === undefined ? {} : { hostWorkspacePath: root }) } },
+      subscribe: listener => { const stop = source.subscribe(listener), stopFiles = bridge.subscribe?.(listener); return () => { stop(); stopFiles?.() } },
+    }, capability: endpoint => bridge.gate!(endpoint.slice('workspaceFiles/'.length) as import('./host-file-controller.ts').HostFileMethod, source.getSnapshot().sessionId) }
   }
 
-  /**
-   * Ask the Harness Workspace Runtime to open one produced path.
-   * @param path - Workspace-relative or absolute file path selected by the user.
-   */
-  async openProducedFile(path: string): Promise<void> {
-    const active = this.requireActive()
-    await this.ctx.workspaces.openPath(resolve(active.workspacePath, path))
+  producedFileOpenReason(): string | undefined {
+    const active = this.active(), bridge = this.managementBridge().artifacts
+    if (active === undefined || bridge?.openReason === undefined) return 'Native Host desktop path mapping is unavailable'
+    const reason = bridge.openReason(active.sessionId)
+    return reason ?? (this.managementBridge().fileReceipts?.forSession(active.sessionId).remote.session?.openWorkspacePath === undefined ? 'Native Host opener is unavailable' : undefined)
   }
 
-  /**
-   * Resolve one produced path using the active Harness Workspace root.
-   * @param path - Workspace-relative or absolute file path.
-   * @returns platform-normalized absolute path suitable for clipboard export.
-   */
+  async openProducedFile(path: string, signal: AbortSignal = AbortSignal.timeout(10_000)): Promise<void> {
+    const options = await this.hostFiles(signal), controller = new HostFileController(options)
+    try {
+      const info = await controller.stat(path, signal), reason = this.producedFileOpenReason()
+      if (reason !== undefined) throw new Error(reason)
+      const remote = this.managementBridge().fileReceipts?.forSession(options.source.getSnapshot().sessionId).remote.session
+      const result = await remote!.openWorkspacePath({ path: info.absolutePath }, signal)
+      signal.throwIfAborted()
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    } finally { controller.dispose() }
+  }
+
   producedFilePath(path: string): string {
-    return resolve(this.requireActive().workspacePath, path)
+    const active = this.requireActive()
+    return containedHostPath(path, this.managementBridge().artifacts?.workspaceRoot?.(active.sessionId))
   }
 
   /**
@@ -1825,6 +2218,34 @@ export class HarnessTuiCapabilities {
     }
   }
 
+  /** Hold only the visible foreground wait; reconnect/owner changes release its native claim. */
+  async *attachQuestionWait(wait: PendingWait<'question'>, signal: AbortSignal): AsyncIterable<{ readonly remainingMs: number }> {
+    const timed = wait.payload.wait
+    const attach = this.management?.continuedQuestions?.attachWait
+    if (timed?.timed !== true || attach === undefined) throw new Error('Native timed question wait is unavailable')
+    const source = this.optionalViewSource()
+    const before = source.getSnapshot()
+    if (!before.ready || before.sessionId !== wait.sessionId) return
+    const scope = new AbortController()
+    const stop = source.subscribe(() => {
+      const now = source.getSnapshot()
+      if (!now.ready || now.sessionId !== before.sessionId || now.generation !== before.generation
+        || !this.active()?.session.getSnapshot().pending.some(candidate => candidate.key === wait.key)) scope.abort()
+    })
+    const abort = () => scope.abort()
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) scope.abort()
+    try { yield* attach(wait.sessionId, timed.callId, scope.signal) }
+    finally { scope.abort(); stop(); signal.removeEventListener('abort', abort) }
+  }
+
+  async timeoutQuestion(wait: PendingWait<'question'>): Promise<void> {
+    const receipt = await wait.respond({ ok: false, error: {
+      code: 'ASK_TIMED_OUT', message: 'Foreground countdown expired; continue from /questions', details: {},
+    } })
+    if (!receipt.accepted) throw new Error(`Timed question response was rejected: ${receipt.reason}`)
+  }
+
   /**
    * Narrow a generic pending interaction after a discriminant check.
    * @param wait - generic Runtime pending interaction.
@@ -1886,33 +2307,35 @@ export class HarnessTuiCapabilities {
 
   private async readCommandCatalog(
     sessionId: SessionId,
-  ): Promise<readonly TuiCommandCandidate[]> {
+  ): Promise<{ readonly commands: readonly TuiCommandCandidate[]; readonly warnings: readonly string[] }> {
     const isSubagent = this.ctx.sessions.subagentAddress(sessionId) !== undefined
-    const [hostResult, skillResponse] = await Promise.all([
+    const [hostRead, skillRead] = await Promise.allSettled([
       isSubagent
         ? Promise.resolve({ ok: true as const, value: [] as readonly HostCommandDescriptor[] })
-        : this.ctx.remote.commands.list(sessionId),
+        : Promise.resolve().then(() => this.ctx.remote.commands.list(sessionId)),
       isSubagent
         ? Promise.resolve(undefined)
-        : this.api.skills.list({ sessionId }),
+        : Promise.resolve().then(() => this.api.skills.list({ sessionId })),
     ])
-    if (!hostResult.ok) {
-      throw new Error(ui(`读取 Host 命令失败：${hostResult.error.message}`, `Failed to load Host commands: ${hostResult.error.message}`))
+    const warnings: string[] = []
+    const hostResult = hostRead.status === 'fulfilled' ? hostRead.value : undefined
+    const skillResponse = skillRead.status === 'fulfilled' ? skillRead.value : undefined
+    if (hostRead.status === 'rejected' || hostResult?.ok === false) {
+      const message = hostRead.status === 'rejected' ? capabilityError(hostRead.reason) : hostResult?.ok === false ? hostResult.error.message : ''
+      warnings.push(ui(`Host 命令暂不可用：${message}`, `Host commands unavailable: ${message}`))
     }
-    if (skillResponse !== undefined && !skillResponse.result.ok) {
-      throw new Error(ui(
-        `读取 Skill 失败：${skillResponse.result.error.message}`,
-        `Failed to load Skills: ${skillResponse.result.error.message}`,
-      ))
+    if (skillRead.status === 'rejected' || skillResponse?.result.ok === false) {
+      const message = skillRead.status === 'rejected' ? capabilityError(skillRead.reason) : skillResponse?.result.ok === false ? skillResponse.result.error.message : ''
+      warnings.push(ui(`Skill 暂不可用：${message}`, `Skills unavailable: ${message}`))
     }
     const present = await this.clarifyRemotePresent().catch(() => false)
-    const commands = mergeClarifyCatalog(tuiCommands(), present)
+    const commands = mergeClarifyCatalog(this.localCommands(), present)
     const reserved = present
       ? new Set<string>([...reservedTuiCatalogNames(), 'clarify'])
       : reservedTuiCatalogNames()
     const merged = [...commands]
     const names = new Set(reserved)
-    for (const command of hostResult.value as readonly HostCommandDescriptor[]) {
+    for (const command of (hostResult?.ok === true ? hostResult.value : []) as readonly HostCommandDescriptor[]) {
       if (reserved.has(command.name)) continue
       names.add(command.name)
       merged.push({
@@ -1948,7 +2371,7 @@ export class HarnessTuiCapabilities {
         behavior: 'skill',
       })
     }
-    return merged
+    return { commands: merged, warnings }
   }
 }
 

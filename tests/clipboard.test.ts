@@ -1,6 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { setTimeout as delay } from 'node:timers/promises'
+import { spawn as nodeSpawn } from 'node:child_process'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { lastFencedCode, copyTargets } from '../src/client/copy-content.ts'
 import {
   CLIPBOARD_READ_BYTE_LIMIT,
@@ -9,6 +12,12 @@ import {
   readClipboardText,
   writeClipboard,
 } from '../src/client/clipboard.ts'
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
+afterEach(() => { vi.mocked(nodeSpawn).mockReset() })
 
 const UTF8_CORPUS = [
   'plain text',
@@ -40,6 +49,57 @@ describe('copy content', () => {
 })
 
 describe('clipboard fallback', () => {
+  it.skipIf(process.platform === 'win32').each(['EPIPE', 'timeout'])('prevents a real %s writer from overwriting the successful fallback later', async mode => {
+    const dir = mkdtempSync(join(tmpdir(), 'seektty-clipboard-late-writer-'))
+    const state = join(dir, 'simulated-clipboard')
+    const pidFile = join(dir, 'writer.pid')
+    try {
+      writeFileSync(join(dir, 'wl-copy'), `#!${process.execPath}\nimport { closeSync, writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nprocess.on('SIGTERM', () => { setTimeout(() => { writeFileSync(${JSON.stringify(state)}, 'late-old-writer'); process.exit(0) }, 150) });\n${mode === 'EPIPE' ? 'closeSync(0);' : "process.stdin.resume();"}\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 })
+      writeFileSync(join(dir, 'xclip'), `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nprocess.stdin.resume(); process.stdin.on('end', () => { writeFileSync(${JSON.stringify(state)}, 'fallback'); process.exit(0) });\n`, { mode: 0o700 })
+      vi.stubEnv('PATH', dir)
+      const result = await writeClipboard(mode === 'EPIPE' ? 'x'.repeat(5 * 1024 * 1024) : 'safe', {
+        // Full-suite contention must still allow the real helper to install its delayed SIGTERM handler.
+        platform: 'linux', fallback: 'auto', writeOsc52: () => undefined, deadlineMs: 2500,
+      })
+      expect(result.finalMethod).toBe('xclip')
+      expect(readFileSync(state, 'utf8')).toBe('fallback')
+      await delay(350)
+      expect(readFileSync(state, 'utf8')).toBe('fallback')
+      const pid = Number(readFileSync(pidFile, 'utf8'))
+      expect(() => process.kill(pid, 0)).toThrow()
+    } finally {
+      vi.unstubAllEnvs()
+      try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL') } catch { /* fixture already exited */ }
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('survives a real helper exiting before reading a 5 MB input and uses the next writer', async () => {
+    const input = 'x'.repeat(5 * 1024 * 1024)
+    const { spawn: realSpawn } = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+    // Keep real child pipes and early exit behavior without requiring executable shebangs on Windows.
+    vi.mocked(nodeSpawn)
+      .mockImplementationOnce((_command, _args, options) => realSpawn(process.execPath, ['-e', 'process.exit(0)'], options))
+      .mockImplementationOnce((_command, _args, options) => realSpawn(process.execPath, ['-e', `let bytes = 0; process.stdin.on('data', chunk => { bytes += chunk.length }); process.stdin.on('end', () => process.exit(bytes === ${String(input.length)} ? 0 : 1))`], options))
+    await expect(writeClipboard(input, {
+      platform: 'linux', fallback: 'auto', writeOsc52: () => undefined,
+    })).resolves.toEqual({ finalMethod: 'xclip', succeeded: ['xclip'] })
+    expect(vi.mocked(nodeSpawn).mock.calls.map(([command]) => command)).toEqual(['wl-copy', 'xclip'])
+  })
+
+  it('handles real ENOENT helpers without losing an existing OSC 52 write', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'seektty-clipboard-missing-'))
+    try {
+      vi.stubEnv('PATH', dir)
+      await expect(writeClipboard('safe', {
+        platform: 'linux', fallback: 'auto', writeOsc52: () => undefined,
+      })).resolves.toEqual({ finalMethod: 'osc52', succeeded: ['osc52'] })
+    } finally {
+      vi.unstubAllEnvs()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('reports both OSC 52 and the final platform writer for small payloads', async () => {
     const writeOsc52 = vi.fn()
     const spawn = vi.fn((..._args: WriterCall) => ({ status: 0 }))

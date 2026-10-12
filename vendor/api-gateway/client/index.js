@@ -430,8 +430,14 @@ function scopedProjection(descriptor) {
 }
 function requireStrictDescriptor(descriptor) {
     const endpoint = endpointOf(descriptor);
+    if (!['direct', 'context'].includes(descriptor.invocation?.kind)) {
+        throw new Error(`client api: ${endpoint} unknown invocation kind`);
+    }
     requireStrictCodec(descriptor.result, endpoint, 'result');
     for (const parameter of descriptor.parameters) {
+        if (!['json', 'lookup'].includes(parameter.source)) {
+            throw new Error(`client api: ${endpoint} unknown parameter source`);
+        }
         requireStrictCodec(parameter.codec, endpoint, parameter.wire);
     }
     if (descriptor.invocation.kind === 'context') {
@@ -464,4 +470,3 @@ function carrierFailure(endpoint, error) {
 function internalFailure(message) {
     return { ok: false, error: { code: 'internal', message, details: {} } };
 }
-//# sourceMappingURL=index.js.map

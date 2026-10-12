@@ -1,6 +1,5 @@
 import { isReplacementSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/projection';
 import { chatNode } from "./common.js";
-const COMPACT_PLUGIN = 'compact';
 function commandFromRun(match) {
     if (match.event.type !== 'command/run')
         throw new Error('command start requires command/run');
@@ -47,7 +46,7 @@ function compactSource(event) {
     if (event.type !== 'user/message' || !isReplacementSurfaceEvent(event))
         return undefined;
     const source = event.data.source;
-    if (source.kind !== 'plugin' || source.plugin !== COMPACT_PLUGIN || typeof source.compactionId !== 'string')
+    if (source.kind !== 'compact-checkpoint' || typeof source.compactionId !== 'string' || source.compactionId === '')
         return undefined;
     return {
         compactionId: source.compactionId,
@@ -184,4 +183,3 @@ export function registerCommandConversationNode(ctx) {
 }
 /** Shared structural checkpoint recognizer for automatic compaction. */
 export { compactSource, compactSummary };
-//# sourceMappingURL=command.js.map

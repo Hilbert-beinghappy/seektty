@@ -26,7 +26,7 @@ export class FenwickTree {
     }
   }
 
-  /** Append one height without touching earlier prefix nodes linearly. */
+  /** Append one height in amortized O(log n), including capacity growth. */
   push(value: number): void {
     this.ensure(this.size + 1)
     this.size += 1
@@ -82,6 +82,13 @@ export class FenwickTree {
     const grown = new Array(capacityFor(size) + 1).fill(0)
     for (let index = 0; index < this.tree.length; index += 1) {
       grown[index] = this.tree[index] ?? 0
+    }
+    // Capacity is a power of two. Only the new power-of-two ancestors span
+    // the old capacity; their intervals must include all existing heights.
+    const capacity = this.tree.length - 1
+    for (let ancestor = capacity * 2; ancestor < grown.length; ancestor *= 2) {
+      grown[ancestor] = this.tree[capacity] ?? 0
+      this.touches += 1
     }
     this.tree = grown
   }

@@ -182,6 +182,87 @@ function pendingActions(
   return { actions, answerQuestion, cancelQuestion }
 }
 
+function timedActions(remainingMs = 100) {
+  const live = liveOverlays()
+  const base = questionBatch(1)
+  const wait = { ...base, payload: { ...base.payload, wait: { callId: 'synthetic-timed-call', timed: true } } } as PendingWait<'question'>
+  const snapshot = { pending: [wait] } as unknown as ConversationSnapshot
+  const answerQuestion = vi.fn(async () => undefined)
+  const cancelQuestion = vi.fn(async () => undefined)
+  const timeoutQuestion = vi.fn(async () => undefined)
+  const released = vi.fn()
+  const attachQuestionWait = vi.fn(async function* (_wait: unknown, signal: AbortSignal) {
+    try {
+      yield { remainingMs }
+      await new Promise<void>(resolve => {
+        if (signal.aborted) resolve()
+        else signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+    } finally { released() }
+  })
+  const capabilities = { active: () => ({ session: { getSnapshot: () => snapshot } }),
+    answerQuestion, cancelQuestion, timeoutQuestion, attachQuestionWait } as unknown as HarnessTuiCapabilities
+  const h = host(live.overlays, { followLatest: vi.fn() })
+  const actions = new TuiActions(capabilities, h)
+  return { ...live, actions, snapshot, answerQuestion, cancelQuestion, timeoutQuestion, released, attachQuestionWait, h }
+}
+
+describe('native foreground countdown overlay', () => {
+  it('shows Host remaining time, times out once and releases its claim without answering or cancelling', async () => {
+    const f = timedActions(60)
+    f.actions.syncPending(f.snapshot)
+    await new Promise(resolve => setTimeout(resolve, 15))
+    expect(plain(f.component().render(90))).toMatch(/剩余|remaining/)
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(f.attachQuestionWait).toHaveBeenCalledTimes(1)
+    expect(f.timeoutQuestion).toHaveBeenCalledTimes(1)
+    expect(f.answerQuestion).not.toHaveBeenCalled()
+    expect(f.cancelQuestion).not.toHaveBeenCalled()
+    expect(f.released).toHaveBeenCalledTimes(1)
+  })
+  it('answers before the deadline and releases the claim with no late timeout', async () => {
+    const f = timedActions(100)
+    f.actions.syncPending(f.snapshot)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    f.component().handleInput(ENTER)
+    await new Promise(resolve => setTimeout(resolve, 130))
+    expect(f.answerQuestion).toHaveBeenCalledTimes(1)
+    expect(f.timeoutQuestion).not.toHaveBeenCalled()
+    expect(f.cancelQuestion).not.toHaveBeenCalled()
+    expect(f.released).toHaveBeenCalledTimes(1)
+  })
+  it('surface disposal releases the wait claim and clears the countdown', async () => {
+    const f = timedActions(100)
+    f.actions.syncPending(f.snapshot)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    f.overlays.dispose()
+    await new Promise(resolve => setTimeout(resolve, 130))
+    expect(f.released).toHaveBeenCalledTimes(1)
+    expect(f.timeoutQuestion).not.toHaveBeenCalled()
+    expect(f.answerQuestion).not.toHaveBeenCalled()
+  })
+  it('does not claim a successful continuation when the timeout carrier rejects', async () => {
+    const f = timedActions(20)
+    f.timeoutQuestion.mockRejectedValueOnce(new Error('Synthetic timeout carrier rejected'))
+    f.actions.syncPending(f.snapshot)
+    await new Promise(resolve => setTimeout(resolve, 70))
+    expect(f.h.notice).toHaveBeenCalledWith('Synthetic timeout carrier rejected', 'error')
+    expect(f.h.notice).not.toHaveBeenCalledWith(expect.anything(), 'success')
+    expect(f.released).toHaveBeenCalledTimes(1)
+  })
+  it('releases the visible claim even while the timeout receipt carrier is still pending', async () => {
+    const f = timedActions(20)
+    let resolve: (() => void) | undefined
+    f.timeoutQuestion.mockImplementationOnce(() => new Promise<undefined>(done => { resolve = () => done(undefined) }))
+    f.actions.syncPending(f.snapshot)
+    await new Promise(done => setTimeout(done, 60))
+    expect(f.timeoutQuestion).toHaveBeenCalledTimes(1)
+    expect(f.released).toHaveBeenCalledTimes(1)
+    expect(f.cancelQuestion).not.toHaveBeenCalled()
+    resolve?.()
+  })
+})
+
 describe('pending interaction continuation', () => {
   it('returns to the latest transcript before submitting a selected answer', async () => {
     const question = {
