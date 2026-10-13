@@ -1,6 +1,6 @@
 {
   "name": "seektty-browser-playwright-mcp",
-  "version": "1.2.6",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "Explicit optional browser-playwright-mcp composition for SeekTTY on official Harness 0.2.0-rc.2",

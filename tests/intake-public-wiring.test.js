@@ -52,7 +52,7 @@ it('public /model-info uses the real selected route and leaves omitted metadata 
 it('public /account signs in using the existing listening HTTP origin and copies only a safe browser URL', async () => {
   const f = fixture(); const script = scriptedOverlays(['sign-in', 'copy-login', undefined])
   await f.actions(script).execute('account', '')
-  expect(f.invoke.mock.calls.find(([r]) => r.method === 'startSignIn')[0]).toMatchObject({ namespace: 'account', args: { callbackOrigin: 'http://127.0.0.1:43210', loginSource: 'desktop', client: { version: '1.2.6' } } })
+  expect(f.invoke.mock.calls.find(([r]) => r.method === 'startSignIn')[0]).toMatchObject({ namespace: 'account', args: { callbackOrigin: 'http://127.0.0.1:43210', loginSource: 'desktop', client: { version: '1.3.0' } } })
   expect(f.copy).toHaveBeenCalledWith('https://example.invalid/sign-in')
   expect(script.details[0].footer).toContain('浏览器')
   f.dispose()

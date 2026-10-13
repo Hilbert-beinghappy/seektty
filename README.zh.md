@@ -1,4 +1,4 @@
-> **开发分支兼容性：** 当前已测 Host 是官方 `0.2.0-rc.2`。本分支包含适配改动；已发布的 `seektty@1.2.6` 在 dsh `0.1.5-rc.1` 上验证。详见[0.2 验证记录](docs/dsh-0.2.0-rc.2-adaptation.md)和[原生 API 迁移记录](docs/dsh-0.1.5-rc.1-adaptation.md)。
+> **发布兼容性：** 当前已测 Host 是官方 `0.2.0-rc.2`，SeekTTY `1.3.0` 与该版本配套。新功能、修复和安装说明见[发布说明](docs/release-v1.3.0.md)，精确包与验证结果见[发布验证](docs/release-v1.3.0-verification.md)。
 
 <div align="center">
 
@@ -9,7 +9,7 @@
 <p>DeepSeek Harness 的终端工作台。</p>
 
 <p>
-  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.2.6-orange" alt="Version 1.2.6"></a>
+  <a href="https://github.com/Hilbert-beinghappy/seektty/releases"><img src="https://img.shields.io/badge/Version-1.3.0-orange" alt="Version 1.3.0"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2-5B5BD6" alt="DeepSeek Harness 0.2.0-rc.2">
   <img src="https://img.shields.io/badge/Node-%5E22.19.0%20%7C%7C%20%3E%3D24-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22.19 or newer">
   <a href="https://github.com/Hilbert-beinghappy/seektty/actions"><img src="https://github.com/Hilbert-beinghappy/seektty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -44,50 +44,50 @@
 
 ## 开发分支
 
-使用本分支的 dsh 适配时，在仓库根目录构建并安装本地包：
+从仓库根目录构建并安装本地 SeekTTY 包：
 
 ```sh
 pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.2.0-rc.2
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm pack
-dsh plugin --profile tui add --config.enable-global-virtual-store=false ./seektty-1.2.6.tgz
+dsh plugin --profile tui add --config.enable-global-virtual-store=false ./seektty-1.3.0.tgz
 dsh --profile tui
 ```
 
-新版本发布前，包版本号暂保留 `1.2.6`。这次适配请使用本地 tarball；下方 npm 安装指向此前已发布版本。
+本地 tarball 用于源码开发与测试；使用正式版本请按下方精确 npm 版本安装。
 
 ## 快速开始
 
-在发布时已验证的官方 DeepSeek Harness `0.1.5-rc.1` 上安装已发布的 SeekTTY：
+在发布时已验证的官方 DeepSeek Harness `0.2.0-rc.2` 上安装已发布的 SeekTTY：
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.1
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.2.0-rc.2
 
-dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.6
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.3.0
 
 dsh --profile tui
 ```
 
 这些命令通过原生 `dsh plugin` 协调机制安装预构建 Bundle。逐命令 pnpm 参数会避开 pnpm 11 Global Virtual Store 布局；当前已测 dsh 版本的 Cordis Loader 还不能可靠加载该布局。SeekTTY 绝不会修改全局 pnpm 配置。Clarify 与 Auxiliary Runtime 均为可选插件，不是默认依赖；历史联合验收组合见[兼容性](#兼容与验证)。
 
-`seektty@1.2.6` npm 包使用已审核包输入构建，详见[发布说明](docs/release-v1.2.6.md)、[验证记录](docs/release-v1.2.6-verification.md)和[ dsh 0.1.5-rc.1 适配记录](docs/dsh-0.1.5-rc.1-adaptation.md)。
+`seektty@1.3.0` npm 包对应[发布说明](docs/release-v1.3.0.md)、[PR 统计](docs/release-v1.3.0-pr-audit.md)和[验证记录](docs/release-v1.3.0-verification.md)。
 
 ### 裸 `deepseek` 启动器
 
 安装 `dsh` 后，可全局安装同一个 SeekTTY Release，并把 Profile 协调固定到精确 npm 版本：
 
 ```sh
-pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.6
-export SEEKTTY_SPEC=seektty@1.2.6
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.3.0
+export SEEKTTY_SPEC=seektty@1.3.0
 deepseek
 ```
 
 PowerShell 使用相同的精确 npm spec：
 
 ```powershell
-pnpm add --global --config.enable-global-virtual-store=false 'seektty@1.2.6'
-$env:SEEKTTY_SPEC='seektty@1.2.6'
+pnpm add --global --config.enable-global-virtual-store=false 'seektty@1.3.0'
+$env:SEEKTTY_SPEC='seektty@1.3.0'
 deepseek
 ```
 
@@ -105,19 +105,16 @@ deepseek --update
 
 `deepseek --update` 采用 SeekTTY 自更新优先策略：先检查 SeekTTY，再检查 dsh；每轮最多安装一个兼容组件，绝不自动安装未测试的 gap 或未来 Host。`DSH_BIN`、本地安装和 `SEEKTTY_SPEC` 覆盖不会被改写，更新失败也不会阻止启动。设置 `SEEKTTY_UPDATE=check` 可改为会话后提示，设置 `SEEKTTY_UPDATE=0` 可关闭检查。
 
-SeekTTY `1.2.6` 适配 dsh `0.1.5-rc.1` 原生 API，同时保留 Fastfetch 风格欢迎页、终端背景融合、TextMate 高亮、对话与选择控件改进，以及 pnpm 11 安装兼容，无需迁移 Settings 或 Session。
+SeekTTY `1.3.0` 适配官方 dsh `0.2.0-rc.2`，把更多原生工作流带到终端。完整变更见双语[发布说明](docs/release-v1.3.0.md)、[PR 统计](docs/release-v1.3.0-pr-audit.md)与[验证记录](docs/release-v1.3.0-verification.md)。
 
-### 1.2.5 新增内容
+### 1.3.0 新增内容
 
-- 空会话显示响应式 DeepSeek 像素鲸鱼欢迎页与 Profile 运行信息；`/welcome` 可配置自定义信息行、可选的安全／受信任 Fastfetch 信息、内置／文件／本机 Fastfetch Logo、混合顺序、实时预览、刷新与重置，欢迎内容不会写入 Session 历史。
-- 主画布可通过 `theme`、`terminal` 和向后兼容的 `explicit` 三种背景模式继承终端透明、模糊和背景图片；overlay、panel 与普通代码表面使用同一继承策略，并补充对比度适配和退出时终端颜色恢复。
-- 导入的 VS Code `tokenColors` 成为权威规则，内置主题补齐精细 TextMate 配色，旧主题获得兼容的细粒度兜底；高亮按语言 grammar 区分，但明确不冒充 LSP 语义高亮。
-- 实时与已完成的思考块均可折叠，流式更新不会重新展开用户手动收起的内容；修正对话控件点击行偏移，工具卡收起后不再残留参数与结果。
-- 权限切换会检查 Harness 原生命令结果并刷新权威状态；模型、推理强度和 Agent 模式拆成独立点击与选择入口，并新增 `/effort` 键盘入口。
-- 宽弹窗会使用可用空间显示完整选项描述，resize 时保留搜索、选中、滚动与鼠标命中；多层控件的 hover 和透明表面语义保持一致。
-- 启动器协调、兼容更新和 TUI 插件变更逐命令关闭 pnpm 11 Global Virtual Store。已知 `store/v11/links` Loader 故障会得到精确且脱敏的恢复提示，不修改全局 pnpm 配置，也不绕过原生 Profile 协调。
+- 在终端使用原生 Session 操作、计划与产物、MCP 资源、Team 信息、定时任务、限时／继续作答，以及账号和模型信息。
+- 浏览 Host 工作区文件、文本与二进制信息，并使用可用的文件监视。插件可以注册终端 Session 操作和有草稿保护、支持撤销的输入活动。
+- 按需安装 Creator、Browser 或 Computer 配套 Bundle；启用官方语音输入 Bundle 后，`/speech wav` 支持先审阅再插入的 WAV 转写，不提供麦克风录音。
+- 修复当前 Host 下的 Preset、表单和工具结果处理、过期目标、审批显示、文件监视清理和退出等待，保留 Harness 原生状态归属与既有终端工作流。
 
-完整变更见双语[发布说明](docs/release-v1.2.5.md)，验证边界与发布流程见 [Owner 审核清单](docs/release-v1.2.5-verification.md)。
+本次也补全 `1.2.6` 说明中省略的 Agent Tree 导航、语义复制、按目标右键菜单、Provider 配置、VS Code 主题发现、独立外观设置、原生滚动和长会话绘制修复。这些功能已经发布过；[PR 统计](docs/release-v1.3.0-pr-audit.md)列明各自的来源与首次发布版本。
 
 ## 界面预览
 
@@ -175,7 +172,7 @@ Clarify 一次提出一个聚焦问题，把已确认的决定带入后续问题
 
 SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可选能力会安全降级，专用终端界面则可以持续演进。
 
-权限切换使用原生 Host 命令及其执行结果。成功后菜单关闭，失败时在菜单内保留错误供重试；完全访问与未知风险预设仍需确认，切换会话后必须重新选择权限。命令适配器支持已挂载的旧版双参数契约，以及官方 dsh `0.1.1-rc.2` 的三参数 `images` 契约；遇到未知契约直接拒绝，不换参数重试命令。
+权限切换使用原生 Host 命令及其执行结果。成功后菜单关闭，失败时在菜单内保留错误供重试；完全访问与未知风险预设仍需确认，切换会话后必须重新选择权限。命令适配器使用已测 dsh `0.2.0-rc.2` 契约；遇到未知契约直接拒绝，不换参数重试可能已经执行的命令。
 
 ## 首次配置 API Key
 
@@ -193,7 +190,7 @@ SeekTTY 从当前 Harness Profile 动态读取这些目录。暂不支持的可�
 
 可从 `/model` 的**管理 Provider…**进入，也可从 `/settings` 的**模型与 Agent**进入。两个入口与首次引导共用同一套 Harness 流程：合并 `llm.providers`、`settings.describe` 和不含凭据值的 `credentials.describe`；先执行带 revision 保护的 Settings mutation，再可选调用 `credentials.set`；最后重新读取 Settings、Credential 元数据、`llm.providers` 与 `llm.models`，全部匹配后才报告完整成功。传输结果若无法通过回读确认，只会标记为状态未知，不会盲目重试。仅保存配置不会暗中修改当前 Session 或新 Session 默认模型。
 
-自定义 Provider 仅使用已安装 `llm-pi-ai` adapter 在 schema 中明确描述的 `providers` 字典；路由 ID 遵循该字典 schema。本界面会去除首尾空白，并额外排除空 ID、终端控制字符和 SeekTTY 内部菜单 ID。在官方 dsh `0.1.1-rc.2` 中，它公开的协议选项是 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages。所有协议都可手工录入模型；adapter 支持时可通过 `llm.discoverModels` 发现。获取到模型列表只证明配置发现成功，第一次真实请求才是认证和推理检查。
+自定义 Provider 仅使用已安装 `llm-pi-ai` adapter 在 schema 中明确描述的 `providers` 字典；路由 ID 遵循该字典 schema。本界面会去除首尾空白，并额外排除空 ID、终端控制字符和 SeekTTY 内部菜单 ID。可用协议以当前 Provider adapter 的 Schema 为准。所有协议都可手工录入模型；adapter 支持时可通过 `llm.discoverModels` 发现。获取到模型列表只证明配置发现成功，第一次真实请求才是认证和推理检查。
 
 API Key 始终通过掩码控件收集，且只交给 Harness Credentials。Credential Ref 使用官方 `[A-Za-z_][A-Za-z0-9_]*` 语法。来自环境或文件的只读凭据只显示为外部管理；凭据元数据不可读时，Key 更新按 fail-closed 禁用。任何新接入且需要写入新 Key 的 Ref，都必须在 Settings 变更前再次确认为“尚未配置且可写”。已配置 Ref 只能在界面明确展示 endpoint 与 Ref 后由用户确认复用，且不会读取或覆盖其中的值；更新当前已绑定 Ref 内的 Key 必须单独保存，不能与其他 Settings 变化合并。同时修改 endpoint 与 Key 时始终使用不同、未配置且可写的新 Ref，因此 Settings 先切换到不可能含有旧 Key 的 Ref，再写入新 Key。Settings 与 Credentials 是两次独立的官方调用，不是原子事务。模型编辑保留 schema 描述的完整模型项，包括输入模态、推理强度和协议兼容字段。
 
@@ -402,8 +399,8 @@ TUI `/plugin` 与原生 `dsh plugin` 会协调同一份 Profile 依赖、Bundle 
 
 ```sh
 pnpm remove --global --config.enable-global-virtual-store=false deepseek-tui
-pnpm add --global --config.enable-global-virtual-store=false seektty@1.2.6
-export SEEKTTY_SPEC=seektty@1.2.6
+pnpm add --global --config.enable-global-virtual-store=false seektty@1.3.0
+export SEEKTTY_SPEC=seektty@1.3.0
 deepseek
 ```
 
@@ -411,7 +408,7 @@ deepseek
 
 ```sh
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false deepseek-tui
-dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.6
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.3.0
 ```
 
 如需同时移除 Profile Bundle 和可选的全局启动器，可执行以下命令；dsh 本体不受影响：
@@ -420,6 +417,32 @@ dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@
 dsh plugin --profile tui remove --config.enable-global-virtual-store=false seektty
 pnpm remove --global --config.enable-global-virtual-store=false seektty
 ```
+
+## 可选原生功能（Harness 0.2.0-rc.2）
+
+包内的 `optional/` 目录提供 `creator`、`browser-playwright-mcp`、
+`browser-chrome-devtools-mcp`、`browser-stagehand-native`、`computer-cua-mcp`
+和 `computer-cua-native` 配套 Bundle。通过原生 Profile 插件管理器安装所需
+本地组合，例如 `/plugins` → 添加 Bundle → 已安装 SeekTTY 目录下的
+`optional/creator`。主 Bundle 的默认行为保持不变。每个 Profile 选择一个
+Browser 或 Computer 后端；Stagehand 需要自己的受支持模型和密钥，Cua／
+浏览器应用的安装与系统权限由对应应用负责。取消操作不能撤销已经完成的系统动作。
+
+使用 WAV 转写前，需要明确安装并启用官方
+`@deepseek-ai/dsh-experimental-voice-input-bundle@0.2.0-rc.2`，然后执行
+`/speech wav`。终端接受 16 kHz 单声道 PCM16 WAV，上限为 4 MiB／120 秒，
+Host 限制更小时遵循更小的限制。模型准备和文字插入都需要确认。转写替换
+原先捕获的输入选区，支持撤销，不会自动发送消息。这个入口只接收 WAV 文件，
+不提供麦克风录音或 React 组件；仅打开命令不会下载模型。
+
+`/files` 支持 Host 工作区浏览和文本／二进制文件视图。Host 引用通过 Host
+文件系统读取，本地上传继续走回执流程；文件监视不可用时显示手动刷新。
+官方文件读取按路径执行，规范路径检查只能尽力校验，不能原子地阻止并发
+文件替换。无法映射到本地的远端路径不能通过本地桌面程序打开。
+
+普通 Cordis 插件可以通过已挂载的 `seekttyExtensions` 服务注册明确的终端
+Session 操作和草稿输入活动。这是终端接口，不会自动加载 Web React 菜单槽
+或组件。`/input-activities` 保护草稿插入边界，也不会自动发送插件输出。
 
 ## 兼容与验证
 
@@ -432,7 +455,7 @@ pnpm remove --global --config.enable-global-virtual-store=false seektty
 | 当前已测 Harness Host | `0.2.0-rc.2` |
 | pnpm 11 布局适配器 | pnpm `11.7.0`；dsh `0.2.0-rc.2`；每次变更单独关闭 GVS |
 | 最近一次联合验收的 Clarify Release 组合 | dsh `0.1.0-rc.8` + SeekTTY `1.2.0` + Auxiliary Runtime `0.1.0` + Clarify `0.2.1` |
-| 当前 Release | SeekTTY `1.2.6` + 官方 dsh `0.1.5-rc.1`；包含原生 API 适配及此前的外观、高亮、交互与 pnpm 布局改动 |
+| 当前 Release | SeekTTY `1.3.0` + 官方 dsh `0.2.0-rc.2`；原生终端工作流、文件与输入扩展、可选功能组合 |
 
 低于声明最低版本的 Host 会被拒绝；高于已测版本的 Host 可以在提示后启动，但自动更新只会安装明确兼容的范围。发布 Bundle 不会把 Cordis 或身份型 `@deepseek-ai/dsh-*` 包安装进 Profile：optional peer 用来描述 Host 合同，运行时 import 统一从官方 Harness 安装解析。附件兼容适配器只处理精确测试过的旧版图片限制形状，遇到未知形状会直接拒绝适配。
 
@@ -444,7 +467,7 @@ pnpm 11 可能把全局包放到 `store/v11/links`。当前已测的 dsh/Cordis 
 
 门禁合同、当前本机证据和适配器退出条件见双语的 [pnpm 11 布局验收记录](docs/pnpm11-layout-acceptance.md)。
 
-当前开发包、本地检查和官方 dsh 插拔流程见[0.2 适配记录](docs/dsh-0.2.0-rc.2-adaptation.md)。[1.2.6 发布记录](docs/release-v1.2.6-verification.md)及此前的 Clarify、Vision-Exp 等可选插件观察保留为历史证据。本机 macOS 结果不代替 Linux/macOS CI 矩阵或真实 GUI 终端鼠标、剪贴板检查。
+[1.3.0 验证记录](docs/release-v1.3.0-verification.md)列明当前包与本次发布验证。[1.2.6 记录](docs/release-v1.2.6-verification.md)及此前 Clarify、Vision-Exp 等观察保留为历史证据。自动 CI 与 PTY 检查不代替真实 GUI 终端鼠标和剪贴板人工验收。
 
 可复用检查：
 
@@ -467,4 +490,13 @@ CLARIFY_SPEC=/path/to/dsh-plugin-clarify.tgz \
 pnpm test:clarify-doctor
 ```
 
-开发分支的适配尚未发布到 npm Registry，请使用上文的本地包安装方式。
+npm Registry 版本为 `seektty@1.3.0`；测试源码改动时使用上文的本地 tarball。此前 `1.2.6` 与官方 dsh `0.1.5-rc.1` 配套验证。
+
+### 回退到 1.2.6
+
+需要旧版时，使用配套的 Host 与 SeekTTY；不要在旧 Host 上加载 `1.3.0`。
+
+```sh
+pnpm add --global --config.enable-global-virtual-store=false @deepseek-ai/dsh@0.1.5-rc.1
+dsh plugin --profile tui add --config.enable-global-virtual-store=false seektty@1.2.6
+```
