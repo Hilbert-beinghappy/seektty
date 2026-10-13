@@ -47,8 +47,8 @@ describe('out-of-tree Bundle contract', () => {
   })
 
   it('pins the native Remote adapter to the exact tested Host', () => {
-    expect(manifest.version).toBe('1.2.6')
-    expect(PACKAGE_VERSION).toBe('1.2.6')
+    expect(manifest.version).toBe('1.3.0')
+    expect(PACKAGE_VERSION).toBe('1.3.0')
     expect(DSH_COMPATIBILITY.minimum).toBe('0.2.0-rc.2')
     expect(compareDshVersion(DSH_COMPATIBILITY.tested, DSH_COMPATIBILITY.minimum)).toBeGreaterThanOrEqual(0)
     expect(AUTO_PERMITTED_DSH_MINIMUM).toBe(DSH_COMPATIBILITY.minimum)
@@ -244,8 +244,8 @@ describe('out-of-tree Bundle contract', () => {
     expect(english).toContain(`| Declared minimum Harness Host | \`${DSH_COMPATIBILITY.minimum}\` |`)
     expect(chinese).toContain(`| 声明的最低 Harness Host | \`${DSH_COMPATIBILITY.minimum}\` |`)
     for (const text of [english, chinese]) expect(text).toContain(`dsh \`${PNPM_GVS_DSH_RANGE}\``)
-    expect(english).toContain('SeekTTY `1.2.6` on official dsh `0.1.5-rc.1`')
-    expect(chinese).toContain('SeekTTY `1.2.6` + 官方 dsh `0.1.5-rc.1`')
+    expect(english).toContain('SeekTTY `1.3.0` on official dsh `0.2.0-rc.2`')
+    expect(chinese).toContain('SeekTTY `1.3.0` + 官方 dsh `0.2.0-rc.2`')
     const release = readFileSync(resolve(root, `docs/release-v${PACKAGE_VERSION}.md`), 'utf8')
     expect(release).toContain(`# SeekTTY ${PACKAGE_VERSION}`)
     expect(release).toContain('## English')
